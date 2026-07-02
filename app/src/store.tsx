@@ -220,12 +220,24 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // few seconds do we look at the tail. If the LLM Master is enabled, IT
   // decides whether the session is waiting on the user (flag_needs_input);
   // without it, a prompt-shaped final line is required.
-  const armedRef = useRef<Set<string>>(new Set())
+  // armed watch: snapshot of the screen/tail at arm time — we only relay once
+  // the content has actually changed AND the TUI is no longer busy
+  const armedRef = useRef<Map<string, { snapshot: string; at: number }>>(new Map())
   const settleRef = useRef<Map<string, { since: number; timer: number }>>(new Map())
 
   const armResponseWatch = useCallback((id: string) => {
-    armedRef.current.add(id)
-  }, [])
+    const alt = isAltScreen(id)
+    const agent = stateRef.current.agents.find(a => a.id === id)
+    const snapshot = alt
+      ? readScreen(id).join('\n')
+      : (agent?.log ?? []).slice(-14).map(l => l.x).join('\n')
+    armedRef.current.set(id, { snapshot, at: Date.now() })
+    // ensure a settle check runs even if the session produces no output at all
+    later(4000, () => bumpSettleRef.current(id))
+  }, [later])
+
+  // set below; ref avoids a declaration cycle with onSettle
+  const bumpSettleRef = useRef<(id: string) => void>(() => {})
 
   const setNeedsInput = useCallback((id: string, question: string, options?: EscOption[], cursorNum?: number) => {
     const agent = stateRef.current.agents.find(a => a.id === id)
@@ -256,7 +268,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const st = stateRef.current.settings
     const llm = Boolean(st.masterEnabled && st.apiKey && st.followMode)
     const alt = isAltScreen(id)
-    const armed = armedRef.current.has(id)
+    const armed = armedRef.current.get(id)
 
     // TUIs redraw constantly, so judge the rendered screen (stable) instead
     // of the raw output stream; plain sessions use the new stream tail.
@@ -299,15 +311,32 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }
 
     if (llm && armed) {
+      const joined = content.join('\n')
+      const expired = Date.now() - armed.at > 15 * 60 * 1000
+      // TUIs pause silently mid-work (API calls) and show a busy marker while
+      // generating — don't relay a half-answer, keep checking until stable
+      const busy = alt && /esc to interrupt|ctrl\+c to interrupt/i.test(joined)
+      const unchanged = joined === armed.snapshot
+      if ((busy || unchanged) && !expired) {
+        settleRef.current.delete(id)
+        const timer = window.setTimeout(() => onSettleRef.current(id, since), 3500)
+        settleRef.current.set(id, { since, timer })
+        return
+      }
       armedRef.current.delete(id)
-      masterEventRef.current(
-        `[event] session "${agent.name}" (${id}) finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
-        'If this session is waiting for user input or permission, call flag_needs_input with what it is asking. ' +
-        'Otherwise: (1) call update_agent_status with a fresh task/summary and action_needed set to what the user should do next, ' +
-        'then (2) reply to the user with exactly two parts — a 1-2 sentence summary of what the session did, and "Next action:" followed by what the user should do (or "none — I\'ll keep watching").',
-      )
+      if (!expired) {
+        masterEventRef.current(
+          `[event] session "${agent.name}" (${id}) finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
+          'If this session is waiting for user input or permission, call flag_needs_input with what it is asking. ' +
+          'Otherwise: (1) call update_agent_status with a fresh task/summary and action_needed set to what the user should do next, ' +
+          'then (2) reply to the user with exactly two parts — a 1-2 sentence summary of what the session did, and "Next action:" followed by what the user should do (or "none — I\'ll keep watching").',
+        )
+      }
     }
   }, [setNeedsInput])
+
+  const onSettleRef = useRef<(id: string, since: number) => void>(() => {})
+  onSettleRef.current = onSettle
 
   // (re)start the settle watcher — checks only run once output goes quiet.
   // Driven by RAW pty activity, because TUI redraws often contain no newlines.
@@ -318,6 +347,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const timer = window.setTimeout(() => onSettle(id, since), 3000)
     settleRef.current.set(id, { since, timer })
   }, [onSettle])
+  bumpSettleRef.current = bumpSettle
 
   // ANSI-stripped tail of each terminal, kept for Master's context, overview
   // cards, and rough usage accounting (the terminal itself renders raw bytes)
