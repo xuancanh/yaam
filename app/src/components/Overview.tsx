@@ -1,6 +1,6 @@
 import { useActions, useConductor } from '../store'
 import { ACCENT, STATUS_META, hexToRgba } from '../data'
-import { AgentAvatar, IC, Icon, StatusPill, ViewHeader } from './ui'
+import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from './ui'
 
 const GRAPH_POS = [
   { x: 150, y: 62 },
@@ -56,7 +56,7 @@ function SessionFlow() {
 
 export function Overview() {
   const s = useConductor()
-  const { focusTab, resume, openPanel, openAgent, openDiff } = useActions()
+  const { focusTab, resume, openPanel, openAgent, openDiff, renameSession } = useActions()
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -77,7 +77,7 @@ export function Overview() {
                 <div onClick={() => openAgent(a.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, cursor: 'pointer' }}>
                   <AgentAvatar agent={a} size={34} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{a.name}</div>
+                    <EditableName name={a.name} onRename={name => renameSession(a.id, name)} />
                     <div className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 1 }}>{a.repo} · {a.branch}</div>
                   </div>
                   <StatusPill agent={a} small />

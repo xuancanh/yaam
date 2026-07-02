@@ -3,7 +3,7 @@ import { useActions, useConductor } from '../store'
 import { DIFF_BG, DIFF_COLORS, LOG_COLORS } from '../data'
 import { gitDiff, isTauri } from '../native'
 import type { Agent, DiffFile } from '../types'
-import { AgentAvatar, IC, Icon } from './ui'
+import { AgentAvatar, EditableName, IC, Icon } from './ui'
 
 /** Parse `git diff` unified output into per-file hunk lists (capped for display). */
 function parseUnifiedDiff(raw: string): DiffFile[] {
@@ -148,7 +148,7 @@ function AgentBody({ agent }: { agent: Agent }) {
 
 export function Drawer() {
   const s = useConductor()
-  const { closeDrawer } = useActions()
+  const { closeDrawer, renameSession } = useActions()
 
   if (!s.drawer) return null
   const agent = s.agents.find(a => a.id === s.drawer!.agentId)
@@ -166,7 +166,10 @@ export function Drawer() {
         <div style={{ padding: '15px 18px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 11 }}>
           <AgentAvatar agent={agent} size={32} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 600 }}>{isDiff ? 'Review changes' : 'Session detail'} · {agent.name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 600 }}>
+              <span style={{ flexShrink: 0 }}>{isDiff ? 'Review changes' : 'Session detail'} ·</span>
+              <EditableName name={agent.name} onRename={name => renameSession(agent.id, name)} fontSize={14} />
+            </div>
             <div className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{agent.repo} · {agent.branch}</div>
           </div>
           <button className="icon-btn" style={{ width: 28, height: 28, borderRadius: 7 }} onClick={closeDrawer}>

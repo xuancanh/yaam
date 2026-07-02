@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { Agent } from '../types'
 import { STATUS_META, hexToRgba } from '../data'
@@ -58,6 +59,46 @@ export function AgentAvatar({ agent, size = 24 }: { agent: Agent; size?: number 
       fontSize: size > 30 ? 12 : 10, fontWeight: 600, color: agent.color, flexShrink: 0,
     }}>
       {agent.short}
+    </div>
+  )
+}
+
+export function EditableName({ name, onRename, fontSize = 13.5 }: {
+  name: string
+  onRename: (name: string) => void
+  fontSize?: number
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+
+  if (editing) {
+    const commit = () => { onRename(draft); setEditing(false) }
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') commit()
+          if (e.key === 'Escape') setEditing(false)
+        }}
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 5,
+          padding: '2px 6px', color: 'var(--text)', outline: 'none', fontSize,
+          fontWeight: 600, fontFamily: 'inherit', width: 150,
+        }}
+      />
+    )
+  }
+  return (
+    <div
+      title="Double-click to rename"
+      onDoubleClick={e => { e.stopPropagation(); setDraft(name); setEditing(true) }}
+      style={{ fontSize, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+    >
+      {name}
     </div>
   )
 }

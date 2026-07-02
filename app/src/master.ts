@@ -77,13 +77,24 @@ const TOOLS = [
 
 function describeState(s: AppState): string {
   const sessions = s.agents.map(a => {
-    const tail = a.log.slice(-12).map(l => `    ${l.x}`).join('\n')
-    return `- id=${a.id} name=${a.name} status=${a.status} cmd=${a.cmd || '(simulated)'} cwd=${a.cwd || '-'}\n  recent output:\n${tail || '    (none)'}`
+    const memOn = (id: string) => a.memory.find(m => m.id === id)?.on !== false
+    const perm = (id: string) => {
+      const t = a.tools.find(x => x.id === id)
+      return t ? (t.on ? t.perm : 'Off') : 'Auto'
+    }
+    const meta = memOn('meta') ? ` cmd=${a.cmd || '-'} cwd=${a.cwd || '-'}` : ''
+    const perms = `\n  your-permissions: send=${perm('send')} stop=${perm('stop')} respawn=${perm('respawn')}`
+    const tail = memOn('tail')
+      ? `\n  recent output:\n${a.log.slice(-12).map(l => `    ${l.x}`).join('\n') || '    (none)'}`
+      : '\n  recent output: (hidden by user)'
+    return `- id=${a.id} name=${a.name} status=${a.status}${a.escReason ? ` waiting-on="${a.escReason}"` : ''}${meta}${perms}${tail}`
   }).join('\n')
   const crons = s.crons.map(c => `- ${c.name} · ${c.schedule} · ${c.on ? 'on' : 'off'} · cmd=${c.cmd || '-'} · last=${c.last}`).join('\n')
   const tasks = s.tasks.map(t => `- [${t.col}] ${t.title}`).join('\n')
   const events = s.events.slice(0, 8).map(e => `- ${e.time} ${e.type}: ${e.text}`).join('\n')
+  const toolPerms = s.toolsCatalog.map(t => `- ${t.id}: ${t.perm}`).join('\n')
   return [
+    `YOUR TOOL PERMISSIONS (Auto = act freely · Ask first = confirm with the user in chat before doing it · Approval/Off = blocked):\n${toolPerms}`,
     `SESSIONS (${s.agents.length}):\n${sessions || '(none)'}`,
     `SCHEDULES:\n${crons || '(none)'}`,
     `BOARD TASKS:\n${tasks || '(none)'}`,
@@ -97,7 +108,7 @@ function systemPrompt(s: AppState): string {
 - You command sessions with tools (send text to their stdin, launch or stop them).
 - Sessions report back through their output, which appears in the state below. After you send something to a session, you get an [event] message with its response once the output settles; relay the outcome to the user concisely and only act further when needed.
 
-Be concise (1-3 sentences unless asked for detail). When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed.
+Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed.
 
 CURRENT STATE
 ${describeState(s)}`

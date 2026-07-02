@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useActions, useConductor } from '../store'
-import { ACCENT, STATUS_META, hexToRgba } from '../data'
+import { ACCENT, STATUS_META, hexToRgba, memTokens } from '../data'
 import { isTauri, pickFolder } from '../native'
 import { fitTerminal, getTerminal } from '../terminals'
 import type { Agent } from '../types'
-import { AgentAvatar, IC, Icon, StatusPill } from './ui'
+import { AgentAvatar, EditableName, IC, Icon, StatusPill } from './ui'
 
 export const SHELLS = ['zsh', 'bash', 'sh', 'fish', 'nu']
 
@@ -157,10 +157,8 @@ function TerminalPane({ agent, active }: { agent: Agent; active: boolean }) {
 
 function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
   const { setActivePane, closePane, openPanel, resume, approve, deny, stopSession, toggleMaximize, renameSession } = useActions()
-  const [editingName, setEditingName] = useState(false)
-  const [nameDraft, setNameDraft] = useState(agent.name)
   const memOn = agent.memory.filter(m => m.on)
-  const memTotal = memOn.reduce((n, m) => n + m.tokens, 0)
+  const memTotal = memOn.reduce((n, m) => n + memTokens(agent, m.id), 0)
   const toolCount = agent.tools.filter(t => t.on).length
 
   return (
@@ -177,32 +175,7 @@ function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; ind
       }}>
         <AgentAvatar agent={agent} />
         <div style={{ minWidth: 0, overflow: 'hidden' }}>
-          {editingName ? (
-            <input
-              autoFocus
-              value={nameDraft}
-              onChange={e => setNameDraft(e.target.value)}
-              onBlur={() => { renameSession(agent.id, nameDraft); setEditingName(false) }}
-              onKeyDown={e => {
-                if (e.key === 'Enter') { renameSession(agent.id, nameDraft); setEditingName(false) }
-                if (e.key === 'Escape') setEditingName(false)
-              }}
-              onClick={e => e.stopPropagation()}
-              className="mono"
-              style={{
-                background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 5,
-                padding: '2px 6px', color: 'var(--text)', outline: 'none', fontSize: 12, width: 130,
-              }}
-            />
-          ) : (
-            <div
-              title="Double-click to rename"
-              onDoubleClick={e => { e.stopPropagation(); setNameDraft(agent.name); setEditingName(true) }}
-              style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-            >
-              {agent.name}
-            </div>
-          )}
+          <EditableName name={agent.name} onRename={name => renameSession(agent.id, name)} fontSize={12.5} />
           <div className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {agent.repo} · {agent.branch}
           </div>

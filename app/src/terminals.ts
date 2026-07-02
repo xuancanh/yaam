@@ -10,6 +10,7 @@ interface Entry {
   term: Terminal
   fit: FitAddon
   onPlainLine: ((line: string) => void) | null
+  onUserInput: (() => void) | null
   pending: string
 }
 
@@ -40,7 +41,7 @@ function ensureListener() {
   })
 }
 
-export function getTerminal(id: string, onPlainLine?: (line: string) => void): Entry {
+export function getTerminal(id: string, onPlainLine?: (line: string) => void, onUserInput?: () => void): Entry {
   ensureListener()
   let entry = entries.get(id)
   if (!entry) {
@@ -64,11 +65,15 @@ export function getTerminal(id: string, onPlainLine?: (line: string) => void): E
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.onData(data => { writeSession(id, data).catch(() => {}) })
-    entry = { term, fit, onPlainLine: onPlainLine ?? null, pending: '' }
+    term.onData(data => {
+      entries.get(id)?.onUserInput?.()
+      writeSession(id, data).catch(() => {})
+    })
+    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, pending: '' }
     entries.set(id, entry)
-  } else if (onPlainLine) {
-    entry.onPlainLine = onPlainLine
+  } else {
+    if (onPlainLine) entry.onPlainLine = onPlainLine
+    if (onUserInput) entry.onUserInput = onUserInput
   }
   return entry
 }

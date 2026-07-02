@@ -36,6 +36,7 @@ export interface ConductorActions {
   toggleTool: (aid: string, tid: string) => void
   cyclePerm: (aid: string, tid: string) => void
   toggleCron: (id: string) => void
+  cycleCatalogPerm: (id: string) => void
   approve: (aid: string) => void
   deny: (aid: string) => void
   gotoNeeds: () => void
@@ -128,6 +129,10 @@ export function humanizeCron(expr: string): string {
   return expr
 }
 
+// Heuristics for "this CLI is waiting on the user": y/n prompts, permission
+// questions, confirmation menus.
+const PROMPT_RE = /(\[y\/n\]|\[y\/N\]|\[Y\/n\]|\(y\/n\)|yes\/no|do you want|would you like|allow this|allow .*\?|permission|approve\?|confirm|proceed\?|continue\?|password:|are you sure|press enter to|\(esc to cancel\))/i
+
 function spawnAgentProcess(id: string, command: string, cwd?: string): Promise<void> {
   return native.spawnSession(id, command.trim(), cwd || undefined)
 }
@@ -181,6 +186,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // After a message is routed into a session, watch its output; once it goes
   // quiet, hand the response back to Master as an event (agents → Master leg).
   const watchRef = useRef<Map<string, { since: number; timer?: number }>>(new Map())
+  const needsRevertRef = useRef<Map<string, number>>(new Map())
 
   const armResponseWatch = useCallback((id: string) => {
     const st = stateRef.current
@@ -203,6 +209,43 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return { ...a, log, used: a.used + 0.01, cost: a.cost + 0.0004 }
       }),
     }))
+    // permission / confirmation prompts surface as "needs action"
+    const isPrompt = PROMPT_RE.test(line)
+    if (isPrompt) {
+      const agent = stateRef.current.agents.find(a => a.id === id)
+      const revert = needsRevertRef.current.get(id)
+      if (revert) { window.clearTimeout(revert); needsRevertRef.current.delete(id) }
+      if (agent && agent.status === 'running') {
+        dispatch(s => ({
+          ...s,
+          agents: s.agents.map(a => a.id === id ? { ...a, status: 'needs' as const, escReason: line } : a),
+        }))
+        logEvent('escalate', id, `${agent.name} is asking for input: ${line.slice(0, 64)}`)
+        notify('escalate', `${agent.name} needs your input`, line.slice(0, 80), id)
+        dispatch(s2 => ({
+          ...s2,
+          messages: s2.messages.concat([{
+            id: mkId('m'), role: 'master', kind: 'escalate', escFor: id,
+            esc: { name: agent.name, color: agent.color, repo: agent.repo, reason: line, resolved: false, decision: null },
+          }]),
+        }))
+        if (stateRef.current.settings.masterEnabled && stateRef.current.settings.apiKey && stateRef.current.settings.followMode) {
+          masterEventRef.current(`[event] session "${agent.name}" (${id}) is waiting for user input/permission: "${line}". Tell the user what it's asking and how to respond.`)
+        }
+      }
+    } else if (stateRef.current.agents.find(a => a.id === id)?.status === 'needs' && !needsRevertRef.current.has(id)) {
+      // prompt lines stopped — assume it was answered and revert to running
+      needsRevertRef.current.set(id, window.setTimeout(() => {
+        needsRevertRef.current.delete(id)
+        const agent = stateRef.current.agents.find(a => a.id === id)
+        if (agent?.status === 'needs') {
+          dispatch(s2 => ({
+            ...s2,
+            agents: s2.agents.map(a => a.id === id ? { ...a, status: 'running' as const, escReason: undefined } : a),
+          }))
+        }
+      }, 4000))
+    }
     const watch = watchRef.current.get(id)
     if (watch) {
       if (watch.timer) window.clearTimeout(watch.timer)
@@ -216,6 +259,17 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           `[event] session "${agent.name}" (${id}) responded:\n${lines.join('\n')}\n\nBriefly relay the outcome to the user; take further action only if needed.`,
         )
       }, 2500)
+    }
+  }, [logEvent, notify])
+
+  // typing into a terminal clears its "needs action" state
+  const clearNeeds = useCallback((id: string) => {
+    const agent = stateRef.current.agents.find(a => a.id === id)
+    if (agent?.status === 'needs') {
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === id ? { ...a, status: 'running' as const, escReason: undefined } : a),
+      }))
     }
   }, [])
 
@@ -264,7 +318,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             tasks: p.tasks ?? s.tasks,
             crons: p.crons ?? s.crons,
             settings: { ...s.settings, ...(p.settings || {}) },
-            toolsCatalog: p.toolsCatalog ?? s.toolsCatalog,
+            toolsCatalog: p.toolsCatalog?.some(t => t.id === 'launch_session') ? p.toolsCatalog : s.toolsCatalog,
             agentTypes: p.agentTypes ?? s.agentTypes,
             integrations: p.integrations ?? s.integrations,
           }))
@@ -323,7 +377,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         maximizedPane: null, view: 'workspace', newSessionOpen: false,
       }
     })
-    getTerminal(id, line => appendTail(id, line))
+    getTerminal(id, line => appendTail(id, line), () => clearNeeds(id))
     native.spawnSession(id, trimmed, dir || undefined).catch(err => {
       dispatch(s => ({
         ...s,
@@ -333,7 +387,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
     })
     return id
-  }, [appendTail])
+  }, [appendTail, clearNeeds])
 
   // cron scheduler: fire enabled schedules once per matching minute
   useEffect(() => {
@@ -372,14 +426,34 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     masterBusyRef.current = true
     dispatch(s => ({ ...s, masterBusy: true }))
 
+    // permission gates: global Tools registry + per-session overrides
+    const catalogGate = (toolId: string): string | null => {
+      const perm = stateRef.current.toolsCatalog.find(t => t.id === toolId)?.perm ?? 'Auto'
+      if (perm === 'Off') return `blocked: the user disabled "${toolId}" in the Tools registry`
+      if (perm === 'Approval') return `blocked: "${toolId}" is set to Approval — ask the user to change it in Tools`
+      return null
+    }
+    const sessionGate = (sid: string, toolId: string): string | null => {
+      const agent = stateRef.current.agents.find(a => a.id === sid)
+      const tool = agent?.tools.find(t => t.id === toolId)
+      if (!tool) return null
+      if (!tool.on || tool.perm === 'Off') return `blocked: the user disabled "${toolId}" for this session`
+      if (tool.perm === 'Approval') return `blocked: "${toolId}" for this session is set to Approval — ask the user`
+      return null
+    }
+
     const exec: MasterExec = {
       launchSession: (command, cwd, name) => {
+        const gated = catalogGate('launch_session')
+        if (gated) return gated
         const id = launchSession(command, cwd || '', name)
         if (!id) return 'failed: empty command'
         logEvent('route', id, `Master launched · ${command}`)
         return `launched session id=${id}`
       },
       sendToSession: (sid, text) => {
+        const gated = catalogGate('send_to_session') || sessionGate(sid, 'send')
+        if (gated) return gated
         const agent = stateRef.current.agents.find(a => a.id === sid)
         if (!agent) return `no session with id ${sid}`
         armResponseWatch(sid)
@@ -392,6 +466,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return `sent to ${agent.name}`
       },
       stopSession: sid => {
+        const gated = catalogGate('stop_session') || sessionGate(sid, 'stop')
+        if (gated) return gated
         native.killSession(sid).catch(() => {})
         dispatch(s => ({
           ...s,
@@ -400,6 +476,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return `stopped ${sid}`
       },
       createSchedule: (name, cron, command, cwd) => {
+        const gated = catalogGate('create_schedule')
+        if (gated) return gated
         dispatch(s => ({
           ...s,
           crons: s.crons.concat([{
@@ -413,6 +491,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return `created schedule ${name} (${cron})`
       },
       addTask: title => {
+        const gated = catalogGate('add_task')
+        if (gated) return gated
         dispatch(s => ({
           ...s,
           tasks: s.tasks.concat([{ id: mkId('t'), title, col: 'backlog', agentId: null }]),
@@ -703,30 +783,41 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       crons: s.crons.map(c => (c.id === id ? { ...c, on: !c.on } : c)),
     })),
 
+    cycleCatalogPerm: id => dispatch(s => ({
+      ...s,
+      toolsCatalog: s.toolsCatalog.map(t => t.id === id
+        ? { ...t, perm: PERM_ORDER[(PERM_ORDER.indexOf(t.perm) + 1) % PERM_ORDER.length] }
+        : t),
+    })),
+
     approve: aid => {
       const agent = stateRef.current.agents.find(a => a.id === aid)
+      // answer the prompt: Enter accepts the default / highlighted option
+      if (agent?.kind === 'real') native.writeSession(aid, '\r').catch(() => {})
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'running' as const, log: a.log.concat([{ t: 'sys' as const, x: 'approved by you · resuming' }]) }
+          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'approved by you' }]) }
           : a),
         messages: s.messages.map(m => (m.escFor === aid && m.esc ? { ...m, esc: { ...m.esc, resolved: true, decision: 'approved' as const } } : m)),
       }))
       flash(`Approved — ${agent?.name || 'agent'} resumed`)
-      logEvent('done', aid, 'Approved · agent resumed')
+      logEvent('done', aid, 'Approved · prompt accepted')
     },
 
     deny: aid => {
       const agent = stateRef.current.agents.find(a => a.id === aid)
+      // Escape cancels the prompt
+      if (agent?.kind === 'real') native.writeSession(aid, '\x1b').catch(() => {})
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'idle' as const, log: a.log.concat([{ t: 'sys' as const, x: 'denied · session paused' }]) }
+          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'denied · prompt cancelled' }]) }
           : a),
         messages: s.messages.map(m => (m.escFor === aid && m.esc ? { ...m, esc: { ...m.esc, resolved: true, decision: 'denied' as const } } : m)),
       }))
-      flash(`Denied — ${agent?.name || 'agent'} paused`)
-      logEvent('escalate', aid, 'Denied · agent paused')
+      flash(`Denied — prompt cancelled`)
+      logEvent('escalate', aid, 'Denied · prompt cancelled')
     },
 
     gotoNeeds: () => dispatch(s => {

@@ -1,4 +1,4 @@
-import type { AgentTool, AppState, DiffFile, MemorySource, Perm, Snapshot } from './types'
+import type { Agent, AgentTool, AppState, DiffFile, MemorySource, Perm, Snapshot } from './types'
 
 export const ACCENT = '#F5C451'
 
@@ -64,24 +64,29 @@ export function hexToRgba(hex: string, a: number): string {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
 }
 
+// What of this session feeds Master's context — toggles are enforced when
+// building Master's system prompt. Token counts are computed live.
 export function mkMemory(): MemorySource[] {
   return [
-    { id: 'repomap', label: 'Repository map', detail: 'auto-indexed', tokens: 8.1, on: true },
-    { id: 'guide', label: 'Project guide', detail: 'CLAUDE.md · conventions', tokens: 2.3, on: true },
-    { id: 'diffs', label: 'Recent diffs', detail: 'last 12 commits', tokens: 4.7, on: true },
-    { id: 'summary', label: 'Session summary', detail: 'rolling context', tokens: 3.2, on: true },
+    { id: 'tail', label: 'Terminal output tail', detail: 'last 200 lines, ANSI-stripped', tokens: 0, on: true },
+    { id: 'meta', label: 'Session metadata', detail: 'command · working dir · status', tokens: 0, on: true },
   ]
 }
 
+// What Master may do to this session — enforced in Master's tool executor.
 export function mkTools(): AgentTool[] {
   return [
-    { id: 'shell', name: 'Shell', on: true, perm: 'Ask first' },
-    { id: 'fs', name: 'File write', on: true, perm: 'Auto' },
-    { id: 'git', name: 'Git', on: true, perm: 'Auto' },
-    { id: 'http', name: 'HTTP fetch', on: true, perm: 'Ask first' },
-    { id: 'db', name: 'DB query', on: false, perm: 'Approval' },
-    { id: 'browser', name: 'Browser', on: false, perm: 'Off' },
+    { id: 'send', name: 'Send input', on: true, perm: 'Auto' },
+    { id: 'stop', name: 'Stop session', on: true, perm: 'Ask first' },
+    { id: 'respawn', name: 'Respawn', on: true, perm: 'Auto' },
   ]
+}
+
+// Live token estimate for a memory source (chars / 4 ≈ tokens, in k)
+export function memTokens(a: Agent, sourceId: string): number {
+  if (sourceId === 'tail') return a.log.reduce((n, l) => n + l.x.length + 1, 0) / 4000
+  if (sourceId === 'meta') return 0.05
+  return 0
 }
 
 export interface AgentDetail {
@@ -143,13 +148,14 @@ export function seedState(): AppState {
       },
     ],
     crons: [],
+    // Master's global tools — permissions here gate its tool executor.
+    // Auto: act freely · Ask first: confirm in chat first · Approval/Off: blocked.
     toolsCatalog: [
-      { id: 'shell', name: 'Shell', desc: 'Run commands in the workspace sandbox.', perm: 'Ask first', agents: 0 },
-      { id: 'fs', name: 'File write', desc: 'Create and edit files in the repository.', perm: 'Auto', agents: 0 },
-      { id: 'git', name: 'Git', desc: 'Stage, commit, branch, and push changes.', perm: 'Auto', agents: 0 },
-      { id: 'http', name: 'HTTP fetch', desc: 'Outbound requests to allowlisted hosts only.', perm: 'Ask first', agents: 0 },
-      { id: 'db', name: 'DB query', desc: 'Read and write against connected databases.', perm: 'Approval', agents: 0 },
-      { id: 'browser', name: 'Browser', desc: 'Headless browsing and page scraping.', perm: 'Off', agents: 0 },
+      { id: 'launch_session', name: 'Launch session', desc: 'Master may spawn new CLI sessions.', perm: 'Auto', agents: 0 },
+      { id: 'send_to_session', name: 'Send input', desc: 'Master may write to a session\'s terminal (per-session override in the session panel).', perm: 'Auto', agents: 0 },
+      { id: 'stop_session', name: 'Stop session', desc: 'Master may kill running sessions.', perm: 'Ask first', agents: 0 },
+      { id: 'create_schedule', name: 'Create schedule', desc: 'Master may add recurring cron schedules.', perm: 'Auto', agents: 0 },
+      { id: 'add_task', name: 'Add board task', desc: 'Master may add cards to the task board.', perm: 'Auto', agents: 0 },
     ],
   }
 }

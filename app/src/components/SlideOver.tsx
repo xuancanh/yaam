@@ -1,5 +1,5 @@
 import { useActions, useConductor } from '../store'
-import { ACCENT, PERM_COLORS, hexToRgba } from '../data'
+import { ACCENT, PERM_COLORS, hexToRgba, memTokens } from '../data'
 import { AgentAvatar, IC, Icon, Switch } from './ui'
 
 export function SlideOver() {
@@ -12,7 +12,7 @@ export function SlideOver() {
   const tab = s.panel.tab
 
   const memOn = agent.memory.filter(m => m.on)
-  const memTotal = memOn.reduce((n, m) => n + m.tokens, 0)
+  const memTotal = memOn.reduce((n, m) => n + memTokens(agent, m.id), 0)
 
   return (
     <>
@@ -53,9 +53,9 @@ export function SlideOver() {
           {tab === 'memory' ? (
             <>
               <div style={{ fontSize: 11.5, color: 'var(--mut)', marginBottom: 14 }}>
-                {memOn.length} sources active ·{' '}
-                <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{memTotal.toFixed(1)}k</span>
-                {' '}in context window
+                What this session contributes to Master's context ·{' '}
+                <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{memTotal.toFixed(2)}k</span>
+                {' '}tokens
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
                 {agent.memory.map(m => (
@@ -65,7 +65,7 @@ export function SlideOver() {
                   }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: m.on ? 'var(--text)' : '#6B7280' }}>{m.label}</div>
-                      <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>{m.detail} · {m.tokens.toFixed(1)}k</div>
+                      <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>{m.detail} · {memTokens(agent, m.id).toFixed(2)}k</div>
                     </div>
                     <Switch on={m.on} onToggle={() => toggleMem(agent.id, m.id)} />
                   </div>
@@ -75,7 +75,7 @@ export function SlideOver() {
           ) : (
             <>
               <div style={{ fontSize: 11.5, color: 'var(--mut)', marginBottom: 14 }}>
-                Toggle capabilities and set how much this agent can do on its own.
+                What Master may do to this session. Auto acts freely, Ask first makes Master confirm in chat, Approval/Off blocks it.
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
                 {agent.tools.map(t => {
