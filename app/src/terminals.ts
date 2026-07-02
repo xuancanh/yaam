@@ -66,7 +66,8 @@ export function getTerminal(id: string, onPlainLine?: (line: string) => void, on
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.onData(data => {
-      entries.get(id)?.onUserInput?.()
+      // scroll/mouse/arrow escape sequences are not the user answering a prompt
+      if (!data.startsWith('\x1b[')) entries.get(id)?.onUserInput?.()
       writeSession(id, data).catch(() => {})
     })
     entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, pending: '' }
@@ -76,6 +77,11 @@ export function getTerminal(id: string, onPlainLine?: (line: string) => void, on
     if (onUserInput) entry.onUserInput = onUserInput
   }
   return entry
+}
+
+/** True when the session is showing a full-screen TUI (alternate buffer). */
+export function isAltScreen(id: string): boolean {
+  return entries.get(id)?.term.buffer.active.type === 'alternate'
 }
 
 export function fitTerminal(id: string) {

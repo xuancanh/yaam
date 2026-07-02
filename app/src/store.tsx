@@ -9,7 +9,7 @@ import { defaultDetail, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
 import * as native from './native'
 import { runMasterTurn } from './master'
 import type { MasterExec } from './master'
-import { getTerminal } from './terminals'
+import { getTerminal, isAltScreen } from './terminals'
 
 type Updater = (s: AppState) => AppState
 
@@ -173,19 +173,71 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
-  // After a message is routed into a session, watch its output; once it goes
-  // quiet, hand the response back to Master as an event (agents → Master leg).
-  const watchRef = useRef<Map<string, { since: number; timer?: number }>>(new Map())
-  const needsRevertRef = useRef<Map<string, number>>(new Map())
+  // Agents → Master / user leg. We never react to individual lines: each
+  // session has a settle watcher, and only once output has been quiet for a
+  // few seconds do we look at the tail. If the LLM Master is enabled, IT
+  // decides whether the session is waiting on the user (flag_needs_input);
+  // without it, a prompt-shaped final line is required.
+  const armedRef = useRef<Set<string>>(new Set())
+  const settleRef = useRef<Map<string, { since: number; timer: number }>>(new Map())
+  const lastUnarmedEventRef = useRef<Map<string, number>>(new Map())
 
   const armResponseWatch = useCallback((id: string) => {
-    const st = stateRef.current
-    if (!(st.settings.masterEnabled && st.settings.apiKey && st.settings.followMode)) return
-    const agent = st.agents.find(a => a.id === id)
-    const existing = watchRef.current.get(id)
-    if (existing?.timer) window.clearTimeout(existing.timer)
-    watchRef.current.set(id, { since: agent ? agent.log.length : 0 })
+    armedRef.current.add(id)
   }, [])
+
+  const setNeedsInput = useCallback((id: string, question: string) => {
+    const agent = stateRef.current.agents.find(a => a.id === id)
+    if (!agent || agent.status !== 'running') return
+    dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === id ? { ...a, status: 'needs' as const, escReason: question } : a),
+      messages: s.messages.concat([{
+        id: mkId('m'), role: 'master', kind: 'escalate', escFor: id,
+        esc: { name: agent.name, color: agent.color, repo: agent.repo, reason: question, resolved: false, decision: null },
+      }]),
+    }))
+    logEvent('escalate', id, `${agent.name} is asking for input: ${question.slice(0, 64)}`)
+    notify('escalate', `${agent.name} needs your input`, question.slice(0, 80), id)
+  }, [logEvent, notify])
+
+  const onSettle = useCallback((id: string, since: number) => {
+    settleRef.current.delete(id)
+    const agent = stateRef.current.agents.find(a => a.id === id)
+    if (!agent || (agent.status !== 'running' && agent.status !== 'needs')) return
+    const lines = agent.log.slice(since).map(l => l.x).filter(Boolean)
+    if (!lines.length) return
+    const tail = lines.slice(-14)
+    const lastLine = tail[tail.length - 1] ?? ''
+    const alt = isAltScreen(id)
+    // TUI redraws (alternate screen) look like new output — never apply the
+    // prompt heuristic to them, and only involve Master when it asked (armed)
+    const promptLike = !alt && (PROMPT_RE.test(tail.slice(-3).join('\n')) || /[?:]\s*$/.test(lastLine.trim()))
+    const st = stateRef.current.settings
+    const armed = armedRef.current.has(id)
+
+    if (st.masterEnabled && st.apiKey && st.followMode) {
+      const last = lastUnarmedEventRef.current.get(id) ?? 0
+      const throttled = !armed && Date.now() - last < 30000
+      if ((armed || promptLike) && !throttled) {
+        if (!armed) lastUnarmedEventRef.current.set(id, Date.now())
+        armedRef.current.delete(id)
+        masterEventRef.current(
+          `[event] session "${agent.name}" (${id}) stopped producing output. New output since last check:\n${tail.join('\n')}\n\n` +
+          'If this session is waiting for user input or permission, call flag_needs_input with what it is asking. ' +
+          'Otherwise briefly relay the outcome if meaningful; if there is nothing worth telling the user, reply with an empty message.',
+        )
+      }
+    } else if (agent.status === 'running' && promptLike) {
+      setNeedsInput(id, lastLine)
+    } else if (agent.status === 'needs' && !promptLike && !alt) {
+      // prompt is gone — it was answered in the terminal
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === id ? { ...a, status: 'running' as const, escReason: undefined } : a),
+      }))
+    }
+  }, [setNeedsInput])
 
   // ANSI-stripped tail of each terminal, kept for Master's context, overview
   // cards, and rough usage accounting (the terminal itself renders raw bytes)
@@ -199,58 +251,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return { ...a, log, used: a.used + 0.01, cost: a.cost + 0.0004 }
       }),
     }))
-    // permission / confirmation prompts surface as "needs action"
-    const isPrompt = PROMPT_RE.test(line)
-    if (isPrompt) {
-      const agent = stateRef.current.agents.find(a => a.id === id)
-      const revert = needsRevertRef.current.get(id)
-      if (revert) { window.clearTimeout(revert); needsRevertRef.current.delete(id) }
-      if (agent && agent.status === 'running') {
-        dispatch(s => ({
-          ...s,
-          agents: s.agents.map(a => a.id === id ? { ...a, status: 'needs' as const, escReason: line } : a),
-        }))
-        logEvent('escalate', id, `${agent.name} is asking for input: ${line.slice(0, 64)}`)
-        notify('escalate', `${agent.name} needs your input`, line.slice(0, 80), id)
-        dispatch(s2 => ({
-          ...s2,
-          messages: s2.messages.concat([{
-            id: mkId('m'), role: 'master', kind: 'escalate', escFor: id,
-            esc: { name: agent.name, color: agent.color, repo: agent.repo, reason: line, resolved: false, decision: null },
-          }]),
-        }))
-        if (stateRef.current.settings.masterEnabled && stateRef.current.settings.apiKey && stateRef.current.settings.followMode) {
-          masterEventRef.current(`[event] session "${agent.name}" (${id}) is waiting for user input/permission: "${line}". Tell the user what it's asking and how to respond.`)
-        }
-      }
-    } else if (stateRef.current.agents.find(a => a.id === id)?.status === 'needs' && !needsRevertRef.current.has(id)) {
-      // prompt lines stopped — assume it was answered and revert to running
-      needsRevertRef.current.set(id, window.setTimeout(() => {
-        needsRevertRef.current.delete(id)
-        const agent = stateRef.current.agents.find(a => a.id === id)
-        if (agent?.status === 'needs') {
-          dispatch(s2 => ({
-            ...s2,
-            agents: s2.agents.map(a => a.id === id ? { ...a, status: 'running' as const, escReason: undefined } : a),
-          }))
-        }
-      }, 4000))
-    }
-    const watch = watchRef.current.get(id)
-    if (watch) {
-      if (watch.timer) window.clearTimeout(watch.timer)
-      watch.timer = window.setTimeout(() => {
-        watchRef.current.delete(id)
-        const agent = stateRef.current.agents.find(a => a.id === id)
-        if (!agent) return
-        const lines = agent.log.slice(watch.since).map(l => l.x).filter(Boolean).slice(-30)
-        if (!lines.length) return
-        masterEventRef.current(
-          `[event] session "${agent.name}" (${id}) responded:\n${lines.join('\n')}\n\nBriefly relay the outcome to the user; take further action only if needed.`,
-        )
-      }, 2500)
-    }
-  }, [logEvent, notify])
+    // (re)start the settle watcher — checks only run once output goes quiet
+    const prev = settleRef.current.get(id)
+    if (prev) window.clearTimeout(prev.timer)
+    const since = prev?.since ?? Math.max(0, (stateRef.current.agents.find(a => a.id === id)?.log.length ?? 1) - 1)
+    const timer = window.setTimeout(() => onSettle(id, since), 3000)
+    settleRef.current.set(id, { since, timer })
+  }, [onSettle])
 
   // typing into a terminal clears its "needs action" state
   const clearNeeds = useCallback((id: string) => {
@@ -523,6 +530,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         logEvent('route', sid, `Master → ${agent.name}: ${text.slice(0, 48)}`)
         return `sent to ${agent.name}`
       },
+      flagNeedsInput: (sid, question) => {
+        const agent = stateRef.current.agents.find(a => a.id === sid)
+        if (!agent) return `no session with id ${sid}`
+        setNeedsInput(sid, question || 'waiting for input')
+        return `flagged ${agent.name} as needing user input`
+      },
       readSession: (sid, lines) => {
         const agent = stateRef.current.agents.find(a => a.id === sid)
         if (!agent) return `no session with id ${sid}`
@@ -590,7 +603,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     masterBusyRef.current = false
     dispatch(s => ({ ...s, masterBusy: false }))
-  }, [armResponseWatch, launchSession, logEvent])
+  }, [armResponseWatch, launchSession, logEvent, setNeedsInput])
 
   masterEventRef.current = note => { void runMaster(note) }
 

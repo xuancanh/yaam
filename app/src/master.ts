@@ -36,6 +36,7 @@ export interface MasterExec {
   sendToSession: (sessionId: string, text: string) => string
   stopSession: (sessionId: string) => string
   readSession: (sessionId: string, lines?: number) => string
+  flagNeedsInput: (sessionId: string, question: string) => string
   createSchedule: (name: string, cron: string, command?: string, cwd?: string) => string
   addTask: (title: string) => string
 }
@@ -76,6 +77,18 @@ const TOOLS = [
         lines: { type: 'number', description: 'how many lines from the end (default 40, max 120)' },
       },
       required: ['session_id'],
+    },
+  },
+  {
+    name: 'flag_needs_input',
+    description: 'Mark a session as waiting for the user: shows a Needs-action banner, sends a notification, and puts an approve/deny card in chat. Call this when a session\'s output shows it is blocked on user input or permission.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string' },
+        question: { type: 'string', description: 'what the session is asking, quoted or paraphrased' },
+      },
+      required: ['session_id', 'question'],
     },
   },
   {
@@ -150,7 +163,7 @@ function systemPrompt(s: AppState): string {
 
 Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
 
-Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed.
+Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed.
 
 CURRENT STATE
 ${describeState(s)}`
@@ -295,6 +308,7 @@ function runTool(name: string, input: Record<string, unknown>, exec: MasterExec)
     case 'send_to_session': return exec.sendToSession(str('session_id'), str('text'))
     case 'stop_session': return exec.stopSession(str('session_id'))
     case 'read_session': return exec.readSession(str('session_id'), typeof input.lines === 'number' ? input.lines : undefined)
+    case 'flag_needs_input': return exec.flagNeedsInput(str('session_id'), str('question'))
     case 'create_schedule': return exec.createSchedule(str('name'), str('cron'), str('command') || undefined, str('cwd') || undefined)
     case 'add_task': return exec.addTask(str('title'))
     default: return `unknown tool ${name}`
