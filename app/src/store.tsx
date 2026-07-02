@@ -483,7 +483,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
       hydrated.current = true
     }).catch(() => { hydrated.current = true })
-  }, [appendTail, bumpSettle, clearNeeds])
+  }, [appendTail, bumpSettle, clearNeeds, later])
 
   const saveTimer = useRef<number | undefined>(undefined)
   useEffect(() => {
@@ -596,7 +596,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
     })
     return id
-  }, [appendTail, bumpSettle, clearNeeds])
+  }, [appendTail, bumpSettle, clearNeeds, later])
 
   // cron scheduler: fire enabled schedules once per matching minute
   useEffect(() => {
