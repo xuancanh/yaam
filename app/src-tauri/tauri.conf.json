@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Conductor",
+  "productName": "YAAM",
   "version": "0.1.0",
   "identifier": "dev.yaam.conductor",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Conductor",
+        "title": "YAAM",
         "width": 1440,
         "height": 900,
         "minWidth": 1100,
