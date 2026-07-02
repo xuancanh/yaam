@@ -142,7 +142,7 @@ export function seedState(): AppState {
     settings: {
       autoRoute: true, approveDestructive: true, followMode: true,
       shell: 'zsh', defaultCwd: '',
-      masterEnabled: false, masterModel: 'claude-sonnet-5', apiKey: '',
+      masterEnabled: false, masterModel: 'claude-sonnet-5', monitorModel: 'claude-haiku-4-5-20251001', apiKey: '',
       provider: 'anthropic', baseUrl: '',
     },
     tasks: [],

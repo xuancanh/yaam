@@ -219,6 +219,8 @@ export interface OrchestrationSettings {
   /** Master brain: when enabled with an API key, Master is an LLM with tools */
   masterEnabled: boolean
   masterModel: string
+  /** model for per-session monitor LLMs; empty = same as masterModel */
+  monitorModel: string
   apiKey: string
   /** LLM provider: anthropic | openai | deepseek | kimi | custom */
   provider: string

@@ -19,6 +19,7 @@ Every session is a real OS process in a **PTY**, rendered with **xterm.js** — 
 Master is a **Claude model with tools** (enable in Settings → Master Brain with an Anthropic API key; model selectable):
 
 - **You → Master**: chat composer (⌘K palette for quick actions)
+- **Per-session monitors**: every session gets its own lightweight monitor LLM (model configurable, e.g. Haiku) with a private conversation — it watches that session's settled output, keeps the status card current, flags needed input, and escalates short digests to Master only when noteworthy. Master never sees raw terminal dumps from the watchers.
 - **Master → sessions**: tools — `launch_session`, `send_to_session` (writes to a session's PTY), `stop_session`, `create_schedule`, `add_task`
 - **Sessions → Master**: each terminal's ANSI-stripped output tail and status feed Master's context; session exits/failures trigger proactive Master turns (follow mode)
 

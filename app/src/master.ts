@@ -267,7 +267,7 @@ function systemPrompt(s: AppState): string {
   return `You are Master, the orchestrator inside YAAM (Yet Another Agent Manager) — a desktop manager for multiple live agent sessions (CLI processes). You sit between the user and the sessions:
 - The user talks to you in chat.
 - You command sessions with tools (send text to their stdin, launch or stop them).
-- Sessions report back through their output, which appears in the state below. After you send something to a session, you get an [event] message with its response once the output settles. Relay it in a fixed shape: a 1-2 sentence summary of what the session did, then a line starting "Next action:" telling the user what to do (approve something, answer a question, review a diff, or "none — I'll keep watching"). Keep the agent's overview card in sync with update_agent_status at the same time.
+- Every session has a dedicated monitor (a separate lightweight LLM) watching its output. You do NOT see raw terminal output as events — monitors keep each session's status card current and send you [monitor report] messages only when something is noteworthy (finished, blocked, needs the user). Trust the reports and the tracked state; use read_session only when you need the raw output yourself. When a monitor report arrives, relay it in a fixed shape: a 1-2 sentence summary of what the session did, then a line starting "Next action:" telling the user what to do (approve something, answer a question, review a diff, or "none — I'll keep watching"). Keep the agent's overview card in sync with update_agent_status at the same time.
 
 Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
 
@@ -277,7 +277,7 @@ CURRENT STATE
 ${describeState(s)}`
 }
 
-interface ApiContentBlock {
+export interface ApiContentBlock {
   type: string
   text?: string
   id?: string
@@ -285,13 +285,13 @@ interface ApiContentBlock {
   input?: Record<string, unknown>
 }
 
-interface ApiResponse {
+export interface ApiResponse {
   content: ApiContentBlock[]
   stop_reason: string
   error?: { message: string }
 }
 
-type ApiMessage = { role: 'user' | 'assistant'; content: unknown }
+export type ApiMessage = { role: 'user' | 'assistant'; content: unknown }
 
 function chatHistory(s: AppState, eventNote?: string): ApiMessage[] {
   const msgs: ApiMessage[] = []
@@ -312,14 +312,14 @@ function chatHistory(s: AppState, eventNote?: string): ApiMessage[] {
   return msgs.slice(-30)
 }
 
-interface LlmConfig {
+export interface LlmConfig {
   provider: ProviderDef
   baseUrl: string
   apiKey: string
   model: string
 }
 
-async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[]): Promise<ApiResponse> {
+async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[] = TOOLS): Promise<ApiResponse> {
   const res = await doFetch(`${cfg.provider.base}/v1/messages`, {
     method: 'POST',
     headers: {
@@ -328,7 +328,7 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model: cfg.model, max_tokens: 2048, system, messages, tools: TOOLS }),
+    body: JSON.stringify({ model: cfg.model, max_tokens: 2048, system, messages, tools }),
   })
   const data = await res.json() as ApiResponse
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
@@ -374,7 +374,7 @@ function toOpenAiMessages(system: string, messages: ApiMessage[]): OaiMessage[] 
   return out
 }
 
-async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]): Promise<ApiResponse> {
+async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[] = TOOLS): Promise<ApiResponse> {
   const base = (cfg.provider.id === 'custom' ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
   if (!base) throw new Error('custom provider needs a base URL (Settings → Master Brain)')
   const res = await doFetch(`${base}/chat/completions`, {
@@ -387,7 +387,7 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
       model: cfg.model,
       max_tokens: 2048,
       messages: toOpenAiMessages(system, messages),
-      tools: TOOLS.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
+      tools: (tools as typeof TOOLS).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
     }),
   })
   const data = await res.json() as {
@@ -407,8 +407,17 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
   return { content, stop_reason: msg?.tool_calls?.length ? 'tool_use' : 'end_turn' }
 }
 
-function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[]): Promise<ApiResponse> {
-  return cfg.provider.protocol === 'anthropic' ? callAnthropic(cfg, system, messages) : callOpenAi(cfg, system, messages)
+export function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools?: unknown[]): Promise<ApiResponse> {
+  return cfg.provider.protocol === 'anthropic' ? callAnthropic(cfg, system, messages, tools) : callOpenAi(cfg, system, messages, tools)
+}
+
+export function buildCfg(settings: AppState['settings'], modelOverride?: string): LlmConfig {
+  return {
+    provider: providerFor(settings.provider),
+    baseUrl: settings.baseUrl,
+    apiKey: settings.apiKey,
+    model: modelOverride || settings.masterModel,
+  }
 }
 
 function runTool(name: string, input: Record<string, unknown>, exec: MasterExec): string {
@@ -455,12 +464,7 @@ export async function runMasterTurn(
   eventNote?: string,
 ): Promise<MasterTurnResult> {
   const s0 = getState()
-  const cfg: LlmConfig = {
-    provider: providerFor(s0.settings.provider),
-    baseUrl: s0.settings.baseUrl,
-    apiKey: s0.settings.apiKey,
-    model: s0.settings.masterModel,
-  }
+  const cfg = buildCfg(s0.settings)
   const messages = chatHistory(s0, eventNote)
   const trace: string[] = []
   let finalTexts: string[] = []

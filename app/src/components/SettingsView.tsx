@@ -98,6 +98,21 @@ export function SettingsView() {
                 {providerFor(s.settings.provider).models.map(m => <option key={m} value={m} />)}
               </datalist>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Monitor model</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
+                  Each session gets its own monitor LLM that watches output and only escalates digests to Master. Use a cheap model.
+                </div>
+              </div>
+              <input
+                list="master-models"
+                value={s.settings.monitorModel}
+                onChange={e => updateSettings({ monitorModel: e.target.value })}
+                placeholder="same as Master model"
+                style={{ ...FIELD_STYLE, width: 260 }}
+              />
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>API key</div>

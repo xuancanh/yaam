@@ -7,8 +7,10 @@ import type {
 } from './types'
 import { defaultDetail, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
 import * as native from './native'
-import { runMasterTurn } from './master'
-import type { MasterExec } from './master'
+import { buildCfg, runMasterTurn } from './master'
+import type { ApiMessage, MasterExec } from './master'
+import { runMonitorTurn } from './monitor'
+import type { MonitorExec } from './monitor'
 import { getTerminal, isAltScreen, readScreen } from './terminals'
 import { ActionsCtx, StateCtx } from './context'
 
@@ -179,6 +181,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state)
   stateRef.current = state
 
+  // set by the Master/monitor runners below; refs avoid declaration cycles
+  const masterEventRef = useRef<(note: string) => void>(() => {})
+  const monitorEventRef = useRef<(id: string, note: string) => Promise<void> | void>(() => {})
+
   useEffect(() => {
     const timers = pending.current
     return () => {
@@ -263,6 +269,86 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   const lastFlaggedRef = useRef<Map<string, string>>(new Map())
 
+  // shared by Master's update_agent_status tool and the per-session monitors
+  const applyAgentStatus = useCallback((sid: string, task?: string, summary?: string, actionNeeded?: string) => {
+    const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    dispatch(s2 => ({
+      ...s2,
+      agents: s2.agents.map(a => a.id === sid
+        ? {
+            ...a,
+            task: task !== undefined ? (task || undefined) : a.task,
+            summary: summary !== undefined ? (summary || undefined) : a.summary,
+            actionNeeded: actionNeeded !== undefined ? (actionNeeded || undefined) : a.actionNeeded,
+            summaryAt: at,
+          }
+        : a),
+    }))
+  }, [])
+
+  // Per-session monitor LLMs: private history + serialized turns per session.
+  // They digest terminal output locally; Master only sees report_to_master.
+  const monitorHistories = useRef<Map<string, ApiMessage[]>>(new Map())
+  const monitorBusy = useRef<Set<string>>(new Set())
+  const monitorQueue = useRef<Map<string, string>>(new Map())
+
+  const runMonitor = useCallback(async (id: string, note: string) => {
+    const st = stateRef.current.settings
+    if (!(st.masterEnabled && st.apiKey && st.followMode)) return
+    if (monitorBusy.current.has(id)) {
+      monitorQueue.current.set(id, note)
+      return
+    }
+    monitorBusy.current.add(id)
+    try {
+      let pending: string | undefined = note
+      while (pending !== undefined) {
+        const current = pending
+        pending = undefined
+        const agent = stateRef.current.agents.find(a => a.id === id)
+        if (!agent) break
+        let history = monitorHistories.current.get(id)
+        if (!history) {
+          history = []
+          monitorHistories.current.set(id, history)
+        }
+        const exec: MonitorExec = {
+          updateStatus: (task, summary, actionNeeded) => {
+            applyAgentStatus(id, task, summary, actionNeeded)
+            return 'status updated'
+          },
+          flagNeedsInput: question => {
+            const screen = isAltScreen(id) ? readScreen(id) : (stateRef.current.agents.find(a => a.id === id)?.log ?? []).slice(-14).map(l => l.x)
+            const { options, cursorNum } = extractOptions(screen)
+            setNeedsInput(id, question || 'waiting for input', options, cursorNum)
+            return 'flagged as needing input'
+          },
+          reportToMaster: (digest, importance) => {
+            const a = stateRef.current.agents.find(x => x.id === id)
+            logEvent(importance === 'info' ? 'done' : 'escalate', id, `Monitor: ${digest.slice(0, 96)}`)
+            if (importance === 'critical' && a) notify('escalate', `${a.name} needs attention`, digest.slice(0, 90), id)
+            masterEventRef.current(
+              `[monitor report · ${importance}] session "${a?.name ?? id}" (${id}): ${digest}\n\n` +
+              'This came from the session\'s dedicated monitor. Relay it to the user in 1-2 sentences ending with "Next action:", and act with your tools if needed.',
+            )
+            return 'reported to Master'
+          },
+        }
+        try {
+          await runMonitorTurn(buildCfg(st, st.monitorModel || undefined), agent, current, history, exec)
+        } catch (e) {
+          logEvent('escalate', id, `Monitor error: ${e instanceof Error ? e.message : String(e)}`)
+        }
+        pending = monitorQueue.current.get(id)
+        monitorQueue.current.delete(id)
+      }
+    } finally {
+      monitorBusy.current.delete(id)
+    }
+  }, [applyAgentStatus, logEvent, notify, setNeedsInput])
+
+  monitorEventRef.current = (id, note) => runMonitor(id, note)
+
   const onSettle = useCallback((id: string, since: number) => {
     settleRef.current.delete(id)
     const agent = stateRef.current.agents.find(a => a.id === id)
@@ -327,15 +413,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
       armedRef.current.delete(id)
       if (!expired) {
-        masterEventRef.current(
-          `[event] session "${agent.name}" (${id}) finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
-          'If this session is waiting for user input or permission, call flag_needs_input with what it is asking. ' +
-          'Otherwise: (1) call update_agent_status with a fresh task/summary and action_needed set to what the user should do next, ' +
-          'then (2) reply to the user with exactly two parts — a 1-2 sentence summary of what the session did, and "Next action:" followed by what the user should do (or "none — I\'ll keep watching").',
-        )
+        void runMonitor(id,
+          `The session finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
+          'It was given a task by Master or the user, so a completed response IS noteworthy — update the status and report a digest to Master.')
       }
     }
-  }, [setNeedsInput])
+  }, [runMonitor, setNeedsInput])
 
   const onSettleRef = useRef<(id: string, since: number) => void>(() => {})
   onSettleRef.current = onSettle
@@ -388,13 +471,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           lastFlaggedRef.current.set(a.id, question)
           const { options, cursorNum } = extractOptions(screen)
           setNeedsInput(a.id, question, options, cursorNum)
-          const st = stateRef.current.settings
-          if (st.masterEnabled && st.apiKey && st.followMode) {
-            masterEventRef.current(
-              `[event] session "${a.name}" (${a.id}) is showing a dialog and has been flagged as needing input:\n${screen.slice(-14).join('\n')}\n\n` +
-              'Tell the user what it is asking — include the options if it is a menu.',
-            )
-          }
+          void monitorEventRef.current(a.id,
+            `A dialog was detected on the session's screen (already flagged as needing input):\n${screen.slice(-14).join('\n')}\n\n` +
+            'This needs the user — report_to_master with what it is asking, including the options if it is a menu.')
         } else if (a.status === 'needs') {
           lastFlaggedRef.current.delete(a.id)
           dispatch(s2 => ({
@@ -453,19 +532,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           failed ? `exit code ${e.code} · ${agent.repo}` : `session ended · ${agent.repo}`,
           e.id,
         )
-        if (stateRef.current.settings.masterEnabled && stateRef.current.settings.apiKey && stateRef.current.settings.followMode) {
-          masterEventRef.current(
-            `[event] session "${agent.name}" (${e.id}) ${failed ? `exited with code ${e.code}` : 'finished and exited'}. ` +
-            'Call update_agent_status (summary + action_needed), then reply with a 1-2 sentence summary and "Next action:" for the user.',
-          )
-        }
+        void monitorEventRef.current(e.id,
+          `The session process ${failed ? `exited with code ${e.code}` : 'finished and exited cleanly'}. Update the status and report a digest to Master.`)
       }
     })
     return () => { offExit() }
   }, [logEvent, notify])
 
-  // set by the Master turn runner below; ref avoids a declaration cycle
-  const masterEventRef = useRef<(note: string) => void>(() => {})
 
   // persistence: restore everything (including session definitions and their
   // output tails) on launch, save on change. Restored sessions come back
@@ -810,19 +883,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       updateAgentStatus: (sid, task, summary, actionNeeded) => {
         const agent = stateRef.current.agents.find(a => a.id === sid)
         if (!agent) return `no session with id ${sid}`
-        const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        dispatch(s2 => ({
-          ...s2,
-          agents: s2.agents.map(a => a.id === sid
-            ? {
-                ...a,
-                task: task !== undefined ? (task || undefined) : a.task,
-                summary: summary !== undefined ? (summary || undefined) : a.summary,
-                actionNeeded: actionNeeded !== undefined ? (actionNeeded || undefined) : a.actionNeeded,
-                summaryAt: at,
-              }
-            : a),
-        }))
+        applyAgentStatus(sid, task, summary, actionNeeded)
         return `updated status for ${agent.name}`
       },
       renameSession: (sid, name) => {
@@ -919,7 +980,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     masterBusyRef.current = false
     dispatch(s => ({ ...s, masterBusy: false }))
-  }, [armResponseWatch, flash, launchSession, logEvent, setNeedsInput])
+  }, [applyAgentStatus, armResponseWatch, flash, launchSession, logEvent, setNeedsInput])
 
   masterEventRef.current = note => { void runMaster(note) }
 
