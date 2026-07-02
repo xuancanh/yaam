@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
   Agent, AppState, BoardCol, Cron, EventType, LogLine,
@@ -10,6 +10,7 @@ import * as native from './native'
 import { runMasterTurn } from './master'
 import type { MasterExec } from './master'
 import { getTerminal, isAltScreen } from './terminals'
+import { ActionsCtx, StateCtx } from './context'
 
 type Updater = (s: AppState) => AppState
 
@@ -71,8 +72,6 @@ export interface ConductorActions {
   stopSession: (id: string) => void
 }
 
-const StateCtx = createContext<AppState | null>(null)
-const ActionsCtx = createContext<ConductorActions | null>(null)
 
 let uid = 0
 function mkId(prefix: string): string {
