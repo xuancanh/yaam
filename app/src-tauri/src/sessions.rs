@@ -178,17 +178,20 @@ fn newest_file_since(dir: &std::path::Path, since_ms: u64, recurse: bool) -> Opt
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
             continue;
         }
-        let mtime = entry
-            .metadata()
+        // creation time, so a concurrent conversation that keeps appending to an
+        // older file can't shadow the session our child process just created
+        let meta = entry.metadata().ok()?;
+        let created = meta
+            .created()
+            .or_else(|_| meta.modified())
             .ok()
-            .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64)?;
-        if mtime < since_ms {
+        if created < since_ms {
             continue;
         }
-        if best.as_ref().map(|b| mtime > b.0).unwrap_or(true) {
-            best = Some((mtime, path));
+        if best.as_ref().map(|b| created > b.0).unwrap_or(true) {
+            best = Some((created, path));
         }
     }
     best

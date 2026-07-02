@@ -69,6 +69,7 @@ export interface Agent {
   diff: DiffFile[]
   /** the CLI's own session/conversation id, captured after launch for resume */
   cliSessionId?: string
+  launchedAt?: number
   /** Master-maintained: what this agent is working on */
   task?: string
   /** Master-maintained: latest 1-2 sentence state summary */
@@ -193,6 +194,8 @@ export interface AgentType {
   enabled: boolean
   /** command used to resume a previous CLI session; {id} is replaced with the captured session id */
   resumeCmd?: string
+  /** resume command when no session id was captured (e.g. claude --continue) */
+  resumeFallbackCmd?: string
   /** how to detect the CLI's session id after launch */
   probe?: 'claude' | 'codex'
 }

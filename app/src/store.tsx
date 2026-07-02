@@ -400,6 +400,18 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             }
           : a),
       }))
+      if (agent && !agent.cliSessionId && agent.cmd && agent.launchedAt) {
+        const probeType = typeForCommand(agent.cmd, stateRef.current.agentTypes)
+        if (probeType?.probe && !/--resume|resume |--continue/.test(agent.cmd)) {
+          native.detectCliSession(probeType.probe, agent.cwd || undefined, agent.launchedAt).then(sid => {
+            if (!sid) return
+            dispatch(s2 => ({
+              ...s2,
+              agents: s2.agents.map(a => a.id === e.id ? { ...a, cliSessionId: sid } : a),
+            }))
+          }).catch(() => {})
+        }
+      }
       if (agent) {
         logEvent(failed ? 'escalate' : 'done', e.id, `${agent.name} ${failed ? `failed · exit ${e.code}` : 'finished'}`)
         notify(
@@ -449,7 +461,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             settings: { ...s.settings, ...(p.settings || {}) },
             toolsCatalog: p.toolsCatalog?.some(t => t.id === 'launch_session') ? p.toolsCatalog : s.toolsCatalog,
             agentTypes: p.agentTypes
-              ? s.agentTypes.map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, probe: t.probe }))
+              ? s.agentTypes.map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, resumeFallbackCmd: t.resumeFallbackCmd, probe: t.probe }))
               : s.agentTypes,
             integrations: p.integrations ?? s.integrations,
             agents: restoredAgents.length ? restoredAgents : s.agents,
@@ -544,7 +556,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const agent: Agent = {
       id, name: nameHint || bin, short: (nameHint || bin).slice(0, 2).toUpperCase(), color,
       repo: dir ? dir.split('/').pop() || dir : '~', branch: 'live',
-      status: 'running', model: trimmed, kind: 'real', cmd: trimmed, cwd: dir,
+      status: 'running', model: trimmed, kind: 'real', cmd: trimmed, cwd: dir, launchedAt: Date.now(),
       fi: 0, feed: [], memory: mkMemory(), tools: mkTools(),
       log: [{ t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` }],
       ...defaultDetail(),
@@ -909,6 +921,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             if (agent.cliSessionId) {
               cmd = type.resumeCmd.replace('{id}', agent.cliSessionId)
               resumeNote = `resuming ${type.name} session ${agent.cliSessionId}`
+            } else if (type.resumeFallbackCmd) {
+              cmd = type.resumeFallbackCmd
+              resumeNote = `no captured session id — resuming most recent via · ${cmd}`
             }
           } else {
             cmd = type.resumeCmd
