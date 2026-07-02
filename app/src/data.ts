@@ -139,12 +139,13 @@ export function seedState(): AppState {
       autoRoute: true, approveDestructive: true, followMode: true,
       shell: 'zsh', defaultCwd: '',
       masterEnabled: false, masterModel: 'claude-sonnet-5', apiKey: '',
+      provider: 'anthropic', baseUrl: '',
     },
     tasks: [],
     messages: [
       {
         id: 'm1', role: 'master', kind: 'text',
-        text: 'I’m Master. Launch a live session (⌘K → New agent session), then tell me what you need — I route tasks to sessions, answer questions about them, and build tools and schedules.',
+        text: 'I’m Master. Give me a brain in Settings → Master Brain (any supported provider’s API key), then tell me what you need — I launch and command sessions, answer questions about them, and build schedules.',
       },
     ],
     crons: [],

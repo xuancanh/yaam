@@ -32,6 +32,11 @@ export async function resizeSession(id: string, rows: number, cols: number): Pro
   await invoke('resize_session', { id, rows, cols }).catch(() => {})
 }
 
+export async function liveSessions(): Promise<string[]> {
+  if (!isTauri) return []
+  return await invoke<string[]>('live_sessions')
+}
+
 export async function killSession(id: string): Promise<void> {
   if (!isTauri) return
   await invoke('kill_session', { id })

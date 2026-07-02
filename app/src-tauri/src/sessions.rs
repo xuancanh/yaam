@@ -161,6 +161,11 @@ pub fn kill_session(state: State<'_, SessionManager>, id: String) -> Result<(), 
 }
 
 #[tauri::command]
+pub fn live_sessions(state: State<'_, SessionManager>) -> Vec<String> {
+    state.sessions.lock().unwrap().keys().cloned().collect()
+}
+
+#[tauri::command]
 pub fn git_diff(cwd: String) -> Result<String, String> {
     let out = Command::new("git")
         .args(["diff", "--no-color", "HEAD"])

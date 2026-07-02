@@ -6,12 +6,14 @@ use sessions::SessionManager;
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_http::init())
     .manage(SessionManager::default())
     .invoke_handler(tauri::generate_handler![
       sessions::spawn_session,
       sessions::write_session,
       sessions::kill_session,
       sessions::resize_session,
+      sessions::live_sessions,
       sessions::git_diff,
       sessions::save_state,
       sessions::load_state,

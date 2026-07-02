@@ -1,7 +1,7 @@
 import { useActions, useConductor } from '../store'
 import { hexToRgba } from '../data'
 import { pickFolder } from '../native'
-import { MASTER_MODELS } from '../master'
+import { PROVIDERS, providerFor } from '../master'
 import { SHELLS } from './Workspace'
 import { Switch, ViewHeader } from './ui'
 
@@ -48,33 +48,66 @@ export function SettingsView() {
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>LLM Master</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
-                  Master becomes a Claude model with tools — it routes tasks to sessions, launches and stops them, and builds schedules. Needs an API key.
+                  Master is an LLM with tools — it routes tasks to sessions, launches and stops them, and builds schedules. Pick a provider and add an API key.
                 </div>
               </div>
               <Switch on={s.settings.masterEnabled} onToggle={() => updateSettings({ masterEnabled: !s.settings.masterEnabled })} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Model</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Provider</div>
               </div>
               <select
-                value={s.settings.masterModel}
-                onChange={e => updateSettings({ masterModel: e.target.value })}
+                value={s.settings.provider}
+                onChange={e => {
+                  const next = providerFor(e.target.value)
+                  updateSettings({ provider: next.id, masterModel: next.models[0] ?? '' })
+                }}
                 style={{ ...FIELD_STYLE, width: 260 }}
               >
-                {MASTER_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+                {PROVIDERS.map(pr => <option key={pr.id} value={pr.id}>{pr.label}</option>)}
               </select>
+            </div>
+            {providerFor(s.settings.provider).id === 'custom' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>Base URL</div>
+                  <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>OpenAI-compatible endpoint root, e.g. http://localhost:11434/v1</div>
+                </div>
+                <input
+                  value={s.settings.baseUrl}
+                  onChange={e => updateSettings({ baseUrl: e.target.value })}
+                  placeholder="https://…/v1"
+                  style={{ ...FIELD_STYLE, width: 260 }}
+                />
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Model</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Type any model id — suggestions per provider.</div>
+              </div>
+              <input
+                list="master-models"
+                value={s.settings.masterModel}
+                onChange={e => updateSettings({ masterModel: e.target.value })}
+                placeholder="model id"
+                style={{ ...FIELD_STYLE, width: 260 }}
+              />
+              <datalist id="master-models">
+                {providerFor(s.settings.provider).models.map(m => <option key={m} value={m} />)}
+              </datalist>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Anthropic API key</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>API key</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Stored locally in the app data folder.</div>
               </div>
               <input
                 type="password"
                 value={s.settings.apiKey}
                 onChange={e => updateSettings({ apiKey: e.target.value })}
-                placeholder="sk-ant-…"
+                placeholder={providerFor(s.settings.provider).keyHint}
                 style={{ ...FIELD_STYLE, width: 260 }}
               />
             </div>

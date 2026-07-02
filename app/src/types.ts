@@ -187,10 +187,14 @@ export interface OrchestrationSettings {
   shell: string
   /** default working directory prefilled in the new-session dialog */
   defaultCwd: string
-  /** Master brain: when enabled with an API key, Master is a Claude model with tools */
+  /** Master brain: when enabled with an API key, Master is an LLM with tools */
   masterEnabled: boolean
   masterModel: string
   apiKey: string
+  /** LLM provider: anthropic | openai | deepseek | kimi | custom */
+  provider: string
+  /** base URL for the custom provider (OpenAI-compatible) */
+  baseUrl: string
 }
 
 export type BoardCol = 'backlog' | 'routed' | 'progress' | 'review' | 'done'

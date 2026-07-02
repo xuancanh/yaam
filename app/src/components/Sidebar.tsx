@@ -212,7 +212,7 @@ export function Sidebar() {
             <span style={{ fontSize: 11.5, color: 'var(--mut)' }}>
               {s.masterBusy
                 ? 'thinking…'
-                : `${runningCount} sessions running${s.settings.masterEnabled && s.settings.apiKey ? ` · ${s.settings.masterModel}` : ' · heuristic mode'}`}
+                : `${runningCount} sessions running${s.settings.masterEnabled && s.settings.apiKey ? ` · ${s.settings.masterModel}` : ' · brain off — configure in Settings'}`}
             </span>
           </div>
         </div>
