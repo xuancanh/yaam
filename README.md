@@ -20,7 +20,16 @@ A desktop app for orchestrating multiple coding agents, built with [Tauri 2](htt
 - **Settings** — orchestration policy toggles, agent-type enablement, and integrations
 - **Memory panel** — per-agent context sources with token budgets you can toggle
 
-The current build runs on simulated agent sessions (the same seed data and streaming behavior as the design prototype); the UI and interaction model are fully functional.
+## Real sessions
+
+Beyond the simulated demo agents, Conductor manages **real OS-process sessions** through its Rust backend:
+
+- **＋ New agent session** → enter any CLI command (`claude -p`, `python3 -i`, `zsh -i`, …) and an optional working directory
+- stdout/stderr stream live into the workspace pane; a `❯` input row sends lines to the process's stdin
+- Stop (kills the process), Resume (respawns the same command), and exit codes surface as session status (Paused / Error)
+- Board tasks, schedules, settings, tool registry, agent types, and integrations persist to disk (`~/Library/Application Support/dev.yaam.conductor/conductor-state.json`) and restore on launch
+
+The four seeded agents (Claude Code, Codex, Gemini CLI, Aider) remain simulated so the orchestration UX is explorable without spawning anything.
 
 ## Structure
 

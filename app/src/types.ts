@@ -52,6 +52,10 @@ export interface Agent {
   branch: string
   status: AgentStatus
   model: string
+  /** 'real' agents are OS processes managed by the Tauri backend; the rest are simulated */
+  kind?: 'sim' | 'real'
+  cmd?: string
+  cwd?: string
   fi: number
   feed: LogLine[]
   memory: MemorySource[]
@@ -203,6 +207,15 @@ export interface Panel {
 export interface Drawer {
   kind: 'agent' | 'diff'
   agentId: string
+}
+
+export interface PersistedState {
+  tasks: BoardTask[]
+  crons: Cron[]
+  settings: OrchestrationSettings
+  toolsCatalog: CatalogTool[]
+  agentTypes: AgentType[]
+  integrations: Integration[]
 }
 
 export interface AppState {

@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import type { ReactNode } from 'react'
-import type { Agent, AppState, BoardCol, Cron, CatalogTool, EventType, Message, Notification, Panel, View } from './types'
+import type { Agent, AppState, BoardCol, Cron, CatalogTool, EventType, LogLine, Message, Notification, Panel, PersistedState, View } from './types'
 import { AIDER_APPROVE_FEED, CLAUDE_FEED, PERM_ORDER, defaultDetail, mkMemory, mkTools, seedState } from './data'
+import * as native from './native'
 
 type Updater = (s: AppState) => AppState
 
@@ -49,6 +50,9 @@ export interface ConductorActions {
   enterCol: (col: BoardCol) => void
   dropTo: (col: BoardCol) => void
   addTask: () => void
+  newRealSession: (command: string, cwd: string) => void
+  sendInput: (id: string, text: string) => void
+  stopSession: (id: string) => void
 }
 
 const StateCtx = createContext<AppState | null>(null)
@@ -75,6 +79,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const toastTimer = useRef<number | undefined>(undefined)
   const pending = useRef<number[]>([])
   const dragId = useRef<string | null>(null)
+  const stateRef = useRef(state)
+  stateRef.current = state
 
   // live streaming tick: running agents replay their feed
   useEffect(() => {
@@ -103,6 +109,68 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       if (toastTimer.current) window.clearTimeout(toastTimer.current)
     }
   }, [])
+
+  // stream real session output/exit events into agent logs
+  useEffect(() => {
+    const appendLog = (id: string, line: LogLine, status?: Agent['status']) =>
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => {
+          if (a.id !== id) return a
+          const log = a.log.concat([line])
+          if (log.length > 500) log.splice(0, log.length - 500)
+          return { ...a, log, ...(status ? { status } : {}) }
+        }),
+      }))
+    const offOut = native.onSessionOutput(e =>
+      appendLog(e.id, { t: e.stream === 'err' ? 'err' : 'out', x: e.line }))
+    const offExit = native.onSessionExit(e =>
+      appendLog(
+        e.id,
+        { t: 'sys', x: `process exited${e.code !== null ? ` · code ${e.code}` : ''}` },
+        e.code === 0 || e.code === null ? 'idle' : 'error',
+      ))
+    return () => { offOut(); offExit() }
+  }, [])
+
+  // persistence: restore board/schedules/settings/tools on launch, save on change
+  const hydrated = useRef(false)
+  useEffect(() => {
+    native.loadStateFile().then(json => {
+      if (json) {
+        try {
+          const p = JSON.parse(json) as Partial<PersistedState>
+          dispatch(s => ({
+            ...s,
+            tasks: p.tasks ?? s.tasks,
+            crons: p.crons ?? s.crons,
+            settings: p.settings ?? s.settings,
+            toolsCatalog: p.toolsCatalog ?? s.toolsCatalog,
+            agentTypes: p.agentTypes ?? s.agentTypes,
+            integrations: p.integrations ?? s.integrations,
+          }))
+        } catch { /* corrupt state file — start fresh */ }
+      }
+      hydrated.current = true
+    }).catch(() => { hydrated.current = true })
+  }, [])
+
+  const saveTimer = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (!hydrated.current) return
+    if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    const persisted: PersistedState = {
+      tasks: state.tasks,
+      crons: state.crons,
+      settings: state.settings,
+      toolsCatalog: state.toolsCatalog,
+      agentTypes: state.agentTypes,
+      integrations: state.integrations,
+    }
+    saveTimer.current = window.setTimeout(() => {
+      native.saveStateFile(JSON.stringify(persisted)).catch(() => {})
+    }, 800)
+  }, [state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.integrations])
 
   const later = useCallback((ms: number, fn: () => void) => {
     pending.current.push(window.setTimeout(fn, ms))
@@ -288,17 +356,24 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       return { ...s, agents: s.agents.concat([target]), focusedIds, view: 'workspace' }
     }),
 
-    resume: id => dispatch(s => {
-      const focusedIds = s.focusedIds.slice()
-      focusedIds[s.activePane] = id
-      return {
-        ...s,
-        agents: s.agents.map(a => a.id === id
-          ? { ...a, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: 'session resumed' }]) }
-          : a),
-        focusedIds, view: 'workspace',
+    resume: id => {
+      const agent = stateRef.current.agents.find(a => a.id === id)
+      if (agent?.kind === 'real' && agent.cmd && agent.status !== 'running') {
+        const parts = agent.cmd.split(/\s+/)
+        native.spawnSession(id, parts[0], parts.slice(1), agent.cwd || undefined).catch(() => {})
       }
-    }),
+      dispatch(s => {
+        const focusedIds = s.focusedIds.slice()
+        focusedIds[s.activePane] = id
+        return {
+          ...s,
+          agents: s.agents.map(a => a.id === id
+            ? { ...a, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: 'session resumed' }]) }
+            : a),
+          focusedIds, view: 'workspace',
+        }
+      })
+    },
 
     openPanel: (id, tab) => dispatch(s => ({ ...s, panel: { agentId: id, tab: tab || 'memory' } })),
     setPanelTab: tab => dispatch(s => (s.panel ? { ...s, panel: { ...s.panel, tab } } : s)),
@@ -442,6 +517,67 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       ...s,
       tasks: s.tasks.concat([{ id: mkId('t'), title: 'New task', col: 'backlog', agentId: null }]),
     })),
+
+    newRealSession: (command, cwd) => {
+      const parts = command.trim().split(/\s+/)
+      if (!parts[0]) return
+      const id = mkId('a')
+      const bin = parts[0].split('/').pop() || parts[0]
+      const REAL_COLORS = ['#7FD1FF', '#F5C451', '#3DDC97', '#FF9B9B', '#C77DFF', '#E8A87C']
+      const color = REAL_COLORS[Math.floor(Math.random() * REAL_COLORS.length)]
+      const dir = cwd.trim()
+      const agent: Agent = {
+        id, name: bin, short: bin.slice(0, 2).toUpperCase(), color,
+        repo: dir ? dir.split('/').pop() || dir : '~', branch: 'live',
+        status: 'running', model: command.trim(), kind: 'real', cmd: command.trim(), cwd: dir,
+        fi: 0, feed: [], memory: mkMemory(), tools: mkTools(),
+        log: [{ t: 'sys', x: `spawning · ${command.trim()}${dir ? ` @ ${dir}` : ''}` }],
+        ...defaultDetail(),
+      }
+      dispatch(s => {
+        const focusedIds = s.focusedIds.slice()
+        focusedIds[s.activePane] = id
+        return { ...s, agents: s.agents.concat([agent]), focusedIds, view: 'workspace' }
+      })
+      native.spawnSession(id, parts[0], parts.slice(1), dir || undefined).catch(err => {
+        dispatch(s => ({
+          ...s,
+          agents: s.agents.map(a => a.id === id
+            ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err', x: String(err) }]) }
+            : a),
+        }))
+      })
+      logEvent('route', id, `Launched real session · ${command.trim()}`)
+      flash('Session launched')
+    },
+
+    sendInput: (id, text) => {
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === id
+          ? { ...a, log: a.log.concat([{ t: 'you', x: text }]) }
+          : a),
+      }))
+      native.writeSession(id, `${text}\n`).catch(err => {
+        dispatch(s => ({
+          ...s,
+          agents: s.agents.map(a => a.id === id
+            ? { ...a, log: a.log.concat([{ t: 'err', x: String(err) }]) }
+            : a),
+        }))
+      })
+    },
+
+    stopSession: id => {
+      native.killSession(id).catch(() => {})
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === id
+          ? { ...a, status: 'idle' as const, log: a.log.concat([{ t: 'sys', x: 'stopped by you' }]) }
+          : a),
+      }))
+      flash('Session stopped')
+    },
   }), [doAsk, doBuild, doRoute, flash, later, logEvent])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
