@@ -38,6 +38,7 @@ export interface MasterExec {
   readSession: (sessionId: string, lines?: number) => string
   flagNeedsInput: (sessionId: string, question: string) => string
   renameSession: (sessionId: string, name: string) => string
+  updateAgentStatus: (sessionId: string, task?: string, summary?: string, actionNeeded?: string) => string
   createSchedule: (name: string, cron: string, command?: string, cwd?: string) => string
   addTask: (title: string) => string
 }
@@ -76,6 +77,20 @@ const TOOLS = [
       properties: {
         session_id: { type: 'string' },
         lines: { type: 'number', description: 'how many lines from the end (default 40, max 120)' },
+      },
+      required: ['session_id'],
+    },
+  },
+  {
+    name: 'update_agent_status',
+    description: 'Update a session\'s card on the Agents overview: what it is working on (task), a 1-2 sentence state summary, and what the user must do if anything (action_needed, empty string to clear). Call this whenever you review a session\'s output so the overview stays current.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string' },
+        task: { type: 'string' },
+        summary: { type: 'string' },
+        action_needed: { type: 'string' },
       },
       required: ['session_id'],
     },
@@ -149,11 +164,16 @@ function describeState(s: AppState): string {
       return t ? (t.on ? t.perm : 'Off') : 'Auto'
     }
     const meta = memOn('meta') ? ` cmd=${a.cmd || '-'} cwd=${a.cwd || '-'}` : ''
+    const tracked = [
+      a.task ? `task="${a.task}"` : '',
+      a.summary ? `summary="${a.summary}"` : '',
+      a.actionNeeded ? `action_needed="${a.actionNeeded}"` : '',
+    ].filter(Boolean).join(' ')
     const perms = `\n  your-permissions: send=${perm('send')} stop=${perm('stop')} respawn=${perm('respawn')}`
     const tail = memOn('tail')
       ? `\n  recent output:\n${a.log.slice(-12).map(l => `    ${l.x}`).join('\n') || '    (none)'}`
       : '\n  recent output: (hidden by user)'
-    return `- id=${a.id} name=${a.name} status=${a.status}${a.escReason ? ` waiting-on="${a.escReason}"` : ''}${meta}${perms}${tail}`
+    return `- id=${a.id} name=${a.name} status=${a.status}${a.escReason ? ` waiting-on="${a.escReason}"` : ''}${meta}${tracked ? `\n  tracked: ${tracked}` : ''}${perms}${tail}`
   }).join('\n')
   const crons = s.crons.map(c => `- ${c.name} · ${c.schedule} · ${c.on ? 'on' : 'off'} · cmd=${c.cmd || '-'} · last=${c.last}`).join('\n')
   const tasks = s.tasks.map(t => `- [${t.col}] ${t.title}`).join('\n')
@@ -180,7 +200,7 @@ function systemPrompt(s: AppState): string {
 
 Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
 
-Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on).
+Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on). Whenever you review a session's output (events, read_session), also call update_agent_status so the Agents overview shows its current task, a short summary, and any action the user must take (clear action_needed with an empty string once handled).
 
 CURRENT STATE
 ${describeState(s)}`
@@ -329,6 +349,12 @@ function runTool(name: string, input: Record<string, unknown>, exec: MasterExec)
     case 'read_session': return exec.readSession(str('session_id'), typeof input.lines === 'number' ? input.lines : undefined)
     case 'flag_needs_input': return exec.flagNeedsInput(str('session_id'), str('question'))
     case 'rename_session': return exec.renameSession(str('session_id'), str('name'))
+    case 'update_agent_status': return exec.updateAgentStatus(
+      str('session_id'),
+      typeof input.task === 'string' ? input.task : undefined,
+      typeof input.summary === 'string' ? input.summary : undefined,
+      typeof input.action_needed === 'string' ? input.action_needed : undefined,
+    )
     case 'create_schedule': return exec.createSchedule(str('name'), str('cron'), str('command') || undefined, str('cwd') || undefined)
     case 'add_task': return exec.addTask(str('title'))
     default: return `unknown tool ${name}`

@@ -82,12 +82,38 @@ export function Overview() {
                   </div>
                   <StatusPill agent={a} small />
                 </div>
-                <div className="mono" style={{
-                  background: 'var(--bg)', border: '1px solid #1a1e26', borderRadius: 8, padding: '8px 10px',
-                  fontSize: 11, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>
-                  {last}
-                </div>
+                {a.task && (
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 6 }}>
+                    <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--accent)', flexShrink: 0 }}>TASK</span>
+                    <span style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.4 }}>{a.task}</span>
+                  </div>
+                )}
+                {a.summary ? (
+                  <div style={{
+                    background: 'var(--bg)', border: '1px solid #1a1e26', borderRadius: 8, padding: '8px 10px',
+                    fontSize: 11.5, color: 'var(--mut)', lineHeight: 1.45,
+                  }}>
+                    {a.summary}
+                    {a.summaryAt && <span className="mono" style={{ color: 'var(--faint)', fontSize: 10, marginLeft: 6 }}>· {a.summaryAt}</span>}
+                  </div>
+                ) : (
+                  <div className="mono" style={{
+                    background: 'var(--bg)', border: '1px solid #1a1e26', borderRadius: 8, padding: '8px 10px',
+                    fontSize: 11, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {last}
+                  </div>
+                )}
+                {a.actionNeeded && (
+                  <div style={{
+                    marginTop: 8, background: 'rgba(255,176,32,.07)', border: '1px solid rgba(255,176,32,.35)',
+                    borderRadius: 8, padding: '7px 10px', fontSize: 11.5, color: 'var(--amber)', lineHeight: 1.4,
+                    display: 'flex', gap: 7, alignItems: 'baseline',
+                  }}>
+                    <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, flexShrink: 0 }}>ACTION</span>
+                    <span style={{ color: '#E8C48A' }}>{a.actionNeeded}</span>
+                  </div>
+                )}
                 <div className="mono" style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 11, color: 'var(--dim)' }}>
                   <span>{memOn} mem</span><span>{toolOn} tools</span><span>${a.cost.toFixed(2)}</span>
                 </div>

@@ -67,6 +67,13 @@ export interface Agent {
   budget: number
   snaps: Snapshot[]
   diff: DiffFile[]
+  /** Master-maintained: what this agent is working on */
+  task?: string
+  /** Master-maintained: latest 1-2 sentence state summary */
+  summary?: string
+  /** Master-maintained: what the user must do, if anything */
+  actionNeeded?: string
+  summaryAt?: string
 }
 
 export interface RouteEntry {

@@ -629,6 +629,24 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         logEvent('route', sid, `Master → ${agent.name}: ${text.slice(0, 48)}`)
         return `sent to ${agent.name}`
       },
+      updateAgentStatus: (sid, task, summary, actionNeeded) => {
+        const agent = stateRef.current.agents.find(a => a.id === sid)
+        if (!agent) return `no session with id ${sid}`
+        const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        dispatch(s2 => ({
+          ...s2,
+          agents: s2.agents.map(a => a.id === sid
+            ? {
+                ...a,
+                task: task !== undefined ? (task || undefined) : a.task,
+                summary: summary !== undefined ? (summary || undefined) : a.summary,
+                actionNeeded: actionNeeded !== undefined ? (actionNeeded || undefined) : a.actionNeeded,
+                summaryAt: at,
+              }
+            : a),
+        }))
+        return `updated status for ${agent.name}`
+      },
       renameSession: (sid, name) => {
         const agent = stateRef.current.agents.find(a => a.id === sid)
         if (!agent) return `no session with id ${sid}`
