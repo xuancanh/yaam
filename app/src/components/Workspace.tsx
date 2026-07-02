@@ -139,10 +139,16 @@ function TerminalPane({ agent, active }: { agent: Agent; active: boolean }) {
     const { term } = getTerminal(agent.id)
     if (!term.element) term.open(el)
     else el.appendChild(term.element)
-    fitTerminal(agent.id)
+    // fit after layout settles — fitting synchronously on reattach measures a
+    // zero-height container and breaks the viewport (no scroll, no cursor)
+    const raf = requestAnimationFrame(() => {
+      fitTerminal(agent.id)
+      try { term.refresh(0, term.rows - 1) } catch { /* not measurable yet */ }
+    })
     const ro = new ResizeObserver(() => fitTerminal(agent.id))
     ro.observe(el)
     return () => {
+      cancelAnimationFrame(raf)
       ro.disconnect()
       if (term.element && term.element.parentElement === el) el.removeChild(term.element)
     }
@@ -152,7 +158,16 @@ function TerminalPane({ agent, active }: { agent: Agent; active: boolean }) {
     if (active) getTerminal(agent.id).term.focus()
   }, [active, agent.id])
 
-  return <div ref={ref} style={{ flex: 1, minHeight: 0, background: '#0A0B0F', padding: '8px 2px 2px 10px' }} />
+  return (
+    <div
+      ref={ref}
+      onMouseDown={() => getTerminal(agent.id).term.focus()}
+      style={{
+        flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden',
+        background: '#0A0B0F', padding: '8px 2px 2px 10px',
+      }}
+    />
+  )
 }
 
 function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
@@ -165,8 +180,9 @@ function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; ind
     <div
       onClick={() => setActivePane(index)}
       style={{
-        flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#0A0B0F',
-        boxShadow: showRing && active ? `inset 0 0 0 1.5px ${ACCENT}` : 'none', position: 'relative',
+        minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        background: '#0A0B0F', boxShadow: showRing && active ? `inset 0 0 0 1.5px ${ACCENT}` : 'none',
+        position: 'relative',
       }}
     >
       <div style={{

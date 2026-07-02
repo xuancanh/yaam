@@ -43,6 +43,19 @@ input {
   user-select: text;
 }
 
+/* xterm panes: selectable text, text cursor, scrollable viewport */
+.xterm {
+  user-select: text;
+  cursor: text;
+  height: 100%;
+}
+.xterm .xterm-viewport {
+  overflow-y: auto;
+}
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 7px;
+}
+
 ::selection {
   background: rgba(245, 196, 81, 0.28);
 }
