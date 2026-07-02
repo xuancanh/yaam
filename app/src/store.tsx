@@ -301,9 +301,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     if (llm && armed) {
       armedRef.current.delete(id)
       masterEventRef.current(
-        `[event] session "${agent.name}" (${id}) stopped producing output. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
+        `[event] session "${agent.name}" (${id}) finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
         'If this session is waiting for user input or permission, call flag_needs_input with what it is asking. ' +
-        'Otherwise briefly relay the outcome if meaningful; if there is nothing worth telling the user, reply with an empty message.',
+        'Otherwise: (1) call update_agent_status with a fresh task/summary and action_needed set to what the user should do next, ' +
+        'then (2) reply to the user with exactly two parts — a 1-2 sentence summary of what the session did, and "Next action:" followed by what the user should do (or "none — I\'ll keep watching").',
       )
     }
   }, [setNeedsInput])
@@ -421,7 +422,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           e.id,
         )
         if (stateRef.current.settings.masterEnabled && stateRef.current.settings.apiKey && stateRef.current.settings.followMode) {
-          masterEventRef.current(`[event] session "${agent.name}" (${e.id}) ${failed ? `exited with code ${e.code}` : 'finished'}. Tell the user, and suggest a next step if useful.`)
+          masterEventRef.current(
+            `[event] session "${agent.name}" (${e.id}) ${failed ? `exited with code ${e.code}` : 'finished and exited'}. ` +
+            'Call update_agent_status (summary + action_needed), then reply with a 1-2 sentence summary and "Next action:" for the user.',
+          )
         }
       }
     })
