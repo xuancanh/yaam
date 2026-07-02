@@ -129,6 +129,28 @@ export function humanizeCron(expr: string): string {
   return expr
 }
 
+// Parse "launch a new session on ~/x for claude code"-style requests without
+// needing the LLM: find an agent type (or shell) and a path.
+export function parseLaunchRequest(
+  text: string,
+  agentTypes: AppState['agentTypes'],
+  shell: string,
+): { command: string; cwd: string; name?: string } | null {
+  const t = text.toLowerCase()
+  if (!/\b(launch|start|open|spin\s*up|spawn|create|run|new)\b/.test(t)) return null
+  const type = agentTypes.find(a => a.enabled && t.includes(a.name.toLowerCase()))
+    || agentTypes.find(a => a.enabled && new RegExp(`\\b${a.id}\\b`).test(t))
+  const wantsShell = /\b(terminal|shell|zsh|bash|fish)\b/.test(t)
+  const mentionsSession = /\b(session|agent|instance|window|pane)\b/.test(t)
+  if (!type && !wantsShell && !mentionsSession) return null
+  const afterPrep = text.match(/\b(?:on|in|at|inside|under)\s+(~?[\w./-]+)/i)
+  const anyPath = text.match(/(~\/[\w./-]+|(?:^|\s)\/[\w./-]+)/)
+  const cwd = (afterPrep?.[1] ?? anyPath?.[1] ?? '').trim()
+  const shellPick = t.match(/\b(zsh|bash|fish|sh)\b/)?.[1]
+  const command = type ? type.model : `${shellPick || shell || 'zsh'} -i`
+  return { command, cwd, name: type?.name }
+}
+
 // Heuristics for "this CLI is waiting on the user": y/n prompts, permission
 // questions, confirmation menus.
 const PROMPT_RE = /(\[y\/n\]|\[y\/N\]|\[Y\/n\]|\(y\/n\)|yes\/no|do you want|would you like|allow this|allow .*\?|permission|approve\?|confirm|proceed\?|continue\?|password:|are you sure|press enter to|\(esc to cancel\))/i
@@ -607,7 +629,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         ...s,
         messages: s.messages.concat([{
           id: mkId('m'), role: 'master', kind: 'text',
-          text: 'No live session to route to. Launch one with ⌘K → New agent session and I’ll send your tasks there.',
+          text: 'No live session to route to. Launch one with ⌘K → New agent session — or enable the LLM Master (Settings → Master Brain, needs an Anthropic API key) so I can understand requests like this and act on them myself.',
         }]),
       }))
       return
@@ -717,10 +739,26 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         if (s.settings.masterEnabled && s.settings.apiKey) {
           later(50, () => { void runMaster() })
         } else {
-          const mode = classify(text)
-          if (mode === 'ask') later(600, doAsk)
-          else if (mode === 'build') later(650, () => doBuild(text))
-          else later(300, () => doRoute(text))
+          const launch = parseLaunchRequest(text, s.agentTypes, s.settings.shell)
+          if (launch) later(300, () => {
+            const id = launchSession(launch.command, launch.cwd, launch.name)
+            dispatch(s2 => ({
+              ...s2,
+              messages: s2.messages.concat([{
+                id: mkId('m'), role: 'master', kind: 'text',
+                text: id
+                  ? `Launching ${launch.name || launch.command}${launch.cwd ? ` in ${launch.cwd}` : ''}.`
+                  : 'I couldn’t launch that — check the command.',
+              }]),
+            }))
+            if (id) logEvent('route', id, `Launched ${launch.command} via chat`)
+          })
+          else {
+            const mode = classify(text)
+            if (mode === 'ask') later(600, doAsk)
+            else if (mode === 'build') later(650, () => doBuild(text))
+            else later(300, () => doRoute(text))
+          }
         }
         return { ...s, messages: s.messages.concat([{ id: mkId('u'), role: 'you', kind: 'text', text }]), composer: '' }
       })
