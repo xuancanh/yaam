@@ -24,6 +24,13 @@ Master is a **Claude model with tools** (enable in Settings → Master Brain wit
 
 Without an API key, Master falls back to a heuristic router (status answers, routing to the focused live session, schedule/tool building).
 
+## Chat-managed app + addons
+
+Following the kernel-plugin pattern of modern agent harnesses (OpenClaw, OpenCode), the app itself is managed through Master's tools — and extended without touching core code:
+
+- **Settings, permissions, schedules from chat**: `configure_setting`, `set_tool_permission`, `create/toggle/delete_schedule` — "turn off follow mode", "set stop_session to Ask first", "delete the nightly job" all work as chat messages
+- **Addons — new tabs built by Master**: ask for a new view ("add a tab showing cost per session as a bar chart") and Master calls `create_addon` with a self-contained HTML document. It appears instantly as a tab in the icon rail, rendered in a **sandboxed iframe** (scripts only, no network/parent access) fed live app state over a postMessage bridge (sessions, tasks, schedules, events, totals — pushed every 3s). Addons persist across restarts and can be replaced by name or removed from chat or the tab header.
+
 ## The rest
 
 - **Schedules** — a real cron scheduler (5-field expressions); schedules with a command launch live sessions on fire; create/delete in the UI or ask Master

@@ -119,6 +119,8 @@ export function seedState(): AppState {
     newSessionOpen: false,
     masterBusy: false,
     dragOverCol: null,
+    addons: [],
+    activeAddon: null,
     agents: [],
     events: [],
     notifications: [],
@@ -159,6 +161,9 @@ export function seedState(): AppState {
       { id: 'stop_session', name: 'Stop session', desc: 'Master may kill running sessions.', perm: 'Ask first', agents: 0 },
       { id: 'create_schedule', name: 'Create schedule', desc: 'Master may add recurring cron schedules.', perm: 'Auto', agents: 0 },
       { id: 'add_task', name: 'Add board task', desc: 'Master may add cards to the task board.', perm: 'Auto', agents: 0 },
+      { id: 'configure_setting', name: 'Change settings', desc: 'Master may change app settings from chat (never API keys).', perm: 'Auto', agents: 0 },
+      { id: 'set_tool_permission', name: 'Change permissions', desc: 'Master may change its own tool permissions.', perm: 'Ask first', agents: 0 },
+      { id: 'create_addon', name: 'Build addons', desc: 'Master may create custom tabs (sandboxed HTML addons).', perm: 'Auto', agents: 0 },
     ],
   }
 }

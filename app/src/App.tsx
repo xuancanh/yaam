@@ -10,6 +10,7 @@ import { UsageView } from './components/UsageView'
 import { Schedules } from './components/Schedules'
 import { ToolsView } from './components/ToolsView'
 import { SettingsView } from './components/SettingsView'
+import { AddonView } from './components/AddonView'
 import { SlideOver } from './components/SlideOver'
 import { Drawer } from './components/Drawer'
 import { CommandPalette } from './components/CommandPalette'
@@ -27,6 +28,7 @@ function MainArea() {
       {s.view === 'crons' && <Schedules />}
       {s.view === 'tools' && <ToolsView />}
       {s.view === 'settings' && <SettingsView />}
+      {s.view === 'addon' && <AddonView />}
     </div>
   )
 }

@@ -235,6 +235,17 @@ export interface BoardTask {
   agentId: string | null
 }
 
+export interface Addon {
+  id: string
+  name: string
+  /** single char / emoji shown in the icon rail */
+  icon: string
+  /** self-contained HTML document rendered in a sandboxed iframe */
+  html: string
+  desc?: string
+  createdAt: string
+}
+
 export type View =
   | 'workspace'
   | 'overview'
@@ -244,6 +255,7 @@ export type View =
   | 'crons'
   | 'tools'
   | 'settings'
+  | 'addon'
 
 export interface Panel {
   agentId: string
@@ -268,6 +280,7 @@ export interface PersistedState {
   activePane?: number
   minimizedIds?: string[]
   paneSplits?: { row: number; cols: number[] }
+  addons?: Addon[]
   messages?: Message[]
   events?: EventItem[]
   notifications?: Notification[]
@@ -293,6 +306,8 @@ export interface AppState {
   newSessionOpen: boolean
   masterBusy: boolean
   dragOverCol: BoardCol | null
+  addons: Addon[]
+  activeAddon: string | null
   agents: Agent[]
   messages: Message[]
   crons: Cron[]

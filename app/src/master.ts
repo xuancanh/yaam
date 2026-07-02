@@ -39,6 +39,12 @@ export interface MasterExec {
   flagNeedsInput: (sessionId: string, question: string) => string
   renameSession: (sessionId: string, name: string) => string
   updateAgentStatus: (sessionId: string, task?: string, summary?: string, actionNeeded?: string) => string
+  configureSetting: (key: string, value: string) => string
+  setToolPermission: (toolId: string, perm: string) => string
+  toggleSchedule: (name: string, on: boolean) => string
+  deleteSchedule: (name: string) => string
+  createAddon: (name: string, icon: string, html: string, desc?: string) => string
+  removeAddon: (name: string) => string
   createSchedule: (name: string, cron: string, command?: string, cwd?: string) => string
   addTask: (title: string) => string
 }
@@ -79,6 +85,69 @@ const TOOLS = [
         lines: { type: 'number', description: 'how many lines from the end (default 40, max 120)' },
       },
       required: ['session_id'],
+    },
+  },
+  {
+    name: 'configure_setting',
+    description: 'Change an app setting. Keys: autoRoute, approveDestructive, followMode (true/false), shell (zsh/bash/…), defaultCwd (path), masterModel (model id). API keys and provider cannot be changed from chat.',
+    input_schema: {
+      type: 'object',
+      properties: { key: { type: 'string' }, value: { type: 'string' } },
+      required: ['key', 'value'],
+    },
+  },
+  {
+    name: 'set_tool_permission',
+    description: 'Set the permission of one of your global tools in the Tools registry. perm: Off | Ask first | Auto | Approval.',
+    input_schema: {
+      type: 'object',
+      properties: { tool_id: { type: 'string' }, perm: { type: 'string' } },
+      required: ['tool_id', 'perm'],
+    },
+  },
+  {
+    name: 'toggle_schedule',
+    description: 'Enable or disable a schedule by name.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string' }, on: { type: 'boolean' } },
+      required: ['name', 'on'],
+    },
+  },
+  {
+    name: 'delete_schedule',
+    description: 'Delete a schedule by name.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'create_addon',
+    description: `Create (or replace, by name) an addon: a custom tab in the app's icon rail rendering a self-contained HTML document in a sandboxed iframe. Use this when the user asks for a new panel/view/feature. The document gets live app state over postMessage:
+- receive: window.addEventListener('message', e => { if (e.data.type === 'yaam:state') render(e.data.state) }) — pushed on load and every ~3s
+- request once: parent.postMessage({ type: 'yaam:getState' }, '*')
+state = { sessions: [{ id, name, status, task, summary, actionNeeded, cost, used }], tasks: [{ title, col }], crons: [{ name, schedule, on, last }], events: [{ time, type, text }], totals: { cost, used, running } }
+Style to match the app: dark background #0A0B0F, text #E7E9F0, muted #8B93A1, accent #F5C451, mono font 'JetBrains Mono', sans 'IBM Plex Sans', panel #0D0F14, border #23272F. No external network calls.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        icon: { type: 'string', description: 'single character or emoji for the rail tab' },
+        html: { type: 'string', description: 'complete HTML document (<!DOCTYPE html>…) with inline CSS/JS' },
+        desc: { type: 'string' },
+      },
+      required: ['name', 'icon', 'html'],
+    },
+  },
+  {
+    name: 'remove_addon',
+    description: 'Remove an addon tab by name.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
     },
   },
   {
@@ -179,6 +248,7 @@ function describeState(s: AppState): string {
   const tasks = s.tasks.map(t => `- [${t.col}] ${t.title}`).join('\n')
   const events = s.events.slice(0, 8).map(e => `- ${e.time} ${e.type}: ${e.text}`).join('\n')
   const toolPerms = s.toolsCatalog.map(t => `- ${t.id}: ${t.perm}`).join('\n')
+  const addons = s.addons.map(a => `- ${a.name} (${a.icon})${a.desc ? ` — ${a.desc}` : ''}`).join('\n')
   const types = s.agentTypes.filter(t => t.enabled)
     .map(t => `- ${t.name}: launch with command "${t.model}" — ${t.desc}`).join('\n')
   return [
@@ -188,6 +258,7 @@ function describeState(s: AppState): string {
     `SESSION DETAIL:\n${sessions || '(none)'}`,
     `SCHEDULES:\n${crons || '(none)'}`,
     `BOARD TASKS:\n${tasks || '(none)'}`,
+    `ADDON TABS:\n${addons || '(none)'}`,
     `RECENT EVENTS:\n${events || '(none)'}`,
   ].join('\n\n')
 }
@@ -200,7 +271,7 @@ function systemPrompt(s: AppState): string {
 
 Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
 
-Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on). Whenever you review a session's output (events, read_session), also call update_agent_status so the Agents overview shows its current task, a short summary, and any action the user must take (clear action_needed with an empty string once handled).
+Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on). You manage the app itself from chat: settings (configure_setting), your tool permissions (set_tool_permission), schedules (create/toggle/delete_schedule), and custom addon tabs (create_addon / remove_addon) — when the user asks for a new view, dashboard, or feature, build it as an addon. Whenever you review a session's output (events, read_session), also call update_agent_status so the Agents overview shows its current task, a short summary, and any action the user must take (clear action_needed with an empty string once handled).
 
 CURRENT STATE
 ${describeState(s)}`
@@ -349,6 +420,12 @@ function runTool(name: string, input: Record<string, unknown>, exec: MasterExec)
     case 'read_session': return exec.readSession(str('session_id'), typeof input.lines === 'number' ? input.lines : undefined)
     case 'flag_needs_input': return exec.flagNeedsInput(str('session_id'), str('question'))
     case 'rename_session': return exec.renameSession(str('session_id'), str('name'))
+    case 'configure_setting': return exec.configureSetting(str('key'), str('value'))
+    case 'set_tool_permission': return exec.setToolPermission(str('tool_id'), str('perm'))
+    case 'toggle_schedule': return exec.toggleSchedule(str('name'), input.on === true)
+    case 'delete_schedule': return exec.deleteSchedule(str('name'))
+    case 'create_addon': return exec.createAddon(str('name'), str('icon'), str('html'), str('desc') || undefined)
+    case 'remove_addon': return exec.removeAddon(str('name'))
     case 'update_agent_status': return exec.updateAgentStatus(
       str('session_id'),
       typeof input.task === 'string' ? input.task : undefined,

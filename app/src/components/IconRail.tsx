@@ -15,7 +15,7 @@ const NAV: Array<{ id: View; label: string; paths: string[] }> = [
 
 export function IconRail() {
   const s = useConductor()
-  const { setView } = useActions()
+  const { setView, openAddon } = useActions()
 
   return (
     <div style={{
@@ -40,6 +40,25 @@ export function IconRail() {
           >
             <Icon paths={n.paths} size={21} />
             <span style={{ fontSize: 9, fontWeight: 500, letterSpacing: 0.2 }}>{n.label}</span>
+          </button>
+        )
+      })}
+      {s.addons.length > 0 && <div style={{ width: 32, height: 1, background: 'var(--line)', margin: '4px 0' }} />}
+      {s.addons.map(a => {
+        const active = s.view === 'addon' && s.activeAddon === a.id
+        return (
+          <button
+            key={a.id}
+            className="rail-btn"
+            title={a.desc || a.name}
+            onClick={() => openAddon(a.id)}
+            style={{
+              background: active ? hexToRgba(ACCENT, 0.14) : 'transparent',
+              color: active ? 'var(--accent)' : 'var(--mut)',
+            }}
+          >
+            <span style={{ fontSize: 17, lineHeight: 1 }}>{a.icon}</span>
+            <span style={{ fontSize: 9, fontWeight: 500, letterSpacing: 0.2, maxWidth: 46, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
           </button>
         )
       })}

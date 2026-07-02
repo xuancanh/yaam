@@ -2,7 +2,7 @@
 import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  Agent, AppState, BoardCol, Cron, EscOption, EventType, LogLine,
+  Addon, Agent, AppState, BoardCol, Cron, EscOption, EventType, LogLine,
   NotifKind, Notification, Panel, PersistedState, View,
 } from './types'
 import { defaultDetail, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
@@ -70,6 +70,8 @@ export interface ConductorActions {
   deleteTask: (id: string) => void
   addCron: (cron: Omit<Cron, 'id' | 'on' | 'built' | 'last'>) => void
   deleteCron: (id: string) => void
+  openAddon: (id: string) => void
+  removeAddon: (id: string) => void
   openNewSession: () => void
   closeNewSession: () => void
   newRealSession: (command: string, cwd: string) => void
@@ -493,7 +495,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             tasks: p.tasks ?? s.tasks,
             crons: p.crons ?? s.crons,
             settings: { ...s.settings, ...(p.settings || {}) },
-            toolsCatalog: p.toolsCatalog?.some(t => t.id === 'launch_session') ? p.toolsCatalog : s.toolsCatalog,
+            toolsCatalog: p.toolsCatalog?.some(t => t.id === 'launch_session')
+              ? p.toolsCatalog.concat(s.toolsCatalog.filter(seed => !p.toolsCatalog!.some(t => t.id === seed.id)))
+              : s.toolsCatalog,
             agentTypes: p.agentTypes
               ? s.agentTypes.map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, resumeFallbackCmd: t.resumeFallbackCmd, probe: t.probe }))
               : s.agentTypes,
@@ -503,6 +507,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             activePane: Math.min(p.activePane ?? 0, Math.max(0, focusedIds.length - 1)),
             minimizedIds: (p.minimizedIds ?? []).filter(id => ids.has(id)),
             paneSplits: p.paneSplits ?? s.paneSplits,
+            addons: p.addons ?? s.addons,
             messages: p.messages?.length ? p.messages : s.messages,
             events: p.events ?? s.events,
             notifications: p.notifications ?? s.notifications,
@@ -547,6 +552,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       activePane: state.activePane,
       minimizedIds: state.minimizedIds,
       paneSplits: state.paneSplits,
+      addons: state.addons,
       messages: state.messages.slice(-60),
       events: state.events.slice(0, 60),
       notifications: state.notifications.slice(0, 30),
@@ -557,7 +563,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [
     state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.integrations,
     state.agents, state.focusedIds, state.activePane, state.minimizedIds, state.paneSplits,
-    state.messages, state.events, state.notifications,
+    state.addons, state.messages, state.events, state.notifications,
   ])
 
   // flush the latest state on quit/reload so nothing inside the debounce window is lost
@@ -569,7 +575,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, integrations: st.integrations,
         agents: st.agents.map(a => ({ ...a, feed: [], log: a.log.slice(-200) })),
         focusedIds: st.focusedIds, activePane: st.activePane,
-        minimizedIds: st.minimizedIds, paneSplits: st.paneSplits,
+        minimizedIds: st.minimizedIds, paneSplits: st.paneSplits, addons: st.addons,
         messages: st.messages.slice(-60), events: st.events.slice(0, 60),
         notifications: st.notifications.slice(0, 30),
       }
@@ -721,6 +727,86 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         logEvent('route', sid, `Master → ${agent.name}: ${text.slice(0, 48)}`)
         return `sent to ${agent.name}`
       },
+      configureSetting: (key, value) => {
+        const gated = catalogGate('configure_setting')
+        if (gated) return gated
+        const bools = ['autoRoute', 'approveDestructive', 'followMode'] as const
+        const strings = ['shell', 'defaultCwd', 'masterModel'] as const
+        if ((bools as readonly string[]).includes(key)) {
+          const v = value.toLowerCase() === 'true'
+          dispatch(s2 => ({ ...s2, settings: { ...s2.settings, [key]: v } }))
+          logEvent('edit', null, `Master set ${key} = ${v}`)
+          return `set ${key} = ${v}`
+        }
+        if ((strings as readonly string[]).includes(key)) {
+          dispatch(s2 => ({ ...s2, settings: { ...s2.settings, [key]: value } }))
+          logEvent('edit', null, `Master set ${key} = ${value}`)
+          return `set ${key} = ${value}`
+        }
+        return `unknown or protected setting: ${key}`
+      },
+      setToolPermission: (toolId, perm) => {
+        const gated = catalogGate('set_tool_permission')
+        if (gated) return gated
+        if (!(PERM_ORDER as readonly string[]).includes(perm)) return `invalid perm "${perm}" — use Off | Ask first | Auto | Approval`
+        const tool = stateRef.current.toolsCatalog.find(t => t.id === toolId)
+        if (!tool) return `no tool with id ${toolId}`
+        dispatch(s2 => ({
+          ...s2,
+          toolsCatalog: s2.toolsCatalog.map(t => (t.id === toolId ? { ...t, perm: perm as typeof t.perm } : t)),
+        }))
+        logEvent('edit', null, `Master set ${toolId} permission to ${perm}`)
+        return `set ${toolId} to ${perm}`
+      },
+      toggleSchedule: (name, on) => {
+        const cron = stateRef.current.crons.find(c => c.name === name)
+        if (!cron) return `no schedule named ${name}`
+        dispatch(s2 => ({ ...s2, crons: s2.crons.map(c => (c.name === name ? { ...c, on } : c)) }))
+        return `${name} is now ${on ? 'on' : 'off'}`
+      },
+      deleteSchedule: name => {
+        const cron = stateRef.current.crons.find(c => c.name === name)
+        if (!cron) return `no schedule named ${name}`
+        dispatch(s2 => ({ ...s2, crons: s2.crons.filter(c => c.name !== name) }))
+        logEvent('cron', null, `Master deleted schedule ${name}`)
+        return `deleted ${name}`
+      },
+      createAddon: (name, icon, html, desc) => {
+        const gated = catalogGate('create_addon')
+        if (gated) return gated
+        if (!name.trim() || !html.trim()) return 'name and html are required'
+        const existing = stateRef.current.addons.find(a => a.name === name)
+        const addon: Addon = {
+          id: existing?.id ?? mkId('ad'),
+          name: name.trim(),
+          icon: (icon || '◆').slice(0, 2),
+          html,
+          desc,
+          createdAt: new Date().toLocaleString(),
+        }
+        dispatch(s2 => ({
+          ...s2,
+          addons: existing
+            ? s2.addons.map(a => (a.id === existing.id ? addon : a))
+            : s2.addons.concat([addon]),
+          view: 'addon',
+          activeAddon: addon.id,
+        }))
+        logEvent('build', null, `Master ${existing ? 'updated' : 'built'} addon “${name}”`)
+        flash(`${existing ? 'Updated' : 'New'} addon · ${name}`)
+        return `${existing ? 'updated' : 'created'} addon "${name}" — it is open now as a tab in the icon rail`
+      },
+      removeAddon: name => {
+        const addon = stateRef.current.addons.find(a => a.name === name)
+        if (!addon) return `no addon named ${name}`
+        dispatch(s2 => ({
+          ...s2,
+          addons: s2.addons.filter(a => a.id !== addon.id),
+          view: s2.activeAddon === addon.id ? 'workspace' : s2.view,
+          activeAddon: s2.activeAddon === addon.id ? null : s2.activeAddon,
+        }))
+        return `removed addon "${name}"`
+      },
       updateAgentStatus: (sid, task, summary, actionNeeded) => {
         const agent = stateRef.current.agents.find(a => a.id === sid)
         if (!agent) return `no session with id ${sid}`
@@ -833,7 +919,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     masterBusyRef.current = false
     dispatch(s => ({ ...s, masterBusy: false }))
-  }, [armResponseWatch, launchSession, logEvent, setNeedsInput])
+  }, [armResponseWatch, flash, launchSession, logEvent, setNeedsInput])
 
   masterEventRef.current = note => { void runMaster(note) }
 
@@ -1174,6 +1260,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       logEvent('cron', null, `Created schedule ${cron.name}`)
     },
     deleteCron: id => dispatch(s => ({ ...s, crons: s.crons.filter(c => c.id !== id) })),
+
+    openAddon: id => dispatch(s => ({ ...s, view: 'addon', activeAddon: id })),
+    removeAddon: id => dispatch(s => ({
+      ...s,
+      addons: s.addons.filter(a => a.id !== id),
+      view: s.activeAddon === id ? 'workspace' : s.view,
+      activeAddon: s.activeAddon === id ? null : s.activeAddon,
+    })),
 
     openNewSession: () => dispatch(s => ({ ...s, newSessionOpen: true })),
     closeNewSession: () => dispatch(s => ({ ...s, newSessionOpen: false })),
