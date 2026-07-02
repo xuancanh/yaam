@@ -79,6 +79,22 @@ export function getTerminal(id: string, onPlainLine?: (line: string) => void, on
   return entry
 }
 
+/** Read the currently rendered screen (visible rows, trimmed, non-empty). */
+export function readScreen(id: string, maxRows = 30): string[] {
+  const entry = entries.get(id)
+  if (!entry) return []
+  const buf = entry.term.buffer.active
+  const lines: string[] = []
+  const start = Math.max(0, buf.length - entry.term.rows)
+  for (let y = start; y < buf.length; y++) {
+    const l = buf.getLine(y)
+    if (!l) continue
+    const txt = l.translateToString(true).trimEnd()
+    if (txt) lines.push(txt)
+  }
+  return lines.slice(-maxRows)
+}
+
 /** True when the session is showing a full-screen TUI (alternate buffer). */
 export function isAltScreen(id: string): boolean {
   return entries.get(id)?.term.buffer.active.type === 'alternate'

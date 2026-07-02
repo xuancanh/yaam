@@ -9,7 +9,7 @@ import { defaultDetail, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
 import * as native from './native'
 import { runMasterTurn } from './master'
 import type { MasterExec } from './master'
-import { getTerminal, isAltScreen } from './terminals'
+import { getTerminal, isAltScreen, readScreen } from './terminals'
 import { ActionsCtx, StateCtx } from './context'
 
 type Updater = (s: AppState) => AppState
@@ -122,6 +122,14 @@ export function humanizeCron(expr: string): string {
 // questions, confirmation menus.
 const PROMPT_RE = /(\[y\/n\]|\[y\/N\]|\[Y\/n\]|\(y\/n\)|yes\/no|do you want|would you like|allow this|allow .*\?|permission|approve\?|confirm|proceed\?|continue\?|password:|are you sure|press enter to|\(esc to cancel\))/i
 
+// Strong markers for full-screen TUI approval dialogs (Claude Code, Codex, …).
+// Matched against the rendered screen, so they must be specific enough to
+// never appear during normal TUI operation.
+const TUI_PROMPT_RE = /(do you want to (proceed|make this edit|run|allow)|requires approval|don'?t ask again|yes, and|grant (access|permission)|allow this (command|tool|action)|\[y\/n\]|\(y\/n\)|password:|enter to select|[↑↓]\/[↑↓] to navigate|❯\s*\d+\.)/i
+const QUESTION_LINE_RE = /(do you want[^?]*\??|requires approval|allow [^?]*\??|permission|\[y\/n\]|\(y\/n\))/i
+// selection menus usually put the actual question on its own line ending in "?"
+const QUESTION_MARK_LINE_RE = /^[^│┌└─]*\S[^?]*\?\s*$/
+
 function spawnAgentProcess(id: string, command: string, cwd?: string): Promise<void> {
   return native.spawnSession(id, command.trim(), cwd || undefined)
 }
@@ -179,7 +187,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // without it, a prompt-shaped final line is required.
   const armedRef = useRef<Set<string>>(new Set())
   const settleRef = useRef<Map<string, { since: number; timer: number }>>(new Map())
-  const lastUnarmedEventRef = useRef<Map<string, number>>(new Map())
 
   const armResponseWatch = useCallback((id: string) => {
     armedRef.current.add(id)
@@ -200,41 +207,63 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     notify('escalate', `${agent.name} needs your input`, question.slice(0, 80), id)
   }, [logEvent, notify])
 
+  const lastFlaggedRef = useRef<Map<string, string>>(new Map())
+
   const onSettle = useCallback((id: string, since: number) => {
     settleRef.current.delete(id)
     const agent = stateRef.current.agents.find(a => a.id === id)
     if (!agent || (agent.status !== 'running' && agent.status !== 'needs')) return
-    const lines = agent.log.slice(since).map(l => l.x).filter(Boolean)
-    if (!lines.length) return
-    const tail = lines.slice(-14)
-    const lastLine = tail[tail.length - 1] ?? ''
-    const alt = isAltScreen(id)
-    // TUI redraws (alternate screen) look like new output — never apply the
-    // prompt heuristic to them, and only involve Master when it asked (armed)
-    const promptLike = !alt && (PROMPT_RE.test(tail.slice(-3).join('\n')) || /[?:]\s*$/.test(lastLine.trim()))
     const st = stateRef.current.settings
+    const llm = Boolean(st.masterEnabled && st.apiKey && st.followMode)
+    const alt = isAltScreen(id)
     const armed = armedRef.current.has(id)
 
-    if (st.masterEnabled && st.apiKey && st.followMode) {
-      const last = lastUnarmedEventRef.current.get(id) ?? 0
-      const throttled = !armed && Date.now() - last < 30000
-      if ((armed || promptLike) && !throttled) {
-        if (!armed) lastUnarmedEventRef.current.set(id, Date.now())
-        armedRef.current.delete(id)
-        masterEventRef.current(
-          `[event] session "${agent.name}" (${id}) stopped producing output. New output since last check:\n${tail.join('\n')}\n\n` +
-          'If this session is waiting for user input or permission, call flag_needs_input with what it is asking. ' +
-          'Otherwise briefly relay the outcome if meaningful; if there is nothing worth telling the user, reply with an empty message.',
-        )
+    // TUIs redraw constantly, so judge the rendered screen (stable) instead
+    // of the raw output stream; plain sessions use the new stream tail.
+    const streamLines = agent.log.slice(since).map(l => l.x).filter(Boolean)
+    const content = alt ? readScreen(id) : streamLines.slice(-14)
+    if (!content.length) return
+    const lastLine = content[content.length - 1] ?? ''
+    const promptDetected = alt
+      ? TUI_PROMPT_RE.test(content.join('\n'))
+      : PROMPT_RE.test(content.slice(-3).join('\n')) || /[?:]\s*$/.test(lastLine.trim())
+
+    if (promptDetected) {
+      const question = (
+        content.find(l => QUESTION_LINE_RE.test(l)) ||
+        content.find(l => QUESTION_MARK_LINE_RE.test(l.trim())) ||
+        lastLine
+      ).trim()
+      const already = agent.status === 'needs' && lastFlaggedRef.current.get(id) === question
+      if (!already) {
+        lastFlaggedRef.current.set(id, question)
+        setNeedsInput(id, question)
+        if (llm) {
+          masterEventRef.current(
+            `[event] session "${agent.name}" (${id}) is showing a dialog (approval or selection menu) and has been flagged as needing input:\n` +
+            `${content.slice(-14).join('\n')}\n\nTell the user what it is asking — include the options if it is a menu. Approve sends Enter (selects the highlighted option), Deny sends Escape; for other choices the user should click into the terminal.`,
+          )
+        }
       }
-    } else if (agent.status === 'running' && promptLike) {
-      setNeedsInput(id, lastLine)
-    } else if (agent.status === 'needs' && !promptLike && !alt) {
-      // prompt is gone — it was answered in the terminal
+      return
+    }
+
+    // prompt gone — it was answered in the terminal
+    if (agent.status === 'needs') {
+      lastFlaggedRef.current.delete(id)
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id ? { ...a, status: 'running' as const, escReason: undefined } : a),
       }))
+    }
+
+    if (llm && armed) {
+      armedRef.current.delete(id)
+      masterEventRef.current(
+        `[event] session "${agent.name}" (${id}) stopped producing output. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
+        'If this session is waiting for user input or permission, call flag_needs_input with what it is asking. ' +
+        'Otherwise briefly relay the outcome if meaningful; if there is nothing worth telling the user, reply with an empty message.',
+      )
     }
   }, [setNeedsInput])
 
@@ -260,6 +289,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // typing into a terminal clears its "needs action" state
   const clearNeeds = useCallback((id: string) => {
+    lastFlaggedRef.current.delete(id)
     const agent = stateRef.current.agents.find(a => a.id === id)
     if (agent?.status === 'needs') {
       dispatch(s => ({
