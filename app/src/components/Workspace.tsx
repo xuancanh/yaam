@@ -155,8 +155,10 @@ function TerminalPane({ agent, active }: { agent: Agent; active: boolean }) {
   return <div ref={ref} style={{ flex: 1, minHeight: 0, background: '#0A0B0F', padding: '8px 2px 2px 10px' }} />
 }
 
-function Pane({ agent, index, active, showRing }: { agent: Agent; index: number; active: boolean; showRing: boolean }) {
-  const { setActivePane, closePane, openPanel, resume, approve, deny, stopSession } = useActions()
+function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
+  const { setActivePane, closePane, openPanel, resume, approve, deny, stopSession, toggleMaximize, renameSession } = useActions()
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState(agent.name)
   const memOn = agent.memory.filter(m => m.on)
   const memTotal = memOn.reduce((n, m) => n + m.tokens, 0)
   const toolCount = agent.tools.filter(t => t.on).length
@@ -175,7 +177,32 @@ function Pane({ agent, index, active, showRing }: { agent: Agent; index: number;
       }}>
         <AgentAvatar agent={agent} />
         <div style={{ minWidth: 0, overflow: 'hidden' }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{agent.name}</div>
+          {editingName ? (
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={e => setNameDraft(e.target.value)}
+              onBlur={() => { renameSession(agent.id, nameDraft); setEditingName(false) }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { renameSession(agent.id, nameDraft); setEditingName(false) }
+                if (e.key === 'Escape') setEditingName(false)
+              }}
+              onClick={e => e.stopPropagation()}
+              className="mono"
+              style={{
+                background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 5,
+                padding: '2px 6px', color: 'var(--text)', outline: 'none', fontSize: 12, width: 130,
+              }}
+            />
+          ) : (
+            <div
+              title="Double-click to rename"
+              onDoubleClick={e => { e.stopPropagation(); setNameDraft(agent.name); setEditingName(true) }}
+              style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            >
+              {agent.name}
+            </div>
+          )}
           <div className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {agent.repo} · {agent.branch}
           </div>
@@ -200,6 +227,11 @@ function Pane({ agent, index, active, showRing }: { agent: Agent; index: number;
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
           </button>
         )}
+        <button className="icon-btn" title={maximized ? 'Restore grid' : 'Maximize pane'} style={{ width: 27, height: 27, borderRadius: 7, color: maximized ? 'var(--accent)' : undefined }} onClick={e => { e.stopPropagation(); toggleMaximize(index) }}>
+          {maximized
+            ? <Icon paths={['M9 4v5H4', 'M15 4v5h5', 'M9 20v-5H4', 'M15 20v-5h5']} size={14} stroke={1.8} />
+            : <Icon paths={['M4 9V4h5', 'M20 9V4h-5', 'M4 15v5h5', 'M20 15v5h-5']} size={14} stroke={1.8} />}
+        </button>
         <button className="icon-btn danger" title="Close pane" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); closePane(index) }}>
           <Icon paths={IC.close} size={14} stroke={1.8} />
         </button>
@@ -238,12 +270,14 @@ function Pane({ agent, index, active, showRing }: { agent: Agent; index: number;
 
 export function Workspace() {
   const s = useConductor()
-  const { focusTab, toggleSplit, openNewSession, closeNewSession } = useActions()
-  const focused = s.focusedIds.slice(0, s.splitCount)
+  const { focusTab, addPane, openNewSession, closeNewSession } = useActions()
+  const focused = s.focusedIds
   const byId = new Map(s.agents.map(a => [a.id, a]))
-  const panes = focused
+  let panes = focused
     .map((id, i) => ({ agent: byId.get(id) || s.agents[0], i }))
     .filter((p): p is { agent: Agent; i: number } => !!p.agent)
+  if (s.maximizedPane !== null && panes[s.maximizedPane]) panes = [panes[s.maximizedPane]]
+  const cols = panes.length <= 1 ? 1 : panes.length <= 4 ? 2 : 3
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -276,24 +310,27 @@ export function Workspace() {
         <div style={{ flex: 1 }} />
         <button
           className="icon-btn"
-          title="Toggle split view"
-          onClick={toggleSplit}
+          title="Add split pane"
+          onClick={addPane}
           style={{
             width: 30, height: 30, flexShrink: 0,
-            background: s.splitCount > 1 ? hexToRgba(ACCENT, 0.14) : 'transparent',
-            color: s.splitCount > 1 ? 'var(--accent)' : '#9AA3B2',
+            background: focused.length > 1 ? hexToRgba(ACCENT, 0.14) : 'transparent',
+            color: focused.length > 1 ? 'var(--accent)' : '#9AA3B2',
           }}
         >
-          <Icon paths={['M4 5h16v14H4z', 'M12 5v14']} size={17} />
+          <Icon paths={['M4 5h16v14H4z', 'M12 5v14', 'M8 12h0', 'M16 10v4', 'M14 12h4']} size={17} />
         </button>
         <button className="icon-btn" title="New agent session" onClick={openNewSession} style={{ width: 30, height: 30, flexShrink: 0, color: '#9AA3B2' }}>
           <Icon paths={IC.plus} size={17} stroke={1.8} />
         </button>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', minHeight: 0, gap: 1, background: 'var(--line)' }}>
+      <div style={{
+        flex: 1, minHeight: 0, display: 'grid', gap: 1, background: 'var(--line)',
+        gridTemplateColumns: `repeat(${cols}, 1fr)`, gridAutoRows: '1fr',
+      }}>
         {panes.length === 0 ? (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: '#0A0B0F' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: '#0A0B0F' }}>
             <div className="grotesk" style={{ fontSize: 17, fontWeight: 600, color: 'var(--mut)' }}>No sessions yet</div>
             <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
               Launch any CLI as a live session — Claude Code, Codex, Aider, a REPL, or a plain shell.
@@ -304,7 +341,14 @@ export function Workspace() {
           </div>
         ) : (
           panes.map(({ agent, i }) => (
-            <Pane key={`${agent.id}-${i}`} agent={agent} index={i} active={i === s.activePane} showRing={s.splitCount > 1} />
+            <Pane
+              key={`${agent.id}-${i}`}
+              agent={agent}
+              index={i}
+              active={i === s.activePane}
+              showRing={focused.length > 1}
+              maximized={s.maximizedPane === i}
+            />
           ))
         )}
       </div>

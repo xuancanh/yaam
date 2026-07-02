@@ -100,7 +100,7 @@ export function seedState(): AppState {
   return {
     view: 'workspace',
     activePane: 0,
-    splitCount: 1,
+    maximizedPane: null,
     focusedIds: [],
     composer: '',
     panel: null,

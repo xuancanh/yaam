@@ -11,7 +11,8 @@ Every session is a real OS process in a **PTY**, rendered with **xterm.js** — 
 - **＋ New agent session** → pick an agent type (commands configurable in Settings), a plain terminal (zsh/bash/sh/fish/nu), or a custom command; pick the working directory with a native folder chooser
 - Full terminal emulation: prompts, colors, TUIs, keystrokes straight to the PTY, resize handled
 - Spawned through a login shell, so your PATH (nvm, homebrew, cargo) works
-- Stop / resume / exit-code status per pane; tabbed with optional split view
+- Stop / resume / exit-code status per pane; double-click the pane title to rename a session
+- **Window organization**: a dynamic terminal grid — new sessions open their own pane (up to a 2×2 grid, 6 panes max), add split panes from the tab bar or ⌘K, maximize/restore any pane, close panes independently; tabs jump to the pane already showing that session
 
 ## Master — three-way orchestration
 

@@ -42,7 +42,7 @@ export function CommandPalette() {
     const cmds: Command[] = [
       { id: 'route', label: 'Route a task…', hint: 'compose', icon: 'route', run: a.focusComposer },
       { id: 'new', label: 'New agent session', hint: 'spawn', icon: 'plus', run: a.openNewSession },
-      { id: 'split', label: 'Toggle split view', hint: 'layout', icon: 'split', run: a.toggleSplit },
+      { id: 'split', label: 'Add split pane', hint: 'layout', icon: 'split', run: a.addPane },
       { id: 'build', label: 'Build a tool or panel', hint: 'compose', icon: 'build', run: a.focusComposer },
     ]
     s.agents.filter(x => x.status === 'idle').forEach(x =>

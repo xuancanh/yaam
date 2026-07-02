@@ -234,7 +234,8 @@ export interface PersistedState {
 export interface AppState {
   view: View
   activePane: number
-  splitCount: 1 | 2
+  /** index into focusedIds of the pane that is currently maximized, or null */
+  maximizedPane: number | null
   focusedIds: string[]
   composer: string
   panel: Panel | null

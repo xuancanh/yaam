@@ -24,8 +24,10 @@ export interface ConductorActions {
   focusComposer: () => void
   setActivePane: (i: number) => void
   focusTab: (id: string) => void
-  toggleSplit: () => void
+  addPane: () => void
   closePane: (i: number) => void
+  toggleMaximize: (i: number) => void
+  renameSession: (id: string, name: string) => void
   resume: (id: string) => void
   openPanel: (id: string, tab?: Panel['tab']) => void
   setPanelTab: (tab: Panel['tab']) => void
@@ -306,9 +308,20 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       ...defaultDetail(),
     }
     dispatch(s => {
+      // a new terminal gets its own pane while there's room in the grid
       const focusedIds = s.focusedIds.slice()
-      focusedIds[s.activePane] = id
-      return { ...s, agents: s.agents.concat([agent]), focusedIds, view: 'workspace', newSessionOpen: false }
+      let activePane: number
+      if (focusedIds.length < 4) {
+        focusedIds.push(id)
+        activePane = focusedIds.length - 1
+      } else {
+        activePane = s.activePane
+        focusedIds[activePane] = id
+      }
+      return {
+        ...s, agents: s.agents.concat([agent]), focusedIds, activePane,
+        maximizedPane: null, view: 'workspace', newSessionOpen: false,
+      }
     })
     getTerminal(id, line => appendTail(id, line))
     native.spawnSession(id, trimmed, dir || undefined).catch(err => {
@@ -596,25 +609,46 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     setActivePane: i => dispatch(s => ({ ...s, activePane: i })),
 
     focusTab: id => dispatch(s => {
+      const existing = s.focusedIds.indexOf(id)
+      if (existing >= 0) return { ...s, activePane: existing, view: 'workspace', maximizedPane: s.maximizedPane === null ? null : existing }
       const focusedIds = s.focusedIds.slice()
-      focusedIds[s.activePane] = id
+      focusedIds[Math.min(s.activePane, Math.max(0, focusedIds.length - 1))] = id
+      if (!focusedIds.length) focusedIds.push(id)
       return { ...s, focusedIds, view: 'workspace' }
     }),
 
-    toggleSplit: () => dispatch(s => {
-      if (s.splitCount === 2) return { ...s, splitCount: 1 as const, activePane: 0 }
-      if (!s.agents.length) return s
-      const other = s.agents.find(a => a.id !== s.focusedIds[0]) || s.agents[0]
-      const focusedIds = s.focusedIds.slice()
-      if (!focusedIds[1]) focusedIds[1] = other.id
-      return { ...s, splitCount: 2 as const, focusedIds }
+    addPane: () => dispatch(s => {
+      if (s.focusedIds.length >= 6) return s
+      const hidden = s.agents.find(a => !s.focusedIds.includes(a.id))
+      if (!hidden) return { ...s, newSessionOpen: true, view: 'workspace' }
+      const focusedIds = s.focusedIds.concat([hidden.id])
+      return { ...s, focusedIds, activePane: focusedIds.length - 1, maximizedPane: null, view: 'workspace' }
     }),
 
     closePane: i => dispatch(s => {
-      if (s.splitCount === 1) return s
-      const keep = s.focusedIds[i === 0 ? 1 : 0]
-      return { ...s, splitCount: 1, activePane: 0, focusedIds: [keep, s.focusedIds[1]] }
+      if (s.focusedIds.length <= 1) return s
+      const focusedIds = s.focusedIds.slice()
+      focusedIds.splice(i, 1)
+      return {
+        ...s,
+        focusedIds,
+        activePane: Math.min(s.activePane, focusedIds.length - 1),
+        maximizedPane: null,
+      }
     }),
+
+    toggleMaximize: i => dispatch(s => ({
+      ...s,
+      maximizedPane: s.maximizedPane === i ? null : i,
+      activePane: i,
+    })),
+
+    renameSession: (id, name) => dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === id
+        ? { ...a, name: name.trim() || a.name, short: (name.trim() || a.name).slice(0, 2).toUpperCase() }
+        : a),
+    })),
 
     resume: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
