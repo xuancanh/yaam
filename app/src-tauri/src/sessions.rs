@@ -7,6 +7,15 @@ use std::process::Command;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+fn expand_tilde(path: &str) -> String {
+    if path == "~" || path.starts_with("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return path.replacen('~', &home, 1);
+        }
+    }
+    path.to_string()
+}
+
 struct SessionHandle {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -57,6 +66,10 @@ pub fn spawn_session(
     cmd.args(["-lc", &command]);
     cmd.env("TERM", "xterm-256color");
     if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
+        let dir = expand_tilde(&dir);
+        if !std::path::Path::new(&dir).is_dir() {
+            return Err(format!("working directory does not exist: {dir}"));
+        }
         cmd.cwd(dir);
     }
 
@@ -151,7 +164,7 @@ pub fn kill_session(state: State<'_, SessionManager>, id: String) -> Result<(), 
 pub fn git_diff(cwd: String) -> Result<String, String> {
     let out = Command::new("git")
         .args(["diff", "--no-color", "HEAD"])
-        .current_dir(&cwd)
+        .current_dir(expand_tilde(&cwd))
         .output()
         .map_err(|e| format!("failed to run git: {e}"))?;
     if !out.status.success() {

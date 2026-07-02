@@ -11,6 +11,7 @@ export interface MasterExec {
   launchSession: (command: string, cwd: string, name?: string) => string
   sendToSession: (sessionId: string, text: string) => string
   stopSession: (sessionId: string) => string
+  readSession: (sessionId: string, lines?: number) => string
   createSchedule: (name: string, cron: string, command?: string, cwd?: string) => string
   addTask: (title: string) => string
 }
@@ -39,6 +40,18 @@ const TOOLS = [
         text: { type: 'string' },
       },
       required: ['session_id', 'text'],
+    },
+  },
+  {
+    name: 'read_session',
+    description: 'Read the most recent terminal output of a session (ANSI-stripped). Use this to check what an agent is doing or whether it finished.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string' },
+        lines: { type: 'number', description: 'how many lines from the end (default 40, max 120)' },
+      },
+      required: ['session_id'],
     },
   },
   {
@@ -93,7 +106,10 @@ function describeState(s: AppState): string {
   const tasks = s.tasks.map(t => `- [${t.col}] ${t.title}`).join('\n')
   const events = s.events.slice(0, 8).map(e => `- ${e.time} ${e.type}: ${e.text}`).join('\n')
   const toolPerms = s.toolsCatalog.map(t => `- ${t.id}: ${t.perm}`).join('\n')
+  const types = s.agentTypes.filter(t => t.enabled)
+    .map(t => `- ${t.name}: launch with command "${t.model}" — ${t.desc}`).join('\n')
   return [
+    `AGENT TYPES you can launch (use the exact command; a plain terminal is "${s.settings.shell || 'zsh'} -i"):\n${types || '(none enabled)'}`,
     `YOUR TOOL PERMISSIONS (Auto = act freely · Ask first = confirm with the user in chat before doing it · Approval/Off = blocked):\n${toolPerms}`,
     `SESSIONS (${s.agents.length}):\n${sessions || '(none)'}`,
     `SCHEDULES:\n${crons || '(none)'}`,
@@ -107,6 +123,8 @@ function systemPrompt(s: AppState): string {
 - The user talks to you in chat.
 - You command sessions with tools (send text to their stdin, launch or stop them).
 - Sessions report back through their output, which appears in the state below. After you send something to a session, you get an [event] message with its response once the output settles; relay the outcome to the user concisely and only act further when needed.
+
+Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
 
 Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed.
 
@@ -146,7 +164,7 @@ function chatHistory(s: AppState, eventNote?: string): ApiMessage[] {
   }
   while (msgs.length && msgs[0].role !== 'user') msgs.shift()
   if (!msgs.length) msgs.push({ role: 'user', content: eventNote || 'Hello' })
-  return msgs.slice(-24)
+  return msgs.slice(-30)
 }
 
 async function callApi(apiKey: string, model: string, system: string, messages: ApiMessage[]): Promise<ApiResponse> {
@@ -158,7 +176,7 @@ async function callApi(apiKey: string, model: string, system: string, messages: 
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model, max_tokens: 1024, system, messages, tools: TOOLS }),
+    body: JSON.stringify({ model, max_tokens: 2048, system, messages, tools: TOOLS }),
   })
   const data = await res.json() as ApiResponse
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
@@ -171,6 +189,7 @@ function runTool(name: string, input: Record<string, unknown>, exec: MasterExec)
     case 'launch_session': return exec.launchSession(str('command'), str('cwd'), str('name') || undefined)
     case 'send_to_session': return exec.sendToSession(str('session_id'), str('text'))
     case 'stop_session': return exec.stopSession(str('session_id'))
+    case 'read_session': return exec.readSession(str('session_id'), typeof input.lines === 'number' ? input.lines : undefined)
     case 'create_schedule': return exec.createSchedule(str('name'), str('cron'), str('command') || undefined, str('cwd') || undefined)
     case 'add_task': return exec.addTask(str('title'))
     default: return `unknown tool ${name}`
@@ -191,7 +210,7 @@ export async function runMasterTurn(
   const messages = chatHistory(s0, eventNote)
   const texts: string[] = []
 
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 8; i++) {
     // re-describe state each iteration so tool effects are visible to the model
     const res = await callApi(apiKey, masterModel, systemPrompt(getState()), messages)
     for (const block of res.content) {

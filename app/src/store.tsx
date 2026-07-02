@@ -306,13 +306,29 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // set by the Master turn runner below; ref avoids a declaration cycle
   const masterEventRef = useRef<(note: string) => void>(() => {})
 
-  // persistence: restore board/schedules/settings/tools on launch, save on change
+  // persistence: restore everything (including session definitions and their
+  // output tails) on launch, save on change. Restored sessions come back
+  // paused — resume respawns their command.
   const hydrated = useRef(false)
+  const hydrateStarted = useRef(false)
   useEffect(() => {
+    if (hydrateStarted.current) return
+    hydrateStarted.current = true
     native.loadStateFile().then(json => {
       if (json) {
         try {
           const p = JSON.parse(json) as Partial<PersistedState>
+          const restoredAgents: Agent[] = (p.agents ?? [])
+            .filter(a => a.kind === 'real' && a.cmd)
+            .map(a => ({
+              ...a,
+              status: 'idle' as const,
+              escReason: undefined,
+              feed: [], fi: 0,
+              log: (a.log ?? []).slice(-200),
+            }))
+          const ids = new Set(restoredAgents.map(a => a.id))
+          const focusedIds = (p.focusedIds ?? []).filter(id => ids.has(id))
           dispatch(s => ({
             ...s,
             tasks: p.tasks ?? s.tasks,
@@ -321,12 +337,24 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             toolsCatalog: p.toolsCatalog?.some(t => t.id === 'launch_session') ? p.toolsCatalog : s.toolsCatalog,
             agentTypes: p.agentTypes ?? s.agentTypes,
             integrations: p.integrations ?? s.integrations,
+            agents: restoredAgents.length ? restoredAgents : s.agents,
+            focusedIds: focusedIds.length ? focusedIds : s.focusedIds,
+            activePane: Math.min(p.activePane ?? 0, Math.max(0, focusedIds.length - 1)),
+            messages: p.messages?.length ? p.messages : s.messages,
+            events: p.events ?? s.events,
+            notifications: p.notifications ?? s.notifications,
           }))
+          // rebuild each restored session's terminal with its saved tail
+          for (const a of restoredAgents) {
+            const { term } = getTerminal(a.id, line => appendTail(a.id, line), () => clearNeeds(a.id))
+            for (const l of a.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
+            term.writeln('\x1b[33m── restored from previous run · press ▶ to relaunch ──\x1b[0m')
+          }
         } catch { /* corrupt state file — start fresh */ }
       }
       hydrated.current = true
     }).catch(() => { hydrated.current = true })
-  }, [])
+  }, [appendTail, clearNeeds])
 
   const saveTimer = useRef<number | undefined>(undefined)
   useEffect(() => {
@@ -339,11 +367,20 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       toolsCatalog: state.toolsCatalog,
       agentTypes: state.agentTypes,
       integrations: state.integrations,
+      agents: state.agents.map(a => ({ ...a, feed: [], log: a.log.slice(-200) })),
+      focusedIds: state.focusedIds,
+      activePane: state.activePane,
+      messages: state.messages.slice(-60),
+      events: state.events.slice(0, 60),
+      notifications: state.notifications.slice(0, 30),
     }
     saveTimer.current = window.setTimeout(() => {
       native.saveStateFile(JSON.stringify(persisted)).catch(() => {})
     }, 800)
-  }, [state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.integrations])
+  }, [
+    state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.integrations,
+    state.agents, state.focusedIds, state.activePane, state.messages, state.events, state.notifications,
+  ])
 
   const launchSession = useCallback((command: string, cwd: string, nameHint?: string): string | null => {
     const trimmed = command.trim()
@@ -449,7 +486,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         const id = launchSession(command, cwd || '', name)
         if (!id) return 'failed: empty command'
         logEvent('route', id, `Master launched · ${command}`)
-        return `launched session id=${id}`
+        armResponseWatch(id) // relay the session's first output back to Master
+        return `launched session id=${id} — its output will be relayed to you as an [event] once it settles; you can also read_session it`
       },
       sendToSession: (sid, text) => {
         const gated = catalogGate('send_to_session') || sessionGate(sid, 'send')
@@ -464,6 +502,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         }))
         logEvent('route', sid, `Master → ${agent.name}: ${text.slice(0, 48)}`)
         return `sent to ${agent.name}`
+      },
+      readSession: (sid, lines) => {
+        const agent = stateRef.current.agents.find(a => a.id === sid)
+        if (!agent) return `no session with id ${sid}`
+        const n = Math.min(Math.max(lines ?? 40, 1), 120)
+        const tail = agent.log.slice(-n).map(l => l.x).join('\n')
+        return tail || '(no output yet)'
       },
       stopSession: sid => {
         const gated = catalogGate('stop_session') || sessionGate(sid, 'stop')

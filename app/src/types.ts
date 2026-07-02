@@ -229,6 +229,13 @@ export interface PersistedState {
   toolsCatalog: CatalogTool[]
   agentTypes: AgentType[]
   integrations: Integration[]
+  /** session definitions + output tails; restored as paused sessions */
+  agents?: Agent[]
+  focusedIds?: string[]
+  activePane?: number
+  messages?: Message[]
+  events?: EventItem[]
+  notifications?: Notification[]
 }
 
 export interface AppState {
