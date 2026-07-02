@@ -1,20 +1,28 @@
+use base64::Engine;
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
+use std::io::{Read, Write};
+use std::process::Command;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+struct SessionHandle {
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+}
+
 #[derive(Default)]
 pub struct SessionManager {
-    children: Mutex<HashMap<String, Child>>,
+    sessions: Mutex<HashMap<String, SessionHandle>>,
 }
 
 #[derive(Clone, Serialize)]
-struct OutputEvent {
+struct DataEvent {
     id: String,
-    stream: String, // "out" | "err" | "sys"
-    line: String,
+    /// base64-encoded raw PTY bytes
+    data: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -23,87 +31,78 @@ struct ExitEvent {
     code: Option<i32>,
 }
 
-fn pump<R: std::io::Read + Send + 'static>(
-    app: AppHandle,
-    id: String,
-    stream: &'static str,
-    reader: R,
-) {
-    std::thread::spawn(move || {
-        let buf = BufReader::new(reader);
-        for line in buf.lines() {
-            match line {
-                Ok(line) => {
-                    let _ = app.emit(
-                        "session-output",
-                        OutputEvent {
-                            id: id.clone(),
-                            stream: stream.into(),
-                            line,
-                        },
-                    );
-                }
-                Err(_) => break,
-            }
-        }
-    });
-}
-
 #[tauri::command]
 pub fn spawn_session(
     app: AppHandle,
     state: State<'_, SessionManager>,
     id: String,
     command: String,
-    args: Vec<String>,
     cwd: Option<String>,
+    rows: Option<u16>,
+    cols: Option<u16>,
 ) -> Result<(), String> {
-    let mut cmd = Command::new(&command);
-    cmd.args(&args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env("TERM", "dumb")
-        .env("NO_COLOR", "1");
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: rows.unwrap_or(24),
+            cols: cols.unwrap_or(80),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| e.to_string())?;
+
+    // Run through a login shell so quoting works and the user's PATH
+    // (nvm, homebrew, cargo, …) is available — GUI apps don't inherit it.
+    let mut cmd = CommandBuilder::new("/bin/sh");
+    cmd.args(["-lc", &command]);
+    cmd.env("TERM", "xterm-256color");
     if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
-        cmd.current_dir(dir);
+        cmd.cwd(dir);
     }
-    let mut child = cmd
-        .spawn()
+
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
         .map_err(|e| format!("failed to spawn `{command}`: {e}"))?;
+    drop(pair.slave);
 
-    if let Some(stdout) = child.stdout.take() {
-        pump(app.clone(), id.clone(), "out", stdout);
-    }
-    if let Some(stderr) = child.stderr.take() {
-        pump(app.clone(), id.clone(), "err", stderr);
-    }
+    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let killer = child.clone_killer();
 
-    state.children.lock().unwrap().insert(id.clone(), child);
+    state.sessions.lock().unwrap().insert(
+        id.clone(),
+        SessionHandle {
+            master: pair.master,
+            writer,
+            killer,
+        },
+    );
 
-    // Reap the process and notify the frontend when it exits.
-    let app2 = app.clone();
-    let id2 = id.clone();
-    std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        let mgr = app2.state::<SessionManager>();
-        let mut children = mgr.children.lock().unwrap();
-        match children.get_mut(&id2).map(|c| c.try_wait()) {
-            Some(Ok(Some(status))) => {
-                children.remove(&id2);
-                drop(children);
-                let _ = app2.emit(
-                    "session-exit",
-                    ExitEvent {
-                        id: id2.clone(),
-                        code: status.code(),
-                    },
-                );
-                break;
+    // stream raw PTY output to the frontend
+    let app_out = app.clone();
+    let id_out = id.clone();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let data = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
+                    let _ = app_out.emit("session-data", DataEvent { id: id_out.clone(), data });
+                }
             }
-            Some(Ok(None)) => continue,
-            _ => break, // killed elsewhere or wait failed
         }
+    });
+
+    // reap the child and notify the frontend when it exits
+    let app_exit = app;
+    let id_exit = id;
+    std::thread::spawn(move || {
+        let code = child.wait().ok().map(|s| s.exit_code() as i32);
+        let mgr = app_exit.state::<SessionManager>();
+        mgr.sessions.lock().unwrap().remove(&id_exit);
+        let _ = app_exit.emit("session-exit", ExitEvent { id: id_exit, code });
     });
 
     Ok(())
@@ -115,23 +114,50 @@ pub fn write_session(
     id: String,
     data: String,
 ) -> Result<(), String> {
-    let mut children = state.children.lock().unwrap();
-    let child = children.get_mut(&id).ok_or("no such session")?;
-    let stdin = child.stdin.as_mut().ok_or("stdin closed")?;
-    stdin
+    let mut sessions = state.sessions.lock().unwrap();
+    let handle = sessions.get_mut(&id).ok_or("no such session")?;
+    handle
+        .writer
         .write_all(data.as_bytes())
-        .and_then(|_| stdin.flush())
+        .and_then(|_| handle.writer.flush())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn resize_session(
+    state: State<'_, SessionManager>,
+    id: String,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    let sessions = state.sessions.lock().unwrap();
+    let handle = sessions.get(&id).ok_or("no such session")?;
+    handle
+        .master
+        .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn kill_session(state: State<'_, SessionManager>, id: String) -> Result<(), String> {
-    let mut children = state.children.lock().unwrap();
-    if let Some(mut child) = children.remove(&id) {
-        let _ = child.kill();
-        let _ = child.wait();
+    let mut sessions = state.sessions.lock().unwrap();
+    if let Some(mut handle) = sessions.remove(&id) {
+        let _ = handle.killer.kill();
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn git_diff(cwd: String) -> Result<String, String> {
+    let out = Command::new("git")
+        .args(["diff", "--no-color", "HEAD"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
 #[tauri::command]

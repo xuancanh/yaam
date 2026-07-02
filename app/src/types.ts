@@ -123,6 +123,10 @@ export interface Cron {
   on: boolean
   built: boolean
   last: string
+  /** command to launch as a real session when the schedule fires */
+  cmd?: string
+  cwd?: string
+  lastFiredMinute?: string
 }
 
 export interface CatalogTool {
@@ -160,6 +164,7 @@ export interface AgentType {
   id: string
   name: string
   color: string
+  /** command line used to launch this agent type as a session */
   model: string
   tools: number
   desc: string
@@ -178,6 +183,14 @@ export interface OrchestrationSettings {
   autoRoute: boolean
   approveDestructive: boolean
   followMode: boolean
+  /** shell used for plain terminal sessions */
+  shell: string
+  /** default working directory prefilled in the new-session dialog */
+  defaultCwd: string
+  /** Master brain: when enabled with an API key, Master is a Claude model with tools */
+  masterEnabled: boolean
+  masterModel: string
+  apiKey: string
 }
 
 export type BoardCol = 'backlog' | 'routed' | 'progress' | 'review' | 'done'
@@ -230,6 +243,8 @@ export interface AppState {
   paletteOpen: boolean
   paletteQuery: string
   notifOpen: boolean
+  newSessionOpen: boolean
+  masterBusy: boolean
   dragOverCol: BoardCol | null
   agents: Agent[]
   messages: Message[]

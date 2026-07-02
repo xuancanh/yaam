@@ -1,8 +1,76 @@
+import { useState } from 'react'
 import type { DragEvent } from 'react'
 import { useActions, useConductor } from '../store'
 import { ACCENT } from '../data'
-import type { BoardCol } from '../types'
+import type { Agent, BoardCol, BoardTask } from '../types'
 import { IC, Icon, ViewHeader } from './ui'
+
+function Card({ card, agent }: { card: BoardTask; agent: Agent | null }) {
+  const { startCardDrag, focusTab, renameTask, deleteTask } = useActions()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(card.title)
+
+  const commit = () => {
+    renameTask(card.id, draft)
+    setEditing(false)
+  }
+
+  return (
+    <div
+      className="board-card"
+      draggable={!editing}
+      onDragStart={e => {
+        startCardDrag(card.id)
+        e.dataTransfer.effectAllowed = 'move'
+        try { e.dataTransfer.setData('text/plain', card.id) } catch { /* older webviews */ }
+      }}
+      onClick={agent && !editing ? () => focusTab(agent.id) : undefined}
+      onDoubleClick={e => { e.stopPropagation(); setDraft(card.title); setEditing(true) }}
+      style={{
+        background: 'var(--panel2)', border: '1px solid var(--line)',
+        borderLeft: `3px solid ${agent ? agent.color : 'var(--dim)'}`,
+        borderRadius: 10, padding: '11px 12px', cursor: 'grab', position: 'relative',
+      }}
+    >
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          onClick={e => e.stopPropagation()}
+          style={{
+            width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 6,
+            padding: '4px 7px', color: 'var(--text)', outline: 'none', fontSize: 12.5, fontWeight: 600,
+            fontFamily: 'inherit',
+          }}
+        />
+      ) : (
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', lineHeight: 1.38 }} title="Double-click to rename">{card.title}</div>
+      )}
+      <button
+        className="card-delete"
+        title="Delete task"
+        onClick={e => { e.stopPropagation(); deleteTask(card.id) }}
+        style={{
+          position: 'absolute', top: 6, right: 6, width: 20, height: 20, border: 'none',
+          background: 'transparent', color: 'var(--dim)', borderRadius: 5,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <Icon paths={IC.close} size={11} stroke={2} />
+      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10 }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: agent ? agent.color : 'var(--dim)', flexShrink: 0 }} />
+        <span style={{ fontSize: 11, color: '#9AA3B2', whiteSpace: 'nowrap' }}>{agent ? agent.name : 'Unassigned'}</span>
+        <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 'auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {agent ? agent.repo : '—'}
+        </span>
+      </div>
+    </div>
+  )
+}
 
 const COLS: Array<{ id: BoardCol; label: string; dot: string }> = [
   { id: 'backlog', label: 'Backlog', dot: '#6B7280' },
@@ -14,7 +82,7 @@ const COLS: Array<{ id: BoardCol; label: string; dot: string }> = [
 
 export function Board() {
   const s = useConductor()
-  const { addTask, startCardDrag, enterCol, dropTo, focusTab } = useActions()
+  const { addTask, enterCol, dropTo } = useActions()
   const byId = new Map(s.agents.map(a => [a.id, a]))
 
   const allowDrop = (e: DragEvent) => {
@@ -52,36 +120,9 @@ export function Board() {
                 <span className="mono" style={{ fontSize: 11, color: 'var(--mut)', background: 'var(--panel2)', borderRadius: 6, padding: '1px 8px', marginLeft: 2 }}>{cards.length}</span>
               </div>
               <div style={{ flex: 1, overflowY: 'auto', padding: 11, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {cards.map(card => {
-                  const agent = card.agentId ? byId.get(card.agentId) : null
-                  return (
-                    <div
-                      key={card.id}
-                      className="board-card"
-                      draggable
-                      onDragStart={e => {
-                        startCardDrag(card.id)
-                        e.dataTransfer.effectAllowed = 'move'
-                        try { e.dataTransfer.setData('text/plain', card.id) } catch { /* older webviews */ }
-                      }}
-                      onClick={agent ? () => focusTab(agent.id) : undefined}
-                      style={{
-                        background: 'var(--panel2)', border: '1px solid var(--line)',
-                        borderLeft: `3px solid ${agent ? agent.color : 'var(--dim)'}`,
-                        borderRadius: 10, padding: '11px 12px', cursor: 'grab',
-                      }}
-                    >
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', lineHeight: 1.38 }}>{card.title}</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10 }}>
-                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: agent ? agent.color : 'var(--dim)', flexShrink: 0 }} />
-                        <span style={{ fontSize: 11, color: '#9AA3B2', whiteSpace: 'nowrap' }}>{agent ? agent.name : 'Unassigned'}</span>
-                        <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 'auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {agent ? agent.repo : '—'}
-                        </span>
-                      </div>
-                    </div>
-                  )
-                })}
+                {cards.map(card => (
+                  <Card key={card.id} card={card} agent={card.agentId ? byId.get(card.agentId) || null : null} />
+                ))}
               </div>
             </div>
           )

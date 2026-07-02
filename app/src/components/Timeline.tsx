@@ -13,6 +13,11 @@ export function Timeline() {
       </ViewHeader>
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px 26px' }}>
         <div style={{ maxWidth: 720 }}>
+          {s.events.length === 0 && (
+            <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--dim)', fontSize: 12.5 }}>
+              No activity yet — launch a session or route a task and events will land here.
+            </div>
+          )}
           {s.events.map(e => {
             const color = EVENT_COLORS[e.type] || 'var(--mut)'
             const soft = hexToRgba(EVENT_COLORS[e.type] || '#8B93A1', 0.16)

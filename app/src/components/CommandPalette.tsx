@@ -41,7 +41,7 @@ export function CommandPalette() {
   const commands = useMemo<Command[]>(() => {
     const cmds: Command[] = [
       { id: 'route', label: 'Route a task…', hint: 'compose', icon: 'route', run: a.focusComposer },
-      { id: 'new', label: 'New agent session', hint: 'spawn', icon: 'plus', run: a.newSession },
+      { id: 'new', label: 'New agent session', hint: 'spawn', icon: 'plus', run: a.openNewSession },
       { id: 'split', label: 'Toggle split view', hint: 'layout', icon: 'split', run: a.toggleSplit },
       { id: 'build', label: 'Build a tool or panel', hint: 'compose', icon: 'build', run: a.focusComposer },
     ]

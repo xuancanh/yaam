@@ -204,8 +204,16 @@ export function Sidebar() {
             <span className="mono" style={{ fontSize: 10, color: 'var(--panel)', background: 'var(--accent)', borderRadius: 5, padding: '1px 6px', fontWeight: 600 }}>ORCHESTRATOR</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)', animation: 'cpulse 1.7s ease-in-out infinite' }} />
-            <span style={{ fontSize: 11.5, color: 'var(--mut)' }}>{runningCount} agents running · following all sessions</span>
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: s.masterBusy ? 'var(--accent)' : 'var(--green)',
+              animation: `cpulse ${s.masterBusy ? '0.9s' : '1.7s'} ease-in-out infinite`,
+            }} />
+            <span style={{ fontSize: 11.5, color: 'var(--mut)' }}>
+              {s.masterBusy
+                ? 'thinking…'
+                : `${runningCount} sessions running${s.settings.masterEnabled && s.settings.apiKey ? ` · ${s.settings.masterModel}` : ' · heuristic mode'}`}
+            </span>
           </div>
         </div>
       </div>

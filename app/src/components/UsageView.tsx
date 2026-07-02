@@ -28,7 +28,7 @@ export function UsageView() {
           <StatCard
             label="Total spend"
             value={`$${totalCost.toFixed(2)}`}
-            sub={`$${totalBudget.toFixed(2)} budget · ${Math.round((totalCost / totalBudget) * 100)}% used`}
+            sub={`$${totalBudget.toFixed(2)} budget · ${totalBudget > 0 ? Math.round((totalCost / totalBudget) * 100) : 0}% used`}
           />
           <StatCard label="Tokens" value={`${totalTokens.toFixed(1)}k`} sub={`across ${s.agents.length} sessions`} />
           <StatCard label="Running now" value={String(runningCount)} sub={`of ${s.agents.length} sessions`} valueColor="var(--green)" />

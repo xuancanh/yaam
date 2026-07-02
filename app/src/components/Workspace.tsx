@@ -1,76 +1,128 @@
-import { useEffect, useRef, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useActions, useConductor } from '../store'
-import { ACCENT, LOG_COLORS, STATUS_META, hexToRgba } from '../data'
-import { isTauri } from '../native'
+import { ACCENT, STATUS_META, hexToRgba } from '../data'
+import { isTauri, pickFolder } from '../native'
+import { fitTerminal, getTerminal } from '../terminals'
 import type { Agent } from '../types'
 import { AgentAvatar, IC, Icon, StatusPill } from './ui'
 
+export const SHELLS = ['zsh', 'bash', 'sh', 'fish', 'nu']
+
+const FIELD_STYLE = {
+  width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
+  padding: '9px 12px', color: 'var(--text)', outline: 'none', fontSize: 13,
+  fontFamily: "'JetBrains Mono', monospace",
+} as const
+
+function FieldLabel({ children }: { children: string }) {
+  return <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--mut)', marginBottom: 5, letterSpacing: 0.3 }}>{children}</div>
+}
+
 function NewSessionDialog({ onClose }: { onClose: () => void }) {
-  const { newSession, newRealSession } = useActions()
-  const [command, setCommand] = useState('')
-  const [cwd, setCwd] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
+  const s = useConductor()
+  const { newRealSession } = useActions()
+  const enabledTypes = useMemo(() => s.agentTypes.filter(t => t.enabled), [s.agentTypes])
+  const [typeId, setTypeId] = useState(enabledTypes[0]?.id ?? 'shell')
+  const [shell, setShell] = useState(s.settings.shell || 'zsh')
+  const [command, setCommand] = useState(enabledTypes[0]?.model ?? '')
+  const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
 
-  useEffect(() => { inputRef.current?.focus() }, [])
+  const isShell = typeId === 'shell'
+  const isCustom = typeId === 'custom'
+  const effectiveCommand = isShell ? `${shell} -i` : command
 
-  const launch = () => {
-    if (!command.trim()) return
-    newRealSession(command, cwd)
-    onClose()
+  const selectType = (id: string) => {
+    setTypeId(id)
+    if (id === 'custom') setCommand('')
+    else if (id !== 'shell') {
+      const t = s.agentTypes.find(x => x.id === id)
+      if (t) setCommand(t.model)
+    }
   }
 
-  const fieldStyle = {
-    width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
-    padding: '9px 12px', color: 'var(--text)', outline: 'none', fontSize: 13,
-    fontFamily: "'JetBrains Mono', monospace",
-  } as const
+  const browse = async () => {
+    const dir = await pickFolder(cwd || undefined)
+    if (dir) setCwd(dir)
+  }
+
+  const launch = () => {
+    if (!effectiveCommand.trim()) return
+    newRealSession(effectiveCommand, cwd)
+    onClose()
+  }
 
   return (
     <div
       onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.55)', zIndex: 46, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '18vh' }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.55)', zIndex: 46, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '15vh' }}
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ width: 480, maxWidth: '92vw', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 15, boxShadow: '0 26px 70px rgba(0,0,0,.6)', padding: 18 }}
+        style={{ width: 500, maxWidth: '92vw', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 15, boxShadow: '0 26px 70px rgba(0,0,0,.6)', padding: 18 }}
       >
         <div className="grotesk" style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>New agent session</div>
         <div style={{ fontSize: 12, color: 'var(--mut)', marginBottom: 14, lineHeight: 1.5 }}>
           {isTauri
-            ? 'Launch any CLI as a live session — its output streams into a workspace pane and you can type to its stdin.'
-            : 'Real sessions need the desktop app — running in a browser, only simulated sessions are available.'}
+            ? 'Pick an agent type or a plain terminal — output streams into a workspace pane, input goes to its stdin.'
+            : 'Sessions need the desktop app — this browser build cannot spawn processes.'}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <input
-            ref={inputRef}
-            value={command}
-            onChange={e => setCommand(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') launch() }}
-            placeholder="command · e.g. claude -p, python3 -i, zsh -i"
-            disabled={!isTauri}
-            style={fieldStyle}
-          />
-          <input
-            value={cwd}
-            onChange={e => setCwd(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') launch() }}
-            placeholder="working directory (optional)"
-            disabled={!isTauri}
-            style={fieldStyle}
-          />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <FieldLabel>Agent type</FieldLabel>
+            <select value={typeId} onChange={e => selectType(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
+              {enabledTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              <option value="shell">Terminal</option>
+              <option value="custom">Custom command…</option>
+            </select>
+          </div>
+          {isShell ? (
+            <div>
+              <FieldLabel>Shell</FieldLabel>
+              <select value={shell} onChange={e => setShell(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
+                {SHELLS.map(sh => <option key={sh} value={sh}>{sh}</option>)}
+              </select>
+            </div>
+          ) : (
+            <div>
+              <FieldLabel>Command</FieldLabel>
+              <input
+                value={command}
+                onChange={e => setCommand(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') launch() }}
+                placeholder={isCustom ? 'e.g. python3 -i, node, htop' : 'command'}
+                disabled={!isTauri}
+                style={FIELD_STYLE}
+              />
+            </div>
+          )}
+          <div>
+            <FieldLabel>Working directory</FieldLabel>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={cwd}
+                onChange={e => setCwd(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') launch() }}
+                placeholder="folder (optional)"
+                disabled={!isTauri}
+                style={FIELD_STYLE}
+              />
+              <button className="open-btn" style={{ flex: 'none', padding: '0 14px' }} onClick={browse} disabled={!isTauri}>
+                Browse…
+              </button>
+            </div>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button
             className="approve-btn"
-            style={{ flex: 1, padding: 9, opacity: isTauri && command.trim() ? 1 : 0.45 }}
+            style={{ flex: 1, padding: 9, opacity: isTauri && effectiveCommand.trim() ? 1 : 0.45 }}
             onClick={launch}
-            disabled={!isTauri || !command.trim()}
+            disabled={!isTauri || !effectiveCommand.trim()}
           >
-            Launch
+            Launch {effectiveCommand.trim() && <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {effectiveCommand.trim().slice(0, 28)}</span>}
           </button>
-          <button className="deny-btn" style={{ flex: 1, padding: 9 }} onClick={() => { newSession(); onClose() }}>
-            Simulated demo session
+          <button className="deny-btn" style={{ flex: 1, padding: 9 }} onClick={onClose}>
+            Cancel
           </button>
         </div>
       </div>
@@ -78,69 +130,29 @@ function NewSessionDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
-function PaneInput({ agent }: { agent: Agent }) {
-  const { sendInput } = useActions()
-  const [value, setValue] = useState('')
-
-  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && value.trim()) {
-      sendInput(agent.id, value)
-      setValue('')
-    }
-  }
-
-  return (
-    <div style={{ borderTop: '1px solid var(--line)', background: 'var(--panel)', padding: '8px 11px', display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span className="mono" style={{ color: 'var(--green)', fontSize: 12, flexShrink: 0 }}>❯</span>
-      <input
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        onKeyDown={onKey}
-        onClick={e => e.stopPropagation()}
-        placeholder={agent.status === 'running' ? 'send to stdin — Enter to submit' : 'session not running'}
-        disabled={agent.status !== 'running'}
-        className="mono"
-        style={{
-          flex: 1, background: 'transparent', border: 'none', outline: 'none',
-          color: 'var(--text)', fontSize: 12.5,
-        }}
-      />
-    </div>
-  )
-}
-
-function PaneLog({ agent }: { agent: Agent }) {
+function TerminalPane({ agent, active }: { agent: Agent; active: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const el = ref.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [agent.log.length])
+    if (!el) return
+    const { term } = getTerminal(agent.id)
+    if (!term.element) term.open(el)
+    else el.appendChild(term.element)
+    fitTerminal(agent.id)
+    const ro = new ResizeObserver(() => fitTerminal(agent.id))
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      if (term.element && term.element.parentElement === el) el.removeChild(term.element)
+    }
+  }, [agent.id])
 
-  const sm = STATUS_META[agent.status] || STATUS_META.idle
+  useEffect(() => {
+    if (active) getTerminal(agent.id).term.focus()
+  }, [active, agent.id])
 
-  return (
-    <div ref={ref} className="mono" style={{
-      flex: 1, overflowY: 'auto', padding: '13px 15px', fontSize: 12.5,
-      lineHeight: 1.62, background: 'var(--bg)',
-    }}>
-      {agent.log.map((line, i) => (
-        <div key={i} style={{
-          color: LOG_COLORS[line.t] || 'var(--mut)',
-          fontStyle: line.t === 'think' ? 'italic' : 'normal',
-          whiteSpace: 'pre-wrap', wordBreak: 'break-word', padding: '1px 0',
-        }}>
-          {line.x}
-        </div>
-      ))}
-      {agent.status === 'running' && (
-        <div style={{ paddingTop: 3, color: sm.color }}>
-          <span style={{ animation: 'cblink 1s step-end infinite' }}>▋</span>{' '}
-          <span style={{ color: 'var(--faint)', fontSize: 11 }}>streaming</span>
-        </div>
-      )}
-    </div>
-  )
+  return <div ref={ref} style={{ flex: 1, minHeight: 0, background: '#0A0B0F', padding: '8px 2px 2px 10px' }} />
 }
 
 function Pane({ agent, index, active, showRing }: { agent: Agent; index: number; active: boolean; showRing: boolean }) {
@@ -193,9 +205,7 @@ function Pane({ agent, index, active, showRing }: { agent: Agent; index: number;
         </button>
       </div>
 
-      <PaneLog agent={agent} />
-
-      {agent.kind === 'real' && <PaneInput agent={agent} />}
+      <TerminalPane agent={agent} active={active} />
 
       {agent.status === 'needs' && (
         <div style={{
@@ -228,10 +238,12 @@ function Pane({ agent, index, active, showRing }: { agent: Agent; index: number;
 
 export function Workspace() {
   const s = useConductor()
-  const { focusTab, toggleSplit } = useActions()
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const { focusTab, toggleSplit, openNewSession, closeNewSession } = useActions()
   const focused = s.focusedIds.slice(0, s.splitCount)
   const byId = new Map(s.agents.map(a => [a.id, a]))
+  const panes = focused
+    .map((id, i) => ({ agent: byId.get(id) || s.agents[0], i }))
+    .filter((p): p is { agent: Agent; i: number } => !!p.agent)
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -274,18 +286,29 @@ export function Workspace() {
         >
           <Icon paths={['M4 5h16v14H4z', 'M12 5v14']} size={17} />
         </button>
-        <button className="icon-btn" title="New agent session" onClick={() => setDialogOpen(true)} style={{ width: 30, height: 30, flexShrink: 0, color: '#9AA3B2' }}>
+        <button className="icon-btn" title="New agent session" onClick={openNewSession} style={{ width: 30, height: 30, flexShrink: 0, color: '#9AA3B2' }}>
           <Icon paths={IC.plus} size={17} stroke={1.8} />
         </button>
       </div>
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0, gap: 1, background: 'var(--line)' }}>
-        {focused.map((id, i) => {
-          const agent = byId.get(id) || s.agents[0]
-          return <Pane key={`${id}-${i}`} agent={agent} index={i} active={i === s.activePane} showRing={s.splitCount > 1} />
-        })}
+        {panes.length === 0 ? (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: '#0A0B0F' }}>
+            <div className="grotesk" style={{ fontSize: 17, fontWeight: 600, color: 'var(--mut)' }}>No sessions yet</div>
+            <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
+              Launch any CLI as a live session — Claude Code, Codex, Aider, a REPL, or a plain shell.
+            </div>
+            <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={openNewSession}>
+              New agent session
+            </button>
+          </div>
+        ) : (
+          panes.map(({ agent, i }) => (
+            <Pane key={`${agent.id}-${i}`} agent={agent} index={i} active={i === s.activePane} showRing={s.splitCount > 1} />
+          ))
+        )}
       </div>
-      {dialogOpen && <NewSessionDialog onClose={() => setDialogOpen(false)} />}
+      {s.newSessionOpen && <NewSessionDialog onClose={closeNewSession} />}
     </div>
   )
 }

@@ -291,6 +291,17 @@ button {
   border-color: #3a4150;
   background: #151922;
 }
+.card-delete {
+  opacity: 0;
+  cursor: pointer;
+}
+.board-card:hover .card-delete {
+  opacity: 1;
+}
+.card-delete:hover {
+  color: var(--red-soft) !important;
+  background: var(--panel3) !important;
+}
 .board-card:active {
   cursor: grabbing;
 }

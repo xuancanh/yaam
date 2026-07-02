@@ -1,6 +1,15 @@
 import { useActions, useConductor } from '../store'
 import { hexToRgba } from '../data'
+import { pickFolder } from '../native'
+import { MASTER_MODELS } from '../master'
+import { SHELLS } from './Workspace'
 import { Switch, ViewHeader } from './ui'
+
+const FIELD_STYLE = {
+  background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 8,
+  padding: '7px 10px', color: 'var(--text)', outline: 'none', fontSize: 12.5,
+  fontFamily: "'JetBrains Mono', monospace",
+} as const
 
 function SectionLabel({ children }: { children: string }) {
   return (
@@ -18,7 +27,12 @@ const ORCHESTRATION: Array<{ id: 'autoRoute' | 'approveDestructive' | 'followMod
 
 export function SettingsView() {
   const s = useConductor()
-  const { toggleSetting, toggleAgentType, toggleIntegration } = useActions()
+  const { toggleSetting, toggleAgentType, toggleIntegration, updateSettings, setAgentTypeCmd } = useActions()
+
+  const browseDefaultCwd = async () => {
+    const dir = await pickFolder(s.settings.defaultCwd || undefined)
+    if (dir) updateSettings({ defaultCwd: dir })
+  }
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -27,6 +41,74 @@ export function SettingsView() {
       </ViewHeader>
       <div style={{ flex: 1, overflowY: 'auto', padding: 22 }}>
         <div style={{ maxWidth: 820 }}>
+
+          <SectionLabel>MASTER BRAIN</SectionLabel>
+          <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>LLM Master</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
+                  Master becomes a Claude model with tools — it routes tasks to sessions, launches and stops them, and builds schedules. Needs an API key.
+                </div>
+              </div>
+              <Switch on={s.settings.masterEnabled} onToggle={() => updateSettings({ masterEnabled: !s.settings.masterEnabled })} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Model</div>
+              </div>
+              <select
+                value={s.settings.masterModel}
+                onChange={e => updateSettings({ masterModel: e.target.value })}
+                style={{ ...FIELD_STYLE, width: 260 }}
+              >
+                {MASTER_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Anthropic API key</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Stored locally in the app data folder.</div>
+              </div>
+              <input
+                type="password"
+                value={s.settings.apiKey}
+                onChange={e => updateSettings({ apiKey: e.target.value })}
+                placeholder="sk-ant-…"
+                style={{ ...FIELD_STYLE, width: 260 }}
+              />
+            </div>
+          </div>
+
+          <SectionLabel>SESSION DEFAULTS</SectionLabel>
+          <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Terminal shell</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Used when launching a plain terminal session.</div>
+              </div>
+              <select
+                value={s.settings.shell}
+                onChange={e => updateSettings({ shell: e.target.value })}
+                style={{ ...FIELD_STYLE, width: 160 }}
+              >
+                {SHELLS.map(sh => <option key={sh} value={sh}>{sh}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Default working directory</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Prefilled in the new-session dialog.</div>
+              </div>
+              <input
+                value={s.settings.defaultCwd}
+                onChange={e => updateSettings({ defaultCwd: e.target.value })}
+                placeholder="none"
+                style={{ ...FIELD_STYLE, width: 220 }}
+              />
+              <button className="open-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={browseDefaultCwd}>Browse…</button>
+            </div>
+          </div>
 
           <SectionLabel>ORCHESTRATION</SectionLabel>
           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
@@ -55,9 +137,15 @@ export function SettingsView() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 13.5, fontWeight: 600 }}>{t.name}</span>
-                    <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{t.model}</span>
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 4, lineHeight: 1.45 }}>{t.desc}</div>
+                  <input
+                    value={t.model}
+                    onChange={e => setAgentTypeCmd(t.id, e.target.value)}
+                    placeholder="launch command"
+                    title="Command used to launch this agent type"
+                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 8, padding: '5px 9px', fontSize: 11.5 }}
+                  />
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
                     <span style={{ fontSize: 11, color: t.enabled ? 'var(--green)' : '#6B7280', fontWeight: 600 }}>
                       {t.enabled ? 'Enabled' : 'Disabled'} · {t.tools} tools

@@ -19,6 +19,11 @@ function NotifPopover() {
         </button>
       </div>
       <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+        {s.notifications.length === 0 && (
+          <div style={{ padding: '24px 14px', textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>
+            Nothing yet — session and schedule events show up here.
+          </div>
+        )}
         {s.notifications.map(n => {
           const color = NOTIF_COLORS[n.kind] || 'var(--mut)'
           return (

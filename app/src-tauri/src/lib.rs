@@ -5,11 +5,14 @@ use sessions::SessionManager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .plugin(tauri_plugin_dialog::init())
     .manage(SessionManager::default())
     .invoke_handler(tauri::generate_handler![
       sessions::spawn_session,
       sessions::write_session,
       sessions::kill_session,
+      sessions::resize_session,
+      sessions::git_diff,
       sessions::save_state,
       sessions::load_state,
     ])
