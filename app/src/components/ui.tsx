@@ -94,11 +94,24 @@ export function EditableName({ name, onRename, fontSize = 13.5 }: {
   }
   return (
     <div
-      title="Double-click to rename"
+      className="editable-name"
+      title="Double-click (or click the pencil) to rename"
       onDoubleClick={e => { e.stopPropagation(); setDraft(name); setEditing(true) }}
-      style={{ fontSize, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+      style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}
     >
-      {name}
+      <span style={{ fontSize, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
+      <button
+        className="rename-pencil"
+        onClick={e => { e.stopPropagation(); setDraft(name); setEditing(true) }}
+        style={{
+          border: 'none', background: 'transparent', color: 'var(--dim)', padding: 1,
+          display: 'flex', alignItems: 'center', flexShrink: 0,
+        }}
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M17 3a2.8 2.8 0 014 4L7.5 20.5 2 22l1.5-5.5z" />
+        </svg>
+      </button>
     </div>
   )
 }

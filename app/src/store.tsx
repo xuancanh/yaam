@@ -529,6 +529,20 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         logEvent('route', sid, `Master → ${agent.name}: ${text.slice(0, 48)}`)
         return `sent to ${agent.name}`
       },
+      renameSession: (sid, name) => {
+        const agent = stateRef.current.agents.find(a => a.id === sid)
+        if (!agent) return `no session with id ${sid}`
+        const trimmed = name.trim()
+        if (!trimmed) return 'name must not be empty'
+        dispatch(s2 => ({
+          ...s2,
+          agents: s2.agents.map(a => a.id === sid
+            ? { ...a, name: trimmed, short: trimmed.slice(0, 2).toUpperCase() }
+            : a),
+        }))
+        logEvent('edit', sid, `Master renamed session to “${trimmed}”`)
+        return `renamed to ${trimmed}`
+      },
       flagNeedsInput: (sid, question) => {
         const agent = stateRef.current.agents.find(a => a.id === sid)
         if (!agent) return `no session with id ${sid}`

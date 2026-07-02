@@ -319,6 +319,18 @@ button {
   cursor: grabbing;
 }
 
+.rename-pencil {
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.editable-name:hover .rename-pencil {
+  opacity: 1;
+}
+.rename-pencil:hover {
+  color: var(--accent) !important;
+}
+
 .review-btn {
   flex: 1;
   background: transparent;

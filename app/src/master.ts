@@ -37,6 +37,7 @@ export interface MasterExec {
   stopSession: (sessionId: string) => string
   readSession: (sessionId: string, lines?: number) => string
   flagNeedsInput: (sessionId: string, question: string) => string
+  renameSession: (sessionId: string, name: string) => string
   createSchedule: (name: string, cron: string, command?: string, cwd?: string) => string
   addTask: (title: string) => string
 }
@@ -77,6 +78,18 @@ const TOOLS = [
         lines: { type: 'number', description: 'how many lines from the end (default 40, max 120)' },
       },
       required: ['session_id'],
+    },
+  },
+  {
+    name: 'rename_session',
+    description: 'Rename a session (its display name in tabs, panes, and lists).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string' },
+        name: { type: 'string' },
+      },
+      required: ['session_id', 'name'],
     },
   },
   {
@@ -126,6 +139,9 @@ const TOOLS = [
 ]
 
 function describeState(s: AppState): string {
+  const roster = s.agents.length
+    ? s.agents.map(a => `${a.name} (id=${a.id}, ${a.status})`).join(' · ')
+    : 'none'
   const sessions = s.agents.map(a => {
     const memOn = (id: string) => a.memory.find(m => m.id === id)?.on !== false
     const perm = (id: string) => {
@@ -148,7 +164,8 @@ function describeState(s: AppState): string {
   return [
     `AGENT TYPES you can launch (use the exact command; a plain terminal is "${s.settings.shell || 'zsh'} -i"):\n${types || '(none enabled)'}`,
     `YOUR TOOL PERMISSIONS (Auto = act freely · Ask first = confirm with the user in chat before doing it · Approval/Off = blocked):\n${toolPerms}`,
-    `SESSIONS (${s.agents.length}):\n${sessions || '(none)'}`,
+    `YOUR SUB-AGENTS — ${s.agents.length} session(s): ${roster}`,
+    `SESSION DETAIL:\n${sessions || '(none)'}`,
     `SCHEDULES:\n${crons || '(none)'}`,
     `BOARD TASKS:\n${tasks || '(none)'}`,
     `RECENT EVENTS:\n${events || '(none)'}`,
@@ -163,7 +180,7 @@ function systemPrompt(s: AppState): string {
 
 Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
 
-Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed.
+Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on).
 
 CURRENT STATE
 ${describeState(s)}`
@@ -309,6 +326,7 @@ function runTool(name: string, input: Record<string, unknown>, exec: MasterExec)
     case 'stop_session': return exec.stopSession(str('session_id'))
     case 'read_session': return exec.readSession(str('session_id'), typeof input.lines === 'number' ? input.lines : undefined)
     case 'flag_needs_input': return exec.flagNeedsInput(str('session_id'), str('question'))
+    case 'rename_session': return exec.renameSession(str('session_id'), str('name'))
     case 'create_schedule': return exec.createSchedule(str('name'), str('cron'), str('command') || undefined, str('cwd') || undefined)
     case 'add_task': return exec.addTask(str('title'))
     default: return `unknown tool ${name}`
