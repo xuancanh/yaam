@@ -107,6 +107,8 @@ export function seedState(): AppState {
     activePane: 0,
     maximizedPane: null,
     focusedIds: [],
+    minimizedIds: [],
+    paneSplits: { row: 0.5, cols: [0.5, 0.5] },
     composer: '',
     panel: null,
     toast: null,

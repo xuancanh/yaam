@@ -28,6 +28,10 @@ export interface ConductorActions {
   addPane: () => void
   closePane: (i: number) => void
   toggleMaximize: (i: number) => void
+  minimizePane: (i: number) => void
+  restoreSession: (id: string) => void
+  setRowSplit: (v: number) => void
+  setColSplit: (row: number, v: number) => void
   renameSession: (id: string, name: string) => void
   resume: (id: string) => void
   openPanel: (id: string, tab?: Panel['tab']) => void
@@ -155,6 +159,14 @@ function typeForCommand(command: string, types: AppState['agentTypes']) {
 
 function spawnAgentProcess(id: string, command: string, cwd?: string): Promise<void> {
   return native.spawnSession(id, command.trim(), cwd || undefined)
+}
+
+// Write text, then Enter as a SEPARATE keypress. TUIs (Claude Code et al.)
+// treat text+\r in one chunk as a paste and insert a newline instead of
+// submitting.
+function sendLineToSession(id: string, text: string) {
+  native.writeSession(id, text).catch(() => {})
+  window.setTimeout(() => { native.writeSession(id, '\r').catch(() => {}) }, 250)
 }
 
 export function ConductorProvider({ children }: { children: ReactNode }) {
@@ -443,6 +455,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             agents: restoredAgents.length ? restoredAgents : s.agents,
             focusedIds: focusedIds.length ? focusedIds : s.focusedIds,
             activePane: Math.min(p.activePane ?? 0, Math.max(0, focusedIds.length - 1)),
+            minimizedIds: (p.minimizedIds ?? []).filter(id => ids.has(id)),
+            paneSplits: p.paneSplits ?? s.paneSplits,
             messages: p.messages?.length ? p.messages : s.messages,
             events: p.events ?? s.events,
             notifications: p.notifications ?? s.notifications,
@@ -485,6 +499,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       agents: state.agents.map(a => ({ ...a, feed: [], log: a.log.slice(-200) })),
       focusedIds: state.focusedIds,
       activePane: state.activePane,
+      minimizedIds: state.minimizedIds,
+      paneSplits: state.paneSplits,
       messages: state.messages.slice(-60),
       events: state.events.slice(0, 60),
       notifications: state.notifications.slice(0, 30),
@@ -494,7 +510,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }, 800)
   }, [
     state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.integrations,
-    state.agents, state.focusedIds, state.activePane, state.messages, state.events, state.notifications,
+    state.agents, state.focusedIds, state.activePane, state.minimizedIds, state.paneSplits,
+    state.messages, state.events, state.notifications,
   ])
 
   // flush the latest state on quit/reload so nothing inside the debounce window is lost
@@ -506,6 +523,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, integrations: st.integrations,
         agents: st.agents.map(a => ({ ...a, feed: [], log: a.log.slice(-200) })),
         focusedIds: st.focusedIds, activePane: st.activePane,
+        minimizedIds: st.minimizedIds, paneSplits: st.paneSplits,
         messages: st.messages.slice(-60), events: st.events.slice(0, 60),
         notifications: st.notifications.slice(0, 30),
       }
@@ -649,7 +667,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         const agent = stateRef.current.agents.find(a => a.id === sid)
         if (!agent) return `no session with id ${sid}`
         armResponseWatch(sid)
-        native.writeSession(sid, `${text}\r`).catch(() => {})
+        sendLineToSession(sid, text)
         dispatch(s => ({
           ...s,
           agents: s.agents.map(a => a.id === sid ? { ...a, log: a.log.concat([{ t: 'you', x: `[master] ${text}` }]) } : a),
@@ -806,12 +824,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     setActivePane: i => dispatch(s => ({ ...s, activePane: i })),
 
     focusTab: id => dispatch(s => {
+      const minimizedIds = s.minimizedIds.filter(x => x !== id)
       const existing = s.focusedIds.indexOf(id)
-      if (existing >= 0) return { ...s, activePane: existing, view: 'workspace', maximizedPane: s.maximizedPane === null ? null : existing }
+      if (existing >= 0) return { ...s, minimizedIds, activePane: existing, view: 'workspace', maximizedPane: s.maximizedPane === null ? null : existing }
       const focusedIds = s.focusedIds.slice()
-      focusedIds[Math.min(s.activePane, Math.max(0, focusedIds.length - 1))] = id
-      if (!focusedIds.length) focusedIds.push(id)
-      return { ...s, focusedIds, view: 'workspace' }
+      if (s.minimizedIds.includes(id) && focusedIds.length < 6) focusedIds.push(id)
+      else if (focusedIds.length) focusedIds[Math.min(s.activePane, focusedIds.length - 1)] = id
+      else focusedIds.push(id)
+      return { ...s, focusedIds, minimizedIds, view: 'workspace' }
     }),
 
     addPane: () => dispatch(s => {
@@ -839,6 +859,36 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       maximizedPane: s.maximizedPane === i ? null : i,
       activePane: i,
     })),
+
+    minimizePane: i => dispatch(s => {
+      const id = s.focusedIds[i]
+      if (!id) return s
+      const focusedIds = s.focusedIds.slice()
+      focusedIds.splice(i, 1)
+      return {
+        ...s,
+        focusedIds,
+        minimizedIds: s.minimizedIds.includes(id) ? s.minimizedIds : s.minimizedIds.concat([id]),
+        activePane: Math.max(0, Math.min(s.activePane, focusedIds.length - 1)),
+        maximizedPane: null,
+      }
+    }),
+
+    restoreSession: id => dispatch(s => {
+      const minimizedIds = s.minimizedIds.filter(x => x !== id)
+      if (s.focusedIds.includes(id)) return { ...s, minimizedIds }
+      const focusedIds = s.focusedIds.length < 6 ? s.focusedIds.concat([id]) : (() => {
+        const f = s.focusedIds.slice(); f[s.activePane] = id; return f
+      })()
+      return { ...s, focusedIds, minimizedIds, activePane: focusedIds.indexOf(id), view: 'workspace', maximizedPane: null }
+    }),
+
+    setRowSplit: v => dispatch(s => ({ ...s, paneSplits: { ...s.paneSplits, row: v } })),
+    setColSplit: (row, v) => dispatch(s => {
+      const cols = s.paneSplits.cols.slice()
+      cols[row] = v
+      return { ...s, paneSplits: { ...s.paneSplits, cols } }
+    }),
 
     renameSession: (id, name) => dispatch(s => ({
       ...s,
@@ -932,7 +982,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       if (!target) return
       const delta = num - (esc.cursorNum ?? 1)
       const moves = delta > 0 ? '\x1b[B'.repeat(delta) : '\x1b[A'.repeat(-delta)
-      native.writeSession(aid, `${moves}\r`).catch(() => {})
+      if (moves) native.writeSession(aid, moves).catch(() => {})
+      window.setTimeout(() => { native.writeSession(aid, '\r').catch(() => {}) }, 200)
       lastFlaggedRef.current.delete(aid)
       dispatch(s => ({
         ...s,
@@ -1094,14 +1145,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           ? { ...a, log: a.log.concat([{ t: 'you', x: text }]) }
           : a),
       }))
-      native.writeSession(id, `${text}\r`).catch(err => {
-        dispatch(s => ({
-          ...s,
-          agents: s.agents.map(a => a.id === id
-            ? { ...a, log: a.log.concat([{ t: 'err', x: String(err) }]) }
-            : a),
-        }))
-      })
+      sendLineToSession(id, text)
     },
 
     stopSession: id => {

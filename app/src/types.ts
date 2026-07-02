@@ -263,6 +263,8 @@ export interface PersistedState {
   agents?: Agent[]
   focusedIds?: string[]
   activePane?: number
+  minimizedIds?: string[]
+  paneSplits?: { row: number; cols: number[] }
   messages?: Message[]
   events?: EventItem[]
   notifications?: Notification[]
@@ -274,6 +276,10 @@ export interface AppState {
   /** index into focusedIds of the pane that is currently maximized, or null */
   maximizedPane: number | null
   focusedIds: string[]
+  /** sessions minimized to the dock strip */
+  minimizedIds: string[]
+  /** divider ratios: row = first row height fraction, cols = first pane width fraction per row */
+  paneSplits: { row: number; cols: number[] }
   composer: string
   panel: Panel | null
   toast: string | null

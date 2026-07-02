@@ -170,8 +170,45 @@ function TerminalPane({ agent, active }: { agent: Agent; active: boolean }) {
   )
 }
 
+function Divider({ dir, onRatio }: { dir: 'col' | 'row'; onRatio: (r: number) => void }) {
+  const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    // walk past display:contents wrappers, which have no box
+    let parent = e.currentTarget.parentElement
+    while (parent) {
+      const r = parent.getBoundingClientRect()
+      if (r.width > 0 && r.height > 0) break
+      parent = parent.parentElement
+    }
+    if (!parent) return
+    const rect = parent.getBoundingClientRect()
+    const move = (ev: MouseEvent) => {
+      const raw = dir === 'col'
+        ? (ev.clientX - rect.left) / rect.width
+        : (ev.clientY - rect.top) / rect.height
+      onRatio(Math.min(0.85, Math.max(0.15, raw)))
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  return (
+    <div
+      className="pane-divider"
+      onMouseDown={onMouseDown}
+      style={{
+        flexShrink: 0,
+        ...(dir === 'col' ? { width: 5, cursor: 'col-resize' } : { height: 5, cursor: 'row-resize' }),
+      }}
+    />
+  )
+}
+
 function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
-  const { setActivePane, closePane, openPanel, resume, approve, deny, stopSession, toggleMaximize, renameSession } = useActions()
+  const { setActivePane, closePane, openPanel, resume, approve, deny, stopSession, toggleMaximize, minimizePane, renameSession } = useActions()
   const memOn = agent.memory.filter(m => m.on)
   const memTotal = memOn.reduce((n, m) => n + memTokens(agent, m.id), 0)
   const toolCount = agent.tools.filter(t => t.on).length
@@ -180,7 +217,7 @@ function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; ind
     <div
       onClick={() => setActivePane(index)}
       style={{
-        minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column',
         background: '#0A0B0F', boxShadow: showRing && active ? `inset 0 0 0 1.5px ${ACCENT}` : 'none',
         position: 'relative',
       }}
@@ -216,6 +253,9 @@ function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; ind
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
           </button>
         )}
+        <button className="icon-btn" title="Minimize to dock" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); minimizePane(index) }}>
+          <Icon paths={['M5 19h14']} size={14} stroke={1.8} />
+        </button>
         <button className="icon-btn" title={maximized ? 'Restore grid' : 'Maximize pane'} style={{ width: 27, height: 27, borderRadius: 7, color: maximized ? 'var(--accent)' : undefined }} onClick={e => { e.stopPropagation(); toggleMaximize(index) }}>
           {maximized
             ? <Icon paths={['M9 4v5H4', 'M15 4v5h5', 'M9 20v-5H4', 'M15 20v-5h5']} size={14} stroke={1.8} />
@@ -259,14 +299,15 @@ function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; ind
 
 export function Workspace() {
   const s = useConductor()
-  const { focusTab, addPane, openNewSession, closeNewSession } = useActions()
+  const { focusTab, addPane, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit } = useActions()
   const focused = s.focusedIds
   const byId = new Map(s.agents.map(a => [a.id, a]))
   let panes = focused
     .map((id, i) => ({ agent: byId.get(id) || s.agents[0], i }))
     .filter((p): p is { agent: Agent; i: number } => !!p.agent)
   if (s.maximizedPane !== null && panes[s.maximizedPane]) panes = [panes[s.maximizedPane]]
-  const cols = panes.length <= 1 ? 1 : panes.length <= 4 ? 2 : 3
+  const rows = panes.length <= 2 ? [panes] : panes.length <= 4 ? [panes.slice(0, 2), panes.slice(2)] : [panes.slice(0, 3), panes.slice(3)]
+  const minimized = s.minimizedIds.map(id => byId.get(id)).filter((a): a is Agent => !!a)
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -314,33 +355,85 @@ export function Workspace() {
         </button>
       </div>
 
-      <div style={{
-        flex: 1, minHeight: 0, display: 'grid', gap: 1, background: 'var(--line)',
-        gridTemplateColumns: `repeat(${cols}, 1fr)`, gridAutoRows: '1fr',
-      }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--line)' }}>
         {panes.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: '#0A0B0F' }}>
-            <div className="grotesk" style={{ fontSize: 17, fontWeight: 600, color: 'var(--mut)' }}>No sessions yet</div>
-            <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
-              Launch any CLI as a live session — Claude Code, Codex, Aider, a REPL, or a plain shell.
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: '#0A0B0F' }}>
+            <div className="grotesk" style={{ fontSize: 17, fontWeight: 600, color: 'var(--mut)' }}>
+              {minimized.length ? 'All sessions minimized' : 'No sessions yet'}
             </div>
-            <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={openNewSession}>
-              New agent session
-            </button>
+            {!minimized.length && (
+              <>
+                <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
+                  Launch any CLI as a live session — Claude Code, Codex, Aider, a REPL, or a plain shell.
+                </div>
+                <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={openNewSession}>
+                  New agent session
+                </button>
+              </>
+            )}
           </div>
         ) : (
-          panes.map(({ agent, i }) => (
-            <Pane
-              key={`${agent.id}-${i}`}
-              agent={agent}
-              index={i}
-              active={i === s.activePane}
-              showRing={focused.length > 1}
-              maximized={s.maximizedPane === i}
-            />
+          rows.map((row, ri) => (
+            <div key={ri} style={{ display: 'contents' }}>
+              {ri > 0 && <Divider dir="row" onRatio={setRowSplit} />}
+              <div style={{
+                display: 'flex', minHeight: 0,
+                flexBasis: rows.length === 1 ? '100%' : `${(ri === 0 ? s.paneSplits.row : 1 - s.paneSplits.row) * 100}%`,
+                flexGrow: 0, flexShrink: 1,
+              }}>
+                {row.map(({ agent, i }, ci) => {
+                  const ratio = s.paneSplits.cols[ri] ?? 0.5
+                  const width = row.length === 1 ? '100%'
+                    : row.length === 2 ? `${(ci === 0 ? ratio : 1 - ratio) * 100}%`
+                    : `${100 / row.length}%`
+                  return (
+                    <div key={`${agent.id}-${i}`} style={{ display: 'contents' }}>
+                      {ci > 0 && row.length === 2 && <Divider dir="col" onRatio={r => setColSplit(ri, r)} />}
+                      {ci > 0 && row.length !== 2 && <div style={{ width: 1, flexShrink: 0 }} />}
+                      <div style={{ width, minWidth: 0, display: 'flex' }}>
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                          <Pane
+                            agent={agent}
+                            index={i}
+                            active={i === s.activePane}
+                            showRing={focused.length > 1}
+                            maximized={s.maximizedPane === i}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           ))
         )}
       </div>
+      {minimized.length > 0 && (
+        <div style={{
+          flexShrink: 0, background: 'var(--panel)', borderTop: '1px solid var(--line)',
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', overflowX: 'auto',
+        }}>
+          <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)', flexShrink: 0 }}>DOCK</span>
+          {minimized.map(a => {
+            const sm = STATUS_META[a.status] || STATUS_META.idle
+            return (
+              <button
+                key={a.id}
+                className="dock-chip"
+                title="Restore to grid"
+                onClick={() => restoreSession(a.id)}
+              >
+                <span style={{
+                  width: 7, height: 7, borderRadius: '50%', background: sm.color, flexShrink: 0,
+                  animation: a.status === 'running' || a.status === 'needs' ? 'cpulse 1.6s ease-in-out infinite' : 'none',
+                }} />
+                <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>{a.name}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
       {s.newSessionOpen && <NewSessionDialog onClose={closeNewSession} />}
     </div>
   )

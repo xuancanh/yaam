@@ -331,6 +331,31 @@ button {
   color: var(--accent) !important;
 }
 
+.pane-divider {
+  background: var(--line);
+  transition: background 0.12s;
+  z-index: 5;
+}
+.pane-divider:hover {
+  background: var(--accent);
+}
+
+.dock-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--panel2);
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  padding: 5px 11px;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.dock-chip:hover {
+  border-color: rgba(245, 196, 81, 0.5);
+  background: var(--panel3);
+}
+
 .option-btn {
   display: flex;
   align-items: center;
