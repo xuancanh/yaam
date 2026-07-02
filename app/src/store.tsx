@@ -176,6 +176,19 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
+  // After a message is routed into a session, watch its output; once it goes
+  // quiet, hand the response back to Master as an event (agents → Master leg).
+  const watchRef = useRef<Map<string, { since: number; timer?: number }>>(new Map())
+
+  const armResponseWatch = useCallback((id: string) => {
+    const st = stateRef.current
+    if (!(st.settings.masterEnabled && st.settings.apiKey && st.settings.followMode)) return
+    const agent = st.agents.find(a => a.id === id)
+    const existing = watchRef.current.get(id)
+    if (existing?.timer) window.clearTimeout(existing.timer)
+    watchRef.current.set(id, { since: agent ? agent.log.length : 0 })
+  }, [])
+
   // ANSI-stripped tail of each terminal, kept for Master's context, overview
   // cards, and rough usage accounting (the terminal itself renders raw bytes)
   const appendTail = useCallback((id: string, line: string) => {
@@ -188,6 +201,20 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return { ...a, log, used: a.used + 0.01, cost: a.cost + 0.0004 }
       }),
     }))
+    const watch = watchRef.current.get(id)
+    if (watch) {
+      if (watch.timer) window.clearTimeout(watch.timer)
+      watch.timer = window.setTimeout(() => {
+        watchRef.current.delete(id)
+        const agent = stateRef.current.agents.find(a => a.id === id)
+        if (!agent) return
+        const lines = agent.log.slice(watch.since).map(l => l.x).filter(Boolean).slice(-30)
+        if (!lines.length) return
+        masterEventRef.current(
+          `[event] session "${agent.name}" (${id}) responded:\n${lines.join('\n')}\n\nBriefly relay the outcome to the user; take further action only if needed.`,
+        )
+      }, 2500)
+    }
   }, [])
 
   useEffect(() => {
@@ -342,6 +369,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       sendToSession: (sid, text) => {
         const agent = stateRef.current.agents.find(a => a.id === sid)
         if (!agent) return `no session with id ${sid}`
+        armResponseWatch(sid)
         native.writeSession(sid, `${text}\r`).catch(() => {})
         dispatch(s => ({
           ...s,
@@ -404,7 +432,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     masterBusyRef.current = false
     dispatch(s => ({ ...s, masterBusy: false }))
-  }, [launchSession, logEvent])
+  }, [armResponseWatch, launchSession, logEvent])
 
   masterEventRef.current = note => { void runMaster(note) }
 
@@ -451,6 +479,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     if (needsRespawn && target.cmd) {
       spawnAgentProcess(target.id, target.cmd, target.cwd).catch(() => {})
     }
+    armResponseWatch(target.id)
     native.writeSession(target.id, `${text}\r`).catch(() => {})
 
     dispatch(s => {
@@ -471,7 +500,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     })
     flash(`Routed to ${target.name}`)
     logEvent('route', target.id, `Routed “${text.slice(0, 48)}” to ${target.name}`)
-  }, [flash, logEvent])
+  }, [armResponseWatch, flash, logEvent])
 
   const doBuildUI = useCallback((text: string) => {
     const t = text.toLowerCase()
@@ -775,6 +804,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     },
 
     sendInput: (id, text) => {
+      armResponseWatch(id)
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
@@ -801,7 +831,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [doAsk, doBuild, doRoute, flash, later, launchSession, logEvent, runMaster])
+  }), [armResponseWatch, doAsk, doBuild, doRoute, flash, later, launchSession, logEvent, runMaster])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {
