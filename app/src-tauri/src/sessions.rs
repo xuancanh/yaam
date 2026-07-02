@@ -160,6 +160,70 @@ pub fn kill_session(state: State<'_, SessionManager>, id: String) -> Result<(), 
     Ok(())
 }
 
+fn newest_file_since(dir: &std::path::Path, since_ms: u64, recurse: bool) -> Option<(u64, std::path::PathBuf)> {
+    let mut best: Option<(u64, std::path::PathBuf)> = None;
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if recurse {
+                if let Some(cand) = newest_file_since(&path, since_ms, true) {
+                    if best.as_ref().map(|b| cand.0 > b.0).unwrap_or(true) {
+                        best = Some(cand);
+                    }
+                }
+            }
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let mtime = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)?;
+        if mtime < since_ms {
+            continue;
+        }
+        if best.as_ref().map(|b| mtime > b.0).unwrap_or(true) {
+            best = Some((mtime, path));
+        }
+    }
+    best
+}
+
+/// Detect the session id a CLI created after `since_ms`, so it can be resumed
+/// later (claude --resume <id>, codex resume <id>).
+#[tauri::command]
+pub fn detect_cli_session(kind: String, cwd: Option<String>, since_ms: f64) -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let since = since_ms as u64;
+    match kind.as_str() {
+        "claude" => {
+            // sessions live in ~/.claude/projects/<cwd with / and . as ->/<id>.jsonl
+            let dir = expand_tilde(&cwd.filter(|c| !c.is_empty()).unwrap_or_else(|| home.clone()));
+            let encoded = dir.replace(['/', '.'], "-");
+            let project = std::path::PathBuf::from(&home).join(".claude/projects").join(encoded);
+            let (_, path) = newest_file_since(&project, since, false)?;
+            path.file_stem().map(|s| s.to_string_lossy().to_string())
+        }
+        "codex" => {
+            // ~/.codex/sessions/YYYY/MM/DD/rollout-...-<uuid>.jsonl
+            let dir = std::path::PathBuf::from(&home).join(".codex/sessions");
+            let (_, path) = newest_file_since(&dir, since, true)?;
+            let stem = path.file_stem()?.to_string_lossy().to_string();
+            if stem.len() >= 36 {
+                Some(stem[stem.len() - 36..].to_string())
+            } else {
+                Some(stem)
+            }
+        }
+        _ => None,
+    }
+}
+
 #[tauri::command]
 pub fn live_sessions(state: State<'_, SessionManager>) -> Vec<String> {
     state.sessions.lock().unwrap().keys().cloned().collect()

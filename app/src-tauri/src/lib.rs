@@ -14,6 +14,7 @@ pub fn run() {
       sessions::kill_session,
       sessions::resize_session,
       sessions::live_sessions,
+      sessions::detect_cli_session,
       sessions::git_diff,
       sessions::save_state,
       sessions::load_state,

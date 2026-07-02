@@ -148,6 +148,11 @@ function extractOptions(lines: string[]): { options: EscOption[]; cursorNum: num
   return options.length >= 2 ? { options, cursorNum } : { options: [], cursorNum: 1 }
 }
 
+function typeForCommand(command: string, types: AppState['agentTypes']) {
+  const bin = command.trim().split(/\s+/)[0]
+  return types.find(t => t.model.trim().split(/\s+/)[0] === bin)
+}
+
 function spawnAgentProcess(id: string, command: string, cwd?: string): Promise<void> {
   return native.spawnSession(id, command.trim(), cwd || undefined)
 }
@@ -431,7 +436,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             crons: p.crons ?? s.crons,
             settings: { ...s.settings, ...(p.settings || {}) },
             toolsCatalog: p.toolsCatalog?.some(t => t.id === 'launch_session') ? p.toolsCatalog : s.toolsCatalog,
-            agentTypes: p.agentTypes ?? s.agentTypes,
+            agentTypes: p.agentTypes
+              ? s.agentTypes.map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, probe: t.probe }))
+              : s.agentTypes,
             integrations: p.integrations ?? s.integrations,
             agents: restoredAgents.length ? restoredAgents : s.agents,
             focusedIds: focusedIds.length ? focusedIds : s.focusedIds,
@@ -541,6 +548,27 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
     })
     getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id))
+    // capture the CLI's own session id so this session can be resumed later
+    const probeType = typeForCommand(trimmed, stateRef.current.agentTypes)
+    if (probeType?.probe && native.isTauri && !/--resume|resume /.test(trimmed)) {
+      const spawnedAt = Date.now()
+      const tryDetect = () => {
+        const current = stateRef.current.agents.find(a => a.id === id)
+        if (!current || current.cliSessionId) return
+        native.detectCliSession(probeType.probe!, dir || undefined, spawnedAt).then(sid => {
+          if (!sid) return
+          dispatch(s2 => ({
+            ...s2,
+            agents: s2.agents.map(a => a.id === id
+              ? { ...a, cliSessionId: sid, log: a.log.concat([{ t: 'sys', x: `captured ${probeType.name} session · ${sid}` }]) }
+              : a),
+          }))
+        }).catch(() => {})
+      }
+      later(7000, tryDetect)
+      later(25000, tryDetect)
+      later(60000, tryDetect)
+    }
     native.spawnSession(id, trimmed, dir || undefined).catch(err => {
       dispatch(s => ({
         ...s,
@@ -821,8 +849,23 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     resume: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
+      let resumeNote = 'session resumed'
       if (agent?.kind === 'real' && agent.cmd && agent.status !== 'running') {
-        spawnAgentProcess(id, agent.cmd, agent.cwd).catch(() => {})
+        // prefer the CLI's own resume flow so the conversation continues
+        let cmd = agent.cmd
+        const type = typeForCommand(agent.cmd, stateRef.current.agentTypes)
+        if (type?.resumeCmd) {
+          if (type.resumeCmd.includes('{id}')) {
+            if (agent.cliSessionId) {
+              cmd = type.resumeCmd.replace('{id}', agent.cliSessionId)
+              resumeNote = `resuming ${type.name} session ${agent.cliSessionId}`
+            }
+          } else {
+            cmd = type.resumeCmd
+            resumeNote = `resuming via · ${cmd}`
+          }
+        }
+        spawnAgentProcess(id, cmd, agent.cwd).catch(() => {})
       }
       dispatch(s => {
         const focusedIds = s.focusedIds.slice()
@@ -830,7 +873,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return {
           ...s,
           agents: s.agents.map(a => a.id === id
-            ? { ...a, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: 'session resumed' }]) }
+            ? { ...a, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]) }
             : a),
           focusedIds, view: 'workspace',
         }

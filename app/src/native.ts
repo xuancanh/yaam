@@ -32,6 +32,11 @@ export async function resizeSession(id: string, rows: number, cols: number): Pro
   await invoke('resize_session', { id, rows, cols }).catch(() => {})
 }
 
+export async function detectCliSession(kind: string, cwd: string | undefined, sinceMs: number): Promise<string | null> {
+  if (!isTauri) return null
+  return await invoke<string | null>('detect_cli_session', { kind, cwd: cwd || null, sinceMs })
+}
+
 export async function liveSessions(): Promise<string[]> {
   if (!isTauri) return []
   return await invoke<string[]>('live_sessions')

@@ -163,7 +163,7 @@ function describeState(s: AppState): string {
       const t = a.tools.find(x => x.id === id)
       return t ? (t.on ? t.perm : 'Off') : 'Auto'
     }
-    const meta = memOn('meta') ? ` cmd=${a.cmd || '-'} cwd=${a.cwd || '-'}` : ''
+    const meta = memOn('meta') ? ` cmd=${a.cmd || '-'} cwd=${a.cwd || '-'}${a.cliSessionId ? ` cli_session=${a.cliSessionId}` : ''}` : ''
     const tracked = [
       a.task ? `task="${a.task}"` : '',
       a.summary ? `summary="${a.summary}"` : '',
