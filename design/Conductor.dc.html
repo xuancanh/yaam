@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:#08090C;font-family:'IBM Plex Sans',system-ui,sans-serif}
+  ::selection{background:rgba(245,196,81,.28)}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#2C313B;border-radius:6px}
+  ::-webkit-scrollbar-thumb:hover{background:#3a4150}
+  ::-webkit-scrollbar-track{background:transparent}
+  @keyframes cpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.78)}}
+  @keyframes cblink{0%,49%{opacity:1}50%,100%{opacity:0}}
+  @keyframes cfade{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+  @keyframes cslide{from{transform:translateX(26px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes cattn{0%,100%{box-shadow:0 0 0 0 rgba(255,176,32,0)}50%{box-shadow:0 0 0 3px rgba(255,176,32,.16)}}
+  @keyframes cring{0%{box-shadow:0 0 0 0 rgba(61,220,151,.35)}70%,100%{box-shadow:0 0 0 7px rgba(61,220,151,0)}}
+</style>
+</helmet>
+
+<div style="height:100vh;width:100vw;display:flex;flex-direction:column;background:#08090C;color:#E7E9F0;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;overflow:hidden;">
+
+  <!-- TITLE BAR -->
+  <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:14px;padding:0 14px;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div style="width:12px;height:12px;border-radius:50%;background:#FF5F57;"></div>
+      <div style="width:12px;height:12px;border-radius:50%;background:#FEBC2E;"></div>
+      <div style="width:12px;height:12px;border-radius:50%;background:#28C840;"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:9px;margin-left:6px;">
+      <div style="width:24px;height:24px;border-radius:7px;background:{{ accentGrad }};display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px {{ accentGlow }};">
+        <div style="width:3px;height:12px;border-radius:2px;background:#0D0F14;transform:rotate(-38deg);"></div>
+      </div>
+      <span style="font-family:'Space Grotesk';font-weight:600;font-size:15px;letter-spacing:.2px;">Conductor</span>
+      <span style="font-family:'JetBrains Mono';font-size:10px;color:#626B79;border:1px solid #23272F;border-radius:5px;padding:2px 6px;">v0.9</span>
+    </div>
+    <button onClick="{{ openPalette }}" style="margin:0 auto;display:flex;align-items:center;gap:10px;background:#12151C;border:1px solid #23272F;border-radius:9px;padding:6px 14px;cursor:pointer;color:#8B93A1;font-family:'JetBrains Mono';font-size:12px;" style-hover="border-color:#2C313B;color:#9AA3B2;">
+      <span style="color:#626B79;">⌘K</span>
+      <span>Route a task · spin up an agent · build a tool</span>
+    </button>
+    <sc-if value="{{ hasNeeds }}" hint-placeholder-val="{{ true }}">
+      <button onClick="{{ gotoNeeds }}" style="display:flex;align-items:center;gap:7px;background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.4);border-radius:8px;padding:5px 11px;cursor:pointer;color:#FFB020;font-size:12px;font-weight:500;" style-hover="background:rgba(255,176,32,.2);">
+        <span style="width:7px;height:7px;border-radius:50%;background:#FFB020;animation:cpulse 1.6s ease-in-out infinite;"></span>
+        {{ needsCount }} needs action
+      </button>
+    </sc-if>
+    <div style="position:relative;">
+      <button onClick="{{ toggleNotif }}" style="width:30px;height:30px;border-radius:8px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;" style-hover="background:#171B23;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4a5 5 0 015 5v4l1.8 2.6H5.2L7 13V9a5 5 0 015-5z"></path><path d="M10 20a2 2 0 004 0"></path></svg>
+        <sc-if value="{{ hasUnread }}" hint-placeholder-val="{{ true }}">
+          <span style="position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:8px;background:#FF5C5C;color:#fff;font-size:10px;font-weight:700;font-family:'IBM Plex Sans';display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid #0D0F14;">{{ unreadLabel }}</span>
+        </sc-if>
+      </button>
+      <sc-if value="{{ notifOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:38px;right:0;width:340px;background:#12151C;border:1px solid #2C313B;border-radius:13px;box-shadow:0 18px 50px rgba(0,0,0,.55);z-index:45;overflow:hidden;">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #23272F;">
+            <span style="font-family:'Space Grotesk';font-weight:600;font-size:13px;">Notifications</span>
+            <button onClick="{{ readAllNotif }}" style="background:transparent;border:none;color:{{ accent }};font-size:11.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';">Mark all read</button>
+          </div>
+          <div style="max-height:340px;overflow-y:auto;">
+            <sc-for list="{{ notifList }}" as="n" hint-placeholder-count="3">
+              <button onClick="{{ n.onClick }}" style="width:100%;text-align:left;display:flex;gap:10px;padding:12px 14px;background:{{ n.bg }};border:none;border-bottom:1px solid #1a1e26;cursor:pointer;" style-hover="background:#171B23;">
+                <span style="width:8px;height:8px;border-radius:50%;background:{{ n.color }};margin-top:5px;flex-shrink:0;opacity:{{ n.unreadOpacity }};"></span>
+                <div style="min-width:0;">
+                  <div style="font-size:12.5px;font-weight:600;color:#E7E9F0;line-height:1.35;">{{ n.title }}</div>
+                  <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;line-height:1.4;">{{ n.detail }}</div>
+                  <div style="font-size:10.5px;color:#626B79;margin-top:3px;font-family:'JetBrains Mono';">{{ n.time }}</div>
+                </div>
+              </button>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+    <div style="width:30px;height:30px;border-radius:8px;background:linear-gradient(140deg,#3a4150,#20242d);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#C7CCD6;font-family:'Space Grotesk';border:1px solid #2C313B;">KP</div>
+  </div>
+
+  <!-- BODY -->
+  <div style="flex:1;display:flex;min-height:0;">
+
+    <!-- ICON RAIL -->
+    <div style="width:62px;flex-shrink:0;background:#0D0F14;border-right:1px solid #23272F;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;">
+      <div style="width:34px;height:34px;border-radius:10px;background:{{ accentGrad }};display:flex;align-items:center;justify-content:center;margin-bottom:8px;box-shadow:0 0 16px {{ accentGlow }};">
+        <div style="width:3px;height:15px;border-radius:2px;background:#0D0F14;transform:rotate(-38deg);"></div>
+      </div>
+      <sc-for list="{{ nav }}" as="n" hint-placeholder-count="4">
+        <button onClick="{{ n.onClick }}" title="{{ n.label }}" style="width:48px;height:46px;border:none;background:{{ n.bg }};border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;color:{{ n.iconColor }};" style-hover="background:#171B23;">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><sc-for list="{{ n.paths }}" as="d" hint-placeholder-count="2"><path d="{{ d }}"></path></sc-for></svg>
+          <span style="font-size:9px;font-weight:500;letter-spacing:.2px;">{{ n.label }}</span>
+        </button>
+      </sc-for>
+      <div style="flex:1;"></div>
+      <button onClick="{{ openSettings }}" title="Settings" style="width:44px;height:40px;border:none;background:transparent;border-radius:11px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:{{ settingsIconColor }};" style-hover="background:#171B23;color:#9AA3B2;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9a3 3 0 100 6 3 3 0 000-6z"></path><path d="M19 12a7 7 0 00-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 00-2-1.2L16.2 3H7.8l-.4 2.7a7 7 0 00-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 003 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 002 1.2L7.8 21h8.4l.4-2.7a7 7 0 002-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"></path></svg>
+      </button>
+    </div>
+
+    <!-- MASTER CHAT SIDEBAR -->
+    <div style="width:392px;flex-shrink:0;background:#0D0F14;border-right:1px solid #23272F;display:flex;flex-direction:column;min-height:0;position:relative;">
+      <div style="position:absolute;top:0;left:0;bottom:0;width:2px;background:linear-gradient(180deg,{{ accentGlow }},transparent 60%);"></div>
+      <div style="padding:15px 17px;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:11px;">
+        <div style="width:32px;height:32px;border-radius:9px;background:{{ accentGrad }};display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 16px {{ accentGlow }};">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0D0F14" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18V7"></path><path d="M12 18V4"></path><path d="M19 18v-8"></path></svg>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-family:'Space Grotesk';font-weight:600;font-size:15px;">Master</span>
+            <span style="font-size:10px;color:#0D0F14;background:{{ accent }};border-radius:5px;padding:1px 6px;font-weight:600;font-family:'JetBrains Mono';">ORCHESTRATOR</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:2px;">
+            <span style="width:6px;height:6px;border-radius:50%;background:#3DDC97;animation:cpulse 1.7s ease-in-out infinite;"></span>
+            <span style="font-size:11.5px;color:#8B93A1;">{{ masterActivity }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div data-auto="1" style="flex:1;overflow-y:auto;padding:16px 15px;display:flex;flex-direction:column;gap:15px;">
+        <sc-for list="{{ messages }}" as="msg" hint-placeholder-count="4">
+
+          <sc-if value="{{ msg.isYou }}" hint-placeholder-val="{{ false }}">
+            <div style="align-self:flex-end;max-width:90%;background:#171B23;border:1px solid #2C313B;border-radius:12px 12px 3px 12px;padding:9px 12px;font-size:13px;line-height:1.5;color:#E7E9F0;">{{ msg.text }}</div>
+          </sc-if>
+
+          <sc-if value="{{ msg.isMaster }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;gap:10px;">
+              <div style="width:24px;height:24px;border-radius:7px;background:{{ accentGrad }};flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-top:1px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0D0F14" stroke-width="2.2" stroke-linecap="round"><path d="M5 18V7"></path><path d="M12 18V4"></path><path d="M19 18v-8"></path></svg>
+              </div>
+              <div style="flex:1;min-width:0;">
+
+                <sc-if value="{{ msg.isText }}" hint-placeholder-val="{{ true }}">
+                  <div style="font-size:13px;line-height:1.55;color:#C7CCD6;padding-top:3px;">{{ msg.text }}</div>
+                </sc-if>
+
+                <sc-if value="{{ msg.isRoute }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:13px;line-height:1.5;color:#C7CCD6;margin-bottom:9px;">{{ msg.text }}</div>
+                  <div style="background:#12151C;border:1px solid #23272F;border-radius:12px;overflow:hidden;">
+                    <div style="display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid #23272F;font-size:10.5px;font-weight:600;letter-spacing:.4px;color:{{ accent }};font-family:'JetBrains Mono';">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9"></path><path d="M4 18h6"></path><path d="M13 6l3 3-3 3"></path><path d="M20 6v12"></path></svg>
+                      AUTO-ROUTED
+                    </div>
+                    <sc-for list="{{ msg.routes }}" as="r" hint-placeholder-count="1">
+                      <div style="display:flex;align-items:center;gap:9px;padding:10px 12px;">
+                        <span style="width:9px;height:9px;border-radius:50%;background:{{ r.color }};flex-shrink:0;"></span>
+                        <div style="flex:1;min-width:0;">
+                          <div style="font-size:12.5px;font-weight:600;color:#E7E9F0;">{{ r.name }}</div>
+                          <div style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;margin-top:1px;">{{ r.repo }}</div>
+                        </div>
+                        <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:{{ r.color }};background:{{ r.soft }};border-radius:6px;padding:3px 7px;">{{ r.action }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ msg.isEscalate }}" hint-placeholder-val="{{ false }}">
+                  <div style="background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.35);border-left:3px solid #FFB020;border-radius:10px;padding:12px;animation:cattn 2.6s ease-in-out infinite;">
+                    <div style="display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;letter-spacing:.4px;color:#FFB020;font-family:'JetBrains Mono';margin-bottom:8px;">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"></path><path d="M12 10v4"></path><path d="M12 17.5v.1"></path></svg>
+                      NEEDS YOUR DECISION
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+                      <span style="width:9px;height:9px;border-radius:50%;background:{{ msg.esc.color }};"></span>
+                      <span style="font-size:13px;font-weight:600;">{{ msg.esc.name }}</span>
+                      <span style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;">{{ msg.esc.repo }}</span>
+                    </div>
+                    <div style="font-size:12.5px;line-height:1.5;color:#C7CCD6;margin-bottom:11px;">{{ msg.esc.reason }}</div>
+                    <sc-if value="{{ msg.escOpen }}" hint-placeholder-val="{{ true }}">
+                      <div style="display:flex;gap:8px;">
+                        <button onClick="{{ msg.onApprove }}" style="flex:1;background:#3DDC97;color:#04240F;border:none;border-radius:8px;padding:8px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="filter:brightness(1.08);">Approve &amp; resume</button>
+                        <button onClick="{{ msg.onDeny }}" style="flex:1;background:transparent;color:#9AA3B2;border:1px solid #2C313B;border-radius:8px;padding:8px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#FF5C5C;color:#FF7A7A;">Deny</button>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ msg.escResolved }}" hint-placeholder-val="{{ false }}">
+                      <div style="font-size:12px;font-weight:600;color:{{ msg.decisionColor }};display:flex;align-items:center;gap:6px;">
+                        <span style="width:7px;height:7px;border-radius:50%;background:{{ msg.decisionColor }};"></span>{{ msg.approvedTxt }}
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ msg.isBuild }}" hint-placeholder-val="{{ false }}">
+                  <div style="background:#12151C;border:1px solid #23272F;border-radius:12px;padding:12px;">
+                    <div style="display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;letter-spacing:.4px;color:{{ accent }};font-family:'JetBrains Mono';margin-bottom:8px;">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3l-1 5 5-1-8 13 1-6-5 1z"></path></svg>
+                      BUILT A {{ msg.build.kindLabel }}
+                    </div>
+                    <div style="font-family:'JetBrains Mono';font-size:13px;font-weight:600;color:#E7E9F0;">{{ msg.build.title }}</div>
+                    <div style="font-size:12px;color:#8B93A1;margin-top:3px;line-height:1.45;">{{ msg.build.detail }}</div>
+                    <button onClick="{{ msg.onView }}" style="margin-top:10px;background:transparent;border:1px solid #2C313B;border-radius:7px;padding:5px 11px;font-size:11.5px;font-weight:600;color:{{ accent }};cursor:pointer;font-family:'IBM Plex Sans';" style-hover="background:#171B23;">View →</button>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ msg.isBuildUI }}" hint-placeholder-val="{{ false }}">
+                  <div style="background:#12151C;border:1px solid #23272F;border-radius:12px;padding:13px;">
+                    <div style="display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;letter-spacing:.4px;color:{{ accent }};font-family:'JetBrains Mono';margin-bottom:11px;">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3l-1 5 5-1-8 13 1-6-5 1z"></path></svg>
+                      SELF-BUILDING · {{ msg.build.title }}
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                      <sc-for list="{{ msg.build.steps }}" as="step" hint-placeholder-count="4">
+                        <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#C7CCD6;">
+                          <span style="width:15px;height:15px;border-radius:50%;border:1.5px solid {{ step.color }};display:flex;align-items:center;justify-content:center;flex-shrink:0;color:{{ step.color }};">
+                            <sc-if value="{{ step.done }}" hint-placeholder-val="{{ false }}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 6"></path></svg></sc-if>
+                            <sc-if value="{{ step.active }}" hint-placeholder-val="{{ false }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ step.color }};animation:cpulse 1s ease-in-out infinite;"></span></sc-if>
+                          </span>
+                          {{ step.label }}
+                        </div>
+                      </sc-for>
+                    </div>
+                    <sc-if value="{{ msg.build.done }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:12px;background:#0A0B0F;border:1px solid #23272F;border-radius:10px;padding:12px;">
+                        <div style="font-size:10.5px;font-weight:600;letter-spacing:.4px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:9px;">{{ msg.build.title }}</div>
+                        <div style="display:flex;align-items:flex-end;gap:5px;height:56px;">
+                          <sc-for list="{{ msg.build.bars }}" as="bar" hint-placeholder-count="7">
+                            <div style="flex:1;height:{{ bar.h }};background:{{ accent }};border-radius:3px 3px 0 0;opacity:.85;"></div>
+                          </sc-for>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:11px;color:#3DDC97;font-weight:600;">
+                          <span style="width:6px;height:6px;border-radius:50%;background:#3DDC97;"></span>Mounted · live in your workspace
+                        </div>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-if>
+
+              </div>
+            </div>
+          </sc-if>
+
+        </sc-for>
+      </div>
+
+      <!-- COMPOSER -->
+      <div style="border-top:1px solid #23272F;padding:12px 14px;">
+        <div style="background:#12151C;border:1px solid #2C313B;border-radius:12px;padding:10px 12px;">
+          <textarea data-composer="1" value="{{ composer }}" onChange="{{ onComposer }}" onKeyDown="{{ onKey }}" placeholder="{{ composerPlaceholder }}" rows="2" style="width:100%;background:transparent;border:none;outline:none;resize:none;color:#E7E9F0;font-family:'IBM Plex Sans';font-size:13.5px;line-height:1.5;"></textarea>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+            <span style="font-size:10.5px;color:#626B79;font-family:'JetBrains Mono';">{{ sendHint }}</span>
+            <button onClick="{{ send }}" style="width:32px;height:32px;border-radius:9px;border:none;background:{{ accent }};color:#1a1400;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="filter:brightness(1.1);">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V5"></path><path d="M6 11l6-6 6 6"></path></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN AREA -->
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#08090C;">
+
+      <!-- WORKSPACE VIEW -->
+      <sc-if value="{{ isWorkspace }}" hint-placeholder-val="{{ true }}">
+        <div data-screen-label="Workspace" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:6px;padding:0 10px;overflow-x:auto;">
+            <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+              <button onClick="{{ t.onFocus }}" style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:0;border:none;border-top:2px solid {{ t.topBorder }};background:{{ t.bg }};cursor:pointer;flex-shrink:0;height:100%;" style-hover="background:#12151C;">
+                <span style="width:8px;height:8px;border-radius:50%;background:{{ t.statusColor }};animation:{{ t.dotAnim }};flex-shrink:0;"></span>
+                <span style="font-size:12.5px;font-weight:600;color:{{ t.nameColor }};white-space:nowrap;">{{ t.name }}</span>
+                <span style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;white-space:nowrap;">{{ t.repo }}</span>
+              </button>
+            </sc-for>
+            <div style="flex:1;"></div>
+            <button onClick="{{ toggleSplit }}" title="Toggle split view" style="width:30px;height:30px;border-radius:8px;border:1px solid #23272F;background:{{ splitBtnBg }};color:{{ splitBtnColor }};display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-hover="background:#171B23;">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="1.5"></rect><path d="M12 5v14"></path></svg>
+            </button>
+            <button onClick="{{ newSession }}" title="New agent session" style="width:30px;height:30px;border-radius:8px;border:1px solid #23272F;background:transparent;color:#9AA3B2;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-hover="background:#171B23;color:#E7E9F0;">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+            </button>
+          </div>
+
+          <div style="flex:1;display:flex;min-height:0;gap:1px;background:#23272F;">
+            <sc-for list="{{ panes }}" as="p" hint-placeholder-count="2">
+              <div onClick="{{ p.onActivate }}" style="flex:1;min-width:0;display:flex;flex-direction:column;background:#0A0B0F;box-shadow:{{ p.ring }};position:relative;">
+                <div style="height:42px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:9px;padding:0 11px;">
+                  <div style="width:24px;height:24px;border-radius:6px;background:{{ p.soft }};border:1px solid {{ p.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:10px;font-weight:600;color:{{ p.color }};flex-shrink:0;">{{ p.initials }}</div>
+                  <div style="min-width:0;overflow:hidden;">
+                    <div style="font-size:12.5px;font-weight:600;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.name }}</div>
+                    <div style="font-family:'JetBrains Mono';font-size:10px;color:#626B79;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.path }}</div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;background:#12151C;border:1px solid #23272F;border-radius:20px;padding:3px 9px;margin-left:6px;">
+                    <span style="width:6px;height:6px;border-radius:50%;background:{{ p.statusColor }};animation:{{ p.dotAnim }};"></span>
+                    <span style="font-size:10.5px;font-weight:600;color:{{ p.statusColor }};">{{ p.statusLabel }}</span>
+                  </div>
+                  <div style="flex:1;"></div>
+                  <button onClick="{{ p.onMem }}" title="Memory &amp; context" style="width:27px;height:27px;border-radius:7px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#171B23;color:#E7E9F0;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"></rect><path d="M4 10h3M4 14h3M17 10h3M17 14h3M10 4v3M14 4v3M10 17v3M14 17v3"></path></svg>
+                  </button>
+                  <button onClick="{{ p.onTools }}" title="Tools &amp; permissions" style="width:27px;height:27px;border-radius:7px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#171B23;color:#E7E9F0;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16M12 4v16M18 4v16"></path><circle cx="6" cy="9" r="2"></circle><circle cx="12" cy="15" r="2"></circle><circle cx="18" cy="7" r="2"></circle></svg>
+                  </button>
+                  <sc-if value="{{ p.isIdle }}" hint-placeholder-val="{{ false }}">
+                    <button onClick="{{ p.onResume }}" title="Resume session" style="width:27px;height:27px;border-radius:7px;border:1px solid #23272F;background:transparent;color:#3DDC97;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#171B23;">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z"></path></svg>
+                    </button>
+                  </sc-if>
+                  <button onClick="{{ p.onClose }}" title="Close pane" style="width:27px;height:27px;border-radius:7px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#171B23;color:#FF7A7A;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+                  </button>
+                </div>
+
+                <div data-auto="1" style="flex:1;overflow-y:auto;padding:13px 15px;font-family:'JetBrains Mono';font-size:12.5px;line-height:1.62;background:#08090C;">
+                  <sc-for list="{{ p.dlog }}" as="line" hint-placeholder-count="8">
+                    <div style="color:{{ line.color }};font-style:{{ line.fs }};white-space:pre-wrap;word-break:break-word;padding:1px 0;">{{ line.text }}</div>
+                  </sc-for>
+                  <sc-if value="{{ p.isRunning }}" hint-placeholder-val="{{ true }}">
+                    <div style="padding-top:3px;color:{{ p.statusColor }};"><span style="animation:cblink 1s step-end infinite;">▋</span> <span style="color:#4a5262;font-size:11px;">streaming</span></div>
+                  </sc-if>
+                </div>
+
+                <sc-if value="{{ p.needsAction }}" hint-placeholder-val="{{ false }}">
+                  <div style="border-top:1px solid rgba(255,176,32,.4);background:rgba(255,176,32,.07);padding:12px 15px;display:flex;flex-direction:column;gap:9px;">
+                    <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:#FFB020;font-family:'IBM Plex Sans';">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"></path><path d="M12 10v4M12 17.5v.1"></path></svg>
+                      Blocked — waiting for your approval
+                    </div>
+                    <div style="font-size:12.5px;line-height:1.5;color:#C7CCD6;font-family:'IBM Plex Sans';">{{ p.escReason }}</div>
+                    <div style="display:flex;gap:8px;">
+                      <button onClick="{{ p.onApprove }}" style="background:#3DDC97;color:#04240F;border:none;border-radius:8px;padding:7px 16px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="filter:brightness(1.08);">Approve</button>
+                      <button onClick="{{ p.onDeny }}" style="background:transparent;color:#9AA3B2;border:1px solid #2C313B;border-radius:8px;padding:7px 16px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#FF5C5C;color:#FF7A7A;">Deny</button>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <div style="height:26px;flex-shrink:0;background:#0D0F14;border-top:1px solid #23272F;display:flex;align-items:center;gap:14px;padding:0 12px;font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;">
+                  <span>{{ p.model }}</span>
+                  <span>{{ p.memCount }} memories · {{ p.memTotal }}</span>
+                  <span>{{ p.toolCount }} tools</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- OVERVIEW VIEW -->
+      <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Overview" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:10px;padding:0 18px;">
+            <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;">All agents</span>
+            <span style="font-size:11px;color:#626B79;border:1px solid #23272F;border-radius:6px;padding:2px 8px;font-family:'JetBrains Mono';">{{ agentCount }} sessions</span>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:20px;">
+            <div style="background:#0D0F14;border:1px solid #23272F;border-radius:14px;padding:15px 18px;margin-bottom:16px;">
+              <div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:4px;">SESSION FLOW</div>
+              <svg viewBox="0 0 720 240" preserveAspectRatio="xMidYMid meet" style="width:100%;height:206px;display:block;">
+                <defs><marker id="cflow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#FFB020"></path></marker></defs>
+                <sc-for list="{{ spokes }}" as="sp" hint-placeholder-count="4"><line x1="{{ sp.x1 }}" y1="{{ sp.y1 }}" x2="{{ sp.x2 }}" y2="{{ sp.y2 }}" stroke="{{ sp.color }}" stroke-width="1.5"></line></sc-for>
+                <sc-if value="{{ hasDep }}" hint-placeholder-val="{{ false }}">
+                  <path d="{{ dep.d }}" fill="none" stroke="#FFB020" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#cflow)"></path>
+                  <text x="360" y="26" text-anchor="middle" fill="#8B93A1" font-size="11" font-family="JetBrains Mono, monospace">waits for rate-limiter</text>
+                </sc-if>
+                <circle cx="360" cy="120" r="30" fill="{{ accentSoft }}" stroke="{{ accent }}" stroke-width="1.5"></circle>
+                <text x="360" y="117" text-anchor="middle" fill="{{ accent }}" font-weight="600" font-size="13" font-family="Space Grotesk, sans-serif">Master</text>
+                <text x="360" y="132" text-anchor="middle" fill="#8B93A1" font-size="9" font-family="JetBrains Mono, monospace">orchestrator</text>
+                <sc-for list="{{ graphNodes }}" as="g" hint-placeholder-count="4">
+                  <circle cx="{{ g.cx }}" cy="{{ g.cy }}" r="24" fill="{{ g.soft }}" stroke="{{ g.color }}" stroke-width="1.5"></circle>
+                  <text x="{{ g.cx }}" y="{{ g.cy }}" dy="4" text-anchor="middle" fill="{{ g.color }}" font-weight="600" font-size="11" font-family="JetBrains Mono, monospace">{{ g.initials }}</text>
+                  <text x="{{ g.cx }}" y="{{ g.labelY }}" text-anchor="middle" fill="#C7CCD6" font-size="11" font-family="IBM Plex Sans, sans-serif">{{ g.name }}</text>
+                  <circle cx="{{ g.dotCx }}" cy="{{ g.dotCy }}" r="4" fill="{{ g.statusColor }}"></circle>
+                </sc-for>
+              </svg>
+            </div>
+            <div style="display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));">
+              <sc-for list="{{ overviewAgents }}" as="a" hint-placeholder-count="4">
+                <div style="background:#0D0F14;border:1px solid #23272F;border-radius:14px;padding:15px;">
+                  <div onClick="{{ a.onDetail }}" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;cursor:pointer;">
+                    <div style="width:34px;height:34px;border-radius:9px;background:{{ a.soft }};border:1px solid {{ a.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:12px;font-weight:600;color:{{ a.color }};">{{ a.initials }}</div>
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-size:13.5px;font-weight:600;">{{ a.name }}</div>
+                      <div style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;margin-top:1px;">{{ a.path }}</div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;background:#12151C;border:1px solid #23272F;border-radius:20px;padding:3px 9px;">
+                      <span style="width:6px;height:6px;border-radius:50%;background:{{ a.statusColor }};animation:{{ a.dotAnim }};"></span>
+                      <span style="font-size:10px;font-weight:600;color:{{ a.statusColor }};">{{ a.statusLabel }}</span>
+                    </div>
+                  </div>
+                  <div style="background:#08090C;border:1px solid #1a1e26;border-radius:8px;padding:8px 10px;font-family:'JetBrains Mono';font-size:11px;color:#8B93A1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.lastLine }}</div>
+                  <div style="display:flex;gap:16px;margin-top:12px;font-size:11px;color:#626B79;font-family:'JetBrains Mono';">
+                    <span>{{ a.memCount }} mem</span><span>{{ a.toolCount }} tools</span><span>{{ a.costLabel2 }}</span>
+                  </div>
+                  <div style="display:flex;gap:8px;margin-top:13px;">
+                    <button onClick="{{ a.onOpenWs }}" style="flex:1;background:#171B23;border:1px solid #2C313B;border-radius:8px;padding:7px;font-size:12px;font-weight:600;color:#E7E9F0;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">Open</button>
+                    <sc-if value="{{ a.isIdle }}" hint-placeholder-val="{{ false }}">
+                      <button onClick="{{ a.onResume }}" style="flex:1;background:rgba(61,220,151,.12);border:1px solid rgba(61,220,151,.35);border-radius:8px;padding:7px;font-size:12px;font-weight:600;color:#3DDC97;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="background:rgba(61,220,151,.2);">Resume</button>
+                    </sc-if>
+                    <button onClick="{{ a.onReview }}" style="flex:1;background:transparent;border:1px solid #2C313B;border-radius:8px;padding:7px;font-size:12px;font-weight:600;color:#9AA3B2;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="background:#171B23;color:#E7E9F0;">Review</button>
+                    <button onClick="{{ a.onMem }}" style="width:36px;background:transparent;border:1px solid #2C313B;border-radius:8px;padding:7px;color:#8B93A1;cursor:pointer;display:flex;align-items:center;justify-content:center;" style-hover="background:#171B23;color:#E7E9F0;">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"></rect><path d="M4 10h3M4 14h3M17 10h3M17 14h3M10 4v3M14 4v3M10 17v3M14 17v3"></path></svg>
+                    </button>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- BOARD VIEW -->
+      <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Board" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:10px;padding:0 18px;">
+            <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;">Task board</span>
+            <span style="font-size:11.5px;color:#626B79;">Drag tasks across stages — cards link to their agent</span>
+            <div style="flex:1;"></div>
+            <button onClick="{{ addTask }}" style="display:flex;align-items:center;gap:6px;background:#171B23;border:1px solid #2C313B;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;color:#E7E9F0;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>New task
+            </button>
+          </div>
+          <div style="flex:1;overflow-x:auto;overflow-y:hidden;padding:16px;display:flex;gap:14px;">
+            <sc-for list="{{ board }}" as="col" hint-placeholder-count="5">
+              <div onDragOver="{{ allowDrop }}" onDrop="{{ col.onDrop }}" onDragEnter="{{ col.onEnter }}" style="width:272px;flex-shrink:0;display:flex;flex-direction:column;background:#0B0C10;border:1px solid {{ col.borderColor }};border-radius:14px;min-height:0;transition:border-color .12s;">
+                <div style="display:flex;align-items:center;gap:8px;padding:13px 14px;border-bottom:1px solid #1a1e26;flex-shrink:0;">
+                  <span style="width:9px;height:9px;border-radius:3px;background:{{ col.dot }};"></span>
+                  <span style="font-size:12.5px;font-weight:600;color:#E7E9F0;">{{ col.label }}</span>
+                  <span style="font-size:11px;color:#8B93A1;font-family:'JetBrains Mono';background:#12151C;border-radius:6px;padding:1px 8px;margin-left:2px;">{{ col.count }}</span>
+                </div>
+                <div style="flex:1;overflow-y:auto;padding:11px;display:flex;flex-direction:column;gap:10px;">
+                  <sc-for list="{{ col.cards }}" as="card" hint-placeholder-count="2">
+                    <div draggable="true" onDragStart="{{ card.onDragStart }}" onClick="{{ card.onClick }}" style="background:#12151C;border:1px solid #23272F;border-left:3px solid {{ card.color }};border-radius:10px;padding:11px 12px;cursor:grab;" style-hover="border-color:#3a4150;background:#151922;">
+                      <div style="font-size:12.5px;font-weight:600;color:#E7E9F0;line-height:1.38;">{{ card.title }}</div>
+                      <div style="display:flex;align-items:center;gap:7px;margin-top:10px;">
+                        <span style="width:7px;height:7px;border-radius:50%;background:{{ card.color }};flex-shrink:0;"></span>
+                        <span style="font-size:11px;color:#9AA3B2;white-space:nowrap;">{{ card.agentName }}</span>
+                        <span style="font-family:'JetBrains Mono';font-size:10px;color:#626B79;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ card.repo }}</span>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- SCHEDULES VIEW -->
+      <sc-if value="{{ isCrons }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Schedules" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:10px;padding:0 18px;">
+            <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;">Schedules</span>
+            <span style="font-size:11.5px;color:#626B79;">Recurring agent runs — some built by Master</span>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px;">
+            <sc-for list="{{ crons }}" as="c" hint-placeholder-count="3">
+              <div style="background:#0D0F14;border:1px solid #23272F;border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:16px;">
+                <button onClick="{{ c.onToggle }}" style="width:38px;height:22px;border-radius:999px;border:1px solid #2C313B;background:{{ c.swBg }};position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;">
+                  <span style="position:absolute;top:2px;left:{{ c.knobX }};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                </button>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:9px;">
+                    <span style="font-family:'JetBrains Mono';font-size:13.5px;font-weight:600;color:#E7E9F0;">{{ c.name }}</span>
+                    <sc-if value="{{ c.built }}" hint-placeholder-val="{{ false }}">
+                      <span style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:{{ accent }};background:{{ accentSoft }};border-radius:5px;padding:2px 7px;font-family:'IBM Plex Sans';">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3l-1 5 5-1-8 13 1-6-5 1z"></path></svg>built by Master
+                      </span>
+                    </sc-if>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:12px;margin-top:4px;font-size:11.5px;color:#8B93A1;">
+                    <span style="font-family:'JetBrains Mono';color:#626B79;">{{ c.schedule }}</span>
+                    <span>{{ c.human }}</span>
+                    <span style="color:#4a5262;">·</span>
+                    <span>{{ c.target }}</span>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:{{ c.color }};"></span>
+                  <span style="font-size:12px;color:#C7CCD6;">{{ c.agent }}</span>
+                </div>
+                <div style="width:150px;text-align:right;font-size:11px;color:#626B79;font-family:'JetBrains Mono';flex-shrink:0;">{{ c.last }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- TOOLS VIEW -->
+      <sc-if value="{{ isTools }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Tools" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:10px;padding:0 18px;">
+            <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;">Tools &amp; permissions</span>
+            <span style="font-size:11.5px;color:#626B79;">Shared capability registry across all agents</span>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:20px;">
+            <div style="display:grid;gap:13px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));">
+              <sc-for list="{{ toolsCat }}" as="t" hint-placeholder-count="6">
+                <div style="background:#0D0F14;border:1px solid #23272F;border-radius:12px;padding:15px;">
+                  <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;">
+                    <span style="font-family:'Space Grotesk';font-size:14px;font-weight:600;">{{ t.name }}</span>
+                    <sc-if value="{{ t.built }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:9.5px;font-weight:600;color:{{ accent }};background:{{ accentSoft }};border-radius:5px;padding:2px 6px;">NEW</span>
+                    </sc-if>
+                  </div>
+                  <div style="font-size:12px;color:#8B93A1;line-height:1.45;min-height:34px;">{{ t.desc }}</div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;">
+                    <span style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:{{ t.permColor }};background:{{ t.permSoft }};border-radius:6px;padding:4px 9px;">
+                      <span style="width:6px;height:6px;border-radius:50%;background:{{ t.permColor }};"></span>{{ t.perm }}
+                    </span>
+                    <span style="font-size:11px;color:#626B79;font-family:'JetBrains Mono';">{{ t.agents }} agents</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ACTIVITY TIMELINE VIEW -->
+      <sc-if value="{{ isTimeline }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Activity" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:10px;padding:0 18px;">
+            <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;">Activity</span>
+            <span style="font-size:11.5px;color:#626B79;">Every agent action and Master decision, newest first</span>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:24px 26px;">
+            <div style="max-width:720px;">
+              <sc-for list="{{ events }}" as="e" hint-placeholder-count="6">
+                <div style="display:flex;gap:14px;">
+                  <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">
+                    <div style="width:30px;height:30px;border-radius:9px;background:{{ e.soft }};display:flex;align-items:center;justify-content:center;">
+                      <span style="width:9px;height:9px;border-radius:50%;background:{{ e.color }};"></span>
+                    </div>
+                    <div style="flex:1;width:2px;background:#1a1e26;margin:3px 0;min-height:14px;"></div>
+                  </div>
+                  <div style="padding-bottom:20px;flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:9px;">
+                      <span style="font-size:9.5px;font-weight:600;letter-spacing:.4px;color:{{ e.color }};background:{{ e.soft }};border-radius:5px;padding:2px 7px;font-family:'JetBrains Mono';">{{ e.typeLabel }}</span>
+                      <span style="font-size:12px;font-weight:600;color:#C7CCD6;">{{ e.agentName }}</span>
+                      <span style="font-size:11px;color:#626B79;font-family:'JetBrains Mono';margin-left:auto;">{{ e.time }}</span>
+                    </div>
+                    <div style="font-size:13px;color:#E7E9F0;margin-top:5px;line-height:1.45;">{{ e.text }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- USAGE VIEW -->
+      <sc-if value="{{ isUsage }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Usage" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:10px;padding:0 18px;">
+            <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;">Cost &amp; usage</span>
+            <span style="font-size:11.5px;color:#626B79;">Tokens and spend per agent · this week</span>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:22px;">
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:22px;">
+              <div style="background:#0D0F14;border:1px solid #23272F;border-radius:13px;padding:16px;">
+                <div style="font-size:11.5px;color:#8B93A1;">Total spend</div>
+                <div style="font-family:'Space Grotesk';font-size:26px;font-weight:600;margin-top:5px;">{{ usageTotals.cost }}</div>
+                <div style="font-size:11.5px;color:#626B79;margin-top:3px;">{{ usageTotals.budget }} budget · {{ usageTotals.pct }} used</div>
+              </div>
+              <div style="background:#0D0F14;border:1px solid #23272F;border-radius:13px;padding:16px;">
+                <div style="font-size:11.5px;color:#8B93A1;">Tokens</div>
+                <div style="font-family:'Space Grotesk';font-size:26px;font-weight:600;margin-top:5px;">{{ usageTotals.tokens }}</div>
+                <div style="font-size:11.5px;color:#626B79;margin-top:3px;">across {{ agentCount }} sessions</div>
+              </div>
+              <div style="background:#0D0F14;border:1px solid #23272F;border-radius:13px;padding:16px;">
+                <div style="font-size:11.5px;color:#8B93A1;">Running now</div>
+                <div style="font-family:'Space Grotesk';font-size:26px;font-weight:600;margin-top:5px;color:#3DDC97;">{{ runningCount }}</div>
+                <div style="font-size:11.5px;color:#626B79;margin-top:3px;">of {{ agentCount }} sessions</div>
+              </div>
+            </div>
+            <div style="background:#0D0F14;border:1px solid #23272F;border-radius:14px;padding:6px 18px;">
+              <sc-for list="{{ usageAgents }}" as="a" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid #1a1e26;">
+                  <div style="width:30px;height:30px;border-radius:8px;background:{{ a.soft }};border:1px solid {{ a.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:11px;font-weight:600;color:{{ a.color }};flex-shrink:0;">{{ a.initials }}</div>
+                  <div style="width:130px;flex-shrink:0;">
+                    <div style="font-size:13px;font-weight:600;">{{ a.name }}</div>
+                    <div style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;">{{ a.usedLabel }}</div>
+                  </div>
+                  <div style="flex:1;height:9px;background:#12151C;border-radius:6px;overflow:hidden;">
+                    <div style="height:100%;width:{{ a.pct }}%;background:{{ a.color }};border-radius:6px;"></div>
+                  </div>
+                  <div style="width:120px;text-align:right;flex-shrink:0;">
+                    <span style="font-family:'JetBrains Mono';font-size:13px;font-weight:600;color:#E7E9F0;">{{ a.costLabel }}</span>
+                    <span style="font-family:'JetBrains Mono';font-size:11px;color:#626B79;margin-left:5px;">{{ a.budgetLabel }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- SETTINGS VIEW -->
+      <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Settings" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:10px;padding:0 18px;">
+            <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;">Settings</span>
+            <span style="font-size:11.5px;color:#626B79;">Agent types, integrations, and orchestration policy</span>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:22px;">
+            <div style="max-width:820px;">
+
+              <div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:11px;">ORCHESTRATION</div>
+              <div style="background:#0D0F14;border:1px solid #23272F;border-radius:13px;padding:5px 16px;margin-bottom:26px;">
+                <sc-for list="{{ settingsToggles }}" as="o" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid #1a1e26;">
+                    <div style="flex:1;">
+                      <div style="font-size:13.5px;font-weight:600;">{{ o.label }}</div>
+                      <div style="font-size:12px;color:#8B93A1;margin-top:2px;">{{ o.detail }}</div>
+                    </div>
+                    <button onClick="{{ o.onToggle }}" style="width:38px;height:22px;border-radius:999px;border:1px solid #2C313B;background:{{ o.swBg }};position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;">
+                      <span style="position:absolute;top:2px;left:{{ o.knobX }};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                    </button>
+                  </div>
+                </sc-for>
+              </div>
+
+              <div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:11px;">AGENT TYPES</div>
+              <div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));margin-bottom:26px;">
+                <sc-for list="{{ settingsTypes }}" as="t" hint-placeholder-count="4">
+                  <div style="background:#0D0F14;border:1px solid #23272F;border-radius:13px;padding:15px;display:flex;gap:12px;">
+                    <div style="width:38px;height:38px;border-radius:10px;background:{{ t.soft }};border:1px solid {{ t.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:12px;font-weight:600;color:{{ t.color }};flex-shrink:0;">{{ t.initials }}</div>
+                    <div style="flex:1;min-width:0;">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:13.5px;font-weight:600;">{{ t.name }}</span>
+                        <span style="font-family:'JetBrains Mono';font-size:10px;color:#626B79;">{{ t.model }}</span>
+                      </div>
+                      <div style="font-size:12px;color:#8B93A1;margin-top:4px;line-height:1.45;">{{ t.desc }}</div>
+                      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">
+                        <span style="font-size:11px;color:{{ t.statusColor }};font-weight:600;">{{ t.statusLabel }} · {{ t.tools }} tools</span>
+                        <button onClick="{{ t.onToggle }}" style="width:38px;height:22px;border-radius:999px;border:1px solid #2C313B;background:{{ t.swBg }};position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;">
+                          <span style="position:absolute;top:2px;left:{{ t.knobX }};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+
+              <div style="font-size:11px;font-weight:600;letter-spacing:.5px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:11px;">INTEGRATIONS</div>
+              <div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));">
+                <sc-for list="{{ settingsIntegrations }}" as="g" hint-placeholder-count="6">
+                  <div style="background:#0D0F14;border:1px solid #23272F;border-radius:13px;padding:15px;">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <div style="width:34px;height:34px;border-radius:9px;background:#171B23;border:1px solid #2C313B;display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk';font-size:12px;font-weight:600;color:#C7CCD6;">{{ g.initials }}</div>
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:13px;font-weight:600;">{{ g.name }}</div>
+                        <div style="font-size:10.5px;color:#626B79;">{{ g.cat }}</div>
+                      </div>
+                      <button onClick="{{ g.onToggle }}" style="width:34px;height:20px;border-radius:999px;border:1px solid #2C313B;background:{{ g.swBg }};position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;">
+                        <span style="position:absolute;top:2px;left:{{ g.knobX }};width:14px;height:14px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                      </button>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;margin-top:11px;">
+                      <span style="width:6px;height:6px;border-radius:50%;background:{{ g.dotColor }};"></span>
+                      <span style="font-size:11.5px;color:{{ g.detailColor }};">{{ g.detail }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+
+  <!-- SLIDE-OVER PANEL -->
+  <sc-if value="{{ panelOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closePanel }}" style="position:fixed;inset:0;background:rgba(4,5,8,.5);z-index:40;"></div>
+    <div style="position:fixed;top:0;right:0;bottom:0;width:392px;background:#0D0F14;border-left:1px solid #2C313B;z-index:41;display:flex;flex-direction:column;box-shadow:-24px 0 60px rgba(0,0,0,.45);">
+      <div style="padding:15px 17px;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:11px;">
+        <div style="width:30px;height:30px;border-radius:8px;background:{{ panelAgent.soft }};border:1px solid {{ panelAgent.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:11px;font-weight:600;color:{{ panelAgent.color }};">{{ panelAgent.initials }}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:14px;font-weight:600;">{{ panelAgent.name }}</div>
+          <div style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;">{{ panelAgent.path }}</div>
+        </div>
+        <button onClick="{{ closePanel }}" style="width:28px;height:28px;border-radius:7px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#171B23;color:#E7E9F0;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </button>
+      </div>
+      <div style="display:flex;gap:4px;padding:10px 15px 0;border-bottom:1px solid #23272F;">
+        <button onClick="{{ panelAgent.tabMem }}" style="padding:8px 14px;background:transparent;border:none;border-bottom:2px solid {{ memTabBorder }};color:{{ memTabColor }};font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';">Memory</button>
+        <button onClick="{{ panelAgent.tabTools }}" style="padding:8px 14px;background:transparent;border:none;border-bottom:2px solid {{ toolsTabBorder }};color:{{ toolsTabColor }};font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';">Tools</button>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding:16px 15px;">
+        <sc-if value="{{ panelMemTab }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:11.5px;color:#8B93A1;margin-bottom:14px;">{{ panelAgent.memCount }} sources active · <span style="color:{{ accent }};font-weight:600;font-family:'JetBrains Mono';">{{ panelAgent.memTotal }}</span> in context window</div>
+          <div style="display:flex;flex-direction:column;gap:9px;">
+            <sc-for list="{{ panelAgent.memory }}" as="m" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:12px;background:#12151C;border:1px solid #23272F;border-radius:10px;padding:11px 13px;">
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:13px;font-weight:600;color:{{ m.labelColor }};">{{ m.label }}</div>
+                  <div style="font-size:11px;color:#626B79;margin-top:2px;">{{ m.detail }} · {{ m.tokLabel }}</div>
+                </div>
+                <button onClick="{{ m.onToggle }}" style="width:38px;height:22px;border-radius:999px;border:1px solid #2C313B;background:{{ m.swBg }};position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;">
+                  <span style="position:absolute;top:2px;left:{{ m.knobX }};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                </button>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ panelToolsTab }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:11.5px;color:#8B93A1;margin-bottom:14px;">Toggle capabilities and set how much this agent can do on its own.</div>
+          <div style="display:flex;flex-direction:column;gap:9px;">
+            <sc-for list="{{ panelAgent.tools }}" as="t" hint-placeholder-count="6">
+              <div style="display:flex;align-items:center;gap:12px;background:#12151C;border:1px solid #23272F;border-radius:10px;padding:11px 13px;">
+                <button onClick="{{ t.onToggle }}" style="width:38px;height:22px;border-radius:999px;border:1px solid #2C313B;background:{{ t.swBg }};position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;">
+                  <span style="position:absolute;top:2px;left:{{ t.knobX }};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                </button>
+                <span style="flex:1;font-size:13px;font-weight:600;color:{{ t.labelColor }};">{{ t.name }}</span>
+                <button onClick="{{ t.onPerm }}" style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:{{ t.permColor }};background:{{ t.permSoft }};border:1px solid {{ t.permBorder }};border-radius:7px;padding:5px 10px;cursor:pointer;font-family:'IBM Plex Sans';">
+                  <span style="width:6px;height:6px;border-radius:50%;background:{{ t.permColor }};"></span>{{ t.perm }}
+                </button>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- DETAIL / DIFF DRAWER -->
+  <sc-if value="{{ drawerOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeDrawer }}" style="position:fixed;inset:0;background:rgba(4,5,8,.55);z-index:42;"></div>
+    <div style="position:fixed;top:0;right:0;bottom:0;width:520px;max-width:92vw;background:#0D0F14;border-left:1px solid #2C313B;z-index:43;display:flex;flex-direction:column;box-shadow:-24px 0 60px rgba(0,0,0,.5);">
+      <div style="padding:15px 18px;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:11px;">
+        <div style="width:32px;height:32px;border-radius:9px;background:{{ drawerAgent.soft }};border:1px solid {{ drawerAgent.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:11px;font-weight:600;color:{{ drawerAgent.color }};flex-shrink:0;">{{ drawerAgent.initials }}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:14px;font-weight:600;">{{ drawerTitle }} · {{ drawerAgent.name }}</div>
+          <div style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;">{{ drawerAgent.path }}</div>
+        </div>
+        <button onClick="{{ closeDrawer }}" style="width:28px;height:28px;border-radius:7px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#171B23;color:#E7E9F0;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </button>
+      </div>
+
+      <sc-if value="{{ isDiffDrawer }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:1;overflow-y:auto;padding:16px 18px;">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;font-size:12px;color:#8B93A1;">
+            <span>{{ drawerAgent.fileCount }} files changed</span>
+            <span style="color:#7FE3B0;font-family:'JetBrains Mono';font-weight:600;">{{ drawerAgent.totalAdd }}</span>
+            <span style="color:#FF9B9B;font-family:'JetBrains Mono';font-weight:600;">{{ drawerAgent.totalDel }}</span>
+          </div>
+          <sc-for list="{{ drawerAgent.diff }}" as="f" hint-placeholder-count="2">
+            <div style="border:1px solid #23272F;border-radius:11px;overflow:hidden;margin-bottom:14px;">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 13px;background:#12151C;border-bottom:1px solid #23272F;">
+                <span style="font-family:'JetBrains Mono';font-size:12px;color:#C7CCD6;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ f.file }}</span>
+                <span style="font-family:'JetBrains Mono';font-size:11px;color:#7FE3B0;font-weight:600;">{{ f.addLabel }}</span>
+                <span style="font-family:'JetBrains Mono';font-size:11px;color:#FF9B9B;font-weight:600;">{{ f.delLabel }}</span>
+              </div>
+              <div style="background:#08090C;padding:8px 0;font-family:'JetBrains Mono';font-size:12px;line-height:1.6;">
+                <sc-for list="{{ f.hunks }}" as="h" hint-placeholder-count="6">
+                  <div style="padding:0 13px;color:{{ h.color }};background:{{ h.bg }};white-space:pre-wrap;word-break:break-word;">{{ h.text }}</div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="border-top:1px solid #23272F;padding:13px 18px;display:flex;gap:10px;">
+          <button onClick="{{ drawerAgent.onApproveDiff }}" style="flex:1;background:#3DDC97;color:#04240F;border:none;border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="filter:brightness(1.08);">Approve &amp; merge</button>
+          <button onClick="{{ drawerAgent.onRequestChanges }}" style="flex:1;background:transparent;color:#9AA3B2;border:1px solid #2C313B;border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#FFB020;color:#FFB020;">Request changes</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isAgentDrawer }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;overflow-y:auto;padding:16px 18px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;">
+            <div style="background:#12151C;border:1px solid #23272F;border-radius:11px;padding:13px;">
+              <div style="font-size:11px;color:#8B93A1;">Spend</div>
+              <div style="font-family:'Space Grotesk';font-size:20px;font-weight:600;margin-top:3px;">{{ drawerAgent.costLabel }}</div>
+            </div>
+            <div style="background:#12151C;border:1px solid #23272F;border-radius:11px;padding:13px;">
+              <div style="font-size:11px;color:#8B93A1;">Tokens</div>
+              <div style="font-family:'Space Grotesk';font-size:20px;font-weight:600;margin-top:3px;">{{ drawerAgent.usedLabel }}</div>
+            </div>
+          </div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:.4px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:10px;">RESUME POINTS</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
+            <sc-for list="{{ drawerAgent.snaps }}" as="sn" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;gap:10px;background:#12151C;border:1px solid #23272F;border-radius:9px;padding:10px 12px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B93A1" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v4l3 2"></path></svg>
+                <span style="flex:1;font-size:12.5px;color:#E7E9F0;">{{ sn.label }}</span>
+                <span style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;">{{ sn.time }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:.4px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:10px;">SESSION HISTORY</div>
+          <div style="background:#08090C;border:1px solid #1a1e26;border-radius:11px;padding:12px 14px;font-family:'JetBrains Mono';font-size:12px;line-height:1.6;">
+            <sc-for list="{{ drawerAgent.history }}" as="line" hint-placeholder-count="8">
+              <div style="color:{{ line.color }};font-style:{{ line.fs }};white-space:pre-wrap;word-break:break-word;">{{ line.text }}</div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="border-top:1px solid #23272F;padding:13px 18px;display:flex;gap:10px;">
+          <button onClick="{{ drawerAgent.onOpenWs }}" style="flex:1;background:#171B23;color:#E7E9F0;border:1px solid #2C313B;border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">Open in workspace</button>
+          <sc-if value="{{ drawerAgent.isIdle }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ drawerAgent.onResumeD }}" style="flex:1;background:rgba(61,220,151,.12);color:#3DDC97;border:1px solid rgba(61,220,151,.35);border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="background:rgba(61,220,151,.2);">Resume session</button>
+          </sc-if>
+        </div>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <!-- COMMAND PALETTE -->
+  <sc-if value="{{ paletteOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closePalette }}" style="position:fixed;inset:0;background:rgba(4,5,8,.55);z-index:46;display:flex;justify-content:center;align-items:flex-start;padding-top:12vh;">
+      <div onClick="{{ stop }}" style="width:600px;max-width:92vw;background:#12151C;border:1px solid #2C313B;border-radius:15px;box-shadow:0 26px 70px rgba(0,0,0,.6);overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:11px;padding:15px 17px;border-bottom:1px solid #23272F;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{ accent }}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9"></path><path d="M4 18h6"></path><path d="M13 6l3 3-3 3"></path><path d="M20 6v12"></path></svg>
+          <input data-palette="1" autofocus value="{{ paletteQuery }}" onInput="{{ onPaletteQuery }}" onKeyDown="{{ onPaletteKey }}" placeholder="Route a task, jump to a view, build a tool…" style="flex:1;background:transparent;border:none;outline:none;color:#E7E9F0;font-family:'IBM Plex Sans';font-size:15px;" />
+          <span style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;border:1px solid #23272F;border-radius:5px;padding:2px 7px;">esc</span>
+        </div>
+        <div style="max-height:52vh;overflow-y:auto;padding:8px;">
+          <sc-for list="{{ paletteCommands }}" as="c" hint-placeholder-count="6">
+            <button onClick="{{ c.onClick }}" style="width:100%;text-align:left;display:flex;align-items:center;gap:12px;padding:11px 12px;background:transparent;border:none;border-radius:9px;cursor:pointer;color:#E7E9F0;" style-hover="background:#1B1F27;">
+              <span style="width:30px;height:30px;border-radius:8px;background:#0A0B0F;border:1px solid #23272F;display:flex;align-items:center;justify-content:center;color:{{ accent }};flex-shrink:0;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><sc-for list="{{ c.iconPaths }}" as="d" hint-placeholder-count="1"><path d="{{ d }}"></path></sc-for></svg>
+              </span>
+              <span style="flex:1;font-size:13.5px;font-weight:500;">{{ c.label }}</span>
+              <span style="font-size:11px;color:#626B79;font-family:'JetBrains Mono';">{{ c.hint }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- TOAST -->
+  <sc-if value="{{ hasToast }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#171B23;border:1px solid #2C313B;border-radius:11px;padding:11px 18px;display:flex;align-items:center;gap:10px;z-index:50;box-shadow:0 12px 40px rgba(0,0,0,.5);">
+      <span style="width:8px;height:8px;border-radius:50%;background:{{ accent }};box-shadow:0 0 8px {{ accentGlow }};"></span>
+      <span style="font-size:13px;font-weight:500;color:#E7E9F0;">{{ toast }}</span>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;},&quot;masterAccent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#F5C451&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Appearance&quot;},&quot;liveStreaming&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Behavior&quot;},&quot;defaultView&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;workspace&quot;,&quot;options&quot;:[&quot;workspace&quot;,&quot;overview&quot;,&quot;crons&quot;,&quot;tools&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Behavior&quot;}}">
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    this.CLAUDE_FEED=[
+      {t:'run',x:'$ pnpm test middleware/rateLimit'},
+      {t:'out',x:'PASS  4 passed · 212ms'},
+      {t:'think',x:'Wiring the limiter into the request pipeline\u2026'},
+      {t:'edit',x:'~ src/server/pipeline.ts  (+6 \u22121)'},
+      {t:'run',x:'$ git add -A && git commit -m "feat: token-bucket limiter"'},
+      {t:'out',x:'[feat/rate-limiter 8a1f9c2] feat: token-bucket limiter'},
+    ];
+    this.AIDER_APPROVE=[
+      {t:'run',x:'$ alembic upgrade head'},
+      {t:'out',x:'INFO  running migration 0007_webhook_events'},
+      {t:'out',x:'INFO  migration complete \u2713'},
+      {t:'edit',x:'~ billing/webhooks/stripe.py  (+34 \u22122)'},
+      {t:'run',x:'$ pytest billing/tests/test_webhooks.py'},
+      {t:'out',x:'==== 9 passed in 3.41s ===='},
+    ];
+    this.state=this.seed();
+  }
+
+  hexToRgba(hex,a){
+    const n=parseInt(hex.slice(1),16);
+    return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';
+  }
+  mkMem(){
+    return [
+      {id:'repomap',label:'Repository map',detail:'auto-indexed · 1,204 files',tokens:8.1,on:true},
+      {id:'guide',label:'Project guide',detail:'CLAUDE.md · conventions',tokens:2.3,on:true},
+      {id:'diffs',label:'Recent diffs',detail:'last 12 commits',tokens:4.7,on:true},
+      {id:'ticket',label:'Linked ticket',detail:'ENG-2214',tokens:0.9,on:true},
+      {id:'summary',label:'Session summary',detail:'rolling context',tokens:3.2,on:true},
+      {id:'slack',label:'Slack thread',detail:'#eng-platform',tokens:1.1,on:false},
+    ];
+  }
+  mkTools(){
+    return [
+      {id:'shell',name:'Shell',on:true,perm:'Ask first'},
+      {id:'fs',name:'File write',on:true,perm:'Auto'},
+      {id:'git',name:'Git',on:true,perm:'Auto'},
+      {id:'http',name:'HTTP fetch',on:true,perm:'Ask first'},
+      {id:'db',name:'DB query',on:false,perm:'Approval'},
+      {id:'browser',name:'Browser',on:false,perm:'Off'},
+    ];
+  }
+
+  seed(){
+    const agents=[
+      {id:'a-claude',name:'Claude Code',short:'CC',color:'#E8A87C',repo:'api-gateway',branch:'feat/rate-limiter',status:'running',model:'claude-sonnet-4.5',fi:0,feed:this.CLAUDE_FEED,memory:this.mkMem(),tools:this.mkTools(),log:[
+        {t:'sys',x:'session resumed · api-gateway @ feat/rate-limiter'},
+        {t:'you',x:'add token-bucket rate limiting to the gateway middleware'},
+        {t:'run',x:'$ rg "middleware" src/ -l'},
+        {t:'out',x:'src/server/pipeline.ts'},
+        {t:'out',x:'src/server/middleware/index.ts'},
+        {t:'think',x:'Adding a RateLimiter with a Redis-backed token bucket\u2026'},
+        {t:'edit',x:'+ src/server/middleware/rateLimit.ts  (48 lines)'},
+        {t:'edit',x:'~ src/server/pipeline.ts  (+6 \u22121)'},
+      ]},
+      {id:'a-codex',name:'Codex',short:'CX',color:'#34D399',repo:'web-dashboard',branch:'fix/auth-redirect',status:'running',model:'gpt-5-codex',fi:0,feed:[
+        {t:'run',x:'$ npm run typecheck'},
+        {t:'out',x:'tsc --noEmit  \u2713  0 errors'},
+        {t:'think',x:'Redirect loop is caused by a stale session cookie\u2026'},
+        {t:'edit',x:'~ src/auth/callback.ts  (+11 \u22124)'},
+        {t:'run',x:'$ npm run test:e2e auth'},
+        {t:'out',x:'\u2713 auth › redirects to /app after login (1.2s)'},
+      ],memory:this.mkMem(),tools:this.mkTools(),log:[
+        {t:'sys',x:'session resumed · web-dashboard @ fix/auth-redirect'},
+        {t:'you',x:'fix the infinite redirect after OAuth login'},
+        {t:'think',x:'Tracing the redirect chain from /callback\u2026'},
+        {t:'edit',x:'~ src/auth/callback.ts  (+11 \u22124)'},
+      ]},
+      {id:'a-gemini',name:'Gemini CLI',short:'GM',color:'#6C8EF5',repo:'data-pipeline',branch:'chore/etl-refactor',status:'idle',model:'gemini-2.5-pro',fi:0,feed:[
+        {t:'run',x:'$ python -m etl.run --dry'},
+        {t:'out',x:'planned 14 stages · 3 sources'},
+        {t:'think',x:'Deduping join keys before the load step\u2026'},
+        {t:'edit',x:'~ etl/transform/normalize.py  (+22 \u22129)'},
+        {t:'out',x:'validated schema: 0 drift'},
+      ],memory:this.mkMem(),tools:this.mkTools(),log:[
+        {t:'sys',x:'session paused · data-pipeline @ chore/etl-refactor'},
+        {t:'out',x:'last run: dry-run ok, 14 stages planned'},
+        {t:'sys',x:'paused 24m ago — resume to continue'},
+      ]},
+      {id:'a-aider',name:'Aider',short:'AD',color:'#C77DFF',repo:'billing-service',branch:'feat/stripe-webhooks',status:'needs',model:'claude-opus-4',fi:0,feed:this.AIDER_APPROVE,memory:this.mkMem(),tools:this.mkTools(),escMsgId:'m4',escReason:'It wants to run alembic upgrade head to add a webhook_events table — a destructive migration against the shared dev database.',log:[
+        {t:'sys',x:'session resumed · billing-service @ feat/stripe-webhooks'},
+        {t:'you',x:'wire up stripe webhook handlers and persist events'},
+        {t:'run',x:'$ rg "webhook" -l'},
+        {t:'out',x:'billing/webhooks/stripe.py'},
+        {t:'think',x:'Need a new events table — generating a migration.'},
+        {t:'edit',x:'+ alembic/versions/0007_webhook_events.py  (61 lines)'},
+        {t:'warn',x:'! wants to run: alembic upgrade head  (destructive)'},
+      ]},
+    ];
+    const D={
+      'a-claude':{used:38.2,cost:1.42,budget:5.0,snaps:[{label:'before pipeline edit',time:'8m ago'},{label:'rateLimit.ts created',time:'5m ago'},{label:'tests green',time:'2m ago'}],diff:[
+        {file:'src/server/middleware/rateLimit.ts',add:48,del:0,hunks:[
+          {t:'meta',x:'@@ new file · src/server/middleware/rateLimit.ts @@'},
+          {t:'add',x:'export class RateLimiter {'},
+          {t:'add',x:'  constructor(private redis: Redis, private rps = 100) {}'},
+          {t:'add',x:'  async allow(key: string) {'},
+          {t:'add',x:'    const n = await this.redis.incr(`rl:${key}`);'},
+          {t:'add',x:'    if (n === 1) await this.redis.expire(`rl:${key}`, 1);'},
+          {t:'add',x:'    return n <= this.rps;'},
+          {t:'add',x:'  }'},
+          {t:'add',x:'}'},
+        ]},
+        {file:'src/server/pipeline.ts',add:6,del:1,hunks:[
+          {t:'meta',x:'@@ -12,7 +12,12 @@ src/server/pipeline.ts'},
+          {t:'ctx',x:' import { auth } from "./middleware/auth";'},
+          {t:'add',x:'+import { RateLimiter } from "./middleware/rateLimit";'},
+          {t:'ctx',x:' export function pipeline(app: App) {'},
+          {t:'del',x:'-  app.use(auth);'},
+          {t:'add',x:'+  const limiter = new RateLimiter(redis);'},
+          {t:'add',x:'+  app.use((req, res, next) =>'},
+          {t:'add',x:'+    limiter.allow(req.ip).then(ok => ok ? next() : res.status(429).end()));'},
+          {t:'add',x:'+  app.use(auth);'},
+        ]},
+      ]},
+      'a-codex':{used:21.7,cost:0.31,budget:3.0,snaps:[{label:'traced redirect chain',time:'7m ago'},{label:'redirect fix',time:'5m ago'}],diff:[
+        {file:'src/auth/callback.ts',add:11,del:4,hunks:[
+          {t:'meta',x:'@@ -30,10 +30,17 @@ src/auth/callback.ts'},
+          {t:'ctx',x:' export async function handleCallback(req, res) {'},
+          {t:'del',x:'-  const session = req.cookies.session;'},
+          {t:'del',x:'-  if (session) return res.redirect("/app");'},
+          {t:'add',x:'+  const session = await verify(req.cookies.session);'},
+          {t:'add',x:'+  if (session?.valid) return res.redirect("/app");'},
+          {t:'add',x:'+  // stale cookie caused the redirect loop — clear it'},
+          {t:'add',x:'+  res.clearCookie("session");'},
+          {t:'ctx',x:'   const token = await exchange(req.query.code);'},
+          {t:'add',x:'+  res.cookie("session", token, { httpOnly: true });'},
+          {t:'ctx',x:'   return res.redirect("/app");'},
+        ]},
+      ]},
+      'a-gemini':{used:14.3,cost:0.52,budget:4.0,snaps:[{label:'dry-run ok',time:'24m ago'}],diff:[
+        {file:'etl/transform/normalize.py',add:22,del:9,hunks:[
+          {t:'meta',x:'@@ -8,9 +8,22 @@ etl/transform/normalize.py'},
+          {t:'del',x:'-    return df.merge(dim, on="key")'},
+          {t:'add',x:'+    df = df.drop_duplicates(subset=["key"])'},
+          {t:'add',x:'+    dim = dim.drop_duplicates(subset=["key"])'},
+          {t:'add',x:'+    return df.merge(dim, on="key", validate="m:1")'},
+        ]},
+      ]},
+      'a-aider':{used:44.9,cost:2.73,budget:6.0,snaps:[{label:'migration generated',time:'just now'}],diff:[
+        {file:'alembic/versions/0007_webhook_events.py',add:61,del:0,hunks:[
+          {t:'meta',x:'@@ new file · alembic/versions/0007_webhook_events.py @@'},
+          {t:'add',x:'def upgrade():'},
+          {t:'add',x:'    op.create_table("webhook_events",'},
+          {t:'add',x:'        sa.Column("id", sa.String, primary_key=True),'},
+          {t:'add',x:'        sa.Column("type", sa.String, nullable=False),'},
+          {t:'add',x:'        sa.Column("payload", sa.JSON))'},
+        ]},
+        {file:'billing/webhooks/stripe.py',add:34,del:2,hunks:[
+          {t:'meta',x:'@@ -1,4 +1,20 @@ billing/webhooks/stripe.py'},
+          {t:'add',x:'+@router.post("/webhooks/stripe")'},
+          {t:'add',x:'+async def handle(req: Request):'},
+          {t:'add',x:'+    event = stripe.Webhook.construct_event(...)'},
+          {t:'add',x:'+    await store_event(event)'},
+        ]},
+      ]},
+    };
+    agents.forEach(a=>{ const d=D[a.id]||{}; a.used=d.used||10.0; a.cost=d.cost||0.20; a.budget=d.budget||3.0; a.diff=d.diff||[]; a.snaps=d.snaps||[{label:'session start',time:'—'}]; });
+    return {
+      view:this.props.defaultView||'workspace',
+      activePane:0, splitCount:2, focusedIds:['a-claude','a-aider'],
+      composer:'', mode:'route', panel:null, toast:null, dragOverCol:null,
+      drawer:null, paletteOpen:false, paletteQuery:'', notifOpen:false,
+      events:[
+        {id:'e1',type:'route',agentId:'a-claude',text:'Routed “token-bucket rate limiting” to Claude Code',time:'12m ago'},
+        {id:'e2',type:'route',agentId:'a-codex',text:'Assigned “auth redirect fix” to Codex',time:'12m ago'},
+        {id:'e3',type:'edit',agentId:'a-claude',text:'Created src/server/middleware/rateLimit.ts',time:'9m ago'},
+        {id:'e4',type:'test',agentId:'a-codex',text:'E2E passed · redirects to /app after login',time:'6m ago'},
+        {id:'e5',type:'escalate',agentId:'a-aider',text:'Aider blocked — wants a destructive migration',time:'4m ago'},
+        {id:'e6',type:'cron',agentId:null,text:'nightly-regression finished · api-gateway',time:'6h ago'},
+      ],
+      notifications:[
+        {id:'n1',kind:'escalate',title:'Aider needs your approval',detail:'Destructive DB migration · billing-service',time:'4m ago',read:false,agentId:'a-aider'},
+        {id:'n2',kind:'done',title:'Codex finished the auth redirect fix',detail:'Ready for review · web-dashboard',time:'6m ago',read:false,agentId:'a-codex'},
+        {id:'n3',kind:'cron',title:'nightly-regression passed',detail:'api-gateway · 6h ago',time:'6h ago',read:true,agentId:null},
+      ],
+      agentTypes:[
+        {id:'claude',name:'Claude Code',color:'#E8A87C',model:'claude-sonnet-4.5',tools:6,desc:'Anthropic CLI — deep multi-file edits, tests, and refactors.',enabled:true},
+        {id:'codex',name:'Codex',color:'#34D399',model:'gpt-5-codex',tools:6,desc:'OpenAI CLI — fast fixes, typechecking, and e2e.',enabled:true},
+        {id:'gemini',name:'Gemini CLI',color:'#6C8EF5',model:'gemini-2.5-pro',tools:5,desc:'Google CLI — very large-context refactors.',enabled:true},
+        {id:'aider',name:'Aider',color:'#C77DFF',model:'claude-opus-4',tools:6,desc:'Pair-programming CLI — git-native diffs.',enabled:true},
+        {id:'cursor',name:'Cursor Agent',color:'#9AA3B2',model:'composer-1',tools:4,desc:'Background agent — repo-wide autonomous tasks.',enabled:false},
+      ],
+      integrations:[
+        {id:'github',name:'GitHub',cat:'Source control',detail:'4 repositories connected',connected:true},
+        {id:'linear',name:'Linear',cat:'Issue tracking',detail:'ENG project · auto-link',connected:true},
+        {id:'slack',name:'Slack',cat:'Notifications',detail:'#eng-platform',connected:true},
+        {id:'postgres',name:'Postgres',cat:'Databases',detail:'dev + staging',connected:true},
+        {id:'figma',name:'Figma (MCP)',cat:'Design',detail:'read-only export',connected:true},
+        {id:'stripe',name:'Stripe',cat:'Payments',detail:'not connected',connected:false},
+        {id:'sentry',name:'Sentry',cat:'Monitoring',detail:'not connected',connected:false},
+        {id:'vercel',name:'Vercel',cat:'Deploy',detail:'not connected',connected:false},
+      ],
+      settings:{concurrency:4,autoRoute:true,approveDestructive:true,followMode:true},
+      agents,
+      tasks:[
+        {id:'t1',title:'Token-bucket rate limiting on the gateway',col:'progress',agentId:'a-claude'},
+        {id:'t2',title:'Fix infinite OAuth redirect loop',col:'progress',agentId:'a-codex'},
+        {id:'t3',title:'Persist Stripe webhook events + migration',col:'review',agentId:'a-aider'},
+        {id:'t4',title:'Refactor ETL to dedupe join keys',col:'routed',agentId:'a-gemini'},
+        {id:'t5',title:'Add distributed request tracing',col:'backlog',agentId:null},
+        {id:'t6',title:'Migrate logging to OpenTelemetry',col:'backlog',agentId:null},
+        {id:'t7',title:'Config UI for rate-limit tiers',col:'backlog',agentId:null},
+        {id:'t8',title:'Weekly dependency audit',col:'done',agentId:'a-codex'},
+        {id:'t9',title:'Stabilize flaky auth e2e tests',col:'done',agentId:'a-claude'},
+      ],
+      messages:[
+        {id:'m1',role:'you',kind:'text',text:'Add token-bucket rate limiting to the API gateway and fix the auth redirect bug on the dashboard.'},
+        {id:'m2',role:'master',kind:'route',text:'Parsed 2 tasks — routing each to the right session:',routes:[
+          {name:'Claude Code',color:'#E8A87C',repo:'api-gateway',task:'rate limiting',action:'resumed'},
+          {name:'Codex',color:'#34D399',repo:'web-dashboard',task:'auth redirect',action:'assigned'},
+        ]},
+        {id:'m3',role:'master',kind:'text',text:'Following both sessions. I\u2019ll only ping you when something needs a decision.'},
+        {id:'m4',role:'master',kind:'escalate',escFor:'a-aider',esc:{name:'Aider',color:'#C77DFF',repo:'billing-service',reason:'It\u2019s blocked on a destructive DB migration (alembic upgrade head) to add a webhook_events table. Approve to let it proceed.',resolved:false,decision:null}},
+      ],
+      crons:[
+        {id:'c1',name:'nightly-regression',schedule:'0 2 * * *',human:'Every day · 2:00 AM',target:'api-gateway',agent:'Claude Code',color:'#E8A87C',on:true,built:true,last:'passed · 6h ago'},
+        {id:'c2',name:'dep-audit',schedule:'0 9 * * 1',human:'Mondays · 9:00 AM',target:'all repos',agent:'Codex',color:'#34D399',on:true,built:false,last:'2 advisories · 3d ago'},
+        {id:'c3',name:'stale-branch-sweep',schedule:'0 18 * * 5',human:'Fridays · 6:00 PM',target:'all repos',agent:'Gemini CLI',color:'#6C8EF5',on:false,built:true,last:'\u2014'},
+      ],
+      toolsCatalog:[
+        {id:'shell',name:'Shell',desc:'Run commands in the workspace sandbox.',perm:'Ask first',agents:4},
+        {id:'fs',name:'File write',desc:'Create and edit files in the repository.',perm:'Auto',agents:4},
+        {id:'git',name:'Git',desc:'Stage, commit, branch, and push changes.',perm:'Auto',agents:4},
+        {id:'http',name:'HTTP fetch',desc:'Outbound requests to allowlisted hosts only.',perm:'Ask first',agents:3},
+        {id:'db',name:'DB query',desc:'Read and write against connected databases.',perm:'Approval',agents:1},
+        {id:'browser',name:'Browser',desc:'Headless browsing and page scraping.',perm:'Off',agents:0},
+        {id:'figma',name:'Figma (MCP)',desc:'Read designs and export assets.',perm:'Auto',agents:2},
+        {id:'deploy',name:'Deploy',desc:'Ship builds to staging and production.',perm:'Approval',agents:0},
+      ],
+    };
+  }
+
+  componentDidMount(){ this.timer=setInterval(this.tick,1500); window.addEventListener('keydown',this.onGlobalKey); }
+  componentWillUnmount(){ clearInterval(this.timer); if(this._t) clearTimeout(this._t); window.removeEventListener('keydown',this.onGlobalKey); }
+  componentDidUpdate(){ document.querySelectorAll('[data-auto]').forEach(el=>{ el.scrollTop=el.scrollHeight; }); }
+
+  tick=()=>{
+    if(this.props.liveStreaming===false||this.state.paletteOpen) return;
+    this.setState(s=>({
+      agents:s.agents.map(a=>{
+        if(a.status!=='running'||!a.feed||!a.feed.length) return a;
+        const line=a.feed[(a.fi||0)%a.feed.length];
+        const log=a.log.concat([line]);
+        if(log.length>70) log.splice(0,log.length-70);
+        return {...a,log,fi:(a.fi||0)+1};
+      })
+    }));
+  };
+
+  flash=(t)=>{ this.setState({toast:t}); if(this._t) clearTimeout(this._t); this._t=setTimeout(()=>this.setState({toast:null}),2600); };
+  push=(m)=>{ this.setState(s=>({messages:s.messages.concat([{id:'m'+Date.now()+Math.random(),...m}])})); };
+
+  setView=(v)=>this.setState({view:v});
+  setMode=(m)=>this.setState({mode:m});
+  onComposer=(e)=>this.setState({composer:e.target.value});
+  onKey=(e)=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); this.send(); } };
+  focusComposer=()=>{ const el=document.querySelector('[data-composer]'); if(el) el.focus(); };
+
+  setActivePane=(i)=>this.setState({activePane:i});
+  focusTab=(id)=>this.setState(s=>{ const f=s.focusedIds.slice(); f[s.activePane]=id; return {focusedIds:f,view:'workspace'}; });
+  toggleSplit=()=>this.setState(s=>{
+    if(s.splitCount===2) return {splitCount:1,activePane:0};
+    const other=s.agents.find(a=>a.id!==s.focusedIds[0])||s.agents[0];
+    const f=s.focusedIds.slice(); if(!f[1]) f[1]=other.id;
+    return {splitCount:2,focusedIds:f};
+  });
+  closePane=(i)=>this.setState(s=>{
+    if(s.splitCount===1) return {};
+    const keep=s.focusedIds[i===0?1:0];
+    return {splitCount:1,activePane:0,focusedIds:[keep,s.focusedIds[1]]};
+  });
+  newSession=()=>this.setState(s=>{
+    const id='a'+Date.now();
+    const target={id,name:'Claude Code',short:'CC',color:'#E8A87C',repo:'untitled',branch:'main',status:'running',model:'claude-sonnet-4.5',fi:0,feed:this.CLAUDE_FEED,memory:this.mkMem(),tools:this.mkTools(),log:[{t:'sys',x:'new session created · untitled @ main'},{t:'out',x:'workspace ready — awaiting instructions'}]};
+    const f=s.focusedIds.slice(); f[s.activePane]=id;
+    return {agents:s.agents.concat([target]),focusedIds:f,view:'workspace'};
+  });
+  resume=(id)=>this.setState(s=>{
+    const f=s.focusedIds.slice(); f[s.activePane]=id;
+    return {agents:s.agents.map(a=>a.id===id?{...a,status:'running',log:a.log.concat([{t:'sys',x:'session resumed'}])}:a),focusedIds:f,view:'workspace'};
+  });
+  openInWorkspace=(id)=>this.focusTab(id);
+
+  openPanel=(id,tab)=>this.setState({panel:{agentId:id,tab:tab||'memory'}});
+  setPanelTab=(tab)=>this.setState(s=>({panel:{...s.panel,tab}}));
+  closePanel=()=>this.setState({panel:null});
+  toggleMem=(aid,mid)=>this.setState(s=>({agents:s.agents.map(a=>a.id===aid?{...a,memory:a.memory.map(m=>m.id===mid?{...m,on:!m.on}:m)}:a)}));
+  toggleTool=(aid,tid)=>this.setState(s=>({agents:s.agents.map(a=>a.id===aid?{...a,tools:a.tools.map(t=>t.id===tid?{...t,on:!t.on}:t)}:a)}));
+  cyclePerm=(aid,tid)=>{ const order=['Off','Ask first','Auto','Approval']; this.setState(s=>({agents:s.agents.map(a=>a.id===aid?{...a,tools:a.tools.map(t=>t.id===tid?{...t,perm:order[(order.indexOf(t.perm)+1)%order.length]}:t)}:a)})); };
+  toggleCron=(id)=>this.setState(s=>({crons:s.crons.map(c=>c.id===id?{...c,on:!c.on}:c)}));
+
+  allowDrop=(e)=>{ e.preventDefault(); if(e.dataTransfer) e.dataTransfer.dropEffect='move'; };
+  onCardDrag=(id,e)=>{ this._drag=id; if(e.dataTransfer){ e.dataTransfer.effectAllowed='move'; try{e.dataTransfer.setData('text/plain',id);}catch(_){} } };
+  enterCol=(col)=>{ if(this.state.dragOverCol!==col) this.setState({dragOverCol:col}); };
+  dropTo=(col)=>{ const id=this._drag; this._drag=null; if(!id){ this.setState({dragOverCol:null}); return; } this.setState(s=>({tasks:s.tasks.map(t=>t.id===id?{...t,col}:t),dragOverCol:null})); };
+  addTask=()=>this.setState(s=>({tasks:s.tasks.concat([{id:'t'+Date.now(),title:'New task',col:'backlog',agentId:null}])}));
+
+  logEvent=(type,agentId,text)=>this.setState(s=>({events:[{id:'e'+Date.now()+Math.random(),type,agentId,text,time:'just now'}].concat(s.events)}));
+
+  onGlobalKey=(e)=>{
+    if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){ e.preventDefault(); this.setState(s=>({paletteOpen:!s.paletteOpen,paletteQuery:''})); }
+    else if(e.key==='Escape'){ this.setState({paletteOpen:false,notifOpen:false,drawer:null}); }
+  };
+  openPalette=()=>this.setState({paletteOpen:true,paletteQuery:''});
+  closePalette=()=>this.setState({paletteOpen:false});
+  onPaletteQuery=(e)=>this.setState({paletteQuery:e.target.value});
+  runCommand=(cmd)=>{ this.setState({paletteOpen:false,paletteQuery:''}); if(cmd&&cmd.run) cmd.run(); };
+  onPaletteKey=(e)=>{ if(e.key==='Enter'){ e.preventDefault(); const l=this.filteredCommands(); if(l[0]) this.runCommand(l[0]); } };
+  baseCommands=()=>{
+    const nav=[['workspace','Go to Workspace'],['overview','Go to Agents'],['board','Go to Board'],['timeline','Go to Activity'],['usage','Go to Usage'],['crons','Go to Schedules'],['tools','Go to Tools'],['settings','Go to Settings']];
+    const cmds=[
+      {id:'route',label:'Route a task…',hint:'compose',icon:'route',run:()=>this.focusComposer()},
+      {id:'new',label:'New agent session',hint:'spawn',icon:'plus',run:()=>this.newSession()},
+      {id:'split',label:'Toggle split view',hint:'layout',icon:'split',run:()=>this.toggleSplit()},
+      {id:'build',label:'Build a tool or panel',hint:'compose',icon:'build',run:()=>this.focusComposer()},
+    ];
+    this.state.agents.filter(a=>a.status==='idle').forEach(a=>cmds.push({id:'res-'+a.id,label:'Resume '+a.name,hint:a.repo,icon:'play',run:()=>this.resume(a.id)}));
+    this.state.agents.filter(a=>a.status==='needs'||a.status==='running').forEach(a=>cmds.push({id:'rev-'+a.id,label:'Review changes · '+a.name,hint:a.repo,icon:'diff',run:()=>this.openDiff(a.id)}));
+    nav.forEach(([v,l])=>cmds.push({id:'nav-'+v,label:l,hint:'navigate',icon:'go',run:()=>this.setView(v)}));
+    return cmds;
+  };
+  filteredCommands=()=>{ const q=(this.state.paletteQuery||'').toLowerCase().trim(); const all=this.baseCommands(); return q?all.filter(c=>c.label.toLowerCase().includes(q)||c.hint.toLowerCase().includes(q)):all; };
+
+  toggleNotif=()=>this.setState(s=>({notifOpen:!s.notifOpen}));
+  readAllNotif=()=>this.setState(s=>({notifications:s.notifications.map(n=>({...n,read:true}))}));
+  clickNotif=(n)=>{ this.setState(s=>({notifications:s.notifications.map(x=>x.id===n.id?{...x,read:true}:x),notifOpen:false})); if(n.kind==='escalate'&&n.agentId) this.focusTab(n.agentId); else if(n.kind==='done'&&n.agentId) this.openDiff(n.agentId); else if(n.kind==='cron') this.setView('crons'); };
+
+  openAgent=(id)=>this.setState({drawer:{kind:'agent',agentId:id}});
+  openDiff=(id)=>this.setState({drawer:{kind:'diff',agentId:id}});
+  closeDrawer=()=>this.setState({drawer:null});
+  approveDiff=(id)=>{ this.setState(s=>({drawer:null,tasks:s.tasks.map(t=>(t.agentId===id&&t.col==='review')?{...t,col:'done'}:t)})); this.logEvent('done',id,'Approved changes · merged to main'); this.flash('Changes approved & merged'); };
+  requestChanges=(id)=>{ this.setState({drawer:null}); this.logEvent('edit',id,'Requested changes on the diff'); this.flash('Requested changes'); };
+
+  toggleIntegration=(id)=>this.setState(s=>({integrations:s.integrations.map(x=>x.id===id?{...x,connected:!x.connected,detail:!x.connected?'connected just now':'not connected'}:x)}));
+  toggleAgentType=(id)=>this.setState(s=>({agentTypes:s.agentTypes.map(x=>x.id===id?{...x,enabled:!x.enabled}:x)}));
+  toggleSetting=(k)=>this.setState(s=>({settings:{...s.settings,[k]:!s.settings[k]}}));
+
+  approve=(aid)=>{
+    this.setState(s=>{
+      const agents=s.agents.map(a=>a.id===aid?{...a,status:'running',feed:this.AIDER_APPROVE,fi:0,log:a.log.concat([{t:'sys',x:'approved by you · resuming'}])}:a);
+      const messages=s.messages.map(m=>(m.escFor===aid)?{...m,esc:{...m.esc,resolved:true,decision:'approved'}}:m);
+      messages.push({id:'m'+Date.now(),role:'master',kind:'text',text:'Approved. Aider is applying the migration on billing-service and running the webhook tests now.'});
+      const f=s.focusedIds.slice(); f[s.activePane]=aid;
+      return {agents,messages,focusedIds:f,view:'workspace'};
+    });
+    this.flash('Approved — Aider resumed');
+    this.logEvent('done',aid,'Approved migration · agent resumed');
+  };
+  deny=(aid)=>{
+    this.setState(s=>{
+      const agents=s.agents.map(a=>a.id===aid?{...a,status:'idle',log:a.log.concat([{t:'sys',x:'denied · migration discarded, session paused'}])}:a);
+      const messages=s.messages.map(m=>(m.escFor===aid)?{...m,esc:{...m.esc,resolved:true,decision:'denied'}}:m);
+      messages.push({id:'m'+Date.now(),role:'master',kind:'text',text:'Denied. Aider discarded the pending migration and paused. Tell me how you\u2019d like to proceed.'});
+      return {agents,messages};
+    });
+    this.flash('Denied — Aider paused');
+    this.logEvent('escalate',aid,'Denied migration · agent paused');
+  };
+
+  classify=(text)=>{
+    const t=text.toLowerCase().trim();
+    if(/\b(build|create|make|set up|scaffold|generate)\b.*\b(tool|integration|mcp|cron|schedule|job|panel|dashboard|view|ui|report)\b/.test(t) || /\b(nightly|every day|every week|weekly|daily|hourly|each morning)\b/.test(t)) return 'build';
+    if(/\?\s*$/.test(text) || /^(what|which|how|why|when|who|where|is|are|do|does|can|status|show me|list|tell me|any )\b/.test(t)) return 'ask';
+    return 'route';
+  };
+  send=()=>{
+    const text=this.state.composer.trim(); if(!text) return;
+    const mode=this.classify(text);
+    this.setState(s=>({messages:s.messages.concat([{id:'u'+Date.now(),role:'you',kind:'text',text}]),composer:''}));
+    if(mode==='ask'){ setTimeout(()=>this.doAsk(text),600); return; }
+    if(mode==='build'){ setTimeout(()=>this.doBuild(text),650); return; }
+    setTimeout(()=>this.doRoute(text),650);
+  };
+  doAsk=()=>{
+    const running=this.state.agents.filter(a=>a.status==='running').length;
+    const needs=this.state.agents.filter(a=>a.status==='needs').length;
+    let reply=running+' agents are running right now. Claude Code has rate limiting passing tests, Codex fixed the auth redirect loop, and Gemini CLI is paused mid-refactor.';
+    if(needs) reply+=' Aider is still waiting on your migration approval.';
+    this.push({role:'master',kind:'text',text:reply});
+  };
+  doRoute=(text)=>{
+    this.setState(s=>{
+      let agents=s.agents.slice();
+      let target=agents.find(a=>a.status==='idle');
+      let action;
+      if(target){
+        action='resumed';
+        agents=agents.map(a=>a.id===target.id?{...a,status:'running',fi:0,log:a.log.concat([{t:'sys',x:'routed by Master'},{t:'you',x:text}])}:a);
+      } else {
+        const slug=(text.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,22))||'task';
+        const id='a'+Date.now();
+        target={id,name:'Claude Code',short:'CC',color:'#E8A87C',repo:'sandbox',branch:'feat/'+slug,status:'running',model:'claude-sonnet-4.5',fi:0,feed:this.CLAUDE_FEED,memory:this.mkMem(),tools:this.mkTools(),log:[{t:'sys',x:'new session · sandbox @ feat/'+slug},{t:'you',x:text}]};
+        action='spun up';
+        agents=agents.concat([target]);
+      }
+      const routeMsg={id:'m'+Date.now(),role:'master',kind:'route',text:'Parsed your request — routing it now:',routes:[{name:target.name,color:target.color,repo:target.repo+' · '+target.branch,task:text,action}]};
+      const f=s.focusedIds.slice(); f[s.activePane]=target.id;
+      return {agents,messages:s.messages.concat([routeMsg]),focusedIds:f,view:'workspace'};
+    });
+    this.flash('Task routed to an agent');
+    this.logEvent('route',null,'Routed “'+text.slice(0,48)+'”');
+  };
+  titleFrom=(text)=>{ const t=text.toLowerCase(); if(/coverage/.test(t))return 'Test coverage'; if(/latency|perf|speed/.test(t))return 'Latency'; if(/cost|spend|budget|token/.test(t))return 'Cost & tokens'; if(/error|failure|crash/.test(t))return 'Error rate'; if(/throughput|traffic|request/.test(t))return 'Throughput'; return 'Metrics'; };
+  doBuild=(text)=>{
+    if(/\b(panel|dashboard|ui|widget|custom view|interface)\b/i.test(text)){ this.doBuildUI(text); return; }
+    const isTool=/tool|integration|mcp/i.test(text);
+    this.setState(s=>{
+      if(isTool){
+        const name=(text.replace(/build( a| the| me)?/i,'').trim().slice(0,26))||'custom-tool';
+        const tool={id:'t'+Date.now(),name,desc:'Generated by Master from your request.',perm:'Ask first',agents:0,built:true};
+        return {toolsCatalog:s.toolsCatalog.concat([tool]),messages:s.messages.concat([{id:'m'+Date.now(),role:'master',kind:'build',build:{kind:'tool',title:name,detail:'Added to the tool registry with Ask-first permission.',view:'tools'}}])};
+      }
+      const name=(text.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,22))||'scheduled-job';
+      const cron={id:'c'+Date.now(),name,schedule:'0 3 * * *',human:'Every day · 3:00 AM',target:'api-gateway',agent:'Claude Code',color:'#E8A87C',on:true,built:true,last:'\u2014'};
+      return {crons:s.crons.concat([cron]),messages:s.messages.concat([{id:'m'+Date.now(),role:'master',kind:'build',build:{kind:'cron',title:name,detail:'Every day · 3:00 AM · runs Claude Code on api-gateway.',view:'crons'}}])};
+    });
+    this.flash(isTool?'Built a new tool':'Built a new schedule');
+    this.logEvent('build',null,isTool?'Built a new tool':'Built a new schedule');
+  };
+  doBuildUI=(text)=>{
+    const mid='m'+Date.now();
+    const title=this.titleFrom(text)+' panel';
+    const bars=Array.from({length:7},()=>0.3+Math.random()*0.7);
+    this.setState(s=>({messages:s.messages.concat([{id:mid,role:'master',kind:'buildui',build:{title,stage:0,done:false,bars}}])}));
+    const at=(stage,ms)=>setTimeout(()=>this.setState(s=>({messages:s.messages.map(m=>m.id===mid?{...m,build:{...m.build,stage}}:m)})),ms);
+    at(1,650); at(2,1350); at(3,2100);
+    setTimeout(()=>{ this.setState(s=>({messages:s.messages.map(m=>m.id===mid?{...m,build:{...m.build,stage:4,done:true}}:m)})); this.logEvent('build',null,'Built a custom panel: '+title); this.flash('Mounted a custom panel'); },2900);
+  };
+
+  renderVals(){
+    const s=this.state;
+    const accent=this.props.masterAccent||'#F5C451';
+    const accentGlow=this.hexToRgba(accent,.5);
+    const accentSoft=this.hexToRgba(accent,.14);
+    const accentGrad='linear-gradient(145deg,'+this.hexToRgba(accent,1)+','+this.hexToRgba(accent,.72)+')';
+    const LOGC={sys:'#5B6472',you:'#E7E9F0',run:'#7FD1FF',out:'#8B93A1',think:'#D9B778',edit:'#7FE3B0',warn:'#FFB020',err:'#FF7A7A'};
+    const SM={running:{label:'Running',color:'#3DDC97'},idle:{label:'Paused',color:'#6B7280'},needs:{label:'Needs action',color:'#FFB020'},error:{label:'Error',color:'#FF5C5C'}};
+    const PERMC={'Off':'#6B7280','Ask first':'#FFB020','Auto':'#3DDC97','Approval':'#FF5C5C'};
+
+    const decorate=(a)=>{
+      const sm=SM[a.status]||SM.idle;
+      const dlog=(a.log||[]).map(l=>({text:l.x,color:LOGC[l.t]||'#8B93A1',fs:l.t==='think'?'italic':'normal'}));
+      const memOn=(a.memory||[]).filter(m=>m.on);
+      const memTotal=memOn.reduce((n,m)=>n+(m.tokens||0),0);
+      const last=(a.log&&a.log.length)?a.log[a.log.length-1].x:'';
+      const toolOn=(a.tools||[]).filter(t=>t.on).length;
+      return {...a,
+        statusLabel:sm.label, statusColor:sm.color,
+        dotAnim:(a.status==='running'||a.status==='needs')?'cpulse 1.6s ease-in-out infinite':'none',
+        initials:a.short||a.name.slice(0,2).toUpperCase(),
+        path:a.repo+' · '+a.branch,
+        soft:this.hexToRgba(a.color,.14), border:this.hexToRgba(a.color,.4),
+        dlog, memTotal:memTotal.toFixed(1)+'k', memCount:memOn.length, toolCount:toolOn,
+        lastLine:last, isIdle:a.status==='idle', costLabel2:'$'+(a.cost||0).toFixed(2),
+        onFocus:()=>this.focusTab(a.id), onResume:()=>this.resume(a.id),
+        onMem:()=>this.openPanel(a.id,'memory'), onTools:()=>this.openPanel(a.id,'tools'),
+        onApprove:()=>this.approve(a.id), onDeny:()=>this.deny(a.id),
+        onOpenWs:()=>this.openInWorkspace(a.id),
+        onDetail:()=>this.openAgent(a.id), onReview:()=>this.openDiff(a.id),
+      };
+    };
+    const A=s.agents.map(decorate);
+    const byId={}; A.forEach(a=>byId[a.id]=a);
+    const focused=s.focusedIds.slice(0,s.splitCount);
+
+    const panes=focused.map((id,i)=>{
+      const a=byId[id]||A[0];
+      return {...a, paneIndex:i,
+        onActivate:()=>this.setActivePane(i), onClose:()=>this.closePane(i),
+        ring:(s.splitCount>1&&i===s.activePane)?('inset 0 0 0 1.5px '+accent):'none',
+        needsAction:a.status==='needs', isRunning:a.status==='running',
+      };
+    });
+    const tabs=A.map(a=>{
+      const active=focused.indexOf(a.id)>=0;
+      return {...a, bg:active?'#12151C':'transparent', nameColor:active?'#E7E9F0':'#9AA3B2', topBorder:active?a.color:'transparent'};
+    });
+
+    const messages=s.messages.map(m=>{
+      const mm={...m, isText:m.kind==='text',isRoute:m.kind==='route',isEscalate:m.kind==='escalate',isBuild:m.kind==='build',isBuildUI:m.kind==='buildui',isYou:m.role==='you',isMaster:m.role==='master'};
+      if(m.kind==='buildui'){
+        const labels=['Planning layout','Generating components','Wiring live data','Mounting panel'];
+        const stage=m.build.stage||0;
+        const steps=labels.map((label,i)=>{ const done=stage>i+1||m.build.done; const active=stage===i+1&&!m.build.done; return {label, done, active, pending:!done&&!active, color:done?'#3DDC97':(active?accent:'#3a4150')}; });
+        const bars=(m.build.bars||[]).map(v=>({h:Math.round(8+v*46)+'px'}));
+        mm.build={...m.build, steps, bars};
+      }
+      if(m.kind==='route'&&m.routes) mm.routes=m.routes.map(r=>({...r,soft:this.hexToRgba(r.color,.16)}));
+      if(m.kind==='escalate'){ mm.escResolved=!!m.esc.resolved; mm.escOpen=!m.esc.resolved; mm.decisionColor=m.esc.decision==='denied'?'#FF7A7A':'#3DDC97'; mm.approvedTxt=m.esc.decision==='denied'?'Denied · agent paused':'Approved · agent resumed'; mm.onApprove=()=>this.approve(m.escFor); mm.onDeny=()=>this.deny(m.escFor); }
+      if(m.kind==='build'){ mm.build={...m.build,kindLabel:m.build.kind==='tool'?'TOOL':'SCHEDULE'}; mm.onView=()=>this.setView(m.build.view); }
+      return mm;
+    });
+
+    const nav=[
+      {id:'workspace',label:'Work',paths:['M3 5.5h18v13H3z','M9.5 5.5v13']},
+      {id:'overview',label:'Agents',paths:['M4 4h6.5v6.5H4z','M13.5 4H20v6.5h-6.5z','M4 13.5h6.5V20H4z','M13.5 13.5H20V20h-6.5z']},
+      {id:'board',label:'Board',paths:['M4 5h4v14H4z','M10 5h4v9h-4z','M16 5h4v12h-4z']},
+      {id:'timeline',label:'Activity',paths:['M3 12h4l2.5 6 5-12 2.5 6h4']},
+      {id:'usage',label:'Usage',paths:['M4 20V11','M10 20V4','M16 20v-6','M3 20h18']},
+      {id:'crons',label:'Cron',paths:['M12 3.6a8.4 8.4 0 100 16.8 8.4 8.4 0 000-16.8z','M12 8v4.3l2.9 1.7']},
+      {id:'tools',label:'Tools',paths:['M6 4v16','M12 4v16','M18 4v16','M6 8.5m-2 0a2 2 0 104 0 2 2 0 10-4 0','M12 14m-2 0a2 2 0 104 0 2 2 0 10-4 0','M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']},
+    ].map(n=>({...n, active:n.id===s.view, bg:n.id===s.view?accentSoft:'transparent', iconColor:n.id===s.view?accent:'#8B93A1', onClick:()=>this.setView(n.id)}));
+
+    const composerPlaceholder='Tell Master what you need — it routes tasks, answers questions, and builds tools automatically\u2026';
+    const sendHint='\u21A9 send · Master picks the right action';
+
+    let panelAgent=null, memTabBorder='transparent',memTabColor='#8B93A1',toolsTabBorder='transparent',toolsTabColor='#8B93A1';
+    if(s.panel){
+      const base=byId[s.panel.agentId];
+      if(base){
+        panelAgent={...base,
+          isMem:s.panel.tab==='memory', isTools:s.panel.tab==='tools',
+          tabMem:()=>this.setPanelTab('memory'), tabTools:()=>this.setPanelTab('tools'),
+          memory:base.memory.map(m=>({...m,onToggle:()=>this.toggleMem(base.id,m.id),swBg:m.on?'#3DDC97':'#2C313B',knobX:m.on?'18px':'2px',labelColor:m.on?'#E7E9F0':'#6B7280',tokLabel:m.tokens.toFixed(1)+'k'})),
+          tools:base.tools.map(t=>({...t,onToggle:()=>this.toggleTool(base.id,t.id),onPerm:()=>this.cyclePerm(base.id,t.id),swBg:t.on?'#3DDC97':'#2C313B',knobX:t.on?'18px':'2px',labelColor:t.on?'#E7E9F0':'#6B7280',permColor:PERMC[t.perm]||'#8B93A1',permSoft:this.hexToRgba(PERMC[t.perm]||'#8B93A1',.13),permBorder:this.hexToRgba(PERMC[t.perm]||'#8B93A1',.35)})),
+        };
+        if(s.panel.tab==='memory'){ memTabBorder=accent; memTabColor='#E7E9F0'; }
+        else { toolsTabBorder=accent; toolsTabColor='#E7E9F0'; }
+      }
+    }
+
+    const crons=s.crons.map(c=>({...c,onToggle:()=>this.toggleCron(c.id),swBg:c.on?'#3DDC97':'#2C313B',knobX:c.on?'18px':'2px'}));
+    const toolsCat=s.toolsCatalog.map(t=>({...t,permColor:PERMC[t.perm]||'#8B93A1',permSoft:this.hexToRgba(PERMC[t.perm]||'#8B93A1',.13)}));
+
+    const COLS=[
+      {id:'backlog',label:'Backlog',dot:'#6B7280'},
+      {id:'routed',label:'Routed',dot:'#6C8EF5'},
+      {id:'progress',label:'In progress',dot:'#3DDC97'},
+      {id:'review',label:'Needs review',dot:'#FFB020'},
+      {id:'done',label:'Done',dot:'#4a5262'},
+    ];
+    const board=COLS.map(c=>{
+      const cards=s.tasks.filter(t=>t.col===c.id).map(t=>{
+        const ag=t.agentId?byId[t.agentId]:null;
+        return {...t, color:ag?ag.color:'#626B79', agentName:ag?ag.name:'Unassigned', repo:ag?ag.repo:'—',
+          onDragStart:(e)=>this.onCardDrag(t.id,e), onClick:ag?()=>this.focusTab(ag.id):()=>{}};
+      });
+      return {...c, cards, count:cards.length,
+        borderColor:s.dragOverCol===c.id?accent:'#1a1e26',
+        onDrop:()=>this.dropTo(c.id), onEnter:()=>this.enterCol(c.id)};
+    });
+
+    const runningCount=A.filter(a=>a.status==='running').length;
+    const needsCount=A.filter(a=>a.status==='needs').length;
+    const needsAgent=A.find(a=>a.status==='needs');
+
+    // Activity timeline
+    const EVI={route:accent,edit:'#7FE3B0',test:'#7FD1FF',escalate:'#FFB020',cron:'#8B93A1',build:accent,done:'#3DDC97'};
+    const events=s.events.map(e=>{ const ag=e.agentId?byId[e.agentId]:null; return {...e, color:EVI[e.type]||'#8B93A1', soft:this.hexToRgba(EVI[e.type]||'#8B93A1',.16), agentName:ag?ag.name:'Master', typeLabel:e.type.toUpperCase()}; });
+
+    // Usage dashboard
+    const usageAgents=A.map(a=>({...a, pct:Math.min(100,Math.round((a.cost/a.budget)*100)), usedLabel:a.used.toFixed(1)+'k tok', costLabel:'$'+a.cost.toFixed(2), budgetLabel:'of $'+a.budget.toFixed(2)}));
+    const tCost=A.reduce((n,a)=>n+a.cost,0), tBudget=A.reduce((n,a)=>n+a.budget,0), tTok=A.reduce((n,a)=>n+a.used,0);
+    const usageTotals={cost:'$'+tCost.toFixed(2), budget:'$'+tBudget.toFixed(2), tokens:tTok.toFixed(1)+'k', pct:Math.round(tCost/tBudget*100)+'%'};
+
+    // Command palette
+    const ICONP={route:['M4 6h9','M4 18h6','M13 6l3 3-3 3','M20 6v12'],plus:['M12 5v14','M5 12h14'],split:['M4 5h16v14H4z','M12 5v14'],build:['M14 3l-1 5 5-1-8 13 1-6-5 1z'],play:['M8 5l11 7-11 7z'],diff:['M6 3v6a3 3 0 003 3h6','M18 21v-6a3 3 0 00-3-3H9','M4 5l2-2 2 2','M20 19l-2 2-2-2'],go:['M5 12h14','M13 6l6 6-6 6']};
+    const paletteCommands=this.filteredCommands().map(c=>({...c, iconPaths:ICONP[c.icon]||ICONP.go, onClick:()=>this.runCommand(c)}));
+
+    // Notifications
+    const NKI={escalate:'#FFB020',done:'#3DDC97',cron:'#8B93A1'};
+    const notifList=s.notifications.map(n=>({...n, color:NKI[n.kind]||'#8B93A1', onClick:()=>this.clickNotif(n), unreadOpacity:n.read?0:1, bg:n.read?'transparent':this.hexToRgba(NKI[n.kind]||'#8B93A1',.06)}));
+    const unread=s.notifications.filter(n=>!n.read).length;
+
+    // Drawer (agent detail / diff review)
+    let drawerAgent=null, isAgentDrawer=false, isDiffDrawer=false, drawerTitle='';
+    if(s.drawer){
+      const base=byId[s.drawer.agentId];
+      if(base){
+        isAgentDrawer=s.drawer.kind==='agent'; isDiffDrawer=s.drawer.kind==='diff';
+        const DFC={add:'#7FE3B0',del:'#FF9B9B',ctx:'#8B93A1',meta:accent};
+        const DFBG={add:'rgba(61,220,151,.09)',del:'rgba(255,92,92,.09)',ctx:'transparent',meta:this.hexToRgba(accent,.08)};
+        const diff=(base.diff||[]).map(f=>({...f, addLabel:'+'+f.add, delLabel:'−'+f.del, hunks:f.hunks.map(h=>({text:h.x,color:DFC[h.t]||'#8B93A1',bg:DFBG[h.t]||'transparent'}))}));
+        const history=(base.log||[]).slice(-16).map(l=>({text:l.x,color:LOGC[l.t]||'#8B93A1',fs:l.t==='think'?'italic':'normal'}));
+        const tAdd=(base.diff||[]).reduce((n,f)=>n+f.add,0), tDel=(base.diff||[]).reduce((n,f)=>n+f.del,0);
+        drawerAgent={...base, diff, history, snaps:base.snaps||[], costLabel:'$'+base.cost.toFixed(2), usedLabel:base.used.toFixed(1)+'k', fileCount:diff.length, totalAdd:'+'+tAdd, totalDel:'−'+tDel,
+          onApproveDiff:()=>this.approveDiff(base.id), onRequestChanges:()=>this.requestChanges(base.id),
+          onOpenWs:()=>{this.closeDrawer();this.focusTab(base.id);}, onResumeD:()=>{this.closeDrawer();this.resume(base.id);}};
+        drawerTitle=isDiffDrawer?'Review changes':'Session detail';
+      }
+    }
+
+    // Settings
+    const settingsTypes=s.agentTypes.map(t=>({...t, soft:this.hexToRgba(t.color,.14), border:this.hexToRgba(t.color,.4), initials:t.name.slice(0,2).toUpperCase(), onToggle:()=>this.toggleAgentType(t.id), swBg:t.enabled?'#3DDC97':'#2C313B', knobX:t.enabled?'18px':'2px', statusLabel:t.enabled?'Enabled':'Disabled', statusColor:t.enabled?'#3DDC97':'#6B7280'}));
+    const settingsIntegrations=s.integrations.map(g=>({...g, onToggle:()=>this.toggleIntegration(g.id), swBg:g.connected?'#3DDC97':'#2C313B', knobX:g.connected?'18px':'2px', dotColor:g.connected?'#3DDC97':'#3a4150', initials:g.name.slice(0,2).toUpperCase(), detailColor:g.connected?'#3DDC97':'#626B79'}));
+    const st=s.settings;
+    const settingsToggles=[
+      {id:'autoRoute',label:'Auto-route requests',detail:'Master assigns tasks to the right agent without asking first.',on:st.autoRoute},
+      {id:'approveDestructive',label:'Require approval for destructive actions',detail:'Migrations, file deletes, and deploys pause for your sign-off.',on:st.approveDestructive},
+      {id:'followMode',label:'Follow mode',detail:'Master watches every session and escalates when action is needed.',on:st.followMode},
+    ].map(x=>({...x, onToggle:()=>this.toggleSetting(x.id), swBg:x.on?'#3DDC97':'#2C313B', knobX:x.on?'18px':'2px'}));
+
+    // Handoff / dependency graph (Agents overview)
+    const gpos=[{x:150,y:62},{x:570,y:62},{x:150,y:178},{x:570,y:178}];
+    const core=A.slice(0,4);
+    const graphNodes=core.map((a,i)=>({...a, cx:gpos[i].x, cy:gpos[i].y, labelY:gpos[i].y+44, dotCx:gpos[i].x+18, dotCy:gpos[i].y-18}));
+    const spokes=graphNodes.map(n=>({x1:360,y1:120,x2:n.cx,y2:n.cy, color:this.hexToRgba(n.color,.45)}));
+    const dep=(graphNodes[0]&&graphNodes[1])?{d:'M '+graphNodes[0].cx+' '+graphNodes[0].cy+' C '+graphNodes[0].cx+' 16 '+graphNodes[1].cx+' 16 '+graphNodes[1].cx+' '+graphNodes[1].cy}:null;
+
+    return {
+      accent, accentGlow, accentSoft, accentGrad,
+      view:s.view, isWorkspace:s.view==='workspace', isOverview:s.view==='overview', isBoard:s.view==='board', isCrons:s.view==='crons', isTools:s.view==='tools',
+      isTimeline:s.view==='timeline', isUsage:s.view==='usage', isSettings:s.view==='settings',
+      events, usageAgents, usageTotals,
+      paletteOpen:s.paletteOpen, paletteQuery:s.paletteQuery, paletteCommands, onPaletteQuery:this.onPaletteQuery, onPaletteKey:this.onPaletteKey, closePalette:this.closePalette, openPalette:this.openPalette,
+      notifOpen:s.notifOpen, notifList, unread, hasUnread:unread>0, unreadLabel:''+unread, toggleNotif:this.toggleNotif, readAllNotif:this.readAllNotif,
+      drawerOpen:!!drawerAgent, drawerAgent, isAgentDrawer, isDiffDrawer, drawerTitle, closeDrawer:this.closeDrawer,
+      settingsTypes, settingsIntegrations, settingsToggles,
+      graphNodes, spokes, dep, hasDep:!!dep, openSettings:()=>this.setView('settings'), settingsIconColor:s.view==='settings'?accent:'#626B79',
+      board, allowDrop:this.allowDrop, addTask:this.addTask,
+      nav, panes, tabs, splitCount:s.splitCount,
+      splitBtnBg:s.splitCount>1?accentSoft:'transparent', splitBtnColor:s.splitCount>1?accent:'#9AA3B2',
+      messages, composer:s.composer,
+      onComposer:this.onComposer, onKey:this.onKey, send:this.send, focusComposer:this.focusComposer,
+      composerPlaceholder, sendHint,
+      newSession:this.newSession, toggleSplit:this.toggleSplit,
+      runningCount, needsCount, hasNeeds:needsCount>0,
+      gotoNeeds:()=>{ if(needsAgent) this.focusTab(needsAgent.id); },
+      masterActivity:runningCount+' agents running · following all sessions',
+      overviewAgents:A, agentCount:A.length, crons, toolsCat,
+      panelOpen:!!panelAgent, panelAgent, memTabBorder, memTabColor, toolsTabBorder, toolsTabColor,
+      panelMemTab:!!panelAgent&&s.panel.tab==='memory', panelToolsTab:!!panelAgent&&s.panel.tab==='tools',
+      closePanel:this.closePanel,
+      toast:s.toast, hasToast:!!s.toast,
+      stop:(e)=>{ if(e&&e.stopPropagation) e.stopPropagation(); },
+    };
+  }
+}
+</script>
+</body>
+</html>
