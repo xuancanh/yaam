@@ -110,6 +110,8 @@ export interface Message {
   escFor?: string
   build?: BuildResult
   buildUI?: BuildUI
+  /** Master's collapsed tool-use / reasoning trace */
+  thinking?: string
 }
 
 export interface Cron {

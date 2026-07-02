@@ -627,9 +627,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const note = pendingTurn.note
       pendingTurn = null
       try {
-        const text = await runMasterTurn(() => stateRef.current, exec, note)
-        if (text) {
-          dispatch(s => ({ ...s, messages: s.messages.concat([{ id: mkId('m'), role: 'master', kind: 'text', text }]) }))
+        const { text, thinking } = await runMasterTurn(() => stateRef.current, exec, note)
+        if (text || thinking) {
+          dispatch(s => ({
+            ...s,
+            messages: s.messages.concat([{
+              id: mkId('m'), role: 'master', kind: 'text',
+              text: text || '(acted without a reply)',
+              thinking: thinking || undefined,
+            }]),
+          }))
         }
       } catch (e) {
         dispatch(s => ({

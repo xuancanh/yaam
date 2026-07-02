@@ -252,6 +252,7 @@ interface OaiToolCall {
 interface OaiMessage {
   role: string
   content: string | null
+  reasoning_content?: string
   tool_calls?: OaiToolCall[]
   tool_call_id?: string
 }
@@ -305,6 +306,7 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
   const msg = data.choices?.[0]?.message
   const content: ApiContentBlock[] = []
+  if (msg?.reasoning_content) content.push({ type: 'thinking', text: msg.reasoning_content })
   if (msg?.content) content.push({ type: 'text', text: msg.content })
   for (const tc of msg?.tool_calls ?? []) {
     let input: Record<string, unknown> = {}
@@ -333,15 +335,22 @@ function runTool(name: string, input: Record<string, unknown>, exec: MasterExec)
   }
 }
 
+export interface MasterTurnResult {
+  text: string
+  thinking: string
+}
+
 /**
  * Run one Master turn: call the model, execute any tool calls against the app,
- * and loop until the model stops. Returns the model's final text.
+ * and loop until the model stops. Intermediate narration, reasoning, and tool
+ * calls are collected as a collapsible "thinking" trace; only the final text
+ * is the reply.
  */
 export async function runMasterTurn(
   getState: () => AppState,
   exec: MasterExec,
   eventNote?: string,
-): Promise<string> {
+): Promise<MasterTurnResult> {
   const s0 = getState()
   const cfg: LlmConfig = {
     provider: providerFor(s0.settings.provider),
@@ -350,25 +359,37 @@ export async function runMasterTurn(
     model: s0.settings.masterModel,
   }
   const messages = chatHistory(s0, eventNote)
-  const texts: string[] = []
+  const trace: string[] = []
+  let finalTexts: string[] = []
 
   for (let i = 0; i < 8; i++) {
     // re-describe state each iteration so tool effects are visible to the model
     const res = await callApi(cfg, systemPrompt(getState()), messages)
+    const stepTexts: string[] = []
     for (const block of res.content) {
-      if (block.type === 'text' && block.text) texts.push(block.text)
+      if (block.type === 'thinking' && block.text) trace.push(block.text)
+      if (block.type === 'text' && block.text) stepTexts.push(block.text)
     }
-    if (res.stop_reason !== 'tool_use') break
+    if (res.stop_reason !== 'tool_use') {
+      finalTexts = stepTexts
+      break
+    }
+    // narration before tool calls belongs to the trace, not the reply
+    trace.push(...stepTexts)
     const results = res.content
       .filter(b => b.type === 'tool_use')
-      .map(b => ({
-        type: 'tool_result',
-        tool_use_id: b.id,
-        content: runTool(b.name || '', b.input || {}, exec),
-      }))
+      .map(b => {
+        const result = runTool(b.name || '', b.input || {}, exec)
+        trace.push(`→ ${b.name}(${JSON.stringify(b.input || {})})`)
+        trace.push(`← ${result.length > 300 ? result.slice(0, 300) + '…' : result}`)
+        return { type: 'tool_result', tool_use_id: b.id, content: result }
+      })
     messages.push({ role: 'assistant', content: res.content })
     messages.push({ role: 'user', content: results })
   }
 
-  return texts.join('\n\n').trim()
+  return {
+    text: finalTexts.join('\n\n').trim(),
+    thinking: trace.join('\n').trim(),
+  }
 }

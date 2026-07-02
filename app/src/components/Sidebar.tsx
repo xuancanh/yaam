@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useActions, useConductor } from '../store'
 import { ACCENT, hexToRgba } from '../data'
@@ -139,6 +139,35 @@ function BuildUICard({ msg }: { msg: Message }) {
   )
 }
 
+function ThinkingBlock({ content }: { content: string }) {
+  const [open, setOpen] = useState(false)
+  const steps = content.split('\n').filter(Boolean).length
+  return (
+    <div style={{ marginBottom: 7 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="mono"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none',
+          color: 'var(--dim)', fontSize: 10.5, padding: '2px 0',
+        }}
+      >
+        <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▸</span>
+        thinking · {steps} step{steps === 1 ? '' : 's'}
+      </button>
+      {open && (
+        <div className="mono" style={{
+          marginTop: 5, background: 'var(--bg)', border: '1px solid #1a1e26', borderRadius: 9,
+          padding: '9px 11px', fontSize: 11, lineHeight: 1.55, color: 'var(--dim)',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 260, overflowY: 'auto',
+        }}>
+          {content}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MessageRow({ msg }: { msg: Message }) {
   if (msg.role === 'you') {
     return (
@@ -156,7 +185,12 @@ function MessageRow({ msg }: { msg: Message }) {
         <MasterMark size={24} glow={false} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {msg.kind === 'text' && <div style={{ fontSize: 13, lineHeight: 1.55, color: '#C7CCD6', paddingTop: 3 }}>{msg.text}</div>}
+        {msg.kind === 'text' && (
+          <div style={{ paddingTop: 3 }}>
+            {msg.thinking && <ThinkingBlock content={msg.thinking} />}
+            <div style={{ fontSize: 13, lineHeight: 1.55, color: '#C7CCD6' }}>{msg.text}</div>
+          </div>
+        )}
         {msg.kind === 'route' && <RouteCard msg={msg} />}
         {msg.kind === 'escalate' && <EscalateCard msg={msg} />}
         {msg.kind === 'build' && <BuildCard msg={msg} />}
