@@ -39,9 +39,10 @@ function RouteCard({ msg }: { msg: Message }) {
 }
 
 function EscalateCard({ msg }: { msg: Message }) {
-  const { approve, deny } = useActions()
+  const { approve, deny, answerPrompt } = useActions()
   const esc = msg.esc!
   const decisionColor = esc.decision === 'denied' ? 'var(--red-soft)' : 'var(--green)'
+  const hasOptions = Boolean(esc.options?.length)
   return (
     <div style={{
       background: 'rgba(255,176,32,.06)', border: '1px solid rgba(255,176,32,.35)',
@@ -59,14 +60,32 @@ function EscalateCard({ msg }: { msg: Message }) {
       </div>
       <div style={{ fontSize: 12.5, lineHeight: 1.5, color: '#C7CCD6', marginBottom: 11 }}>{esc.reason}</div>
       {!esc.resolved ? (
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="approve-btn" style={{ flex: 1, padding: 8 }} onClick={() => approve(msg.escFor!)}>Approve &amp; resume</button>
-          <button className="deny-btn" style={{ flex: 1, padding: 8 }} onClick={() => deny(msg.escFor!)}>Deny</button>
-        </div>
+        hasOptions ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {esc.options!.map(o => (
+              <button
+                key={o.num}
+                className="option-btn"
+                onClick={() => answerPrompt(msg.escFor!, o.num)}
+              >
+                <span className="mono" style={{ color: 'var(--accent)', flexShrink: 0 }}>{o.num}.</span>
+                <span style={{ flex: 1, textAlign: 'left' }}>{o.label}</span>
+              </button>
+            ))}
+            <button className="deny-btn" style={{ padding: 7, fontSize: 12 }} onClick={() => deny(msg.escFor!)}>
+              Dismiss (Esc)
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="approve-btn" style={{ flex: 1, padding: 8 }} onClick={() => approve(msg.escFor!)}>Approve &amp; resume</button>
+            <button className="deny-btn" style={{ flex: 1, padding: 8 }} onClick={() => deny(msg.escFor!)}>Deny</button>
+          </div>
+        )
       ) : (
         <div style={{ fontSize: 12, fontWeight: 600, color: decisionColor, display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: decisionColor }} />
-          {esc.decision === 'denied' ? 'Denied · agent paused' : 'Approved · agent resumed'}
+          {esc.decision === 'denied' ? 'Denied · dismissed' : esc.choice ? `Chose ${esc.choice}` : 'Approved · agent resumed'}
         </div>
       )}
     </div>

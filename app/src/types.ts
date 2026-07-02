@@ -77,6 +77,11 @@ export interface RouteEntry {
   action: string
 }
 
+export interface EscOption {
+  num: number
+  label: string
+}
+
 export interface Escalation {
   name: string
   color: string
@@ -84,6 +89,12 @@ export interface Escalation {
   reason: string
   resolved: boolean
   decision: 'approved' | 'denied' | null
+  /** numbered options extracted from the dialog, when it is a menu */
+  options?: EscOption[]
+  /** option number the ❯ cursor was on when detected */
+  cursorNum?: number
+  /** label of the option the user picked */
+  choice?: string
 }
 
 export interface BuildResult {

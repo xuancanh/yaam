@@ -11,6 +11,8 @@ interface Entry {
   fit: FitAddon
   onPlainLine: ((line: string) => void) | null
   onUserInput: (() => void) | null
+  /** called on every raw output chunk — TUI redraws often contain no newlines */
+  onActivity: (() => void) | null
   pending: string
 }
 
@@ -28,6 +30,7 @@ function ensureListener() {
     const entry = entries.get(e.id)
     if (!entry) return
     entry.term.write(e.bytes)
+    entry.onActivity?.()
     if (entry.onPlainLine) {
       entry.pending += decoder.decode(e.bytes, { stream: true })
       const parts = entry.pending.split(/\r\n|\n|\r/)
@@ -41,7 +44,12 @@ function ensureListener() {
   })
 }
 
-export function getTerminal(id: string, onPlainLine?: (line: string) => void, onUserInput?: () => void): Entry {
+export function getTerminal(
+  id: string,
+  onPlainLine?: (line: string) => void,
+  onUserInput?: () => void,
+  onActivity?: () => void,
+): Entry {
   ensureListener()
   let entry = entries.get(id)
   if (!entry) {
@@ -70,11 +78,12 @@ export function getTerminal(id: string, onPlainLine?: (line: string) => void, on
       if (!data.startsWith('\x1b[')) entries.get(id)?.onUserInput?.()
       writeSession(id, data).catch(() => {})
     })
-    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, pending: '' }
+    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, onActivity: onActivity ?? null, pending: '' }
     entries.set(id, entry)
   } else {
     if (onPlainLine) entry.onPlainLine = onPlainLine
     if (onUserInput) entry.onUserInput = onUserInput
+    if (onActivity) entry.onActivity = onActivity
   }
   return entry
 }

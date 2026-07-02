@@ -2,7 +2,7 @@
 import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  Agent, AppState, BoardCol, Cron, EventType, LogLine,
+  Agent, AppState, BoardCol, Cron, EscOption, EventType, LogLine,
   NotifKind, Notification, Panel, PersistedState, View,
 } from './types'
 import { defaultDetail, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
@@ -39,6 +39,7 @@ export interface ConductorActions {
   toggleCron: (id: string) => void
   cycleCatalogPerm: (id: string) => void
   approve: (aid: string) => void
+  answerPrompt: (aid: string, num: number) => void
   deny: (aid: string) => void
   gotoNeeds: () => void
   openPalette: () => void
@@ -130,6 +131,23 @@ const QUESTION_LINE_RE = /(do you want[^?]*\??|requires approval|allow [^?]*\??|
 // selection menus usually put the actual question on its own line ending in "?"
 const QUESTION_MARK_LINE_RE = /^[^│┌└─]*\S[^?]*\?\s*$/
 
+// numbered dialog options, with optional ❯ cursor: "❯ 1. Yes" / "2. No"
+const OPTION_RE = /^\s*[│]?\s*(❯)?\s*(\d+)[.)]\s+(.+?)\s*[│]?\s*$/
+
+function extractOptions(lines: string[]): { options: EscOption[]; cursorNum: number } {
+  const options: EscOption[] = []
+  let cursorNum = 1
+  for (const line of lines) {
+    const m = line.match(OPTION_RE)
+    if (!m) continue
+    const num = parseInt(m[2], 10)
+    if (options.some(o => o.num === num)) continue
+    options.push({ num, label: m[3].trim().slice(0, 60) })
+    if (m[1]) cursorNum = num
+  }
+  return options.length >= 2 ? { options, cursorNum } : { options: [], cursorNum: 1 }
+}
+
 function spawnAgentProcess(id: string, command: string, cwd?: string): Promise<void> {
   return native.spawnSession(id, command.trim(), cwd || undefined)
 }
@@ -192,7 +210,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     armedRef.current.add(id)
   }, [])
 
-  const setNeedsInput = useCallback((id: string, question: string) => {
+  const setNeedsInput = useCallback((id: string, question: string, options?: EscOption[], cursorNum?: number) => {
     const agent = stateRef.current.agents.find(a => a.id === id)
     if (!agent || agent.status !== 'running') return
     dispatch(s => ({
@@ -200,7 +218,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       agents: s.agents.map(a => a.id === id ? { ...a, status: 'needs' as const, escReason: question } : a),
       messages: s.messages.concat([{
         id: mkId('m'), role: 'master', kind: 'escalate', escFor: id,
-        esc: { name: agent.name, color: agent.color, repo: agent.repo, reason: question, resolved: false, decision: null },
+        esc: {
+          name: agent.name, color: agent.color, repo: agent.repo, reason: question,
+          resolved: false, decision: null,
+          options: options?.length ? options : undefined,
+          cursorNum: cursorNum ?? 1,
+        },
       }]),
     }))
     logEvent('escalate', id, `${agent.name} is asking for input: ${question.slice(0, 64)}`)
@@ -237,7 +260,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const already = agent.status === 'needs' && lastFlaggedRef.current.get(id) === question
       if (!already) {
         lastFlaggedRef.current.set(id, question)
-        setNeedsInput(id, question)
+        const { options, cursorNum } = extractOptions(content)
+        setNeedsInput(id, question, options, cursorNum)
         if (llm) {
           masterEventRef.current(
             `[event] session "${agent.name}" (${id}) is showing a dialog (approval or selection menu) and has been flagged as needing input:\n` +
@@ -267,6 +291,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }
   }, [setNeedsInput])
 
+  // (re)start the settle watcher — checks only run once output goes quiet.
+  // Driven by RAW pty activity, because TUI redraws often contain no newlines.
+  const bumpSettle = useCallback((id: string) => {
+    const prev = settleRef.current.get(id)
+    if (prev) window.clearTimeout(prev.timer)
+    const since = prev?.since ?? Math.max(0, (stateRef.current.agents.find(a => a.id === id)?.log.length ?? 1) - 1)
+    const timer = window.setTimeout(() => onSettle(id, since), 3000)
+    settleRef.current.set(id, { since, timer })
+  }, [onSettle])
+
   // ANSI-stripped tail of each terminal, kept for Master's context, overview
   // cards, and rough usage accounting (the terminal itself renders raw bytes)
   const appendTail = useCallback((id: string, line: string) => {
@@ -279,13 +313,49 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return { ...a, log, used: a.used + 0.01, cost: a.cost + 0.0004 }
       }),
     }))
-    // (re)start the settle watcher — checks only run once output goes quiet
-    const prev = settleRef.current.get(id)
-    if (prev) window.clearTimeout(prev.timer)
-    const since = prev?.since ?? Math.max(0, (stateRef.current.agents.find(a => a.id === id)?.log.length ?? 1) - 1)
-    const timer = window.setTimeout(() => onSettle(id, since), 3000)
-    settleRef.current.set(id, { since, timer })
-  }, [onSettle])
+  }, [])
+
+  // Deterministic safety net for full-screen TUIs: scan the rendered screen of
+  // every running alt-buffer session for approval dialogs / selection menus.
+  // Settle timing doesn't matter here; dedupe prevents refiring on redraws.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      for (const a of stateRef.current.agents) {
+        if (a.kind !== 'real') continue
+        if (a.status !== 'running' && a.status !== 'needs') continue
+        if (!isAltScreen(a.id)) continue
+        const screen = readScreen(a.id)
+        if (!screen.length) continue
+        const joined = screen.join('\n')
+        if (TUI_PROMPT_RE.test(joined)) {
+          if (a.status !== 'running') continue
+          const question = (
+            screen.find(l => QUESTION_LINE_RE.test(l)) ||
+            screen.find(l => QUESTION_MARK_LINE_RE.test(l.trim())) ||
+            screen[screen.length - 1]
+          ).trim()
+          if (lastFlaggedRef.current.get(a.id) === question) continue
+          lastFlaggedRef.current.set(a.id, question)
+          const { options, cursorNum } = extractOptions(screen)
+          setNeedsInput(a.id, question, options, cursorNum)
+          const st = stateRef.current.settings
+          if (st.masterEnabled && st.apiKey && st.followMode) {
+            masterEventRef.current(
+              `[event] session "${a.name}" (${a.id}) is showing a dialog and has been flagged as needing input:\n${screen.slice(-14).join('\n')}\n\n` +
+              'Tell the user what it is asking — include the options if it is a menu.',
+            )
+          }
+        } else if (a.status === 'needs') {
+          lastFlaggedRef.current.delete(a.id)
+          dispatch(s2 => ({
+            ...s2,
+            agents: s2.agents.map(x => x.id === a.id ? { ...x, status: 'running' as const, escReason: undefined } : x),
+          }))
+        }
+      }
+    }, 4000)
+    return () => window.clearInterval(timer)
+  }, [setNeedsInput])
 
   // typing into a terminal clears its "needs action" state
   const clearNeeds = useCallback((id: string) => {
@@ -375,7 +445,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           native.liveSessions().then(liveIds => {
             const alive = new Set(liveIds)
             for (const a of restoredAgents) {
-              const { term } = getTerminal(a.id, line => appendTail(a.id, line), () => clearNeeds(a.id))
+              const { term } = getTerminal(a.id, line => appendTail(a.id, line), () => clearNeeds(a.id), () => bumpSettle(a.id))
               for (const l of a.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
               term.writeln(alive.has(a.id)
                 ? '\x1b[32m── reattached · session is still running ──\x1b[0m'
@@ -392,7 +462,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
       hydrated.current = true
     }).catch(() => { hydrated.current = true })
-  }, [appendTail, clearNeeds])
+  }, [appendTail, bumpSettle, clearNeeds])
 
   const saveTimer = useRef<number | undefined>(undefined)
   useEffect(() => {
@@ -470,7 +540,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         maximizedPane: null, view: 'workspace', newSessionOpen: false,
       }
     })
-    getTerminal(id, line => appendTail(id, line), () => clearNeeds(id))
+    getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id))
     native.spawnSession(id, trimmed, dir || undefined).catch(err => {
       dispatch(s => ({
         ...s,
@@ -480,7 +550,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
     })
     return id
-  }, [appendTail, clearNeeds])
+  }, [appendTail, bumpSettle, clearNeeds])
 
   // cron scheduler: fire enabled schedules once per matching minute
   useEffect(() => {
@@ -790,6 +860,32 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         ? { ...t, perm: PERM_ORDER[(PERM_ORDER.indexOf(t.perm) + 1) % PERM_ORDER.length] }
         : t),
     })),
+
+    answerPrompt: (aid, num) => {
+      const st = stateRef.current
+      const agent = st.agents.find(a => a.id === aid)
+      const msg = [...st.messages].reverse().find(m => m.kind === 'escalate' && m.escFor === aid && m.esc && !m.esc.resolved)
+      const esc = msg?.esc
+      if (!agent || !esc?.options?.length) return
+      const target = esc.options.find(o => o.num === num)
+      if (!target) return
+      const delta = num - (esc.cursorNum ?? 1)
+      const moves = delta > 0 ? '\x1b[B'.repeat(delta) : '\x1b[A'.repeat(-delta)
+      native.writeSession(aid, `${moves}\r`).catch(() => {})
+      lastFlaggedRef.current.delete(aid)
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === aid
+          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'you' as const, x: `chose ${num}. ${target.label}` }]) }
+          : a),
+        messages: s.messages.map(m => m === msg && m.esc
+          ? { ...m, esc: { ...m.esc, resolved: true, decision: 'approved' as const, choice: `${num}. ${target.label}` } }
+          : m),
+      }))
+      flash(`Chose “${target.label}”`)
+      logEvent('done', aid, `Answered prompt · ${num}. ${target.label}`)
+      armResponseWatch(aid)
+    },
 
     approve: aid => {
       const agent = stateRef.current.agents.find(a => a.id === aid)
