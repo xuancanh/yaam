@@ -11,7 +11,7 @@ const GRAPH_POS = [
 
 function SessionFlow() {
   const s = useConductor()
-  const core = s.agents.slice(0, 4)
+  const core = s.agents.filter(a => !a.archived).slice(0, 4)
   const nodes = core.map((a, i) => ({ agent: a, ...GRAPH_POS[i] }))
   const dep = nodes.length >= 2
     ? `M ${nodes[0].x} ${nodes[0].y} C ${nodes[0].x} 16 ${nodes[1].x} 16 ${nodes[1].x} ${nodes[1].y}`
@@ -56,19 +56,21 @@ function SessionFlow() {
 
 export function Overview() {
   const s = useConductor()
-  const { focusTab, resume, openPanel, openAgent, openDiff, renameSession } = useActions()
+  const { focusTab, resume, openPanel, openAgent, openDiff, renameSession, archiveSession, unarchiveSession, deleteSession } = useActions()
+  const active = s.agents.filter(a => !a.archived)
+  const archived = s.agents.filter(a => a.archived)
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <ViewHeader title="All agents">
         <span className="mono" style={{ fontSize: 11, color: 'var(--dim)', border: '1px solid var(--line)', borderRadius: 6, padding: '2px 8px' }}>
-          {s.agents.length} sessions
+          {active.length} sessions{archived.length ? ` · ${archived.length} archived` : ''}
         </span>
       </ViewHeader>
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
         <SessionFlow />
         <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))' }}>
-          {s.agents.map(a => {
+          {active.map(a => {
             const memOn = a.memory.filter(m => m.on).length
             const toolOn = a.tools.filter(t => t.on).length
             const last = a.log.length ? a.log[a.log.length - 1].x : ''
@@ -123,6 +125,9 @@ export function Overview() {
                     <button className="resume-btn" onClick={() => resume(a.id)}>Resume</button>
                   )}
                   <button className="review-btn" onClick={() => openDiff(a.id)}>Review</button>
+                  <button className="icon-btn" title="Archive session" style={{ width: 36, padding: 7 }} onClick={() => archiveSession(a.id)}>
+                    <Icon paths={['M4 7h16', 'M6 7v12h12V7', 'M10 11h4']} size={15} />
+                  </button>
                   <button className="icon-btn" style={{ width: 36, padding: 7 }} onClick={() => openPanel(a.id, 'memory')}>
                     <Icon paths={['M7 7h10v10H7z', ...IC.chip]} size={15} />
                   </button>
@@ -131,6 +136,29 @@ export function Overview() {
             )
           })}
         </div>
+        {archived.length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            <div className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color: 'var(--dim)', marginBottom: 10 }}>ARCHIVED</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {archived.map(a => (
+                <div key={a.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 12, background: 'var(--panel)',
+                  border: '1px solid var(--line)', borderRadius: 10, padding: '9px 13px', opacity: 0.75,
+                }}>
+                  <AgentAvatar agent={a} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600 }}>{a.name}</span>
+                    <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', marginLeft: 8 }}>{a.repo}{a.cliSessionId ? ` · ⧉ ${a.cliSessionId.slice(0, 8)}` : ''}</span>
+                  </div>
+                  <button className="open-btn" style={{ flex: 'none', padding: '5px 12px' }} onClick={() => unarchiveSession(a.id)}>Restore</button>
+                  <button className="icon-btn danger" title="Delete permanently" style={{ width: 28, height: 28 }} onClick={() => deleteSession(a.id)}>
+                    <Icon paths={IC.close} size={13} stroke={1.8} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

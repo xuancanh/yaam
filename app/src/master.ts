@@ -223,10 +223,11 @@ Style to match the app: dark background #0A0B0F, text #E7E9F0, muted #8B93A1, ac
 ]
 
 function describeState(s: AppState): string {
-  const roster = s.agents.length
-    ? s.agents.map(a => `${a.name} (id=${a.id}, ${a.status})`).join(' · ')
+  const live = s.agents.filter(a => !a.archived)
+  const roster = live.length
+    ? live.map(a => `${a.name} (id=${a.id}, ${a.status})`).join(' · ')
     : 'none'
-  const sessions = s.agents.map(a => {
+  const sessions = live.map(a => {
     const memOn = (id: string) => a.memory.find(m => m.id === id)?.on !== false
     const perm = (id: string) => {
       const t = a.tools.find(x => x.id === id)
@@ -254,7 +255,7 @@ function describeState(s: AppState): string {
   return [
     `AGENT TYPES you can launch (use the exact command; a plain terminal is "${s.settings.shell || 'zsh'} -i"):\n${types || '(none enabled)'}`,
     `YOUR TOOL PERMISSIONS (Auto = act freely · Ask first = confirm with the user in chat before doing it · Approval/Off = blocked):\n${toolPerms}`,
-    `YOUR SUB-AGENTS — ${s.agents.length} session(s): ${roster}`,
+    `YOUR SUB-AGENTS — ${live.length} session(s)${s.agents.length - live.length ? ` (+${s.agents.length - live.length} archived)` : ''}: ${roster}`,
     `SESSION DETAIL:\n${sessions || '(none)'}`,
     `SCHEDULES:\n${crons || '(none)'}`,
     `BOARD TASKS:\n${tasks || '(none)'}`,

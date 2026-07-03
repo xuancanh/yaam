@@ -92,7 +92,7 @@ function DiffBody({ agent }: { agent: Agent }) {
 }
 
 function AgentBody({ agent }: { agent: Agent }) {
-  const { closeDrawer, focusTab, resume } = useActions()
+  const { closeDrawer, focusTab, resume, archiveSession, deleteSession } = useActions()
   const history = agent.log.slice(-16)
 
   return (
@@ -144,11 +144,21 @@ function AgentBody({ agent }: { agent: Agent }) {
         <button className="open-btn" style={{ padding: 10, fontSize: 13, borderRadius: 9 }} onClick={() => { closeDrawer(); focusTab(agent.id) }}>
           Open in workspace
         </button>
-        {agent.status === 'idle' && (
+        {agent.status === 'idle' && !agent.archived && (
           <button className="resume-btn" style={{ padding: 10, fontSize: 13, borderRadius: 9 }} onClick={() => { closeDrawer(); resume(agent.id) }}>
             Resume session
           </button>
         )}
+        <button className="deny-btn" style={{ padding: 10, fontSize: 13, borderRadius: 9 }} onClick={() => archiveSession(agent.id)}>
+          Archive
+        </button>
+        <button
+          className="deny-btn"
+          style={{ padding: 10, fontSize: 13, borderRadius: 9, color: 'var(--red-soft)', borderColor: 'rgba(255,92,92,.4)' }}
+          onClick={() => deleteSession(agent.id)}
+        >
+          Delete
+        </button>
       </div>
     </>
   )

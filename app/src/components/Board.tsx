@@ -6,7 +6,7 @@ import type { Agent, BoardCol, BoardTask } from '../types'
 import { IC, Icon, ViewHeader } from './ui'
 
 function Card({ card, agent }: { card: BoardTask; agent: Agent | null }) {
-  const { startCardDrag, focusTab, renameTask, deleteTask } = useActions()
+  const { startCardDrag, focusTab, renameTask, deleteTask, startTask } = useActions()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(card.title)
 
@@ -63,7 +63,21 @@ function Card({ card, agent }: { card: BoardTask; agent: Agent | null }) {
       </button>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10 }}>
         <span style={{ width: 7, height: 7, borderRadius: '50%', background: agent ? agent.color : 'var(--dim)', flexShrink: 0 }} />
-        <span style={{ fontSize: 11, color: '#9AA3B2', whiteSpace: 'nowrap' }}>{agent ? agent.name : 'Unassigned'}</span>
+        {agent ? (
+          <span style={{ fontSize: 11, color: '#9AA3B2', whiteSpace: 'nowrap' }}>{agent.name}</span>
+        ) : (
+          <button
+            title="Spawn a session for this task"
+            onClick={e => { e.stopPropagation(); startTask(card.id) }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none',
+              color: 'var(--green)', fontSize: 11, fontWeight: 600, padding: 0,
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z" /></svg>
+            Start session
+          </button>
+        )}
         <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 'auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {agent ? agent.repo : '—'}
         </span>
@@ -93,7 +107,7 @@ export function Board() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <ViewHeader title="Task board">
-        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Drag tasks across stages — cards link to their agent</span>
+        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Drag an unassigned task into Routed/In progress (or hit ▶) to spawn a session for it</span>
         <div style={{ flex: 1 }} />
         <button className="open-btn" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px' }} onClick={addTask}>
           <Icon paths={IC.plus} size={14} stroke={1.8} />New task

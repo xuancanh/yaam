@@ -325,7 +325,7 @@ export function Workspace() {
         height: 46, flexShrink: 0, background: 'var(--panel)', borderBottom: '1px solid var(--line)',
         display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', overflowX: 'auto',
       }}>
-        {s.agents.map(a => {
+        {s.agents.filter(a => !a.archived).map(a => {
           const active = focused.includes(a.id)
           const sm = STATUS_META[a.status] || STATUS_META.idle
           return (

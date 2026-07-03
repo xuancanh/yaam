@@ -11,7 +11,7 @@ import { buildCfg, runMasterTurn } from './master'
 import type { ApiMessage, MasterExec } from './master'
 import { runMonitorTurn } from './monitor'
 import type { MonitorExec } from './monitor'
-import { getTerminal, isAltScreen, readScreen } from './terminals'
+import { disposeTerminal, getTerminal, isAltScreen, readScreen } from './terminals'
 import { ActionsCtx, StateCtx } from './context'
 
 type Updater = (s: AppState) => AppState
@@ -35,6 +35,10 @@ export interface ConductorActions {
   setRowSplit: (v: number) => void
   setColSplit: (row: number, v: number) => void
   renameSession: (id: string, name: string) => void
+  archiveSession: (id: string) => void
+  unarchiveSession: (id: string) => void
+  deleteSession: (id: string) => void
+  startTask: (taskId: string) => void
   resume: (id: string) => void
   openPanel: (id: string, tab?: Panel['tab']) => void
   setPanelTab: (tab: Panel['tab']) => void
@@ -165,6 +169,7 @@ function typeForCommand(command: string, types: AppState['agentTypes']) {
 // otherwise show it in the active pane. Never duplicates a session across
 // panes (two panes would fight over the same terminal element).
 function focusSessionIn(s: AppState, id: string): AppState {
+  s = { ...s, agents: s.agents.map(a => (a.id === id && a.archived ? { ...a, archived: false } : a)) }
   const minimizedIds = s.minimizedIds.filter(x => x !== id)
   const existing = s.focusedIds.indexOf(id)
   if (existing >= 0) {
@@ -742,6 +747,31 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return id
   }, [appendTail, bumpSettle, clearNeeds, probeCliSession])
 
+  // Board → session: an unassigned task dragged into work (or explicitly
+  // started) spawns the default agent type with the task as its prompt.
+  const spawnSessionForTask = useCallback((taskId: string) => {
+    const st = stateRef.current
+    const task = st.tasks.find(t => t.id === taskId)
+    if (!task || task.agentId) return
+    const type = st.agentTypes.find(t => t.enabled)
+    if (!type) {
+      flash('No enabled agent type to handle the task')
+      return
+    }
+    const quoted = `'${task.title.replace(/'/g, `'\\''`)}'`
+    const id = launchSession(`${type.model} ${quoted}`, st.settings.defaultCwd || '', task.title.slice(0, 18))
+    if (!id) return
+    dispatch(s2 => ({
+      ...s2,
+      tasks: s2.tasks.map(t => t.id === taskId
+        ? { ...t, agentId: id, col: t.col === 'backlog' || t.col === 'done' ? 'progress' as const : t.col }
+        : t),
+    }))
+    armResponseWatch(id)
+    logEvent('route', id, `Spawned ${type.name} for task “${task.title.slice(0, 48)}”`)
+    flash(`Session spawned for “${task.title.slice(0, 28)}”`)
+  }, [armResponseWatch, flash, launchSession, logEvent])
+
   // cron scheduler: fire enabled schedules once per matching minute
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1039,7 +1069,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     addPane: () => dispatch(s => {
       if (s.focusedIds.length >= 6) return s
-      const hidden = s.agents.find(a => !s.focusedIds.includes(a.id))
+      const hidden = s.agents.find(a => !a.archived && !s.focusedIds.includes(a.id))
       if (!hidden) return { ...s, newSessionOpen: true, view: 'workspace' }
       const focusedIds = s.focusedIds.concat([hidden.id])
       return { ...s, focusedIds, activePane: focusedIds.length - 1, maximizedPane: null, view: 'workspace' }
@@ -1104,6 +1134,50 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         ? { ...a, name: name.trim() || a.name, short: (name.trim() || a.name).slice(0, 2).toUpperCase() }
         : a),
     })),
+
+    archiveSession: id => {
+      const agent = stateRef.current.agents.find(a => a.id === id)
+      if (agent?.status === 'running' || agent?.status === 'needs') native.killSession(id).catch(() => {})
+      dispatch(s => {
+        const focusedIds = s.focusedIds.filter(x => x !== id)
+        return {
+          ...s,
+          agents: s.agents.map(a => a.id === id ? { ...a, archived: true, status: 'idle' as const, escReason: undefined } : a),
+          focusedIds,
+          minimizedIds: s.minimizedIds.filter(x => x !== id),
+          activePane: Math.max(0, Math.min(s.activePane, focusedIds.length - 1)),
+          maximizedPane: null,
+          drawer: s.drawer?.agentId === id ? null : s.drawer,
+        }
+      })
+      flash(`Archived ${agent?.name ?? 'session'}`)
+      logEvent('edit', id, `Archived session ${agent?.name ?? id}`)
+    },
+
+    unarchiveSession: id => dispatch(s => focusSessionIn(s, id)),
+
+    deleteSession: id => {
+      const agent = stateRef.current.agents.find(a => a.id === id)
+      native.killSession(id).catch(() => {})
+      disposeTerminal(id)
+      monitorHistories.current.delete(id)
+      dispatch(s => {
+        const focusedIds = s.focusedIds.filter(x => x !== id)
+        return {
+          ...s,
+          agents: s.agents.filter(a => a.id !== id),
+          tasks: s.tasks.map(t => (t.agentId === id ? { ...t, agentId: null } : t)),
+          focusedIds,
+          minimizedIds: s.minimizedIds.filter(x => x !== id),
+          activePane: Math.max(0, Math.min(s.activePane, focusedIds.length - 1)),
+          maximizedPane: null,
+          drawer: s.drawer?.agentId === id ? null : s.drawer,
+          panel: s.panel?.agentId === id ? null : s.panel,
+        }
+      })
+      flash(`Deleted ${agent?.name ?? 'session'}`)
+      logEvent('edit', null, `Deleted session ${agent?.name ?? id}`)
+    },
 
     resume: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
@@ -1307,7 +1381,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       dispatch(s => id
         ? { ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, col } : t)), dragOverCol: null }
         : { ...s, dragOverCol: null })
+      if (id && (col === 'routed' || col === 'progress')) {
+        const task = stateRef.current.tasks.find(t => t.id === id)
+        if (task && !task.agentId) later(50, () => spawnSessionForTask(id))
+      }
     },
+
+    startTask: taskId => spawnSessionForTask(taskId),
     addTask: () => dispatch(s => ({
       ...s,
       tasks: s.tasks.concat([{ id: mkId('t'), title: 'New task', col: 'backlog', agentId: null }]),
@@ -1368,7 +1448,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [armResponseWatch, flash, later, launchSession, logEvent, probeCliSession, runMaster])
+  }), [armResponseWatch, flash, later, launchSession, logEvent, probeCliSession, runMaster, spawnSessionForTask])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {

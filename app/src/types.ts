@@ -70,6 +70,8 @@ export interface Agent {
   /** the CLI's own session/conversation id, captured after launch for resume */
   cliSessionId?: string
   launchedAt?: number
+  /** archived sessions are hidden from tabs/overview but kept for history */
+  archived?: boolean
   /** Master-maintained: what this agent is working on */
   task?: string
   /** Master-maintained: latest 1-2 sentence state summary */
