@@ -89,6 +89,7 @@ export interface ConductorActions {
   installAddonFromUrl: (url: string) => void
   exportAddon: (id: string) => void
   sendAddonChat: (id: string, text: string) => void
+  updateAddonMeta: (id: string, patch: Partial<Pick<Addon, 'name' | 'version' | 'icon' | 'desc' | 'author'>>) => void
   openNewSession: () => void
   closeNewSession: () => void
   newRealSession: (command: string, cwd: string) => void
@@ -1540,6 +1541,11 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     },
 
     sendAddonChat: (id, text) => { void sendAddonChatImpl(id, text) },
+
+    updateAddonMeta: (id, patch) => dispatch(s => ({
+      ...s,
+      addons: s.addons.map(a => (a.id === id ? { ...a, ...patch } : a)),
+    })),
 
     exportAddon: id => {
       void (async () => {

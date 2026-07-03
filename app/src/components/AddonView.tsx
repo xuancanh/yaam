@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useActions, useConductor } from '../store'
-import { exportAddonPackage } from '../addons'
-import type { Addon, AppState } from '../types'
+import { AddonSource } from './AddonSource'
+import { addonSnapshot } from '../addons'
+import type { Addon } from '../types'
 import { IC, Icon, MasterMark, ViewHeader } from './ui'
 
 function AddonChat({ addon }: { addon: Addon }) {
@@ -73,36 +74,6 @@ function AddonChat({ addon }: { addon: Addon }) {
   )
 }
 
-function AddonSource({ addon }: { addon: Addon }) {
-  return (
-    <div className="mono" style={{
-      flex: 1, overflow: 'auto', background: '#0A0B0F', padding: 18,
-      fontSize: 12, lineHeight: 1.6, color: '#C7CCD6', whiteSpace: 'pre', userSelect: 'text', cursor: 'text',
-    }}>
-      {exportAddonPackage(addon)}
-    </div>
-  )
-}
-
-// What addons are allowed to see — a read-only snapshot pushed over postMessage.
-function snapshot(s: AppState) {
-  return {
-    sessions: s.agents.map(a => ({
-      id: a.id, name: a.name, status: a.status,
-      task: a.task ?? null, summary: a.summary ?? null, actionNeeded: a.actionNeeded ?? null,
-      cost: Number(a.cost.toFixed(3)), used: Number(a.used.toFixed(2)),
-    })),
-    tasks: s.tasks.map(t => ({ title: t.title, col: t.col })),
-    crons: s.crons.map(c => ({ name: c.name, schedule: c.schedule, on: c.on, last: c.last })),
-    events: s.events.slice(0, 10).map(e => ({ time: e.time, type: e.type, text: e.text })),
-    totals: {
-      cost: Number(s.agents.reduce((n, a) => n + a.cost, 0).toFixed(3)),
-      used: Number(s.agents.reduce((n, a) => n + a.used, 0).toFixed(2)),
-      running: s.agents.filter(a => a.status === 'running').length,
-    },
-  }
-}
-
 export function AddonView() {
   const s = useConductor()
   const { removeAddon } = useActions()
@@ -115,7 +86,7 @@ export function AddonView() {
 
   const push = useCallback(() => {
     iframeRef.current?.contentWindow?.postMessage(
-      { type: 'yaam:state', state: snapshot(stateRef.current) }, '*')
+      { type: 'yaam:state', state: addonSnapshot(stateRef.current) }, '*')
   }, [])
 
   useEffect(() => {
