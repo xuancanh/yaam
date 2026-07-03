@@ -378,7 +378,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
     }
 
-    if (llm && armed) {
+    if (armed) {
       const joined = content.join('\n')
       const expired = Date.now() - armed.at > 15 * 60 * 1000
       // TUIs pause silently mid-work (API calls) and show a busy marker while
@@ -393,12 +393,27 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
       armedRef.current.delete(id)
       if (!expired) {
-        void runMonitor(id,
-          `The session finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
-          'It was given a task by Master or the user, so a completed response IS noteworthy — update the status and report a digest to Master.')
+        // deterministic indicator, independent of the LLM layer: if the user
+        // isn't looking at this session, flash its tab and ring the bell
+        const st2 = stateRef.current
+        const watching = st2.focusedIds[st2.activePane] === id
+          && (agent.workspaceId ?? st2.activeWorkspace) === st2.activeWorkspace
+          && document.hasFocus()
+        if (!watching) {
+          dispatch(s2 => ({
+            ...s2,
+            agents: s2.agents.map(a => (a.id === id ? { ...a, attention: true } : a)),
+          }))
+          notify('done', `${agent.name} finished responding`, lastLine.slice(0, 90), id)
+        }
+        if (llm) {
+          void runMonitor(id,
+            `The session finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
+            'It was given a task by Master or the user, so a completed response IS noteworthy — update the status and report a digest to Master.')
+        }
       }
     }
-  }, [runMonitor, setNeedsInput])
+  }, [notify, runMonitor, setNeedsInput])
 
   const onSettleRef = useRef<(id: string, since: number) => void>(() => {})
   onSettleRef.current = onSettle
@@ -592,7 +607,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           native.liveSessions().then(liveIds => {
             const alive = new Set(liveIds)
             for (const a of restoredAgents) {
-              const { term } = getTerminal(a.id, line => appendTail(a.id, line), () => clearNeeds(a.id), () => bumpSettle(a.id))
+              const { term } = getTerminal(a.id, line => appendTail(a.id, line), () => clearNeeds(a.id), () => bumpSettle(a.id), () => armResponseWatch(a.id))
               if (alive.has(a.id)) {
                 // live PTY: never inject text (it corrupts TUI screens) —
                 // nudge the app to repaint itself once the pane has mounted
@@ -615,7 +630,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
       hydrated.current = true
     }).catch(() => { hydrated.current = true })
-  }, [appendTail, bumpSettle, clearNeeds])
+  }, [appendTail, armResponseWatch, bumpSettle, clearNeeds])
 
   const saveTimer = useRef<number | undefined>(undefined)
   useEffect(() => {
@@ -725,7 +740,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       if (agent.workspaceId !== s.activeWorkspace) return withAgent
       return { ...focusSessionIn(withAgent, id), newSessionOpen: false }
     })
-    getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id))
+    getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
     probeCliSession(id, trimmed, dir, false)
     const launchType = stateRef.current.agentTypes.find(t => t.id === (typeId ?? '')) ?? typeForCommand(trimmed, stateRef.current.agentTypes)
     native.spawnSession(id, `${envPrefix(launchType?.env)}${trimmed}`, dir || undefined).catch(err => {
@@ -737,7 +752,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
     })
     return id
-  }, [appendTail, bumpSettle, clearNeeds, probeCliSession])
+  }, [appendTail, armResponseWatch, bumpSettle, clearNeeds, probeCliSession])
 
   // Board → session: an unassigned task dragged into work (or explicitly
   // started) spawns the default agent type with the task as its prompt.

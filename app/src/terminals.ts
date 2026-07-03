@@ -11,6 +11,8 @@ interface Entry {
   fit: FitAddon
   onPlainLine: ((line: string) => void) | null
   onUserInput: (() => void) | null
+  /** Enter pressed — the user submitted something to the session */
+  onUserSubmit: (() => void) | null
   /** called on every raw output chunk — TUI redraws often contain no newlines */
   onActivity: (() => void) | null
   pending: string
@@ -49,6 +51,7 @@ export function getTerminal(
   onPlainLine?: (line: string) => void,
   onUserInput?: () => void,
   onActivity?: () => void,
+  onUserSubmit?: () => void,
 ): Entry {
   ensureListener()
   let entry = entries.get(id)
@@ -75,15 +78,20 @@ export function getTerminal(
     term.loadAddon(fit)
     term.onData(data => {
       // scroll/mouse/arrow escape sequences are not the user answering a prompt
-      if (!data.startsWith('\x1b[')) entries.get(id)?.onUserInput?.()
+      if (!data.startsWith('\x1b[')) {
+        const entry = entries.get(id)
+        entry?.onUserInput?.()
+        if (data.includes('\r') || data.includes('\n')) entry?.onUserSubmit?.()
+      }
       writeSession(id, data).catch(() => {})
     })
-    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, onActivity: onActivity ?? null, pending: '' }
+    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, onActivity: onActivity ?? null, onUserSubmit: onUserSubmit ?? null, pending: '' }
     entries.set(id, entry)
   } else {
     if (onPlainLine) entry.onPlainLine = onPlainLine
     if (onUserInput) entry.onUserInput = onUserInput
     if (onActivity) entry.onActivity = onActivity
+    if (onUserSubmit) entry.onUserSubmit = onUserSubmit
   }
   return entry
 }
