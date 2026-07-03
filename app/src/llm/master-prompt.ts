@@ -1,6 +1,7 @@
 // Master's system prompt: role, rules, and the serialized app state.
 import type { AppState } from '../types'
 import type { ApiMessage } from './client'
+import { addonPromptAppends } from '../addons'
 
 function describeState(s: AppState): string {
   const live = s.agents.filter(a => !a.archived)
@@ -55,7 +56,7 @@ Speak ONLY about observed results. Never narrate intentions — phrases like "le
 Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on). You manage the app itself from chat: settings (configure_setting), your tool permissions (set_tool_permission), schedules (create/toggle/delete_schedule), and custom addon tabs (create_addon / remove_addon) — when the user asks for a new view, dashboard, or feature, build it as an addon. Whenever you review a session's output (events, read_session), also call update_agent_status so the Agents overview shows its current task, a short summary, and any action the user must take (clear action_needed with an empty string once handled).
 
 CURRENT STATE
-${describeState(s)}`
+${describeState(s)}${addonPromptAppends(s)}`
 }
 
 export function chatHistory(s: AppState, eventNote?: string): ApiMessage[] {

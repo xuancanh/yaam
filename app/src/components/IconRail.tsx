@@ -43,8 +43,8 @@ export function IconRail() {
           </button>
         )
       })}
-      {s.addons.length > 0 && <div style={{ width: 32, height: 1, background: 'var(--line)', margin: '4px 0' }} />}
-      {s.addons.map(a => {
+      {s.addons.some(a => a.enabled && a.html) && <div style={{ width: 32, height: 1, background: 'var(--line)', margin: '4px 0' }} />}
+      {s.addons.filter(a => a.enabled && a.html).map(a => {
         const active = s.view === 'addon' && s.activeAddon === a.id
         return (
           <button

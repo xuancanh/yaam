@@ -50,7 +50,12 @@ Without an API key, Master falls back to a heuristic router (status answers, rou
 Following the kernel-plugin pattern of modern agent harnesses (OpenClaw, OpenCode), the app itself is managed through Master's tools — and extended without touching core code:
 
 - **Settings, permissions, schedules from chat**: `configure_setting`, `set_tool_permission`, `create/toggle/delete_schedule` — "turn off follow mode", "set stop_session to Ask first", "delete the nightly job" all work as chat messages
-- **Addons — new tabs built by Master**: ask for a new view ("add a tab showing cost per session as a bar chart") and Master calls `create_addon` with a self-contained HTML document. It appears instantly as a tab in the icon rail, rendered in a **sandboxed iframe** (scripts only, no network/parent access) fed live app state over a postMessage bridge (sessions, tasks, schedules, events, totals — pushed every 3s). Addons persist across restarts and can be replaced by name or removed from chat or the tab header.
+- **Addons — a real plugin system**: an addon is a shareable JSON package (`*.yaam.json`) that can carry any mix of:
+  - a **view** — a tab in the icon rail, rendered in a sandboxed iframe fed live app state over postMessage
+  - **Master tools** — JS handlers registered into Master's tool list (namespaced `addon_*`), run against a curated API (`getState`, `sendToSession`, `launchSession`, `flash`, `logEvent`, `notify`)
+  - **hooks** — behavior extensions: `onSessionExit`, `onNeedsInput`, and `masterPromptAppend` (literally changes Master's instructions while enabled)
+
+  Master builds addons from chat (`create_addon`); users install them from a file, a URL, or the **registry browser** (Settings → Addons — configurable index URL; `registry/` in this repo is the seed with `session-bell` and `cost-pulse` examples). Enable/disable, export to share, replace by name; everything persists. ⚠ Tool handlers and hooks run with app privileges — install only trusted packages; views stay sandboxed.
 
 ## The rest
 

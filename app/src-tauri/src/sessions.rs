@@ -246,6 +246,16 @@ pub fn git_diff(cwd: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(expand_tilde(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(expand_tilde(&path), contents).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn save_state(app: AppHandle, json: String) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

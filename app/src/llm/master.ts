@@ -2,6 +2,7 @@
 import type { AppState } from '../types'
 import { buildCfg, callApi } from './client'
 import { runTool, TOOLS } from './master-tools'
+import { addonToolDefs } from '../addons'
 import type { MasterExec } from './master-tools'
 import { chatHistory, systemPrompt } from './master-prompt'
 
@@ -31,7 +32,7 @@ export async function runMasterTurn(
 
   for (let i = 0; i < 10; i++) {
     // re-describe state each iteration so tool effects are visible to the model
-    const res = await callApi(cfg, systemPrompt(getState()), messages, TOOLS)
+    const res = await callApi(cfg, systemPrompt(getState()), messages, [...TOOLS, ...addonToolDefs(getState())])
     const stepTexts: string[] = []
     for (const block of res.content) {
       if (block.type === 'thinking' && block.text) trace.push(block.text)

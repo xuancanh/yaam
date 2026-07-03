@@ -12,6 +12,8 @@ import type { ApiMessage, MasterExec } from './master'
 import { runMonitorTurn } from './monitor'
 import type { MonitorExec } from './monitor'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './terminals'
+import { addonSnapshot, execAddonHook, execAddonTool, exportAddonPackage, parseAddonPackage } from './addons'
+import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
 
 type Updater = (s: AppState) => AppState
@@ -81,6 +83,10 @@ export interface ConductorActions {
   deleteCron: (id: string) => void
   openAddon: (id: string) => void
   removeAddon: (id: string) => void
+  toggleAddon: (id: string) => void
+  installAddonFromFile: () => void
+  installAddonFromUrl: (url: string) => void
+  exportAddon: (id: string) => void
   openNewSession: () => void
   closeNewSession: () => void
   newRealSession: (command: string, cwd: string) => void
@@ -196,7 +202,11 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }))
     logEvent('escalate', id, `${agent.name} is asking for input: ${question.slice(0, 64)}`)
     notify('escalate', `${agent.name} needs your input`, question.slice(0, 80), id)
+    fireAddonHookRef.current('onNeedsInput', { sessionId: id, name: agent.name, question })
   }, [logEvent, notify])
+
+  // ref: setNeedsInput is declared before the hook runner
+  const fireAddonHookRef = useRef<(hook: 'onSessionExit' | 'onNeedsInput', event: Record<string, unknown>) => void>(() => {})
 
   const lastFlaggedRef = useRef<Map<string, string>>(new Map())
 
@@ -461,6 +471,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         }
       }
       if (agent) {
+        fireAddonHookRef.current('onSessionExit', { sessionId: e.id, name: agent.name, code: e.code })
         logEvent(failed ? 'escalate' : 'done', e.id, `${agent.name} ${failed ? `failed · exit ${e.code}` : 'finished'}`)
         notify(
           failed ? 'escalate' : 'done',
@@ -517,7 +528,15 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             activePane: Math.min(p.activePane ?? 0, Math.max(0, focusedIds.length - 1)),
             minimizedIds: (p.minimizedIds ?? []).filter(id => ids.has(id)),
             paneSplits: p.paneSplits ?? s.paneSplits,
-            addons: p.addons ?? s.addons,
+            addons: (p.addons ?? s.addons).map(a => {
+              const partial = a as Partial<Addon>
+              return {
+                ...a,
+                version: partial.version ?? '1.0.0',
+                enabled: partial.enabled ?? true,
+                source: partial.source ?? 'master' as const,
+              }
+            }),
             messages: p.messages?.length ? p.messages : s.messages,
             events: p.events ?? s.events,
             notifications: p.notifications ?? s.notifications,
@@ -664,6 +683,30 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     })
     return id
   }, [appendTail, bumpSettle, clearNeeds, probeCliSession])
+
+  // API surface handed to addon tool handlers and hooks
+  const addonApiRef = useRef<AddonApi | null>(null)
+  const getAddonApi = useCallback((): AddonApi => {
+    if (!addonApiRef.current) {
+      addonApiRef.current = {
+        getState: () => addonSnapshot(stateRef.current),
+        sendToSession: (sid, text) => {
+          if (stateRef.current.agents.some(a => a.id === sid)) sendLineToSession(sid, text)
+        },
+        launchSession: (command, cwd, name) => launchSession(command, cwd || '', name),
+        flash: t => flash(String(t).slice(0, 80)),
+        logEvent: t => logEvent('edit', null, `[addon] ${String(t).slice(0, 120)}`),
+        notify: (title, detail) => notify('done', String(title).slice(0, 80), String(detail).slice(0, 120), null),
+      }
+    }
+    return addonApiRef.current
+  }, [flash, launchSession, logEvent, notify])
+
+  const fireAddonHook = useCallback((hook: 'onSessionExit' | 'onNeedsInput', event: Record<string, unknown>) => {
+    void execAddonHook(stateRef.current, hook, event, getAddonApi())
+  }, [getAddonApi])
+
+  fireAddonHookRef.current = fireAddonHook
 
   // Board → session: an unassigned task dragged into work (or explicitly
   // started) spawns the default agent type with the task as its prompt.
@@ -836,17 +879,27 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         logEvent('cron', null, `Master deleted schedule ${name}`)
         return `deleted ${name}`
       },
-      createAddon: (name, icon, html, desc) => {
+      createAddon: (name, icon, html, desc, toolsJson, hooksJson) => {
         const gated = catalogGate('create_addon')
         if (gated) return gated
-        if (!name.trim() || !html.trim()) return 'name and html are required'
+        if (!name.trim()) return 'name is required'
+        let parsed
+        try {
+          parsed = parseAddonPackage(JSON.stringify({
+            name, icon, html: html || undefined, description: desc,
+            tools: toolsJson ? JSON.parse(toolsJson) : undefined,
+            hooks: hooksJson ? JSON.parse(hooksJson) : undefined,
+            version: '1.0.0',
+          }))
+        } catch (e) {
+          return `invalid addon package: ${e instanceof Error ? e.message : String(e)}`
+        }
         const existing = stateRef.current.addons.find(a => a.name === name)
         const addon: Addon = {
+          ...parsed,
           id: existing?.id ?? mkId('ad'),
-          name: name.trim(),
-          icon: (icon || '◆').slice(0, 2),
-          html,
-          desc,
+          enabled: true,
+          source: 'master',
           createdAt: new Date().toLocaleString(),
         }
         dispatch(s2 => ({
@@ -854,12 +907,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           addons: existing
             ? s2.addons.map(a => (a.id === existing.id ? addon : a))
             : s2.addons.concat([addon]),
-          view: 'addon',
-          activeAddon: addon.id,
+          ...(addon.html ? { view: 'addon' as const, activeAddon: addon.id } : {}),
         }))
         logEvent('build', null, `Master ${existing ? 'updated' : 'built'} addon “${name}”`)
         flash(`${existing ? 'Updated' : 'New'} addon · ${name}`)
-        return `${existing ? 'updated' : 'created'} addon "${name}" — it is open now as a tab in the icon rail`
+        const parts = [addon.html ? 'view tab' : '', addon.tools?.length ? `${addon.tools.length} tool(s)` : '', addon.hooks ? 'hooks' : ''].filter(Boolean).join(', ')
+        return `${existing ? 'updated' : 'created'} addon "${name}" (${parts})`
       },
       removeAddon: name => {
         const addon = stateRef.current.addons.find(a => a.name === name)
@@ -872,6 +925,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         }))
         return `removed addon "${name}"`
       },
+      runAddonTool: (name, input) => execAddonTool(stateRef.current, name, input, getAddonApi()),
       updateAgentStatus: (sid, task, summary, actionNeeded) => {
         const agent = stateRef.current.agents.find(a => a.id === sid)
         if (!agent) return `no session with id ${sid}`
@@ -972,9 +1026,28 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     masterBusyRef.current = false
     dispatch(s => ({ ...s, masterBusy: false }))
-  }, [applyAgentStatus, armResponseWatch, flash, launchSession, logEvent, sessionScreenTail, setNeedsInput])
+  }, [applyAgentStatus, armResponseWatch, flash, getAddonApi, launchSession, logEvent, sessionScreenTail, setNeedsInput])
 
   masterEventRef.current = note => { void runMaster(note) }
+
+  const installPackage = useCallback((json: string, source: Addon['source']) => {
+    const parsed = parseAddonPackage(json) // throws readable errors
+    const existing = stateRef.current.addons.find(a => a.name === parsed.name)
+    const addon: Addon = {
+      ...parsed,
+      id: existing?.id ?? mkId('ad'),
+      enabled: true,
+      source,
+      createdAt: new Date().toLocaleString(),
+    }
+    dispatch(s2 => ({
+      ...s2,
+      addons: existing ? s2.addons.map(a => (a.id === existing.id ? addon : a)) : s2.addons.concat([addon]),
+      ...(addon.html ? { view: 'addon' as const, activeAddon: addon.id } : {}),
+    }))
+    logEvent('build', null, `Installed addon “${addon.name}” v${addon.version} (${source})`)
+    flash(`Installed ${addon.name} v${addon.version}`)
+  }, [flash, logEvent])
 
   const actions = useMemo<ConductorActions>(() => ({
     setView: v => dispatch(s => ({ ...s, view: v })),
@@ -1382,6 +1455,50 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     deleteCron: id => dispatch(s => ({ ...s, crons: s.crons.filter(c => c.id !== id) })),
 
     openAddon: id => dispatch(s => ({ ...s, view: 'addon', activeAddon: id })),
+
+    toggleAddon: id => dispatch(s => ({
+      ...s,
+      addons: s.addons.map(a => (a.id === id ? { ...a, enabled: !a.enabled } : a)),
+    })),
+
+    installAddonFromFile: () => {
+      void (async () => {
+        try {
+          const path = await native.pickFile()
+          if (!path) return
+          const json = await native.readTextFile(path)
+          installPackage(json, 'file')
+        } catch (e) {
+          flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      })()
+    },
+
+    installAddonFromUrl: url => {
+      void (async () => {
+        try {
+          const json = await native.httpGetText(url)
+          installPackage(json, 'url')
+        } catch (e) {
+          flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      })()
+    },
+
+    exportAddon: id => {
+      void (async () => {
+        const addon = stateRef.current.addons.find(a => a.id === id)
+        if (!addon) return
+        try {
+          const path = await native.pickSavePath(`${addon.name.replace(/[^a-z0-9-]/gi, '-')}.yaam.json`)
+          if (!path) return
+          await native.writeTextFile(path, exportAddonPackage(addon))
+          flash(`Exported ${addon.name}`)
+        } catch (e) {
+          flash(`Export failed: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      })()
+    },
     removeAddon: id => dispatch(s => ({
       ...s,
       addons: s.addons.filter(a => a.id !== id),
@@ -1421,7 +1538,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [armResponseWatch, flash, later, launchSession, logEvent, probeCliSession, runMaster, spawnSessionForTask])
+  }), [armResponseWatch, flash, installPackage, later, launchSession, logEvent, probeCliSession, runMaster, spawnSessionForTask])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {

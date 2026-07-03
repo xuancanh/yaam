@@ -1,9 +1,121 @@
 import { useActions, useConductor } from '../store'
 import { hexToRgba } from '../data'
-import { pickFolder } from '../native'
+import { httpGetText, pickFolder } from '../native'
 import { PROVIDERS, providerFor } from '../master'
 import { SHELLS } from '../data'
+import { useState } from 'react'
 import { EditableName, IC, Icon, Switch, ViewHeader } from './ui'
+
+interface RegistryEntry {
+  name: string
+  version?: string
+  icon?: string
+  description?: string
+  url: string
+}
+
+function AddonsSection() {
+  const s = useConductor()
+  const { toggleAddon, removeAddon, exportAddon, openAddon, installAddonFromFile, installAddonFromUrl, updateSettings } = useActions()
+  const [url, setUrl] = useState('')
+  const [registry, setRegistry] = useState<RegistryEntry[] | null>(null)
+  const [regStatus, setRegStatus] = useState('')
+
+  const browse = async () => {
+    setRegStatus('loading…')
+    try {
+      const json = JSON.parse(await httpGetText(s.settings.registryUrl))
+      const pkgs = Array.isArray(json.packages) ? json.packages as RegistryEntry[] : []
+      setRegistry(pkgs)
+      setRegStatus(pkgs.length ? '' : 'registry is empty')
+    } catch (e) {
+      setRegistry(null)
+      setRegStatus(`failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const FIELD = { ...FIELD_STYLE, flex: 1 } as const
+
+  return (
+    <>
+      <SectionLabel>ADDONS</SectionLabel>
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
+        {s.addons.length === 0 && (
+          <div style={{ padding: '14px 0', fontSize: 12, color: 'var(--dim)' }}>
+            No addons yet — ask Master to build one, or install a package below.
+          </div>
+        )}
+        {s.addons.map(a => (
+          <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: '1px solid #1a1e26' }}>
+            <span style={{ fontSize: 16, width: 22, textAlign: 'center' }}>{a.icon}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {a.name}
+                <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 7 }}>v{a.version} · {a.source}</span>
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--mut)', marginTop: 1 }}>
+                {[a.html ? 'view' : '', a.tools?.length ? `${a.tools.length} tool(s)` : '', a.hooks ? 'hooks' : ''].filter(Boolean).join(' · ') || 'empty'}
+                {a.desc ? ` — ${a.desc}` : ''}
+              </div>
+            </div>
+            {a.html && a.enabled && (
+              <button className="open-btn" style={{ flex: 'none', padding: '4px 11px', fontSize: 11.5 }} onClick={() => openAddon(a.id)}>Open</button>
+            )}
+            <button className="open-btn" style={{ flex: 'none', padding: '4px 11px', fontSize: 11.5 }} onClick={() => exportAddon(a.id)}>Export</button>
+            <Switch on={a.enabled} onToggle={() => toggleAddon(a.id)} />
+            <button className="icon-btn danger" title="Remove addon" style={{ width: 26, height: 26 }} onClick={() => removeAddon(a.id)}>
+              <Icon paths={IC.close} size={12} stroke={2} />
+            </button>
+          </div>
+        ))}
+        <div style={{ padding: '13px 0', display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
+            ⚠ Addon tools and hooks run with app privileges — install packages only from sources you trust. Views stay sandboxed.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="open-btn" style={{ flex: 'none', padding: '6px 13px', fontSize: 12 }} onClick={installAddonFromFile}>
+              Install from file…
+            </button>
+            <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/addon.yaam.json" style={FIELD} />
+            <button
+              className="open-btn"
+              style={{ flex: 'none', padding: '6px 13px', fontSize: 12, opacity: url.trim() ? 1 : 0.5 }}
+              disabled={!url.trim()}
+              onClick={() => { installAddonFromUrl(url.trim()); setUrl('') }}
+            >
+              Install URL
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              value={s.settings.registryUrl}
+              onChange={e => updateSettings({ registryUrl: e.target.value })}
+              placeholder="registry index URL"
+              style={FIELD}
+            />
+            <button className="open-btn" style={{ flex: 'none', padding: '6px 13px', fontSize: 12 }} onClick={browse}>
+              Browse registry
+            </button>
+          </div>
+          {regStatus && <div className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>{regStatus}</div>}
+          {registry?.map(pkg => (
+            <div key={pkg.url} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: 9, padding: '9px 12px' }}>
+              <span style={{ fontSize: 15 }}>{pkg.icon || '◆'}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{pkg.name}</span>
+                <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 6 }}>{pkg.version || ''}</span>
+                <div style={{ fontSize: 11, color: 'var(--mut)' }}>{pkg.description || ''}</div>
+              </div>
+              <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5 }} onClick={() => installAddonFromUrl(pkg.url)}>
+                Install
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
 
 const FIELD_STYLE = {
   background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 8,
@@ -227,6 +339,8 @@ export function SettingsView() {
               </div>
             ))}
           </div>
+
+          <AddonsSection />
 
           <SectionLabel>INTEGRATIONS</SectionLabel>
           <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))' }}>

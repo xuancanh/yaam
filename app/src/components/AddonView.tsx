@@ -49,13 +49,13 @@ export function AddonView() {
     }
   }, [push])
 
-  if (!addon) return null
+  if (!addon?.html) return null
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <ViewHeader title={`${addon.icon} ${addon.name}`}>
         <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>
-          {addon.desc || 'addon'} · built by Master · {addon.createdAt}
+          {addon.desc || 'addon'} · v{addon.version} · {addon.source === 'master' ? 'built by Master' : `installed (${addon.source})`} · {addon.createdAt}
         </span>
         <div style={{ flex: 1 }} />
         <button

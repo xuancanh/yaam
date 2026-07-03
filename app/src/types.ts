@@ -232,6 +232,8 @@ export interface OrchestrationSettings {
   apiKey: string
   /** LLM provider: anthropic | openai | deepseek | kimi | custom */
   provider: string
+  /** addon registry index URL (JSON) */
+  registryUrl: string
   /** base URL for the custom provider (OpenAI-compatible) */
   baseUrl: string
 }
@@ -245,14 +247,37 @@ export interface BoardTask {
   agentId: string | null
 }
 
+export interface AddonTool {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+  /** JS function body: (input, api) => string | Promise<string> */
+  handler: string
+}
+
+export interface AddonHooks {
+  /** JS body: (event = { sessionId, name, code }, api) => void — runs when a session exits */
+  onSessionExit?: string
+  /** JS body: (event = { sessionId, name, question }, api) => void — runs when a session needs input */
+  onNeedsInput?: string
+  /** appended to Master's system prompt while the addon is enabled — changes its behavior */
+  masterPromptAppend?: string
+}
+
 export interface Addon {
   id: string
   name: string
+  version: string
   /** single char / emoji shown in the icon rail */
   icon: string
-  /** self-contained HTML document rendered in a sandboxed iframe */
-  html: string
   desc?: string
+  author?: string
+  /** self-contained HTML document rendered in a sandboxed iframe (optional tab) */
+  html?: string
+  tools?: AddonTool[]
+  hooks?: AddonHooks
+  enabled: boolean
+  source: 'master' | 'file' | 'url' | 'registry'
   createdAt: string
 }
 

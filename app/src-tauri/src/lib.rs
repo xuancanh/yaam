@@ -16,6 +16,8 @@ pub fn run() {
       sessions::live_sessions,
       sessions::detect_cli_session,
       sessions::git_diff,
+      sessions::read_text_file,
+      sessions::write_text_file,
       sessions::save_state,
       sessions::load_state,
     ])

@@ -9,11 +9,12 @@ export interface MasterExec {
   flagNeedsInput: (sessionId: string, question: string) => string
   renameSession: (sessionId: string, name: string) => string
   updateAgentStatus: (sessionId: string, task?: string, summary?: string, actionNeeded?: string) => string
+  runAddonTool: (name: string, input: Record<string, unknown>) => Promise<string>
   configureSetting: (key: string, value: string) => string
   setToolPermission: (toolId: string, perm: string) => string
   toggleSchedule: (name: string, on: boolean) => string
   deleteSchedule: (name: string) => string
-  createAddon: (name: string, icon: string, html: string, desc?: string) => string
+  createAddon: (name: string, icon: string, html: string, desc?: string, toolsJson?: string, hooksJson?: string) => string
   removeAddon: (name: string) => string
   createSchedule: (name: string, cron: string, command?: string, cwd?: string) => string
   addTask: (title: string) => string
@@ -117,10 +118,12 @@ Style to match the app: dark background #0A0B0F, text #E7E9F0, muted #8B93A1, ac
       properties: {
         name: { type: 'string' },
         icon: { type: 'string', description: 'single character or emoji for the rail tab' },
-        html: { type: 'string', description: 'complete HTML document (<!DOCTYPE html>…) with inline CSS/JS' },
+        html: { type: 'string', description: 'complete HTML document (<!DOCTYPE html>…) with inline CSS/JS. Optional if the addon only adds tools/hooks.' },
         desc: { type: 'string' },
+        tools_json: { type: 'string', description: 'optional JSON array of tools: [{name, description, input_schema, handler}] — handler is a JS function body (input, api) => string. api = { getState(), sendToSession(id,text), launchSession(cmd,cwd,name), flash(t), logEvent(t), notify(title,detail) }' },
+        hooks_json: { type: 'string', description: 'optional JSON object: { onSessionExit?, onNeedsInput?: JS body (event, api) => void, masterPromptAppend?: string appended to your system prompt }' },
       },
-      required: ['name', 'icon', 'html'],
+      required: ['name', 'icon'],
     },
   },
   {
@@ -218,7 +221,7 @@ export async function runTool(name: string, input: Record<string, unknown>, exec
     case 'set_tool_permission': return exec.setToolPermission(str('tool_id'), str('perm'))
     case 'toggle_schedule': return exec.toggleSchedule(str('name'), input.on === true)
     case 'delete_schedule': return exec.deleteSchedule(str('name'))
-    case 'create_addon': return exec.createAddon(str('name'), str('icon'), str('html'), str('desc') || undefined)
+    case 'create_addon': return exec.createAddon(str('name'), str('icon'), str('html'), str('desc') || undefined, str('tools_json') || undefined, str('hooks_json') || undefined)
     case 'remove_addon': return exec.removeAddon(str('name'))
     case 'update_agent_status': return exec.updateAgentStatus(
       str('session_id'),

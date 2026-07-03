@@ -1,0 +1,19 @@
+{
+  "registry": 1,
+  "packages": [
+    {
+      "name": "session-bell",
+      "version": "1.0.0",
+      "icon": "🔔",
+      "description": "Notifications when any session finishes or asks for input; adds a ping_all_sessions tool for Master.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/session-bell.yaam.json"
+    },
+    {
+      "name": "cost-pulse",
+      "version": "1.0.0",
+      "icon": "💠",
+      "description": "Live per-session spend bar chart as a tab.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/cost-pulse.yaam.json"
+    }
+  ]
+}

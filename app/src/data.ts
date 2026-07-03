@@ -155,6 +155,7 @@ export function seedState(): AppState {
       shell: 'zsh', defaultCwd: '',
       masterEnabled: false, masterModel: 'claude-sonnet-5', monitorModel: 'claude-haiku-4-5-20251001', apiKey: '',
       provider: 'anthropic', baseUrl: '',
+      registryUrl: 'https://raw.githubusercontent.com/xuancanh/yaam/main/registry/index.json',
     },
     tasks: [],
     messages: [

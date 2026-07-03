@@ -2,7 +2,8 @@
 // browser (e.g. `npm run dev` opened directly) so the simulated agents still work.
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -82,6 +83,31 @@ export async function pickFolder(defaultPath?: string): Promise<string | null> {
   if (!isTauri) return null
   const picked = await openDialog({ directory: true, multiple: false, defaultPath: defaultPath || undefined })
   return typeof picked === 'string' ? picked : null
+}
+
+export async function httpGetText(url: string): Promise<string> {
+  const res = await (isTauri ? tauriFetch : fetch)(url)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return await res.text()
+}
+
+export async function pickFile(): Promise<string | null> {
+  if (!isTauri) return null
+  const picked = await openDialog({ multiple: false, filters: [{ name: 'YAAM addon', extensions: ['json'] }] })
+  return typeof picked === 'string' ? picked : null
+}
+
+export async function pickSavePath(defaultName: string): Promise<string | null> {
+  if (!isTauri) return null
+  return await saveDialog({ defaultPath: defaultName, filters: [{ name: 'YAAM addon', extensions: ['json'] }] })
+}
+
+export async function readTextFile(path: string): Promise<string> {
+  return await invoke<string>('read_text_file', { path })
+}
+
+export async function writeTextFile(path: string, contents: string): Promise<void> {
+  await invoke('write_text_file', { path, contents })
 }
 
 export async function gitDiff(cwd: string): Promise<string> {
