@@ -76,7 +76,7 @@ function AddonChat({ addon }: { addon: Addon }) {
 
 export function AddonView() {
   const s = useConductor()
-  const { removeAddon } = useActions()
+  const { removeAddon, addonRpc } = useActions()
   const [mode, setMode] = useState<'view' | 'source' | 'chat'>('view')
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const stateRef = useRef(s)
@@ -93,6 +93,17 @@ export function AddonView() {
     const onMessage = (e: MessageEvent) => {
       if (e.source !== iframeRef.current?.contentWindow) return
       if (e.data?.type === 'yaam:getState') push()
+      if (e.data?.type === 'yaam:call' && typeof e.data.callId === 'string' && typeof e.data.method === 'string') {
+        const { callId, method } = e.data
+        const args = Array.isArray(e.data.args) ? e.data.args : []
+        const id = stateRef.current.activeAddon
+        if (!id) return
+        addonRpc(id, method, args).then(result => {
+          iframeRef.current?.contentWindow?.postMessage({ type: 'yaam:result', callId, result }, '*')
+        }).catch(err => {
+          iframeRef.current?.contentWindow?.postMessage({ type: 'yaam:result', callId, error: err instanceof Error ? err.message : String(err) }, '*')
+        })
+      }
     }
     window.addEventListener('message', onMessage)
     const timer = window.setInterval(push, 3000)
@@ -100,7 +111,7 @@ export function AddonView() {
       window.removeEventListener('message', onMessage)
       window.clearInterval(timer)
     }
-  }, [push])
+  }, [addonRpc, push])
 
   if (!addon) return null
   const effectiveMode = mode === 'view' && !addon.html ? 'chat' : mode

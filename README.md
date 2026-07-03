@@ -55,9 +55,10 @@ Following the kernel-plugin pattern of modern agent harnesses (OpenClaw, OpenCod
 
 - **Settings, permissions, schedules from chat**: `configure_setting`, `set_tool_permission`, `create/toggle/delete_schedule` — "turn off follow mode", "set stop_session to Ask first", "delete the nightly job" all work as chat messages
 - **Addons — a real plugin system**: an addon is a shareable JSON package (`*.yaam.json`) that can carry any mix of:
-  - a **view** — a tab in the icon rail, rendered in a sandboxed iframe fed live app state over postMessage
-  - **Master tools** — JS handlers registered into Master's tool list (namespaced `addon_*`), run against a curated API (`getState`, `sendToSession`, `launchSession`, `flash`, `logEvent`, `notify`)
+  - a **view** — a tab in the icon rail, rendered in a sandboxed iframe. Views get live app state pushed over postMessage AND can call back into the app over an RPC bridge (`yaam:call` → whitelisted methods): read state, send to sessions, launch/focus sessions, full board-task CRUD (`tasks.add/rename/move/remove/start`), notifications, and private per-addon storage — enough to rebuild built-in views entirely (see `kanban-lite` in the registry: the kanban board as a pure addon)
+  - **Master tools** — JS handlers registered into Master's tool list (namespaced `addon_*`), run against the same API
   - **hooks** — behavior extensions: `onSessionExit`, `onNeedsInput`, and `masterPromptAppend` (literally changes Master's instructions while enabled)
+  - **permissions** — packages declare capability scopes (`state:read`, `sessions:send`, `sessions:launch`, `tasks`, `ui`, `storage`); every API call is checked against the user's grants, which are visible and revocable per-permission as chips in Settings → Addons
 
   Every addon tab has three modes: **Preview** (the rendered view), **Source** (the raw package — html, tool handlers, hooks — selectable for copying), and **Customize** — a dedicated chat scoped to that addon, where an editor LLM applies changes through a validated `update_addon` tool ("make the bars green", "add a tool that restarts idle sessions"). Master builds addons from chat (`create_addon`); users install them from a file, a URL, or the **registry browser** (Settings → Addons — configurable index URL; `registry/` in this repo is the seed with `session-bell` and `cost-pulse` examples). Enable/disable, export to share, replace by name; everything persists. ⚠ Tool handlers and hooks run with app privileges — install only trusted packages; views stay sandboxed.
 

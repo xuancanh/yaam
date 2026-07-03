@@ -4,16 +4,23 @@
     {
       "name": "session-bell",
       "version": "1.0.0",
-      "icon": "🔔",
+      "icon": "\ud83d\udd14",
       "description": "Notifications when any session finishes or asks for input; adds a ping_all_sessions tool for Master.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/session-bell.yaam.json"
     },
     {
       "name": "cost-pulse",
       "version": "1.0.0",
-      "icon": "💠",
+      "icon": "\ud83d\udca0",
       "description": "Live per-session spend bar chart as a tab.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/cost-pulse.yaam.json"
+    },
+    {
+      "name": "kanban-lite",
+      "version": "1.0.0",
+      "icon": "\ud83d\uddc2",
+      "description": "The built-in kanban board as a pure addon (proof of the addon platform).",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/kanban-lite.yaam.json"
     }
   ]
 }

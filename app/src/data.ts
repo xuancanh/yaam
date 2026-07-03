@@ -137,6 +137,7 @@ export function seedState(): AppState {
     dragOverCol: null,
     addons: [],
     activeAddon: null,
+    addonStorage: {},
     addonChats: {},
     addonChatBusy: null,
     agents: [],

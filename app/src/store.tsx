@@ -2,7 +2,7 @@
 import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  Addon, Agent, AppState, BoardCol, Cron, EscOption, EventType, LogLine,
+  Addon, AddonPermission, Agent, AppState, BoardCol, Cron, EscOption, EventType, LogLine,
   NotifKind, Notification, Panel, PersistedState, View,
 } from './types'
 import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
@@ -12,7 +12,7 @@ import type { ApiMessage, MasterExec } from './master'
 import { runMonitorTurn } from './monitor'
 import type { MonitorExec } from './monitor'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './terminals'
-import { addonSnapshot, execAddonHook, execAddonTool, exportAddonPackage, parseAddonPackage } from './addons'
+import { ALL_PERMISSIONS, addonSnapshot, dispatchAddonRpc, enforcePermissions, execAddonHook, execAddonTool, exportAddonPackage, parseAddonPackage } from './addons'
 import { runAddonEditorTurn } from './llm/addon-editor'
 import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
@@ -85,10 +85,12 @@ export interface ConductorActions {
   openAddon: (id: string) => void
   removeAddon: (id: string) => void
   toggleAddon: (id: string) => void
+  toggleAddonGrant: (id: string, perm: AddonPermission) => void
   installAddonFromFile: () => void
   installAddonFromUrl: (url: string) => void
   exportAddon: (id: string) => void
   sendAddonChat: (id: string, text: string) => void
+  addonRpc: (addonId: string, method: string, args: unknown[]) => Promise<unknown>
   updateAddonMeta: (id: string, patch: Partial<Pick<Addon, 'name' | 'version' | 'icon' | 'desc' | 'author'>>) => void
   switchWorkspace: (id: string) => void
   createWorkspace: (name: string) => void
@@ -568,13 +570,17 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             workspaces,
             activeWorkspace,
             workspaceData: p.workspaceData ?? {},
+            addonStorage: p.addonStorage ?? {},
             addons: (p.addons ?? s.addons).map(a => {
               const partial = a as Partial<Addon>
+              const permissions = partial.permissions ?? ALL_PERMISSIONS.map(x => x.id)
               return {
                 ...a,
                 version: partial.version ?? '1.0.0',
                 enabled: partial.enabled ?? true,
                 source: partial.source ?? 'master' as const,
+                permissions,
+                granted: partial.granted ?? permissions,
               }
             }),
             messages: p.messages?.length ? p.messages : s.messages,
@@ -631,6 +637,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       minimizedIds: state.minimizedIds,
       paneSplits: state.paneSplits,
       addons: state.addons,
+      addonStorage: state.addonStorage,
       messages: state.messages.slice(-60),
       events: state.events.slice(0, 60),
       notifications: state.notifications.slice(0, 30),
@@ -641,7 +648,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [
     state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.integrations,
     state.agents, state.focusedIds, state.activePane, state.minimizedIds, state.paneSplits,
-    state.addons, state.messages, state.events, state.notifications,
+    state.addons, state.addonStorage, state.messages, state.events, state.notifications,
     state.workspaces, state.activeWorkspace, state.workspaceData,
   ])
 
@@ -655,7 +662,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         workspaces: st.workspaces, activeWorkspace: st.activeWorkspace, workspaceData: st.workspaceData,
         agents: st.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
         focusedIds: st.focusedIds, activePane: st.activePane,
-        minimizedIds: st.minimizedIds, paneSplits: st.paneSplits, addons: st.addons,
+        minimizedIds: st.minimizedIds, paneSplits: st.paneSplits, addons: st.addons, addonStorage: st.addonStorage,
         messages: st.messages.slice(-60), events: st.events.slice(0, 60),
         notifications: st.notifications.slice(0, 30),
       }
@@ -732,30 +739,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return id
   }, [appendTail, bumpSettle, clearNeeds, probeCliSession])
 
-  // API surface handed to addon tool handlers and hooks
-  const addonApiRef = useRef<AddonApi | null>(null)
-  const getAddonApi = useCallback((): AddonApi => {
-    if (!addonApiRef.current) {
-      addonApiRef.current = {
-        getState: () => addonSnapshot(stateRef.current),
-        sendToSession: (sid, text) => {
-          if (stateRef.current.agents.some(a => a.id === sid)) sendLineToSession(sid, text)
-        },
-        launchSession: (command, cwd, name) => launchSession(command, cwd || '', name),
-        flash: t => flash(String(t).slice(0, 80)),
-        logEvent: t => logEvent('edit', null, `[addon] ${String(t).slice(0, 120)}`),
-        notify: (title, detail) => notify('done', String(title).slice(0, 80), String(detail).slice(0, 120), null),
-      }
-    }
-    return addonApiRef.current
-  }, [flash, launchSession, logEvent, notify])
-
-  const fireAddonHook = useCallback((hook: 'onSessionExit' | 'onNeedsInput', event: Record<string, unknown>) => {
-    void execAddonHook(stateRef.current, hook, event, getAddonApi())
-  }, [getAddonApi])
-
-  fireAddonHookRef.current = fireAddonHook
-
   // Board → session: an unassigned task dragged into work (or explicitly
   // started) spawns the default agent type with the task as its prompt.
   const spawnSessionForTask = useCallback((taskId: string) => {
@@ -780,6 +763,67 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     logEvent('route', id, `Spawned ${type.name} for task “${task.title.slice(0, 48)}”`)
     flash(`Session spawned for “${task.title.slice(0, 28)}”`)
   }, [armResponseWatch, flash, launchSession, logEvent])
+
+  // API surface handed to addon code (tools, hooks, and view RPC) — scoped
+  // per addon so storage is namespaced
+  const makeAddonApiRaw = useCallback((addonId: string): AddonApi => ({
+    getState: () => addonSnapshot(stateRef.current),
+    sendToSession: (sid, text) => {
+      if (stateRef.current.agents.some(a => a.id === sid)) sendLineToSession(sid, String(text))
+    },
+    launchSession: (command, cwd, name) => launchSession(String(command), cwd ? String(cwd) : '', name ? String(name) : undefined),
+    focusSession: sid => dispatch(s2 => (s2.agents.some(a => a.id === sid) ? focusSessionIn(s2, sid) : s2)),
+    flash: t => flash(String(t).slice(0, 80)),
+    logEvent: t => logEvent('edit', null, `[addon] ${String(t).slice(0, 120)}`),
+    notify: (title, detail) => notify('done', String(title).slice(0, 80), String(detail).slice(0, 120), null),
+    tasks: {
+      add: (title, col) => {
+        const id = mkId('t')
+        const validCols = ['backlog', 'routed', 'progress', 'review', 'done']
+        const column = validCols.includes(String(col)) ? String(col) as BoardCol : 'backlog'
+        dispatch(s2 => ({
+          ...s2,
+          tasks: s2.tasks.concat([{ id, title: String(title).slice(0, 120), col: column, agentId: null }]),
+        }))
+        return id
+      },
+      rename: (id, title) => dispatch(s2 => ({
+        ...s2,
+        tasks: s2.tasks.map(t => (t.id === id ? { ...t, title: String(title).slice(0, 120) || t.title } : t)),
+      })),
+      move: (id, col) => {
+        const validCols = ['backlog', 'routed', 'progress', 'review', 'done']
+        if (!validCols.includes(String(col))) return
+        dispatch(s2 => ({
+          ...s2,
+          tasks: s2.tasks.map(t => (t.id === id ? { ...t, col: String(col) as BoardCol } : t)),
+        }))
+      },
+      remove: id => dispatch(s2 => ({ ...s2, tasks: s2.tasks.filter(t => t.id !== id) })),
+      start: id => spawnSessionForTask(String(id)),
+    },
+    storage: {
+      get: key => stateRef.current.addonStorage[addonId]?.[String(key)],
+      set: (key, value) => dispatch(s2 => ({
+        ...s2,
+        addonStorage: {
+          ...s2.addonStorage,
+          [addonId]: { ...(s2.addonStorage[addonId] ?? {}), [String(key)]: value },
+        },
+      })),
+    },
+  }), [flash, launchSession, logEvent, notify, spawnSessionForTask])
+
+  const makeAddonApi = useCallback((addonId: string): AddonApi => {
+    const addon = stateRef.current.addons.find(a => a.id === addonId)
+    return enforcePermissions(makeAddonApiRaw(addonId), addon?.granted ?? [])
+  }, [makeAddonApiRaw])
+
+  const fireAddonHook = useCallback((hook: 'onSessionExit' | 'onNeedsInput', event: Record<string, unknown>) => {
+    void execAddonHook(stateRef.current, hook, event, makeAddonApi)
+  }, [makeAddonApi])
+
+  fireAddonHookRef.current = fireAddonHook
 
   // cron scheduler: fire enabled schedules once per matching minute
   useEffect(() => {
@@ -937,7 +981,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         logEvent('cron', null, `Master deleted schedule ${name}`)
         return `deleted ${name}`
       },
-      createAddon: (name, icon, html, desc, toolsJson, hooksJson) => {
+      createAddon: (name, icon, html, desc, toolsJson, hooksJson, permissionsJson) => {
         const gated = catalogGate('create_addon')
         if (gated) return gated
         if (!name.trim()) return 'name is required'
@@ -947,6 +991,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             name, icon, html: html || undefined, description: desc,
             tools: toolsJson ? JSON.parse(toolsJson) : undefined,
             hooks: hooksJson ? JSON.parse(hooksJson) : undefined,
+            permissions: permissionsJson ? JSON.parse(permissionsJson) : undefined,
             version: '1.0.0',
           }))
         } catch (e) {
@@ -956,6 +1001,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         const addon: Addon = {
           ...parsed,
           id: existing?.id ?? mkId('ad'),
+          granted: existing?.granted ?? parsed.permissions,
           enabled: true,
           source: 'master',
           createdAt: new Date().toLocaleString(),
@@ -983,7 +1029,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         }))
         return `removed addon "${name}"`
       },
-      runAddonTool: (name, input) => execAddonTool(stateRef.current, name, input, getAddonApi()),
+      runAddonTool: (name, input) => execAddonTool(stateRef.current, name, input, makeAddonApi),
       updateAgentStatus: (sid, task, summary, actionNeeded) => {
         const agent = stateRef.current.agents.find(a => a.id === sid)
         if (!agent) return `no session with id ${sid}`
@@ -1084,7 +1130,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     masterBusyRef.current = false
     dispatch(s => ({ ...s, masterBusy: false }))
-  }, [applyAgentStatus, armResponseWatch, flash, getAddonApi, launchSession, logEvent, sessionScreenTail, setNeedsInput])
+  }, [applyAgentStatus, armResponseWatch, flash, makeAddonApi, launchSession, logEvent, sessionScreenTail, setNeedsInput])
 
   masterEventRef.current = (note, agentId) => {
     const s = stateRef.current
@@ -1161,6 +1207,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const addon: Addon = {
       ...parsed,
       id: existing?.id ?? mkId('ad'),
+      // upgrades keep the user's grant choices; fresh installs grant what's
+      // requested (visible + revocable per-permission in Settings)
+      granted: existing ? existing.granted.filter(g => parsed.permissions.includes(g)) : parsed.permissions,
       enabled: true,
       source,
       createdAt: new Date().toLocaleString(),
@@ -1586,6 +1635,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       addons: s.addons.map(a => (a.id === id ? { ...a, enabled: !a.enabled } : a)),
     })),
 
+    toggleAddonGrant: (id, perm) => dispatch(s => ({
+      ...s,
+      addons: s.addons.map(a => a.id === id
+        ? { ...a, granted: a.granted.includes(perm) ? a.granted.filter(g => g !== perm) : a.granted.concat([perm]) }
+        : a),
+    })),
+
     installAddonFromFile: () => {
       void (async () => {
         try {
@@ -1611,6 +1667,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     },
 
     sendAddonChat: (id, text) => { void sendAddonChatImpl(id, text) },
+
+    addonRpc: (addonId, method, args) => dispatchAddonRpc(makeAddonApi(addonId), method, args),
 
     updateAddonMeta: (id, patch) => dispatch(s => ({
       ...s,
@@ -1727,7 +1785,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [armResponseWatch, flash, installPackage, later, launchSession, logEvent, probeCliSession, runMaster, sendAddonChatImpl, spawnSessionForTask])
+  }), [armResponseWatch, flash, installPackage, later, launchSession, logEvent, makeAddonApi, probeCliSession, runMaster, sendAddonChatImpl, spawnSessionForTask])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {

@@ -2,6 +2,7 @@ import { useActions, useConductor } from '../store'
 import { hexToRgba } from '../data'
 import { httpGetText, pickFolder } from '../native'
 import { PROVIDERS, providerFor } from '../master'
+import { ALL_PERMISSIONS } from '../addons'
 import { SHELLS } from '../data'
 import { useState } from 'react'
 import { EditableName, IC, Icon, Switch, ViewHeader } from './ui'
@@ -16,7 +17,7 @@ interface RegistryEntry {
 
 function AddonsSection() {
   const s = useConductor()
-  const { toggleAddon, removeAddon, exportAddon, openAddon, installAddonFromFile, installAddonFromUrl, updateSettings } = useActions()
+  const { toggleAddon, toggleAddonGrant, removeAddon, exportAddon, openAddon, installAddonFromFile, installAddonFromUrl, updateSettings } = useActions()
   const [url, setUrl] = useState('')
   const [registry, setRegistry] = useState<RegistryEntry[] | null>(null)
   const [regStatus, setRegStatus] = useState('')
@@ -56,6 +57,30 @@ function AddonsSection() {
               <div style={{ fontSize: 11.5, color: 'var(--mut)', marginTop: 1 }}>
                 {[a.html ? 'view' : '', a.tools?.length ? `${a.tools.length} tool(s)` : '', a.hooks ? 'hooks' : ''].filter(Boolean).join(' · ') || 'empty'}
                 {a.desc ? ` — ${a.desc}` : ''}
+              </div>
+              <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+                {a.permissions.map(perm => {
+                  const on = a.granted.includes(perm)
+                  const label = ALL_PERMISSIONS.find(x => x.id === perm)?.label ?? perm
+                  return (
+                    <button
+                      key={perm}
+                      title={`${label} — click to ${on ? 'revoke' : 'grant'}`}
+                      onClick={() => toggleAddonGrant(a.id, perm)}
+                      className="mono"
+                      style={{
+                        fontSize: 9.5, fontWeight: 600, padding: '2px 7px', borderRadius: 5,
+                        border: '1px solid', cursor: 'pointer',
+                        borderColor: on ? 'rgba(61,220,151,.35)' : 'var(--line2)',
+                        background: on ? 'rgba(61,220,151,.1)' : 'transparent',
+                        color: on ? 'var(--green)' : 'var(--dim)',
+                        textDecoration: on ? 'none' : 'line-through',
+                      }}
+                    >
+                      {perm}
+                    </button>
+                  )
+                })}
               </div>
             </div>
             <button className="open-btn" style={{ flex: 'none', padding: '4px 11px', fontSize: 11.5 }} onClick={() => openAddon(a.id)}>Open</button>

@@ -266,6 +266,8 @@ export interface AddonHooks {
   masterPromptAppend?: string
 }
 
+export type AddonPermission = 'state:read' | 'sessions:send' | 'sessions:launch' | 'tasks' | 'ui' | 'storage'
+
 export interface Addon {
   id: string
   name: string
@@ -278,6 +280,10 @@ export interface Addon {
   html?: string
   tools?: AddonTool[]
   hooks?: AddonHooks
+  /** capability scopes the package requests */
+  permissions: AddonPermission[]
+  /** scopes the user has granted (enforced at the API boundary) */
+  granted: AddonPermission[]
   enabled: boolean
   source: 'master' | 'file' | 'url' | 'registry'
   createdAt: string
@@ -314,6 +320,7 @@ export interface PersistedState {
   workspaces?: Workspace[]
   activeWorkspace?: string
   workspaceData?: Record<string, WorkspaceData>
+  addonStorage?: Record<string, Record<string, unknown>>
   /** session definitions + output tails; restored as paused sessions */
   agents?: Agent[]
   focusedIds?: string[]
@@ -373,6 +380,8 @@ export interface AppState {
   dragOverCol: BoardCol | null
   addons: Addon[]
   activeAddon: string | null
+  /** per-addon persistent key-value storage */
+  addonStorage: Record<string, Record<string, unknown>>
   /** per-addon customization chat (in-memory) */
   addonChats: Record<string, { role: 'you' | 'master'; text: string }[]>
   addonChatBusy: string | null

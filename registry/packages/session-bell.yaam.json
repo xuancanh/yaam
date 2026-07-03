@@ -2,14 +2,21 @@
   "manifest": 2,
   "name": "session-bell",
   "version": "1.0.0",
-  "icon": "🔔",
+  "icon": "\ud83d\udd14",
   "description": "Rings the notification bell (and toasts) whenever any session finishes or asks for input.",
   "author": "yaam",
   "tools": [
     {
       "name": "ping_all_sessions",
       "description": "Send a short status-request message to every running session.",
-      "input_schema": { "type": "object", "properties": { "message": { "type": "string" } } },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
       "handler": "const state = api.getState(); const msg = input.message || 'status?'; let n = 0; for (const s of state.sessions) { if (s.status === 'running') { api.sendToSession(s.id, msg); n++; } } return `pinged ${n} running session(s)`;"
     }
   ],
@@ -17,5 +24,10 @@
     "onSessionExit": "api.notify(`${input.name} exited`, input.code === 0 ? 'finished cleanly' : `exit code ${input.code}`); api.flash(`${input.name} done`);",
     "onNeedsInput": "api.flash(`${input.name} is waiting: ${String(input.question).slice(0, 40)}`);",
     "masterPromptAppend": "The user has the session-bell addon installed: they are notified out-of-band when sessions finish, so keep your completion relays extra brief."
-  }
+  },
+  "permissions": [
+    "state:read",
+    "sessions:send",
+    "ui"
+  ]
 }
