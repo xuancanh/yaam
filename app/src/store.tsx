@@ -161,6 +161,28 @@ function typeForCommand(command: string, types: AppState['agentTypes']) {
   return types.find(t => t.model.trim().split(/\s+/)[0] === bin)
 }
 
+// iTerm-like focus: if the session is already visible, activate that pane;
+// otherwise show it in the active pane. Never duplicates a session across
+// panes (two panes would fight over the same terminal element).
+function focusSessionIn(s: AppState, id: string): AppState {
+  const minimizedIds = s.minimizedIds.filter(x => x !== id)
+  const existing = s.focusedIds.indexOf(id)
+  if (existing >= 0) {
+    return {
+      ...s, minimizedIds, activePane: existing, view: 'workspace',
+      maximizedPane: s.maximizedPane === null ? null : existing,
+    }
+  }
+  const focusedIds = s.focusedIds.slice()
+  if (!focusedIds.length) focusedIds.push(id)
+  else focusedIds[Math.min(s.activePane, focusedIds.length - 1)] = id
+  return {
+    ...s, focusedIds, minimizedIds,
+    activePane: Math.min(s.activePane, focusedIds.length - 1),
+    view: 'workspace',
+  }
+}
+
 function spawnAgentProcess(id: string, command: string, cwd?: string): Promise<void> {
   return native.spawnSession(id, command.trim(), cwd || undefined)
 }
@@ -562,7 +584,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
               log: (a.log ?? []).slice(-200),
             }))
           const ids = new Set(restoredAgents.map(a => a.id))
-          const focusedIds = (p.focusedIds ?? []).filter(id => ids.has(id))
+          const focusedIds = [...new Set((p.focusedIds ?? []).filter(id => ids.has(id)))]
           dispatch(s => ({
             ...s,
             tasks: p.tasks ?? s.tasks,
@@ -674,22 +696,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       log: [{ t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` }],
       ...defaultDetail(),
     }
-    dispatch(s => {
-      // a new terminal gets its own pane while there's room in the grid
-      const focusedIds = s.focusedIds.slice()
-      let activePane: number
-      if (focusedIds.length < 4) {
-        focusedIds.push(id)
-        activePane = focusedIds.length - 1
-      } else {
-        activePane = s.activePane
-        focusedIds[activePane] = id
-      }
-      return {
-        ...s, agents: s.agents.concat([agent]), focusedIds, activePane,
-        maximizedPane: null, view: 'workspace', newSessionOpen: false,
-      }
-    })
+    dispatch(s => ({
+      ...focusSessionIn({ ...s, agents: s.agents.concat([agent]) }, id),
+      newSessionOpen: false,
+    }))
     getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id))
     // capture the CLI's own session id so this session can be resumed later
     const probeType = typeForCommand(trimmed, stateRef.current.agentTypes)
@@ -1016,16 +1026,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     setActivePane: i => dispatch(s => ({ ...s, activePane: i })),
 
-    focusTab: id => dispatch(s => {
-      const minimizedIds = s.minimizedIds.filter(x => x !== id)
-      const existing = s.focusedIds.indexOf(id)
-      if (existing >= 0) return { ...s, minimizedIds, activePane: existing, view: 'workspace', maximizedPane: s.maximizedPane === null ? null : existing }
-      const focusedIds = s.focusedIds.slice()
-      if (s.minimizedIds.includes(id) && focusedIds.length < 6) focusedIds.push(id)
-      else if (focusedIds.length) focusedIds[Math.min(s.activePane, focusedIds.length - 1)] = id
-      else focusedIds.push(id)
-      return { ...s, focusedIds, minimizedIds, view: 'workspace' }
-    }),
+    focusTab: id => dispatch(s => focusSessionIn(s, id)),
 
     addPane: () => dispatch(s => {
       if (s.focusedIds.length >= 6) return s
@@ -1068,12 +1069,17 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }),
 
     restoreSession: id => dispatch(s => {
-      const minimizedIds = s.minimizedIds.filter(x => x !== id)
-      if (s.focusedIds.includes(id)) return { ...s, minimizedIds }
-      const focusedIds = s.focusedIds.length < 6 ? s.focusedIds.concat([id]) : (() => {
-        const f = s.focusedIds.slice(); f[s.activePane] = id; return f
-      })()
-      return { ...s, focusedIds, minimizedIds, activePane: focusedIds.indexOf(id), view: 'workspace', maximizedPane: null }
+      // restoring from the dock opens a split if there's room (it was
+      // deliberately parked, not swapped away)
+      if (!s.focusedIds.includes(id) && s.focusedIds.length < 6) {
+        const focusedIds = s.focusedIds.concat([id])
+        return {
+          ...s, focusedIds,
+          minimizedIds: s.minimizedIds.filter(x => x !== id),
+          activePane: focusedIds.length - 1, view: 'workspace', maximizedPane: null,
+        }
+      }
+      return focusSessionIn(s, id)
     }),
 
     setRowSplit: v => dispatch(s => ({ ...s, paneSplits: { ...s.paneSplits, row: v } })),
@@ -1113,17 +1119,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         }
         spawnAgentProcess(id, cmd, agent.cwd).catch(() => {})
       }
-      dispatch(s => {
-        const focusedIds = s.focusedIds.slice()
-        focusedIds[s.activePane] = id
-        return {
-          ...s,
-          agents: s.agents.map(a => a.id === id
-            ? { ...a, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]) }
-            : a),
-          focusedIds, view: 'workspace',
-        }
-      })
+      dispatch(s => focusSessionIn({
+        ...s,
+        agents: s.agents.map(a => a.id === id
+          ? { ...a, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]) }
+          : a),
+      }, id))
     },
 
     openPanel: (id, tab) => dispatch(s => ({ ...s, panel: { agentId: id, tab: tab || 'memory' } })),
@@ -1227,10 +1228,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     gotoNeeds: () => dispatch(s => {
       const needsAgent = s.agents.find(a => a.status === 'needs' || a.status === 'error')
-      if (!needsAgent) return s
-      const focusedIds = s.focusedIds.slice()
-      focusedIds[s.activePane] = needsAgent.id
-      return { ...s, focusedIds, view: 'workspace' }
+      return needsAgent ? focusSessionIn(s, needsAgent.id) : s
     }),
 
     openPalette: () => dispatch(s => ({ ...s, paletteOpen: true, paletteQuery: '' })),
@@ -1246,9 +1244,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         notifOpen: false,
       }
       if (n.agentId && s.agents.some(a => a.id === n.agentId)) {
-        const focusedIds = next.focusedIds.slice()
-        focusedIds[next.activePane] = n.agentId
-        return { ...next, focusedIds, view: 'workspace' }
+        return focusSessionIn(next, n.agentId)
       }
       if (n.kind === 'cron') return { ...next, view: 'crons' }
       return next

@@ -302,9 +302,14 @@ export function Workspace() {
   const { focusTab, addPane, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit } = useActions()
   const focused = s.focusedIds
   const byId = new Map(s.agents.map(a => [a.id, a]))
+  const seen = new Set<string>()
   let panes = focused
     .map((id, i) => ({ agent: byId.get(id) || s.agents[0], i }))
-    .filter((p): p is { agent: Agent; i: number } => !!p.agent)
+    .filter((p): p is { agent: Agent; i: number } => {
+      if (!p.agent || seen.has(p.agent.id)) return false
+      seen.add(p.agent.id)
+      return true
+    })
   if (s.maximizedPane !== null && panes[s.maximizedPane]) panes = [panes[s.maximizedPane]]
   const rows = panes.length <= 2 ? [panes] : panes.length <= 4 ? [panes.slice(0, 2), panes.slice(2)] : [panes.slice(0, 3), panes.slice(3)]
   const minimized = s.minimizedIds.map(id => byId.get(id)).filter((a): a is Agent => !!a)
