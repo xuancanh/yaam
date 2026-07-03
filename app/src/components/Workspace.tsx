@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useActions, useConductor } from '../store'
-import { ACCENT, STATUS_META, hexToRgba, memTokens } from '../data'
+import { ACCENT, hexToRgba, indicatorColor, memTokens } from '../data'
 import { isTauri, pickFolder } from '../native'
 import { fitTerminal, getTerminal } from '../terminals'
 import type { Agent } from '../types'
@@ -327,7 +327,7 @@ export function Workspace() {
       }}>
         {s.agents.filter(a => !a.archived).map(a => {
           const active = focused.includes(a.id)
-          const sm = STATUS_META[a.status] || STATUS_META.idle
+          const flash = a.status === 'needs' || a.attention
           return (
             <button
               key={a.id}
@@ -339,8 +339,10 @@ export function Workspace() {
               }}
             >
               <span style={{
-                width: 8, height: 8, borderRadius: '50%', background: sm.color, flexShrink: 0,
-                animation: a.status === 'running' || a.status === 'needs' ? 'cpulse 1.6s ease-in-out infinite' : 'none',
+                width: flash ? 9 : 8, height: flash ? 9 : 8, borderRadius: '50%',
+                background: indicatorColor(a), flexShrink: 0,
+                animation: flash ? 'cpulse 1.1s ease-in-out infinite' : 'none',
+                boxShadow: flash ? `0 0 7px ${indicatorColor(a)}` : 'none',
               }} />
               <span style={{ fontSize: 12.5, fontWeight: 600, color: active ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
               <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>
@@ -426,7 +428,7 @@ export function Workspace() {
         }}>
           <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)', flexShrink: 0 }}>DOCK</span>
           {minimized.map(a => {
-            const sm = STATUS_META[a.status] || STATUS_META.idle
+            const flash = a.status === 'needs' || a.attention
             return (
               <button
                 key={a.id}
@@ -435,8 +437,8 @@ export function Workspace() {
                 onClick={() => restoreSession(a.id)}
               >
                 <span style={{
-                  width: 7, height: 7, borderRadius: '50%', background: sm.color, flexShrink: 0,
-                  animation: a.status === 'running' || a.status === 'needs' ? 'cpulse 1.6s ease-in-out infinite' : 'none',
+                  width: 7, height: 7, borderRadius: '50%', background: indicatorColor(a), flexShrink: 0,
+                  animation: flash ? 'cpulse 1.1s ease-in-out infinite' : 'none',
                 }} />
                 <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>{a.name}</span>
               </button>

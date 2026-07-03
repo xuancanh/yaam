@@ -37,8 +37,9 @@ export const IC = {
 
 export function StatusPill({ agent, small }: { agent: Agent; small?: boolean }) {
   const sm = STATUS_META[agent.status] || STATUS_META.idle
-  const anim = agent.status === 'running' || agent.status === 'needs'
-    ? 'cpulse 1.6s ease-in-out infinite' : 'none'
+  // running = calm static light; flashing means "look at me" (needs/attention)
+  const anim = agent.status === 'needs' || agent.attention
+    ? 'cpulse 1.1s ease-in-out infinite' : 'none'
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 6, background: 'var(--panel2)',

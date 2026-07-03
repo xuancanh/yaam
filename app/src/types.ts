@@ -74,6 +74,8 @@ export interface Agent {
   archived?: boolean
   /** agent type used to launch this session (env + resume behavior) */
   typeId?: string
+  /** unseen event: finished its job / needs action — flashes in tabs and overview until viewed */
+  attention?: boolean
   /** Master-maintained: what this agent is working on */
   task?: string
   /** Master-maintained: latest 1-2 sentence state summary */

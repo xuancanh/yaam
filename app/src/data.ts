@@ -59,6 +59,15 @@ export const DIFF_BG: Record<string, string> = {
   meta: 'rgba(245,196,81,.08)',
 }
 
+// dot color for a session's tab/card indicator: attention overrides toward
+// what happened (finished=green, error=red, needs=amber)
+export function indicatorColor(a: Agent): string {
+  if (a.status === 'needs') return STATUS_META.needs.color
+  if (a.status === 'error') return STATUS_META.error.color
+  if (a.attention && a.status === 'idle') return STATUS_META.running.color
+  return (STATUS_META[a.status] || STATUS_META.idle).color
+}
+
 export function hexToRgba(hex: string, a: number): string {
   const n = parseInt(hex.slice(1), 16)
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`

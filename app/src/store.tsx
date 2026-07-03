@@ -172,7 +172,7 @@ function typeForCommand(command: string, types: AppState['agentTypes']) {
 // otherwise show it in the active pane. Never duplicates a session across
 // panes (two panes would fight over the same terminal element).
 function focusSessionIn(s: AppState, id: string): AppState {
-  s = { ...s, agents: s.agents.map(a => (a.id === id && a.archived ? { ...a, archived: false } : a)) }
+  s = { ...s, agents: s.agents.map(a => (a.id === id ? { ...a, archived: false, attention: false } : a)) }
   const minimizedIds = s.minimizedIds.filter(x => x !== id)
   const existing = s.focusedIds.indexOf(id)
   if (existing >= 0) {
@@ -310,7 +310,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     if (!agent || agent.status !== 'running') return
     dispatch(s => ({
       ...s,
-      agents: s.agents.map(a => a.id === id ? { ...a, status: 'needs' as const, escReason: question } : a),
+      agents: s.agents.map(a => a.id === id ? { ...a, status: 'needs' as const, escReason: question, attention: true } : a),
       messages: s.messages.concat([{
         id: mkId('m'), role: 'master', kind: 'escalate', escFor: id,
         esc: {
@@ -338,6 +338,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             task: task !== undefined ? (task || undefined) : a.task,
             summary: summary !== undefined ? (summary || undefined) : a.summary,
             actionNeeded: actionNeeded !== undefined ? (actionNeeded || undefined) : a.actionNeeded,
+            attention: a.attention || Boolean(actionNeeded),
             summaryAt: at,
           }
         : a),
@@ -383,6 +384,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           },
           reportToMaster: (digest, importance) => {
             const a = stateRef.current.agents.find(x => x.id === id)
+            dispatch(s2 => ({
+              ...s2,
+              agents: s2.agents.map(x => (x.id === id ? { ...x, attention: true } : x)),
+            }))
             logEvent(importance === 'info' ? 'done' : 'escalate', id, `Monitor: ${digest.slice(0, 96)}`)
             if (importance === 'critical' && a) notify('escalate', `${a.name} needs attention`, digest.slice(0, 90), id)
             masterEventRef.current(
@@ -547,13 +552,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // typing into a terminal clears its "needs action" state
   const clearNeeds = useCallback((id: string) => {
     lastFlaggedRef.current.delete(id)
-    const agent = stateRef.current.agents.find(a => a.id === id)
-    if (agent?.status === 'needs') {
-      dispatch(s => ({
-        ...s,
-        agents: s.agents.map(a => a.id === id ? { ...a, status: 'running' as const, escReason: undefined } : a),
-      }))
-    }
+    dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === id
+        ? { ...a, attention: false, ...(a.status === 'needs' ? { status: 'running' as const, escReason: undefined } : {}) }
+        : a),
+    }))
   }, [])
 
   useEffect(() => {
@@ -566,6 +570,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           ? {
               ...a,
               status: failed ? 'error' as const : 'idle' as const,
+              attention: true,
               log: a.log.concat([{ t: 'sys' as const, x: `process exited${e.code !== null ? ` · code ${e.code}` : ''}` }]),
             }
           : a),
@@ -1122,7 +1127,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       el?.focus()
     },
 
-    setActivePane: i => dispatch(s => ({ ...s, activePane: i })),
+    setActivePane: i => dispatch(s => {
+      const id = s.focusedIds[i]
+      return {
+        ...s,
+        activePane: i,
+        agents: id ? s.agents.map(a => (a.id === id ? { ...a, attention: false } : a)) : s.agents,
+      }
+    }),
 
     focusTab: id => dispatch(s => focusSessionIn(s, id)),
 
