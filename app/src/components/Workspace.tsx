@@ -292,6 +292,11 @@ function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; ind
         <span>{agent.model}</span>
         <span>{memOn.length} memories · {memTotal.toFixed(1)}k</span>
         <span>{toolCount} tools</span>
+        {agent.cliSessionId && (
+          <span title={`CLI session ${agent.cliSessionId} — used for resume`} style={{ marginLeft: 'auto', color: 'var(--faint)' }}>
+            ⧉ {agent.cliSessionId.slice(0, 8)}
+          </span>
+        )}
       </div>
     </div>
   )

@@ -108,6 +108,14 @@ function AgentBody({ agent }: { agent: Agent }) {
             <div className="grotesk" style={{ fontSize: 20, fontWeight: 600, marginTop: 3 }}>{agent.used.toFixed(1)}k</div>
           </div>
         </div>
+        {agent.cliSessionId && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: 11, padding: '11px 13px', marginBottom: 20 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: 'var(--mut)' }}>CLI session id · used by resume</div>
+              <div className="mono" style={{ fontSize: 12, color: 'var(--text)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis' }}>{agent.cliSessionId}</div>
+            </div>
+          </div>
+        )}
         <div className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, color: 'var(--mut)', marginBottom: 10 }}>RESUME POINTS</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
           {agent.snaps.map((sn, i) => (

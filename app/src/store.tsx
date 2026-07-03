@@ -629,7 +629,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
       hydrated.current = true
     }).catch(() => { hydrated.current = true })
-  }, [appendTail, bumpSettle, clearNeeds, later])
+  }, [appendTail, bumpSettle, clearNeeds])
 
   const saveTimer = useRef<number | undefined>(undefined)
   useEffect(() => {
@@ -680,6 +680,35 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('beforeunload', flush)
   }, [])
 
+  // Capture the CLI's own session id (claude/codex) by watching for the
+  // session file it creates. Interactive claude ignores --session-id for
+  // local persistence, so file detection is the reliable mechanism; after a
+  // resume we re-probe because --fork-session (and older CLIs) mint a new id.
+  const probeCliSession = useCallback((id: string, command: string, cwd: string, isResume: boolean) => {
+    const probeType = typeForCommand(command, stateRef.current.agentTypes)
+      ?? typeForCommand(stateRef.current.agents.find(a => a.id === id)?.cmd ?? '', stateRef.current.agentTypes)
+    if (!probeType?.probe || !native.isTauri) return
+    if (!isResume && /--resume|resume |--continue/.test(command)) return
+    const spawnedAt = Date.now()
+    const tryDetect = () => {
+      const current = stateRef.current.agents.find(a => a.id === id)
+      if (!current) return
+      if (!isResume && current.cliSessionId) return
+      native.detectCliSession(probeType.probe!, cwd || undefined, spawnedAt).then(sid => {
+        if (!sid || sid === stateRef.current.agents.find(a => a.id === id)?.cliSessionId) return
+        dispatch(s2 => ({
+          ...s2,
+          agents: s2.agents.map(a => a.id === id
+            ? { ...a, cliSessionId: sid, log: a.log.concat([{ t: 'sys', x: `${isResume ? 'session id changed on resume' : `captured ${probeType.name} session`} · ${sid}` }]) }
+            : a),
+        }))
+      }).catch(() => {})
+    }
+    later(7000, tryDetect)
+    later(25000, tryDetect)
+    if (!isResume) later(60000, tryDetect)
+  }, [later])
+
   const launchSession = useCallback((command: string, cwd: string, nameHint?: string): string | null => {
     const trimmed = command.trim()
     if (!trimmed) return null
@@ -701,27 +730,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       newSessionOpen: false,
     }))
     getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id))
-    // capture the CLI's own session id so this session can be resumed later
-    const probeType = typeForCommand(trimmed, stateRef.current.agentTypes)
-    if (probeType?.probe && native.isTauri && !/--resume|resume /.test(trimmed)) {
-      const spawnedAt = Date.now()
-      const tryDetect = () => {
-        const current = stateRef.current.agents.find(a => a.id === id)
-        if (!current || current.cliSessionId) return
-        native.detectCliSession(probeType.probe!, dir || undefined, spawnedAt).then(sid => {
-          if (!sid) return
-          dispatch(s2 => ({
-            ...s2,
-            agents: s2.agents.map(a => a.id === id
-              ? { ...a, cliSessionId: sid, log: a.log.concat([{ t: 'sys', x: `captured ${probeType.name} session · ${sid}` }]) }
-              : a),
-          }))
-        }).catch(() => {})
-      }
-      later(7000, tryDetect)
-      later(25000, tryDetect)
-      later(60000, tryDetect)
-    }
+    probeCliSession(id, trimmed, dir, false)
     native.spawnSession(id, trimmed, dir || undefined).catch(err => {
       dispatch(s => ({
         ...s,
@@ -731,7 +740,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
     })
     return id
-  }, [appendTail, bumpSettle, clearNeeds, later])
+  }, [appendTail, bumpSettle, clearNeeds, probeCliSession])
 
   // cron scheduler: fire enabled schedules once per matching minute
   useEffect(() => {
@@ -1118,6 +1127,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           }
         }
         spawnAgentProcess(id, cmd, agent.cwd).catch(() => {})
+        probeCliSession(id, cmd, agent.cwd || '', true)
       }
       dispatch(s => focusSessionIn({
         ...s,
@@ -1358,7 +1368,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [armResponseWatch, flash, later, launchSession, logEvent, runMaster])
+  }), [armResponseWatch, flash, later, launchSession, logEvent, probeCliSession, runMaster])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {
