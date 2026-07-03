@@ -283,7 +283,7 @@ function systemPrompt(s: AppState): string {
 - You command sessions with tools (send text to their stdin, launch or stop them).
 - Every session has a dedicated monitor (a separate lightweight LLM) watching its output. You do NOT see raw terminal output as events — monitors keep each session's status card current and send you [monitor report] messages only when something is noteworthy (finished, blocked, needs the user). Trust the reports and the tracked state; use read_session only when you need the raw output yourself. When a monitor report arrives, relay it in a fixed shape: a 1-2 sentence summary of what the session did, then a line starting "Next action:" telling the user what to do (approve something, answer a question, review a diff, or "none — I'll keep watching"). Keep the agent's overview card in sync with update_agent_status at the same time.
 
-NEVER claim an action succeeded without observing it: send_to_session and press_keys return the session's screen — read it and report what actually happened. If a session shows a dialog or menu, answer it with press_keys (enter accepts the highlighted option, up/down move, esc cancels, digits pick numbered options) — send_to_session is only for typing messages/commands. Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
+Speak ONLY about observed results. Never narrate intentions — phrases like "let me check", "I'll send", "I've asked it to…" are forbidden unless the corresponding tool call already happened THIS turn and you are describing its returned screen. If you want to check or send: call the tool, then describe what you saw. NEVER claim an action succeeded without observing it: send_to_session and press_keys return the session's screen — read it and report what actually happened. If a session shows a dialog or menu, answer it with press_keys (enter accepts the highlighted option, up/down move, esc cancels, digits pick numbered options) — send_to_session is only for typing messages/commands. Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
 
 Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on). You manage the app itself from chat: settings (configure_setting), your tool permissions (set_tool_permission), schedules (create/toggle/delete_schedule), and custom addon tabs (create_addon / remove_addon) — when the user asks for a new view, dashboard, or feature, build it as an addon. Whenever you review a session's output (events, read_session), also call update_agent_status so the Agents overview shows its current task, a short summary, and any action the user must take (clear action_needed with an empty string once handled).
 
@@ -342,7 +342,7 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model: cfg.model, max_tokens: 2048, system, messages, tools }),
+    body: JSON.stringify({ model: cfg.model, max_tokens: 2048, temperature: 0.2, system, messages, tools }),
   })
   const data = await res.json() as ApiResponse
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
@@ -400,6 +400,7 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
     body: JSON.stringify({
       model: cfg.model,
       max_tokens: 2048,
+      temperature: 0.2,
       messages: toOpenAiMessages(system, messages),
       tools: (tools as typeof TOOLS).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
     }),
@@ -483,8 +484,10 @@ export async function runMasterTurn(
   const messages = chatHistory(s0, eventNote)
   const trace: string[] = []
   let finalTexts: string[] = []
+  const usedTools: string[] = []
+  let integrityRetried = false
 
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 10; i++) {
     // re-describe state each iteration so tool effects are visible to the model
     const res = await callApi(cfg, systemPrompt(getState()), messages)
     const stepTexts: string[] = []
@@ -494,12 +497,28 @@ export async function runMasterTurn(
     }
     if (res.stop_reason !== 'tool_use') {
       finalTexts = stepTexts
+      // integrity check: replies that claim actions must be backed by real
+      // tool calls this turn — otherwise force the model to act or restate
+      const finalText = stepTexts.join(' ')
+      const claimsAction = /\b(i(?:'ve| have)? (?:sent|asked|told|instructed|approved|pressed)|let me (?:check|send|ask|see)|i'?ll (?:check|send|ask|watch)|instruction (?:is |was )?(?:sent|in))\b/i.test(finalText)
+      const acted = usedTools.some(t => ['send_to_session', 'press_keys', 'launch_session', 'stop_session', 'read_session'].includes(t))
+      if (claimsAction && !acted && !integrityRetried) {
+        integrityRetried = true
+        messages.push({ role: 'assistant', content: finalText })
+        messages.push({
+          role: 'user',
+          content: '[integrity check — not the user] Your reply claims or promises an action, but you called no session tool this turn. Do it now with the proper tool (send_to_session / press_keys / read_session) and then report only what the returned screen shows — or restate your reply without claiming any action.',
+        })
+        trace.push('⚠ integrity check: claimed action without tool call — retrying')
+        continue
+      }
       break
     }
     // narration before tool calls belongs to the trace, not the reply
     trace.push(...stepTexts)
     const results = []
     for (const b of res.content.filter(x => x.type === 'tool_use')) {
+      usedTools.push(b.name || '')
       const result = await runTool(b.name || '', b.input || {}, exec)
       trace.push(`→ ${b.name}(${JSON.stringify(b.input || {})})`)
       trace.push(`← ${result.length > 300 ? result.slice(0, 300) + '…' : result}`)

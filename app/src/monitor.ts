@@ -61,7 +61,7 @@ You receive the session's output whenever it settles. Your duties, in order:
 2. If the session is waiting on the user (permission prompt, question, selection menu), call flag_needs_input.
 3. Call report_to_master ONLY when noteworthy: task completed, error/blocked, user decision required, or a major milestone. Routine progress = update_status only, no report. Master is busy — do not spam it.
 
-Never reply with prose; use tools, then stop. If nothing changed, do nothing.`
+Ground every tool argument in the output you actually received — never invent progress, intentions, or results that the text does not show. If the output is ambiguous, say so in the summary rather than guessing. Never reply with prose; use tools, then stop. If nothing changed, do nothing.`
 }
 
 function runMonitorTool(name: string, input: Record<string, unknown>, exec: MonitorExec): string {
