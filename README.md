@@ -60,6 +60,12 @@ Following the kernel-plugin pattern of modern agent harnesses (OpenClaw, OpenCod
   - **hooks** — behavior extensions: `onSessionExit`, `onNeedsInput`, and `masterPromptAppend` (literally changes Master's instructions while enabled)
   - **permissions** — packages declare capability scopes (`state:read`, `sessions:send`, `sessions:launch`, `tasks`, `ui`, `storage`); every API call is checked against the user's grants, which are visible and revocable per-permission as chips in Settings → Addons
 
+  ![Session Timeline — an addon Master invented and built on request](docs/addon-timeline.png)
+
+  ↑ *"Be creative, create a new addon that you think interesting for me"* — Master designed and shipped this **Session Timeline** tab (stats cards, per-agent entries, color-coded event flow) in one chat turn. Below: the built-in kanban board rebuilt as the installable `kanban-lite` package, running a live session spawned from a card:
+
+  ![kanban-lite — the built-in board as a pure addon](docs/addon-kanban.png)
+
   Every addon tab has three modes: **Preview** (the rendered view), **Source** (the raw package — html, tool handlers, hooks — selectable for copying), and **Customize** — a dedicated chat scoped to that addon, where an editor LLM applies changes through a validated `update_addon` tool ("make the bars green", "add a tool that restarts idle sessions"). Master builds addons from chat (`create_addon`); users install them from a file, a URL, or the **registry browser** (Settings → Addons — configurable index URL; `registry/` in this repo is the seed with `session-bell` and `cost-pulse` examples). Enable/disable, export to share, replace by name; everything persists. ⚠ Tool handlers and hooks run with app privileges — install only trusted packages; views stay sandboxed.
 
 ## The rest
