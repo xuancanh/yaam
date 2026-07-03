@@ -11,6 +11,17 @@ A desktop manager for multiple live coding-agent sessions, built with [Tauri 2](
 - **Top — session tabs** with status lights (steady green = working, flashing = finished/needs you), split/maximize/minimize controls per pane, and the ⌘K palette.
 - **Rail** — Workspace, Agents overview (per-session task/summary/action cards maintained by monitor LLMs), kanban Board (cards spawn sessions), Activity, Usage, Schedules (real cron that launches sessions), Tools (permission gates for Master), plus any custom addon tabs Master has built.
 
+### Agents overview
+
+![Agents overview — monitor-maintained status cards](docs/agents.png)
+
+Each session's card is kept current by its **dedicated monitor LLM** — no manual bookkeeping:
+
+- **TASK** — what the agent is working on ("Reducing full script to 30-minute version")
+- **Summary** — a timestamped 1-2 sentence state digest written after each settled response
+- **ACTION** — the amber strip appears when something needs you, and clears when handled
+- **Session flow** — the orchestration graph (Master ↔ sub-agents with live status dots), per-session spend, Review (live `git diff` of the session's working directory), archive/restore, and the **Archived** shelf at the bottom.
+
 **YAAM** puts a "Master" orchestrator between you and a fleet of real CLI sessions (Claude Code, Codex, Gemini CLI, Aider, shells, REPLs — anything). You talk to Master; it routes tasks to sessions, watches them, escalates, and builds schedules and tools.
 
 ## Sessions — real terminals
