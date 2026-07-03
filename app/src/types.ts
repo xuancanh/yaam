@@ -72,6 +72,8 @@ export interface Agent {
   launchedAt?: number
   /** archived sessions are hidden from tabs/overview but kept for history */
   archived?: boolean
+  /** agent type used to launch this session (env + resume behavior) */
+  typeId?: string
   /** Master-maintained: what this agent is working on */
   task?: string
   /** Master-maintained: latest 1-2 sentence state summary */
@@ -194,6 +196,10 @@ export interface AgentType {
   tools: number
   desc: string
   enabled: boolean
+  /** environment variables, one KEY=value per line, applied when launching */
+  env?: string
+  /** user-created type (deletable) */
+  custom?: boolean
   /** command used to resume a previous CLI session; {id} is replaced with the captured session id */
   resumeCmd?: string
   /** resume command when no session id was captured (e.g. claude --continue) */

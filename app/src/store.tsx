@@ -68,6 +68,9 @@ export interface ConductorActions {
   toggleSetting: (k: 'autoRoute' | 'approveDestructive' | 'followMode') => void
   updateSettings: (patch: Partial<AppState['settings']>) => void
   setAgentTypeCmd: (id: string, cmd: string) => void
+  updateAgentType: (id: string, patch: Partial<AppState['agentTypes'][number]>) => void
+  addAgentType: () => void
+  deleteAgentType: (id: string) => void
   startCardDrag: (id: string) => void
   enterCol: (col: BoardCol) => void
   dropTo: (col: BoardCol) => void
@@ -186,6 +189,19 @@ function focusSessionIn(s: AppState, id: string): AppState {
     activePane: Math.min(s.activePane, focusedIds.length - 1),
     view: 'workspace',
   }
+}
+
+// KEY=value lines → shell assignment prefix (we spawn via sh -lc)
+function envPrefix(env?: string): string {
+  if (!env) return ''
+  const parts = env.split('\n')
+    .map(l => l.trim())
+    .filter(l => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
+    .map(l => {
+      const i = l.indexOf('=')
+      return `${l.slice(0, i)}='${l.slice(i + 1).replace(/'/g, `'\\''`)}'`
+    })
+  return parts.length ? `${parts.join(' ')} ` : ''
 }
 
 function spawnAgentProcess(id: string, command: string, cwd?: string): Promise<void> {
@@ -599,7 +615,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
               ? p.toolsCatalog.concat(s.toolsCatalog.filter(seed => !p.toolsCatalog!.some(t => t.id === seed.id)))
               : s.toolsCatalog,
             agentTypes: p.agentTypes
-              ? s.agentTypes.map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, resumeFallbackCmd: t.resumeFallbackCmd, probe: t.probe }))
+              ? s.agentTypes
+                  .map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, resumeFallbackCmd: t.resumeFallbackCmd, probe: t.probe } as typeof t))
+                  .concat(p.agentTypes.filter(x => x.custom && !s.agentTypes.some(t => t.id === x.id)))
               : s.agentTypes,
             integrations: p.integrations ?? s.integrations,
             agents: restoredAgents.length ? restoredAgents : s.agents,
@@ -714,7 +732,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     if (!isResume) later(60000, tryDetect)
   }, [later])
 
-  const launchSession = useCallback((command: string, cwd: string, nameHint?: string): string | null => {
+  const launchSession = useCallback((command: string, cwd: string, nameHint?: string, typeId?: string): string | null => {
     const trimmed = command.trim()
     if (!trimmed) return null
     const id = mkId('a')
@@ -726,6 +744,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       id, name: nameHint || bin, short: (nameHint || bin).slice(0, 2).toUpperCase(), color,
       repo: dir ? dir.split('/').pop() || dir : '~', branch: 'live',
       status: 'running', model: trimmed, kind: 'real', cmd: trimmed, cwd: dir, launchedAt: Date.now(),
+      typeId: typeId ?? typeForCommand(trimmed, stateRef.current.agentTypes)?.id,
       fi: 0, feed: [], memory: mkMemory(), tools: mkTools(),
       log: [{ t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` }],
       ...defaultDetail(),
@@ -736,7 +755,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }))
     getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id))
     probeCliSession(id, trimmed, dir, false)
-    native.spawnSession(id, trimmed, dir || undefined).catch(err => {
+    const launchType = stateRef.current.agentTypes.find(t => t.id === (typeId ?? '')) ?? typeForCommand(trimmed, stateRef.current.agentTypes)
+    native.spawnSession(id, `${envPrefix(launchType?.env)}${trimmed}`, dir || undefined).catch(err => {
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
@@ -759,7 +779,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       return
     }
     const quoted = `'${task.title.replace(/'/g, `'\\''`)}'`
-    const id = launchSession(`${type.model} ${quoted}`, st.settings.defaultCwd || '', task.title.slice(0, 18))
+    const id = launchSession(`${type.model} ${quoted}`, st.settings.defaultCwd || '', task.title.slice(0, 18), type.id)
     if (!id) return
     dispatch(s2 => ({
       ...s2,
@@ -1185,7 +1205,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       if (agent?.kind === 'real' && agent.cmd && agent.status !== 'running') {
         // prefer the CLI's own resume flow so the conversation continues
         let cmd = agent.cmd
-        const type = typeForCommand(agent.cmd, stateRef.current.agentTypes)
+        const type = stateRef.current.agentTypes.find(t => t.id === agent.typeId)
+          ?? typeForCommand(agent.cmd, stateRef.current.agentTypes)
         if (type?.resumeCmd) {
           if (type.resumeCmd.includes('{id}')) {
             if (agent.cliSessionId) {
@@ -1200,7 +1221,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             resumeNote = `resuming via · ${cmd}`
           }
         }
-        spawnAgentProcess(id, cmd, agent.cwd).catch(() => {})
+        spawnAgentProcess(id, `${envPrefix(type?.env)}${cmd}`, agent.cwd).catch(() => {})
         probeCliSession(id, cmd, agent.cwd || '', true)
       }
       dispatch(s => focusSessionIn({
@@ -1371,6 +1392,22 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     setAgentTypeCmd: (id, cmd) => dispatch(s => ({
       ...s,
       agentTypes: s.agentTypes.map(t => (t.id === id ? { ...t, model: cmd } : t)),
+    })),
+    updateAgentType: (id, patch) => dispatch(s => ({
+      ...s,
+      agentTypes: s.agentTypes.map(t => (t.id === id ? { ...t, ...patch } : t)),
+    })),
+    addAgentType: () => dispatch(s => ({
+      ...s,
+      agentTypes: s.agentTypes.concat([{
+        id: mkId('custom'),
+        name: 'New agent', color: '#7FD1FF', model: '', tools: 0,
+        desc: 'Custom agent type.', enabled: true, custom: true, env: '',
+      }]),
+    })),
+    deleteAgentType: id => dispatch(s => ({
+      ...s,
+      agentTypes: s.agentTypes.filter(t => t.id !== id),
     })),
 
     startCardDrag: id => { dragId.current = id },

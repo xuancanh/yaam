@@ -3,7 +3,7 @@ import { hexToRgba } from '../data'
 import { pickFolder } from '../native'
 import { PROVIDERS, providerFor } from '../master'
 import { SHELLS } from './Workspace'
-import { Switch, ViewHeader } from './ui'
+import { EditableName, IC, Icon, Switch, ViewHeader } from './ui'
 
 const FIELD_STYLE = {
   background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 8,
@@ -27,7 +27,7 @@ const ORCHESTRATION: Array<{ id: 'autoRoute' | 'approveDestructive' | 'followMod
 
 export function SettingsView() {
   const s = useConductor()
-  const { toggleSetting, toggleAgentType, toggleIntegration, updateSettings, setAgentTypeCmd } = useActions()
+  const { toggleSetting, toggleAgentType, toggleIntegration, updateSettings, setAgentTypeCmd, updateAgentType, addAgentType, deleteAgentType } = useActions()
 
   const browseDefaultCwd = async () => {
     const dir = await pickFolder(s.settings.defaultCwd || undefined)
@@ -171,7 +171,12 @@ export function SettingsView() {
             ))}
           </div>
 
-          <SectionLabel>AGENT TYPES</SectionLabel>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
+            <SectionLabel>AGENT TYPES</SectionLabel>
+            <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5, marginBottom: 11 }} onClick={addAgentType}>
+              + Add agent type
+            </button>
+          </div>
           <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', marginBottom: 26 }}>
             {s.agentTypes.map(t => (
               <div key={t.id} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: 15, display: 'flex', gap: 12 }}>
@@ -184,15 +189,33 @@ export function SettingsView() {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>{t.name}</span>
+                    <EditableName name={t.name} onRename={name => updateAgentType(t.id, { name })} />
+                    {t.custom && (
+                      <button
+                        className="icon-btn danger"
+                        title="Delete agent type"
+                        style={{ width: 22, height: 22, borderRadius: 6, marginLeft: 'auto' }}
+                        onClick={() => deleteAgentType(t.id)}
+                      >
+                        <Icon paths={IC.close} size={11} stroke={2} />
+                      </button>
+                    )}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 4, lineHeight: 1.45 }}>{t.desc}</div>
                   <input
                     value={t.model}
                     onChange={e => setAgentTypeCmd(t.id, e.target.value)}
-                    placeholder="launch command"
+                    placeholder="launch command · e.g. claude"
                     title="Command used to launch this agent type"
                     style={{ ...FIELD_STYLE, width: '100%', marginTop: 8, padding: '5px 9px', fontSize: 11.5 }}
+                  />
+                  <textarea
+                    value={t.env ?? ''}
+                    onChange={e => updateAgentType(t.id, { env: e.target.value })}
+                    placeholder={'environment · one per line\nANTHROPIC_MODEL=claude-sonnet-5\nHTTP_PROXY=…'}
+                    rows={2}
+                    title="Environment variables applied when launching this agent type"
+                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11, resize: 'vertical', minHeight: 34 }}
                   />
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
                     <span style={{ fontSize: 11, color: t.enabled ? 'var(--green)' : '#6B7280', fontWeight: 600 }}>
