@@ -494,7 +494,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
               ...a,
               status: 'idle' as const,
               escReason: undefined,
-              feed: [], fi: 0,
               log: (a.log ?? []).slice(-200),
             }))
           const ids = new Set(restoredAgents.map(a => a.id))
@@ -564,7 +563,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       toolsCatalog: state.toolsCatalog,
       agentTypes: state.agentTypes,
       integrations: state.integrations,
-      agents: state.agents.map(a => ({ ...a, feed: [], log: a.log.slice(-200) })),
+      agents: state.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
       focusedIds: state.focusedIds,
       activePane: state.activePane,
       minimizedIds: state.minimizedIds,
@@ -590,7 +589,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const persisted: PersistedState = {
         tasks: st.tasks, crons: st.crons, settings: st.settings,
         toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, integrations: st.integrations,
-        agents: st.agents.map(a => ({ ...a, feed: [], log: a.log.slice(-200) })),
+        agents: st.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
         focusedIds: st.focusedIds, activePane: st.activePane,
         minimizedIds: st.minimizedIds, paneSplits: st.paneSplits, addons: st.addons,
         messages: st.messages.slice(-60), events: st.events.slice(0, 60),
@@ -644,7 +643,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       repo: dir ? dir.split('/').pop() || dir : '~', branch: 'live',
       status: 'running', model: trimmed, kind: 'real', cmd: trimmed, cwd: dir, launchedAt: Date.now(),
       typeId: typeId ?? typeForCommand(trimmed, stateRef.current.agentTypes)?.id,
-      fi: 0, feed: [], memory: mkMemory(), tools: mkTools(),
+      memory: mkMemory(), tools: mkTools(),
       log: [{ t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` }],
       ...defaultDetail(),
     }

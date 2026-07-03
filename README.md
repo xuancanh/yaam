@@ -47,8 +47,14 @@ Following the kernel-plugin pattern of modern agent harnesses (OpenClaw, OpenCod
 ```
 design/   Original design prototype (Conductor.dc.html)
 app/      Tauri app
-  src/            React frontend (store.tsx = state + orchestration, master.ts = LLM Master, terminals.ts = xterm registry)
-  src-tauri/      Rust backend (sessions.rs = PTY sessions, git diff, persistence)
+  src/
+    store.tsx       state + provider (actions, effects, persistence)
+    state-lib.ts    pure helpers (cron, dialog detection, pane focus, env)
+    llm/            LLM layer: client (providers/protocols), master harness,
+                    master tools + prompt, per-session monitors
+    terminals.ts    xterm registry + PTY bridge
+    components/     views; components/workspace/ = pane grid internals
+  src-tauri/        Rust backend (sessions.rs = PTY sessions, git diff, persistence)
 ```
 
 ## Development

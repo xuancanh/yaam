@@ -56,8 +56,6 @@ export interface Agent {
   kind?: 'sim' | 'real'
   cmd?: string
   cwd?: string
-  fi: number
-  feed: LogLine[]
   memory: MemorySource[]
   tools: AgentTool[]
   log: LogLine[]

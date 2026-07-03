@@ -2,7 +2,7 @@ import { useActions, useConductor } from '../store'
 import { hexToRgba } from '../data'
 import { pickFolder } from '../native'
 import { PROVIDERS, providerFor } from '../master'
-import { SHELLS } from './Workspace'
+import { SHELLS } from '../data'
 import { EditableName, IC, Icon, Switch, ViewHeader } from './ui'
 
 const FIELD_STYLE = {

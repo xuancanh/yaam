@@ -2,6 +2,8 @@ import type { Agent, AgentTool, AppState, DiffFile, MemorySource, Perm, Snapshot
 
 export const ACCENT = '#F5C451'
 
+export const SHELLS = ['zsh', 'bash', 'sh', 'fish', 'nu']
+
 export const LOG_COLORS: Record<string, string> = {
   sys: '#5B6472',
   you: '#E7E9F0',
