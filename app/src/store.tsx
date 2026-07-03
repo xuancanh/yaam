@@ -208,6 +208,14 @@ function spawnAgentProcess(id: string, command: string, cwd?: string): Promise<v
   return native.spawnSession(id, command.trim(), cwd || undefined)
 }
 
+const wait = (ms: number) => new Promise<void>(r => window.setTimeout(r, ms))
+
+const KEYMAP: Record<string, string> = {
+  enter: '\r', esc: '\x1b', escape: '\x1b', up: '\x1b[A', down: '\x1b[B',
+  right: '\x1b[C', left: '\x1b[D', tab: '\t', space: ' ', backspace: '\x7f',
+  'ctrl+c': '\x03', 'ctrl+d': '\x04',
+}
+
 // Write text, then Enter as a SEPARATE keypress. TUIs (Claude Code et al.)
 // treat text+\r in one chunk as a paste and insert a newline instead of
 // submitting.
@@ -275,6 +283,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // the content has actually changed AND the TUI is no longer busy
   const armedRef = useRef<Map<string, { snapshot: string; at: number }>>(new Map())
   const settleRef = useRef<Map<string, { since: number; timer: number }>>(new Map())
+
+  const sessionScreenTail = useCallback((id: string): string => {
+    const lines = isAltScreen(id)
+      ? readScreen(id)
+      : (stateRef.current.agents.find(a => a.id === id)?.log ?? []).map(l => l.x)
+    return lines.filter(Boolean).slice(-10).join('\n') || '(no output)'
+  }, [])
 
   const armResponseWatch = useCallback((id: string) => {
     const alt = isAltScreen(id)
@@ -855,7 +870,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         armResponseWatch(id) // relay the session's first output back to Master
         return `launched session id=${id} — its output will be relayed to you as an [event] once it settles; you can also read_session it`
       },
-      sendToSession: (sid, text) => {
+      sendToSession: async (sid, text) => {
         const gated = catalogGate('send_to_session') || sessionGate(sid, 'send')
         if (gated) return gated
         const agent = stateRef.current.agents.find(a => a.id === sid)
@@ -867,7 +882,25 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           agents: s.agents.map(a => a.id === sid ? { ...a, log: a.log.concat([{ t: 'you', x: `[master] ${text}` }]) } : a),
         }))
         logEvent('route', sid, `Master → ${agent.name}: ${text.slice(0, 48)}`)
-        return `sent to ${agent.name}`
+        await wait(1600)
+        return `sent to ${agent.name}. screen now:\n${sessionScreenTail(sid)}`
+      },
+      pressKeys: async (sid, keys) => {
+        const gated = catalogGate('send_to_session') || sessionGate(sid, 'send')
+        if (gated) return gated
+        const agent = stateRef.current.agents.find(a => a.id === sid)
+        if (!agent) return `no session with id ${sid}`
+        if (!keys.length) return 'no keys given'
+        for (const key of keys.slice(0, 12)) {
+          const seq = KEYMAP[key.toLowerCase()] ?? (key.length === 1 ? key : null)
+          if (seq === null) return `unknown key "${key}" — use enter/esc/up/down/left/right/tab/space/backspace/ctrl+c or single characters`
+          native.writeSession(sid, seq).catch(() => {})
+          await wait(160)
+        }
+        logEvent('route', sid, `Master pressed ${keys.join(' ')} in ${agent.name}`)
+        armResponseWatch(sid)
+        await wait(900)
+        return `pressed ${keys.join(' ')}. screen now:\n${sessionScreenTail(sid)}`
       },
       configureSetting: (key, value) => {
         const gated = catalogGate('configure_setting')
@@ -1049,7 +1082,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     masterBusyRef.current = false
     dispatch(s => ({ ...s, masterBusy: false }))
-  }, [applyAgentStatus, armResponseWatch, flash, launchSession, logEvent, setNeedsInput])
+  }, [applyAgentStatus, armResponseWatch, flash, launchSession, logEvent, sessionScreenTail, setNeedsInput])
 
   masterEventRef.current = note => { void runMaster(note) }
 

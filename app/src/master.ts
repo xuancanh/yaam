@@ -33,7 +33,8 @@ export function providerFor(id: string): ProviderDef {
 
 export interface MasterExec {
   launchSession: (command: string, cwd: string, name?: string) => string
-  sendToSession: (sessionId: string, text: string) => string
+  sendToSession: (sessionId: string, text: string) => Promise<string>
+  pressKeys: (sessionId: string, keys: string[]) => Promise<string>
   stopSession: (sessionId: string) => string
   readSession: (sessionId: string, lines?: number) => string
   flagNeedsInput: (sessionId: string, question: string) => string
@@ -65,7 +66,7 @@ const TOOLS = [
   },
   {
     name: 'send_to_session',
-    description: 'Send a line of text to a session\'s stdin. Use the session id from the state listing.',
+    description: 'Type a message into a session and press Enter. Returns the session\'s screen ~1.5s later so you can see the effect. For answering TUI dialogs/menus use press_keys instead — text input does not drive menus.',
     input_schema: {
       type: 'object',
       properties: {
@@ -73,6 +74,18 @@ const TOOLS = [
         text: { type: 'string' },
       },
       required: ['session_id', 'text'],
+    },
+  },
+  {
+    name: 'press_keys',
+    description: 'Send keystrokes to a session — the way to drive TUI dialogs and selection menus. keys is a sequence of: "enter", "esc", "up", "down", "left", "right", "tab", "space", "backspace", "ctrl+c", or a single literal character (e.g. "1", "y"). Keys are pressed in order with realistic gaps; returns the screen afterwards so you can verify.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string' },
+        keys: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['session_id', 'keys'],
     },
   },
   {
@@ -270,7 +283,7 @@ function systemPrompt(s: AppState): string {
 - You command sessions with tools (send text to their stdin, launch or stop them).
 - Every session has a dedicated monitor (a separate lightweight LLM) watching its output. You do NOT see raw terminal output as events — monitors keep each session's status card current and send you [monitor report] messages only when something is noteworthy (finished, blocked, needs the user). Trust the reports and the tracked state; use read_session only when you need the raw output yourself. When a monitor report arrives, relay it in a fixed shape: a 1-2 sentence summary of what the session did, then a line starting "Next action:" telling the user what to do (approve something, answer a question, review a diff, or "none — I'll keep watching"). Keep the agent's overview card in sync with update_agent_status at the same time.
 
-Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
+NEVER claim an action succeeded without observing it: send_to_session and press_keys return the session's screen — read it and report what actually happened. If a session shows a dialog or menu, answer it with press_keys (enter accepts the highlighted option, up/down move, esc cancels, digits pick numbered options) — send_to_session is only for typing messages/commands. Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
 
 Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on). You manage the app itself from chat: settings (configure_setting), your tool permissions (set_tool_permission), schedules (create/toggle/delete_schedule), and custom addon tabs (create_addon / remove_addon) — when the user asks for a new view, dashboard, or feature, build it as an addon. Whenever you review a session's output (events, read_session), also call update_agent_status so the Agents overview shows its current task, a short summary, and any action the user must take (clear action_needed with an empty string once handled).
 
@@ -421,11 +434,12 @@ export function buildCfg(settings: AppState['settings'], modelOverride?: string)
   }
 }
 
-function runTool(name: string, input: Record<string, unknown>, exec: MasterExec): string {
+async function runTool(name: string, input: Record<string, unknown>, exec: MasterExec): Promise<string> {
   const str = (k: string) => typeof input[k] === 'string' ? input[k] as string : ''
   switch (name) {
     case 'launch_session': return exec.launchSession(str('command'), str('cwd'), str('name') || undefined)
     case 'send_to_session': return exec.sendToSession(str('session_id'), str('text'))
+    case 'press_keys': return exec.pressKeys(str('session_id'), Array.isArray(input.keys) ? (input.keys as unknown[]).filter((k): k is string => typeof k === 'string') : [])
     case 'stop_session': return exec.stopSession(str('session_id'))
     case 'read_session': return exec.readSession(str('session_id'), typeof input.lines === 'number' ? input.lines : undefined)
     case 'flag_needs_input': return exec.flagNeedsInput(str('session_id'), str('question'))
@@ -484,14 +498,13 @@ export async function runMasterTurn(
     }
     // narration before tool calls belongs to the trace, not the reply
     trace.push(...stepTexts)
-    const results = res.content
-      .filter(b => b.type === 'tool_use')
-      .map(b => {
-        const result = runTool(b.name || '', b.input || {}, exec)
-        trace.push(`→ ${b.name}(${JSON.stringify(b.input || {})})`)
-        trace.push(`← ${result.length > 300 ? result.slice(0, 300) + '…' : result}`)
-        return { type: 'tool_result', tool_use_id: b.id, content: result }
-      })
+    const results = []
+    for (const b of res.content.filter(x => x.type === 'tool_use')) {
+      const result = await runTool(b.name || '', b.input || {}, exec)
+      trace.push(`→ ${b.name}(${JSON.stringify(b.input || {})})`)
+      trace.push(`← ${result.length > 300 ? result.slice(0, 300) + '…' : result}`)
+      results.push({ type: 'tool_result', tool_use_id: b.id, content: result })
+    }
     messages.push({ role: 'assistant', content: res.content })
     messages.push({ role: 'user', content: results })
   }
