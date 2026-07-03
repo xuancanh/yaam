@@ -11,7 +11,7 @@ import { buildCfg, runMasterTurn } from './master'
 import type { ApiMessage, MasterExec } from './master'
 import { runMonitorTurn } from './monitor'
 import type { MonitorExec } from './monitor'
-import { disposeTerminal, getTerminal, isAltScreen, readScreen } from './terminals'
+import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './terminals'
 import { ActionsCtx, StateCtx } from './context'
 
 type Updater = (s: AppState) => AppState
@@ -651,15 +651,21 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             const alive = new Set(liveIds)
             for (const a of restoredAgents) {
               const { term } = getTerminal(a.id, line => appendTail(a.id, line), () => clearNeeds(a.id), () => bumpSettle(a.id))
-              for (const l of a.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
-              term.writeln(alive.has(a.id)
-                ? '\x1b[32m── reattached · session is still running ──\x1b[0m'
-                : '\x1b[33m── restored from previous run · press ▶ to relaunch ──\x1b[0m')
+              if (alive.has(a.id)) {
+                // live PTY: never inject text (it corrupts TUI screens) —
+                // nudge the app to repaint itself once the pane has mounted
+                window.setTimeout(() => repaintSession(a.id), 1200)
+              } else {
+                for (const l of a.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
+                term.writeln('\x1b[33m── restored from previous run · press ▶ to relaunch ──\x1b[0m')
+              }
             }
             if (alive.size) {
               dispatch(s2 => ({
                 ...s2,
-                agents: s2.agents.map(a => alive.has(a.id) ? { ...a, status: 'running' as const } : a),
+                agents: s2.agents.map(a => alive.has(a.id)
+                  ? { ...a, status: 'running' as const, log: a.log.concat([{ t: 'sys' as const, x: 'reattached · session still running' }]) }
+                  : a),
               }))
             }
           }).catch(() => {})

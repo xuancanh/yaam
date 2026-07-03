@@ -118,6 +118,20 @@ export function fitTerminal(id: string) {
   } catch { /* pane not laid out yet */ }
 }
 
+/**
+ * Force a running TUI to fully repaint: two SIGWINCHes (cols-1, then back).
+ * Used after reattaching to a live PTY — injecting text would corrupt the
+ * alternate screen, a resize makes the app redraw itself instead.
+ */
+export function repaintSession(id: string) {
+  const entry = entries.get(id)
+  if (!entry || !entry.term.element) return
+  const { rows, cols } = entry.term
+  resizeSession(id, rows, Math.max(2, cols - 1)).then(() => {
+    window.setTimeout(() => { resizeSession(id, rows, cols).catch(() => {}) }, 140)
+  }).catch(() => {})
+}
+
 export function disposeTerminal(id: string) {
   const entry = entries.get(id)
   if (entry) {
