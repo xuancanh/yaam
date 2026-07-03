@@ -1,7 +1,7 @@
 // Pure helpers shared by the store: ids, cron parsing, prompt/dialog
 // detection, agent-type utilities, pane focus semantics, and PTY input.
 import * as native from './native'
-import type { AppState, EscOption } from './types'
+import type { AppState, EscOption, WorkspaceData } from './types'
 
 let uid = 0
 export function mkId(prefix: string): string {
@@ -138,3 +138,44 @@ export function sendLineToSession(id: string, text: string) {
   window.setTimeout(() => { native.writeSession(id, '\r').catch(() => {}) }, 250)
 }
 
+
+
+// ---------- workspace scoping ----------
+
+export function emptyScoped(greeting: string): WorkspaceData {
+  return {
+    focusedIds: [], activePane: 0, minimizedIds: [],
+    paneSplits: { row: 0.5, cols: [0.5, 0.5] }, maximizedPane: null,
+    messages: [{ id: mkId('m'), role: 'master', kind: 'text', text: greeting }],
+    crons: [], tasks: [], events: [], notifications: [], pendingMasterNotes: [],
+  }
+}
+
+export function scopedFromState(s: AppState): WorkspaceData {
+  return {
+    focusedIds: s.focusedIds, activePane: s.activePane, minimizedIds: s.minimizedIds,
+    paneSplits: s.paneSplits, maximizedPane: s.maximizedPane,
+    messages: s.messages, crons: s.crons, tasks: s.tasks,
+    events: s.events, notifications: s.notifications, pendingMasterNotes: [],
+  }
+}
+
+export function applyScoped(s: AppState, d: WorkspaceData): AppState {
+  return {
+    ...s,
+    focusedIds: d.focusedIds, activePane: d.activePane, minimizedIds: d.minimizedIds,
+    paneSplits: d.paneSplits, maximizedPane: d.maximizedPane,
+    messages: d.messages, crons: d.crons, tasks: d.tasks,
+    events: d.events, notifications: d.notifications,
+  }
+}
+
+/** Switch the active workspace: stash current scoped data, load the target's. */
+export function switchWorkspaceIn(s: AppState, id: string, greeting: string): AppState {
+  if (id === s.activeWorkspace || !s.workspaces.some(w => w.id === id)) return s
+  const stash = { ...s.workspaceData, [s.activeWorkspace]: scopedFromState(s) }
+  const target = stash[id] ?? emptyScoped(greeting)
+  const rest = { ...stash }
+  delete rest[id]
+  return applyScoped({ ...s, activeWorkspace: id, workspaceData: rest, view: 'workspace' }, target)
+}

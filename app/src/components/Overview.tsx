@@ -4,8 +4,9 @@ import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from './u
 export function Overview() {
   const s = useConductor()
   const { focusTab, resume, openPanel, openAgent, openDiff, renameSession, archiveSession, unarchiveSession, deleteSession } = useActions()
-  const active = s.agents.filter(a => !a.archived)
-  const archived = s.agents.filter(a => a.archived)
+  const inWs = (a: typeof s.agents[number]) => (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace
+  const active = s.agents.filter(a => !a.archived && inWs(a))
+  const archived = s.agents.filter(a => a.archived && inWs(a))
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>

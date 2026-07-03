@@ -4,7 +4,8 @@ import type { ApiMessage } from './client'
 import { addonPromptAppends } from '../addons'
 
 function describeState(s: AppState): string {
-  const live = s.agents.filter(a => !a.archived)
+  const ws = s.workspaces.find(w => w.id === s.activeWorkspace)
+  const live = s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
   const roster = live.length
     ? live.map(a => `${a.name} (id=${a.id}, ${a.status})`).join(' · ')
     : 'none'
@@ -36,7 +37,8 @@ function describeState(s: AppState): string {
   return [
     `AGENT TYPES you can launch (use the exact command; a plain terminal is "${s.settings.shell || 'zsh'} -i"):\n${types || '(none enabled)'}`,
     `YOUR TOOL PERMISSIONS (Auto = act freely · Ask first = confirm with the user in chat before doing it · Approval/Off = blocked):\n${toolPerms}`,
-    `YOUR SUB-AGENTS — ${live.length} session(s)${s.agents.length - live.length ? ` (+${s.agents.length - live.length} archived)` : ''}: ${roster}`,
+    `WORKSPACE: "${ws?.name ?? 'Default'}"${s.workspaces.length > 1 ? ` (${s.workspaces.length - 1} other workspace(s) exist — you only see and manage this one)` : ''}`,
+    `YOUR SUB-AGENTS — ${live.length} session(s): ${roster}`,
     `SESSION DETAIL:\n${sessions || '(none)'}`,
     `SCHEDULES:\n${crons || '(none)'}`,
     `BOARD TASKS:\n${tasks || '(none)'}`,

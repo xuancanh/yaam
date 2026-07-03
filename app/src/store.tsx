@@ -5,7 +5,7 @@ import type {
   Addon, Agent, AppState, BoardCol, Cron, EscOption, EventType, LogLine,
   NotifKind, Notification, Panel, PersistedState, View,
 } from './types'
-import { defaultDetail, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
+import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
 import * as native from './native'
 import { buildCfg, runMasterTurn } from './master'
 import type { ApiMessage, MasterExec } from './master'
@@ -90,6 +90,10 @@ export interface ConductorActions {
   exportAddon: (id: string) => void
   sendAddonChat: (id: string, text: string) => void
   updateAddonMeta: (id: string, patch: Partial<Pick<Addon, 'name' | 'version' | 'icon' | 'desc' | 'author'>>) => void
+  switchWorkspace: (id: string) => void
+  createWorkspace: (name: string) => void
+  renameWorkspace: (id: string, name: string) => void
+  deleteWorkspace: (id: string) => void
   openNewSession: () => void
   closeNewSession: () => void
   newRealSession: (command: string, cwd: string) => void
@@ -101,7 +105,7 @@ export interface ConductorActions {
 import {
   KEYMAP, PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
   cronMatches, envPrefix, extractOptions, focusSessionIn, humanizeCron, mkId,
-  sendLineToSession, spawnAgentProcess, typeForCommand, wait,
+  sendLineToSession, spawnAgentProcess, switchWorkspaceIn, typeForCommand, wait,
 } from './state-lib'
 
 export { cronMatches, humanizeCron } from './state-lib'
@@ -115,7 +119,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   stateRef.current = state
 
   // set by the Master/monitor runners below; refs avoid declaration cycles
-  const masterEventRef = useRef<(note: string) => void>(() => {})
+  const masterEventRef = useRef<(note: string, agentId?: string) => void>(() => {})
   const monitorEventRef = useRef<(id: string, note: string) => Promise<void> | void>(() => {})
 
   useEffect(() => {
@@ -136,25 +140,41 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     toastTimer.current = window.setTimeout(() => dispatch(s => ({ ...s, toast: null })), 2600)
   }, [])
 
-  const logEvent = useCallback((type: EventType, agentId: string | null, text: string) => {
-    dispatch(s => ({
-      ...s,
-      events: [{ id: mkId('e'), type, agentId, text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]
-        .concat(s.events)
-        .slice(0, 200),
-    }))
+  // events/notifications land in the OWNING workspace (sessions in background
+  // workspaces keep reporting into their own stash)
+  const widOf = useCallback((s: AppState, agentId: string | null): string => {
+    if (!agentId) return s.activeWorkspace
+    const agent = s.agents.find(a => a.id === agentId)
+    return agent?.workspaceId && (s.workspaces.some(w => w.id === agent.workspaceId))
+      ? agent.workspaceId
+      : s.activeWorkspace
   }, [])
 
+  const logEvent = useCallback((type: EventType, agentId: string | null, text: string) => {
+    const item = { id: mkId('e'), type, agentId, text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+    dispatch(s => {
+      const wid = widOf(s, agentId)
+      if (wid === s.activeWorkspace) return { ...s, events: [item].concat(s.events).slice(0, 200) }
+      const d = s.workspaceData[wid]
+      if (!d) return s
+      return { ...s, workspaceData: { ...s.workspaceData, [wid]: { ...d, events: [item].concat(d.events).slice(0, 200) } } }
+    })
+  }, [widOf])
+
   const notify = useCallback((kind: NotifKind, title: string, detail: string, agentId: string | null) => {
-    dispatch(s => ({
-      ...s,
-      notifications: [{
-        id: mkId('n'), kind, title, detail,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        read: false, agentId,
-      }].concat(s.notifications).slice(0, 30),
-    }))
-  }, [])
+    const item = {
+      id: mkId('n'), kind, title, detail,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      read: false, agentId,
+    }
+    dispatch(s => {
+      const wid = widOf(s, agentId)
+      if (wid === s.activeWorkspace) return { ...s, notifications: [item].concat(s.notifications).slice(0, 30) }
+      const d = s.workspaceData[wid]
+      if (!d) return s
+      return { ...s, workspaceData: { ...s.workspaceData, [wid]: { ...d, notifications: [item].concat(d.notifications).slice(0, 30) } } }
+    })
+  }, [widOf])
 
   // Agents → Master / user leg. We never react to individual lines: each
   // session has a settle watcher, and only once output has been quiet for a
@@ -190,23 +210,30 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const setNeedsInput = useCallback((id: string, question: string, options?: EscOption[], cursorNum?: number) => {
     const agent = stateRef.current.agents.find(a => a.id === id)
     if (!agent || agent.status !== 'running') return
-    dispatch(s => ({
-      ...s,
-      agents: s.agents.map(a => a.id === id ? { ...a, status: 'needs' as const, escReason: question, attention: true } : a),
-      messages: s.messages.concat([{
-        id: mkId('m'), role: 'master', kind: 'escalate', escFor: id,
+    dispatch(s => {
+      const msg = {
+        id: mkId('m'), role: 'master' as const, kind: 'escalate' as const, escFor: id,
         esc: {
           name: agent.name, color: agent.color, repo: agent.repo, reason: question,
           resolved: false, decision: null,
           options: options?.length ? options : undefined,
           cursorNum: cursorNum ?? 1,
         },
-      }]),
-    }))
+      }
+      const withStatus = {
+        ...s,
+        agents: s.agents.map(a => a.id === id ? { ...a, status: 'needs' as const, escReason: question, attention: true } : a),
+      }
+      const wid = widOf(s, id)
+      if (wid === s.activeWorkspace) return { ...withStatus, messages: s.messages.concat([msg]) }
+      const d = s.workspaceData[wid]
+      if (!d) return withStatus
+      return { ...withStatus, workspaceData: { ...s.workspaceData, [wid]: { ...d, messages: d.messages.concat([msg]) } } }
+    })
     logEvent('escalate', id, `${agent.name} is asking for input: ${question.slice(0, 64)}`)
     notify('escalate', `${agent.name} needs your input`, question.slice(0, 80), id)
     fireAddonHookRef.current('onNeedsInput', { sessionId: id, name: agent.name, question })
-  }, [logEvent, notify])
+  }, [logEvent, notify, widOf])
 
   // ref: setNeedsInput is declared before the hook runner
   const fireAddonHookRef = useRef<(hook: 'onSessionExit' | 'onNeedsInput', event: Record<string, unknown>) => void>(() => {})
@@ -279,6 +306,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             masterEventRef.current(
               `[monitor report · ${importance}] session "${a?.name ?? id}" (${id}): ${digest}\n\n` +
               'This came from the session\'s dedicated monitor. Relay it to the user in 1-2 sentences ending with "Next action:", and act with your tools if needed.',
+              id,
             )
             return 'reported to Master'
           },
@@ -332,6 +360,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           masterEventRef.current(
             `[event] session "${agent.name}" (${id}) is showing a dialog (approval or selection menu) and has been flagged as needing input:\n` +
             `${content.slice(-14).join('\n')}\n\nTell the user what it is asking — include the options if it is a menu. Approve sends Enter (selects the highlighted option), Deny sends Escape; for other choices the user should click into the terminal.`,
+            id,
           )
         }
       }
@@ -502,12 +531,17 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       if (json) {
         try {
           const p = JSON.parse(json) as Partial<PersistedState>
+          const workspaces = p.workspaces?.length ? p.workspaces : [{ id: 'ws-default', name: 'Default' }]
+          const activeWorkspace = p.activeWorkspace && workspaces.some(w => w.id === p.activeWorkspace)
+            ? p.activeWorkspace
+            : workspaces[0].id
           const restoredAgents: Agent[] = (p.agents ?? [])
             .filter(a => a.kind === 'real' && a.cmd)
             .map(a => ({
               ...a,
               status: 'idle' as const,
               escReason: undefined,
+              workspaceId: a.workspaceId && workspaces.some(w => w.id === a.workspaceId) ? a.workspaceId : activeWorkspace,
               log: (a.log ?? []).slice(-200),
             }))
           const ids = new Set(restoredAgents.map(a => a.id))
@@ -531,6 +565,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             activePane: Math.min(p.activePane ?? 0, Math.max(0, focusedIds.length - 1)),
             minimizedIds: (p.minimizedIds ?? []).filter(id => ids.has(id)),
             paneSplits: p.paneSplits ?? s.paneSplits,
+            workspaces,
+            activeWorkspace,
+            workspaceData: p.workspaceData ?? {},
             addons: (p.addons ?? s.addons).map(a => {
               const partial = a as Partial<Addon>
               return {
@@ -585,6 +622,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       toolsCatalog: state.toolsCatalog,
       agentTypes: state.agentTypes,
       integrations: state.integrations,
+      workspaces: state.workspaces,
+      activeWorkspace: state.activeWorkspace,
+      workspaceData: state.workspaceData,
       agents: state.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
       focusedIds: state.focusedIds,
       activePane: state.activePane,
@@ -602,6 +642,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.integrations,
     state.agents, state.focusedIds, state.activePane, state.minimizedIds, state.paneSplits,
     state.addons, state.messages, state.events, state.notifications,
+    state.workspaces, state.activeWorkspace, state.workspaceData,
   ])
 
   // flush the latest state on quit/reload so nothing inside the debounce window is lost
@@ -611,6 +652,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const persisted: PersistedState = {
         tasks: st.tasks, crons: st.crons, settings: st.settings,
         toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, integrations: st.integrations,
+        workspaces: st.workspaces, activeWorkspace: st.activeWorkspace, workspaceData: st.workspaceData,
         agents: st.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
         focusedIds: st.focusedIds, activePane: st.activePane,
         minimizedIds: st.minimizedIds, paneSplits: st.paneSplits, addons: st.addons,
@@ -652,7 +694,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     if (!isResume) later(60000, tryDetect)
   }, [later])
 
-  const launchSession = useCallback((command: string, cwd: string, nameHint?: string, typeId?: string): string | null => {
+  const launchSession = useCallback((command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string): string | null => {
     const trimmed = command.trim()
     if (!trimmed) return null
     const id = mkId('a')
@@ -665,14 +707,17 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       repo: dir ? dir.split('/').pop() || dir : '~', branch: 'live',
       status: 'running', model: trimmed, kind: 'real', cmd: trimmed, cwd: dir, launchedAt: Date.now(),
       typeId: typeId ?? typeForCommand(trimmed, stateRef.current.agentTypes)?.id,
+      workspaceId: workspaceId ?? stateRef.current.activeWorkspace,
       memory: mkMemory(), tools: mkTools(),
       log: [{ t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` }],
       ...defaultDetail(),
     }
-    dispatch(s => ({
-      ...focusSessionIn({ ...s, agents: s.agents.concat([agent]) }, id),
-      newSessionOpen: false,
-    }))
+    dispatch(s => {
+      const withAgent = { ...s, agents: s.agents.concat([agent]) }
+      // background-workspace launches (cron) must not touch the active layout
+      if (agent.workspaceId !== s.activeWorkspace) return withAgent
+      return { ...focusSessionIn(withAgent, id), newSessionOpen: false }
+    })
     getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id))
     probeCliSession(id, trimmed, dir, false)
     const launchType = stateRef.current.agentTypes.find(t => t.id === (typeId ?? '')) ?? typeForCommand(trimmed, stateRef.current.agentTypes)
@@ -741,21 +786,31 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const timer = window.setInterval(() => {
       const now = new Date()
       const minuteKey = now.toISOString().slice(0, 16)
-      const due = stateRef.current.crons.filter(c =>
-        c.on && c.lastFiredMinute !== minuteKey && cronMatches(c.schedule, now))
-      if (!due.length) return
       const timeLabel = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      dispatch(s => ({
-        ...s,
-        crons: s.crons.map(c => due.some(d => d.id === c.id)
-          ? { ...c, lastFiredMinute: minuteKey, last: `ran · ${timeLabel}` }
-          : c),
-      }))
-      due.forEach(c => {
-        logEvent('cron', null, `${c.name} fired${c.cmd ? ` · launching ${c.cmd}` : ''}`)
-        notify('cron', `${c.name} fired`, c.cmd ? `launched: ${c.cmd}` : 'schedule ran', null)
-        if (c.cmd && native.isTauri) launchSession(c.cmd, c.cwd || '', c.name)
-      })
+      const st = stateRef.current
+      // schedules fire in every workspace, active or not
+      const pools: Array<{ wid: string; crons: typeof st.crons }> = [
+        { wid: st.activeWorkspace, crons: st.crons },
+        ...Object.entries(st.workspaceData).map(([wid, d]) => ({ wid, crons: d.crons })),
+      ]
+      for (const pool of pools) {
+        const due = pool.crons.filter(c => c.on && c.lastFiredMinute !== minuteKey && cronMatches(c.schedule, now))
+        if (!due.length) continue
+        dispatch(s => {
+          const mark = (crons: typeof s.crons) => crons.map(c => due.some(x => x.id === c.id)
+            ? { ...c, lastFiredMinute: minuteKey, last: `ran · ${timeLabel}` }
+            : c)
+          if (pool.wid === s.activeWorkspace) return { ...s, crons: mark(s.crons) }
+          const d = s.workspaceData[pool.wid]
+          if (!d) return s
+          return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, crons: mark(d.crons) } } }
+        })
+        for (const c of due) {
+          const launchedId = c.cmd && native.isTauri ? launchSession(c.cmd, c.cwd || '', c.name, undefined, pool.wid) : null
+          logEvent('cron', launchedId, `${c.name} fired${c.cmd ? ` · launching ${c.cmd}` : ''}`)
+          notify('cron', `${c.name} fired`, c.cmd ? `launched: ${c.cmd}` : 'schedule ran', launchedId)
+        }
+      }
     }, 15000)
     return () => window.clearInterval(timer)
   }, [launchSession, logEvent, notify])
@@ -1031,7 +1086,22 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     dispatch(s => ({ ...s, masterBusy: false }))
   }, [applyAgentStatus, armResponseWatch, flash, getAddonApi, launchSession, logEvent, sessionScreenTail, setNeedsInput])
 
-  masterEventRef.current = note => { void runMaster(note) }
+  masterEventRef.current = (note, agentId) => {
+    const s = stateRef.current
+    const wid = widOf(s, agentId ?? null)
+    if (wid === s.activeWorkspace) {
+      void runMaster(note)
+      return
+    }
+    dispatch(s2 => {
+      const d = s2.workspaceData[wid]
+      if (!d) return s2
+      return {
+        ...s2,
+        workspaceData: { ...s2.workspaceData, [wid]: { ...d, pendingMasterNotes: d.pendingMasterNotes.concat([note]).slice(-10) } },
+      }
+    })
+  }
 
   // dedicated customization chat per addon: private LLM history, edits apply
   // through the update_addon tool (full package replacement, validated)
@@ -1153,7 +1223,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     addPane: () => dispatch(s => {
       if (s.focusedIds.length >= 6) return s
-      const hidden = s.agents.find(a => !a.archived && !s.focusedIds.includes(a.id))
+      const hidden = s.agents.find(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace && !s.focusedIds.includes(a.id))
       if (!hidden) return { ...s, newSessionOpen: true, view: 'workspace' }
       const focusedIds = s.focusedIds.concat([hidden.id])
       return { ...s, focusedIds, activePane: focusedIds.length - 1, maximizedPane: null, view: 'workspace' }
@@ -1396,7 +1466,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     },
 
     gotoNeeds: () => dispatch(s => {
-      const needsAgent = s.agents.find(a => a.status === 'needs' || a.status === 'error')
+      const needsAgent = s.agents.find(a => ((a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace) && (a.status === 'needs' || a.status === 'error'))
       return needsAgent ? focusSessionIn(s, needsAgent.id) : s
     }),
 
@@ -1567,6 +1637,63 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       view: s.activeAddon === id ? 'workspace' : s.view,
       activeAddon: s.activeAddon === id ? null : s.activeAddon,
     })),
+
+    switchWorkspace: id => {
+      // Master events that queued while this workspace was inactive
+      const pending = stateRef.current.workspaceData[id]?.pendingMasterNotes ?? []
+      dispatch(s => switchWorkspaceIn(s, id, MASTER_GREETING))
+      if (pending.length) {
+        later(600, () => {
+          if (stateRef.current.activeWorkspace !== id) return
+          void runMaster(`[events queued while this workspace was in the background]\n${pending.join('\n\n')}\n\nSummarize these for the user (grouped, brief).`)
+        })
+      }
+    },
+
+    createWorkspace: name => {
+      const id = mkId('ws')
+      const trimmed = name.trim() || `Workspace ${stateRef.current.workspaces.length + 1}`
+      dispatch(s => switchWorkspaceIn(
+        { ...s, workspaces: s.workspaces.concat([{ id, name: trimmed }]) },
+        id, MASTER_GREETING,
+      ))
+      flash(`Workspace “${trimmed}” created`)
+    },
+
+    renameWorkspace: (id, name) => dispatch(s => ({
+      ...s,
+      workspaces: s.workspaces.map(w => (w.id === id ? { ...w, name: name.trim() || w.name } : w)),
+    })),
+
+    deleteWorkspace: id => {
+      const s0 = stateRef.current
+      if (s0.workspaces.length <= 1) {
+        flash('Cannot delete the last workspace')
+        return
+      }
+      // kill the workspace's sessions and drop their terminals
+      for (const a of s0.agents.filter(a => a.workspaceId === id)) {
+        native.killSession(a.id).catch(() => {})
+        disposeTerminal(a.id)
+        monitorHistories.current.delete(a.id)
+      }
+      dispatch(s => {
+        let next = s
+        if (s.activeWorkspace === id) {
+          const fallback = s.workspaces.find(w => w.id !== id)!
+          next = switchWorkspaceIn(s, fallback.id, MASTER_GREETING)
+        }
+        const workspaceData = { ...next.workspaceData }
+        delete workspaceData[id]
+        return {
+          ...next,
+          workspaces: next.workspaces.filter(w => w.id !== id),
+          workspaceData,
+          agents: next.agents.filter(a => a.workspaceId !== id),
+        }
+      })
+      flash('Workspace deleted')
+    },
 
     openNewSession: () => dispatch(s => ({ ...s, newSessionOpen: true })),
     closeNewSession: () => dispatch(s => ({ ...s, newSessionOpen: false })),

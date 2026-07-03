@@ -24,6 +24,10 @@ Each session's card is kept current by its **dedicated monitor LLM** — no manu
 
 **YAAM** puts a "Master" orchestrator between you and a fleet of real CLI sessions (Claude Code, Codex, Gemini CLI, Aider, shells, REPLs — anything). You talk to Master; it routes tasks to sessions, watches them, escalates, and builds schedules and tools.
 
+## Workspaces
+
+Work is organized into **workspaces** (switcher in the title bar): each has its own sessions, its own Master chat, its own schedules, kanban board, activity feed, and notifications. Background workspaces stay alive — their sessions keep running and their monitors keep reporting into that workspace; Master events queue while a workspace is inactive and are summarized when you switch in. Create, rename, and delete workspaces from the switcher (deleting kills that workspace's sessions). Settings, agent types, addons, and the tool registry are global.
+
 ## Sessions — real terminals
 
 Every session is a real OS process in a **PTY**, rendered with **xterm.js** — an iTerm-style terminal in each workspace pane:

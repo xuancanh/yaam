@@ -13,10 +13,11 @@ function StatCard({ label, value, sub, valueColor }: { label: string; value: str
 
 export function UsageView() {
   const s = useConductor()
-  const totalCost = s.agents.reduce((n, a) => n + a.cost, 0)
-  const totalBudget = s.agents.reduce((n, a) => n + a.budget, 0)
-  const totalTokens = s.agents.reduce((n, a) => n + a.used, 0)
-  const runningCount = s.agents.filter(a => a.status === 'running').length
+  const agents = s.agents.filter(a => (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
+  const totalCost = agents.reduce((n, a) => n + a.cost, 0)
+  const totalBudget = agents.reduce((n, a) => n + a.budget, 0)
+  const totalTokens = agents.reduce((n, a) => n + a.used, 0)
+  const runningCount = agents.filter(a => a.status === 'running').length
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -30,11 +31,11 @@ export function UsageView() {
             value={`$${totalCost.toFixed(2)}`}
             sub={`$${totalBudget.toFixed(2)} budget · ${totalBudget > 0 ? Math.round((totalCost / totalBudget) * 100) : 0}% used`}
           />
-          <StatCard label="Tokens" value={`${totalTokens.toFixed(1)}k`} sub={`across ${s.agents.length} sessions`} />
-          <StatCard label="Running now" value={String(runningCount)} sub={`of ${s.agents.length} sessions`} valueColor="var(--green)" />
+          <StatCard label="Tokens" value={`${totalTokens.toFixed(1)}k`} sub={`across ${agents.length} sessions`} />
+          <StatCard label="Running now" value={String(runningCount)} sub={`of ${agents.length} sessions`} valueColor="var(--green)" />
         </div>
         <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, padding: '6px 18px' }}>
-          {s.agents.map(a => {
+          {agents.map(a => {
             const pct = Math.min(100, Math.round((a.cost / a.budget) * 100))
             return (
               <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '15px 0', borderBottom: '1px solid #1a1e26' }}>

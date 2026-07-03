@@ -74,6 +74,8 @@ export interface Agent {
   typeId?: string
   /** unseen event: finished its job / needs action — flashes in tabs and overview until viewed */
   attention?: boolean
+  /** owning workspace */
+  workspaceId?: string
   /** Master-maintained: what this agent is working on */
   task?: string
   /** Master-maintained: latest 1-2 sentence state summary */
@@ -309,6 +311,9 @@ export interface PersistedState {
   toolsCatalog: CatalogTool[]
   agentTypes: AgentType[]
   integrations: Integration[]
+  workspaces?: Workspace[]
+  activeWorkspace?: string
+  workspaceData?: Record<string, WorkspaceData>
   /** session definitions + output tails; restored as paused sessions */
   agents?: Agent[]
   focusedIds?: string[]
@@ -321,7 +326,32 @@ export interface PersistedState {
   notifications?: Notification[]
 }
 
+export interface Workspace {
+  id: string
+  name: string
+}
+
+/** Per-workspace slice. The ACTIVE workspace's copy lives flat on AppState;
+ *  inactive workspaces are stashed here and swapped in on switch. */
+export interface WorkspaceData {
+  focusedIds: string[]
+  activePane: number
+  minimizedIds: string[]
+  paneSplits: { row: number; cols: number[] }
+  maximizedPane: number | null
+  messages: Message[]
+  crons: Cron[]
+  tasks: BoardTask[]
+  events: EventItem[]
+  notifications: Notification[]
+  /** Master events that arrived while the workspace was in the background */
+  pendingMasterNotes: string[]
+}
+
 export interface AppState {
+  workspaces: Workspace[]
+  activeWorkspace: string
+  workspaceData: Record<string, WorkspaceData>
   view: View
   activePane: number
   /** index into focusedIds of the pane that is currently maximized, or null */

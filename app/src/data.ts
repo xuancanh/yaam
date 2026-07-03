@@ -4,6 +4,8 @@ export const ACCENT = '#F5C451'
 
 export const SHELLS = ['zsh', 'bash', 'sh', 'fish', 'nu']
 
+export const MASTER_GREETING = 'I’m Master for this workspace. Give me a brain in Settings → Master Brain (any supported provider’s API key), then tell me what you need — I launch and command sessions, answer questions about them, and build schedules.'
+
 export const LOG_COLORS: Record<string, string> = {
   sys: '#5B6472',
   you: '#E7E9F0',
@@ -115,6 +117,9 @@ export function defaultDetail(): AgentDetail {
 export function seedState(): AppState {
   return {
     view: 'workspace',
+    workspaces: [{ id: 'ws-default', name: 'Default' }],
+    activeWorkspace: 'ws-default',
+    workspaceData: {},
     activePane: 0,
     maximizedPane: null,
     focusedIds: [],

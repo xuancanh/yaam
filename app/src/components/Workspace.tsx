@@ -29,7 +29,7 @@ export function Workspace() {
         height: 46, flexShrink: 0, background: 'var(--panel)', borderBottom: '1px solid var(--line)',
         display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', overflowX: 'auto',
       }}>
-        {s.agents.filter(a => !a.archived).map(a => {
+        {s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace).map(a => {
           const active = focused.includes(a.id)
           const flash = a.status === 'needs' || a.attention
           return (
