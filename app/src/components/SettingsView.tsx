@@ -58,9 +58,7 @@ function AddonsSection() {
                 {a.desc ? ` — ${a.desc}` : ''}
               </div>
             </div>
-            {a.html && a.enabled && (
-              <button className="open-btn" style={{ flex: 'none', padding: '4px 11px', fontSize: 11.5 }} onClick={() => openAddon(a.id)}>Open</button>
-            )}
+            <button className="open-btn" style={{ flex: 'none', padding: '4px 11px', fontSize: 11.5 }} onClick={() => openAddon(a.id)}>Open</button>
             <button className="open-btn" style={{ flex: 'none', padding: '4px 11px', fontSize: 11.5 }} onClick={() => exportAddon(a.id)}>Export</button>
             <Switch on={a.enabled} onToggle={() => toggleAddon(a.id)} />
             <button className="icon-btn danger" title="Remove addon" style={{ width: 26, height: 26 }} onClick={() => removeAddon(a.id)}>

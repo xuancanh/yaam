@@ -13,6 +13,7 @@ import { runMonitorTurn } from './monitor'
 import type { MonitorExec } from './monitor'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './terminals'
 import { addonSnapshot, execAddonHook, execAddonTool, exportAddonPackage, parseAddonPackage } from './addons'
+import { runAddonEditorTurn } from './llm/addon-editor'
 import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
 
@@ -87,6 +88,7 @@ export interface ConductorActions {
   installAddonFromFile: () => void
   installAddonFromUrl: (url: string) => void
   exportAddon: (id: string) => void
+  sendAddonChat: (id: string, text: string) => void
   openNewSession: () => void
   closeNewSession: () => void
   newRealSession: (command: string, cwd: string) => void
@@ -1030,6 +1032,58 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   masterEventRef.current = note => { void runMaster(note) }
 
+  // dedicated customization chat per addon: private LLM history, edits apply
+  // through the update_addon tool (full package replacement, validated)
+  const addonEditorHistories = useRef<Map<string, ApiMessage[]>>(new Map())
+
+  const sendAddonChatImpl = useCallback(async (id: string, text: string) => {
+    const st = stateRef.current.settings
+    const addon = stateRef.current.addons.find(a => a.id === id)
+    if (!addon) return
+    dispatch(s2 => ({
+      ...s2,
+      addonChats: { ...s2.addonChats, [id]: (s2.addonChats[id] ?? []).concat([{ role: 'you', text }]) },
+      addonChatBusy: id,
+    }))
+    const reply = (t: string) => dispatch(s2 => ({
+      ...s2,
+      addonChats: { ...s2.addonChats, [id]: (s2.addonChats[id] ?? []).concat([{ role: 'master', text: t }]) },
+      addonChatBusy: s2.addonChatBusy === id ? null : s2.addonChatBusy,
+    }))
+    if (!(st.apiKey && st.masterEnabled)) {
+      reply('The addon editor needs the LLM Master configured (Settings → Master Brain).')
+      return
+    }
+    let history = addonEditorHistories.current.get(id)
+    if (!history) {
+      history = []
+      addonEditorHistories.current.set(id, history)
+    }
+    const apply = (json: string): string => {
+      try {
+        const parsed = parseAddonPackage(json)
+        dispatch(s2 => ({
+          ...s2,
+          addons: s2.addons.map(a => a.id === id
+            ? { ...a, ...parsed, id, source: a.source, enabled: a.enabled, createdAt: new Date().toLocaleString() }
+            : a),
+        }))
+        logEvent('build', null, `Addon “${parsed.name}” updated via its chat (v${parsed.version})`)
+        return `applied — the addon is now v${parsed.version}`
+      } catch (e) {
+        return `rejected: ${e instanceof Error ? e.message : String(e)}`
+      }
+    }
+    try {
+      const current = stateRef.current.addons.find(a => a.id === id)
+      const out = await runAddonEditorTurn(
+        buildCfg(st), current ? exportAddonPackage(current) : '{}', history, text, apply)
+      reply(out || '(updated)')
+    } catch (e) {
+      reply(`Editor error: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }, [logEvent])
+
   const installPackage = useCallback((json: string, source: Addon['source']) => {
     const parsed = parseAddonPackage(json) // throws readable errors
     const existing = stateRef.current.addons.find(a => a.name === parsed.name)
@@ -1485,6 +1539,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       })()
     },
 
+    sendAddonChat: (id, text) => { void sendAddonChatImpl(id, text) },
+
     exportAddon: id => {
       void (async () => {
         const addon = stateRef.current.addons.find(a => a.id === id)
@@ -1538,7 +1594,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [armResponseWatch, flash, installPackage, later, launchSession, logEvent, probeCliSession, runMaster, spawnSessionForTask])
+  }), [armResponseWatch, flash, installPackage, later, launchSession, logEvent, probeCliSession, runMaster, sendAddonChatImpl, spawnSessionForTask])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {

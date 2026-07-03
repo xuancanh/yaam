@@ -343,6 +343,9 @@ export interface AppState {
   dragOverCol: BoardCol | null
   addons: Addon[]
   activeAddon: string | null
+  /** per-addon customization chat (in-memory) */
+  addonChats: Record<string, { role: 'you' | 'master'; text: string }[]>
+  addonChatBusy: string | null
   agents: Agent[]
   messages: Message[]
   crons: Cron[]

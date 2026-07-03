@@ -55,7 +55,7 @@ Following the kernel-plugin pattern of modern agent harnesses (OpenClaw, OpenCod
   - **Master tools** — JS handlers registered into Master's tool list (namespaced `addon_*`), run against a curated API (`getState`, `sendToSession`, `launchSession`, `flash`, `logEvent`, `notify`)
   - **hooks** — behavior extensions: `onSessionExit`, `onNeedsInput`, and `masterPromptAppend` (literally changes Master's instructions while enabled)
 
-  Master builds addons from chat (`create_addon`); users install them from a file, a URL, or the **registry browser** (Settings → Addons — configurable index URL; `registry/` in this repo is the seed with `session-bell` and `cost-pulse` examples). Enable/disable, export to share, replace by name; everything persists. ⚠ Tool handlers and hooks run with app privileges — install only trusted packages; views stay sandboxed.
+  Every addon tab has three modes: **Preview** (the rendered view), **Source** (the raw package — html, tool handlers, hooks — selectable for copying), and **Customize** — a dedicated chat scoped to that addon, where an editor LLM applies changes through a validated `update_addon` tool ("make the bars green", "add a tool that restarts idle sessions"). Master builds addons from chat (`create_addon`); users install them from a file, a URL, or the **registry browser** (Settings → Addons — configurable index URL; `registry/` in this repo is the seed with `session-bell` and `cost-pulse` examples). Enable/disable, export to share, replace by name; everything persists. ⚠ Tool handlers and hooks run with app privileges — install only trusted packages; views stay sandboxed.
 
 ## The rest
 

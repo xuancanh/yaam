@@ -1,0 +1,62 @@
+// Per-addon customization chat: a small dedicated LLM conversation that knows
+// one addon package and edits it via the update_addon tool.
+import { callApi } from './client'
+import type { ApiContentBlock, ApiMessage, LlmConfig } from './client'
+
+const EDITOR_TOOLS = [
+  {
+    name: 'update_addon',
+    description: 'Replace the addon with an updated package. Pass the COMPLETE package JSON — every field, not a diff.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        package_json: { type: 'string', description: 'full manifest-2 package JSON: { name, version, icon, description, html?, tools?, hooks? }' },
+      },
+      required: ['package_json'],
+    },
+  },
+]
+
+function editorSystem(addonJson: string): string {
+  return `You customize exactly ONE addon package for YAAM (an agent-manager desktop app). The user chats with you to change it; apply changes with the update_addon tool, passing the COMPLETE updated package JSON.
+
+Package rules:
+- html (optional): a complete self-contained HTML document rendered in a sandboxed iframe. Live app state arrives over postMessage: window.addEventListener('message', e => { if (e.data.type === 'yaam:state') render(e.data.state) }) and parent.postMessage({ type: 'yaam:getState' }, '*') requests it once. state = { sessions, tasks, crons, events, totals }. Match the app theme: background #0A0B0F, panel #0D0F14, border #23272F, text #E7E9F0, muted #8B93A1, accent #F5C451, fonts 'IBM Plex Sans' / 'JetBrains Mono'. No external network calls.
+- tools (optional): [{ name, description, input_schema, handler }] — handler is a JS function body (input, api) => string, api = { getState(), sendToSession(id, text), launchSession(cmd, cwd, name), flash(t), logEvent(t), notify(title, detail) }.
+- hooks (optional): { onSessionExit, onNeedsInput: JS bodies (input = event, api) => void, masterPromptAppend: string }.
+- Keep the name unless the user asks to change it; bump the patch version on every change.
+- After updating, reply with 1-2 sentences describing what changed. Never claim a change you did not apply with the tool.
+
+CURRENT PACKAGE:
+${addonJson}`
+}
+
+export async function runAddonEditorTurn(
+  cfg: LlmConfig,
+  addonJson: string,
+  history: ApiMessage[],
+  userText: string,
+  apply: (packageJson: string) => string,
+): Promise<string> {
+  history.push({ role: 'user', content: userText })
+  const texts: string[] = []
+  for (let i = 0; i < 4; i++) {
+    const res = await callApi(cfg, editorSystem(addonJson), history, EDITOR_TOOLS)
+    const stepTexts = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text as string)
+    if (res.stop_reason !== 'tool_use') {
+      history.push({ role: 'assistant', content: stepTexts.join('\n') || '(ok)' })
+      texts.push(...stepTexts)
+      break
+    }
+    const results = []
+    for (const b of res.content.filter((x): x is ApiContentBlock => x.type === 'tool_use')) {
+      const json = typeof b.input?.package_json === 'string' ? b.input.package_json : ''
+      results.push({ type: 'tool_result', tool_use_id: b.id, content: apply(json) })
+    }
+    history.push({ role: 'assistant', content: res.content })
+    history.push({ role: 'user', content: results })
+  }
+  while (history.length > 20) history.shift()
+  if (history.length && history[0].role !== 'user') history.shift()
+  return texts.join('\n\n').trim()
+}
