@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
+import { hasCreds } from '../master'
 import { useActions, useConductor } from '../store'
 import { ACCENT, hexToRgba } from '../data'
 import type { Message } from '../types'
@@ -265,7 +266,7 @@ export function Sidebar() {
             <span style={{ fontSize: 11.5, color: 'var(--mut)' }}>
               {s.masterBusy
                 ? 'thinking…'
-                : `${runningCount} sessions running${s.settings.masterEnabled && s.settings.apiKey ? ` · ${s.settings.masterModel}` : ' · brain off — configure in Settings'}`}
+                : `${runningCount} sessions running${s.settings.masterEnabled && hasCreds(s.settings) ? ` · ${s.settings.masterModel}` : ' · brain off — configure in Settings'}`}
             </span>
           </div>
         </div>

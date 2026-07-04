@@ -1,5 +1,7 @@
+mod bedrock;
 mod sessions;
 
+use bedrock::BedrockState;
 use sessions::SessionManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -8,7 +10,9 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_http::init())
     .manage(SessionManager::default())
+    .manage(BedrockState::default())
     .invoke_handler(tauri::generate_handler![
+      bedrock::bedrock_invoke,
       sessions::spawn_session,
       sessions::write_session,
       sessions::kill_session,

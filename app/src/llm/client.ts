@@ -1,7 +1,7 @@
 // LLM providers and protocol adapters (Anthropic Messages / OpenAI-compatible
 // chat completions). HTTP goes through the Tauri backend to avoid CORS.
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
-import { isTauri } from '../native'
+import { bedrockInvoke, isTauri } from '../native'
 import type { AppState } from '../types'
 
 const doFetch: typeof fetch = (...args) => (isTauri ? tauriFetch(...args) : fetch(...args))
@@ -20,6 +20,7 @@ export const PROVIDERS: ProviderDef[] = [
   { id: 'openai', label: 'OpenAI', base: 'https://api.openai.com/v1', protocol: 'openai', models: ['gpt-4o', 'gpt-4o-mini', 'o4-mini'], keyHint: 'sk-…' },
   { id: 'deepseek', label: 'DeepSeek', base: 'https://api.deepseek.com', protocol: 'openai', models: ['deepseek-chat', 'deepseek-reasoner'], keyHint: 'sk-…' },
   { id: 'kimi', label: 'Kimi (Moonshot)', base: 'https://api.moonshot.ai/v1', protocol: 'openai', models: ['kimi-k2-0905-preview', 'kimi-latest'], keyHint: 'sk-…' },
+  { id: 'bedrock', label: 'AWS Bedrock (Claude)', base: '', protocol: 'anthropic', models: ['us.anthropic.claude-sonnet-4-5-20250929-v1:0', 'us.anthropic.claude-haiku-4-5-20251001-v1:0', 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'], keyHint: 'no key — AWS credential chain' },
   { id: 'custom', label: 'Custom (OpenAI-compatible)', base: '', protocol: 'openai', models: [], keyHint: 'api key' },
 ]
 
@@ -48,9 +49,18 @@ export interface LlmConfig {
   baseUrl: string
   apiKey: string
   model: string
+  awsRegion: string
+  awsProfile: string
+  awsRefreshCmd: string
 }
 
 async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
+  if (cfg.provider.id === 'bedrock') {
+    // model id goes in the URL on Bedrock; auth is SigV4 in the backend
+    const body = JSON.stringify({ anthropic_version: 'bedrock-2023-05-31', max_tokens: 2048, temperature: 0.2, system, messages, tools })
+    const raw = await bedrockInvoke(cfg.awsRegion || 'us-east-1', cfg.awsProfile, cfg.awsRefreshCmd, cfg.model, body)
+    return JSON.parse(raw) as ApiResponse
+  }
   const res = await doFetch(`${cfg.provider.base}/v1/messages`, {
     method: 'POST',
     headers: {
@@ -143,12 +153,21 @@ export function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[], 
   return cfg.provider.protocol === 'anthropic' ? callAnthropic(cfg, system, messages, tools) : callOpenAi(cfg, system, messages, tools)
 }
 
+/** Whether the settings hold usable credentials for the chosen provider.
+ *  Bedrock has no API key — it authenticates via the AWS credential chain. */
+export function hasCreds(settings: AppState['settings']): boolean {
+  return settings.provider === 'bedrock' || Boolean(settings.apiKey)
+}
+
 export function buildCfg(settings: AppState['settings'], modelOverride?: string): LlmConfig {
   return {
     provider: providerFor(settings.provider),
     baseUrl: settings.baseUrl,
     apiKey: settings.apiKey,
     model: modelOverride || settings.masterModel,
+    awsRegion: settings.awsRegion,
+    awsProfile: settings.awsProfile,
+    awsRefreshCmd: settings.awsRefreshCmd,
   }
 }
 

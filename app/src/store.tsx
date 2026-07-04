@@ -7,7 +7,7 @@ import type {
 } from './types'
 import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
 import * as native from './native'
-import { buildCfg, runMasterTurn } from './master'
+import { buildCfg, hasCreds, runMasterTurn } from './master'
 import type { ApiMessage, MasterExec } from './master'
 import { runMonitorTurn } from './monitor'
 import type { MonitorExec } from './monitor'
@@ -268,7 +268,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   const runMonitor = useCallback(async (id: string, note: string) => {
     const st = stateRef.current.settings
-    if (!(st.masterEnabled && st.apiKey && st.followMode)) return
+    if (!(st.masterEnabled && hasCreds(st) && st.followMode)) return
     if (monitorBusy.current.has(id)) {
       monitorQueue.current.set(id, note)
       return
@@ -333,7 +333,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const agent = stateRef.current.agents.find(a => a.id === id)
     if (!agent || (agent.status !== 'running' && agent.status !== 'needs')) return
     const st = stateRef.current.settings
-    const llm = Boolean(st.masterEnabled && st.apiKey && st.followMode)
+    const llm = Boolean(st.masterEnabled && hasCreds(st) && st.followMode)
     const alt = isAltScreen(id)
     const armed = armedRef.current.get(id)
 
@@ -881,7 +881,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const lastEventRef = useRef<{ note: string; at: number } | null>(null)
 
   const runMaster = useCallback(async (eventNote?: string) => {
-    if (!stateRef.current.settings.apiKey) return
+    if (!hasCreds(stateRef.current.settings)) return
     if (eventNote) {
       const last = lastEventRef.current
       if (last && last.note === eventNote && Date.now() - last.at < 10000) return
@@ -1182,7 +1182,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       addonChats: { ...s2.addonChats, [id]: (s2.addonChats[id] ?? []).concat([{ role: 'master', text: t }]) },
       addonChatBusy: s2.addonChatBusy === id ? null : s2.addonChatBusy,
     }))
-    if (!(st.apiKey && st.masterEnabled)) {
+    if (!(hasCreds(st) && st.masterEnabled)) {
       reply('The addon editor needs the LLM Master configured (Settings → Master Brain).')
       return
     }
@@ -1254,16 +1254,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         composer: '',
       }))
       const st = stateRef.current.settings
-      if (st.apiKey && st.masterEnabled) {
+      if (hasCreds(st) && st.masterEnabled) {
         later(50, () => { void runMaster() })
       } else {
         later(300, () => dispatch(s2 => ({
           ...s2,
           messages: s2.messages.concat([{
             id: mkId('m'), role: 'master', kind: 'text',
-            text: s2.settings.apiKey
+            text: hasCreds(s2.settings)
               ? 'My brain is switched off — enable “LLM Master” in Settings → Master Brain and I’ll take it from there.'
-              : 'I need a brain first: add your Anthropic API key in Settings → Master Brain (and flip the LLM Master toggle), then ask me again.',
+              : 'I need a brain first: pick a provider in Settings → Master Brain (API key, or AWS Bedrock with your credential chain) and flip the LLM Master toggle, then ask me again.',
           }]),
         })))
       }

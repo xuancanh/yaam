@@ -183,7 +183,7 @@ export function SettingsView() {
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>LLM Master</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
-                  Master is an LLM with tools — it routes tasks to sessions, launches and stops them, and builds schedules. Pick a provider and add an API key.
+                  Master is an LLM with tools — it routes tasks to sessions, launches and stops them, and builds schedules. Pick a provider and add credentials — an API key, or AWS Bedrock via your credential chain.
                 </div>
               </div>
               <Switch on={s.settings.masterEnabled} onToggle={() => updateSettings({ masterEnabled: !s.settings.masterEnabled })} />
@@ -203,6 +203,50 @@ export function SettingsView() {
                 {PROVIDERS.map(pr => <option key={pr.id} value={pr.id}>{pr.label}</option>)}
               </select>
             </div>
+            {providerFor(s.settings.provider).id === 'bedrock' && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>AWS region</div>
+                    <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Region hosting the Bedrock inference profile.</div>
+                  </div>
+                  <input
+                    value={s.settings.awsRegion}
+                    onChange={e => updateSettings({ awsRegion: e.target.value })}
+                    placeholder="us-east-1"
+                    style={{ ...FIELD_STYLE, width: 260 }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>AWS profile</div>
+                    <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
+                      Profile from ~/.aws/config (SSO profiles auto-refresh their tokens). Empty = default credential chain: env vars, default profile, instance role.
+                    </div>
+                  </div>
+                  <input
+                    value={s.settings.awsProfile}
+                    onChange={e => updateSettings({ awsProfile: e.target.value })}
+                    placeholder="default"
+                    style={{ ...FIELD_STYLE, width: 260 }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>Credential refresh command</div>
+                    <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
+                      Optional. Runs automatically when Bedrock rejects expired credentials, then the call retries — e.g. <span className="mono">aws sso login --profile work</span> or your corporate credential tool.
+                    </div>
+                  </div>
+                  <input
+                    value={s.settings.awsRefreshCmd}
+                    onChange={e => updateSettings({ awsRefreshCmd: e.target.value })}
+                    placeholder="aws sso login --profile …"
+                    style={{ ...FIELD_STYLE, width: 260 }}
+                  />
+                </div>
+              </>
+            )}
             {providerFor(s.settings.provider).id === 'custom' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
                 <div style={{ flex: 1 }}>
@@ -248,19 +292,21 @@ export function SettingsView() {
                 style={{ ...FIELD_STYLE, width: 260 }}
               />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600 }}>API key</div>
-                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Stored locally in the app data folder.</div>
+            {providerFor(s.settings.provider).id !== 'bedrock' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>API key</div>
+                  <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Stored locally in the app data folder.</div>
+                </div>
+                <input
+                  type="password"
+                  value={s.settings.apiKey}
+                  onChange={e => updateSettings({ apiKey: e.target.value })}
+                  placeholder={providerFor(s.settings.provider).keyHint}
+                  style={{ ...FIELD_STYLE, width: 260 }}
+                />
               </div>
-              <input
-                type="password"
-                value={s.settings.apiKey}
-                onChange={e => updateSettings({ apiKey: e.target.value })}
-                placeholder={providerFor(s.settings.provider).keyHint}
-                style={{ ...FIELD_STYLE, width: 260 }}
-              />
-            </div>
+            )}
           </div>
 
           <SectionLabel>SESSION DEFAULTS</SectionLabel>

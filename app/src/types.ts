@@ -238,6 +238,12 @@ export interface OrchestrationSettings {
   registryUrl: string
   /** base URL for the custom provider (OpenAI-compatible) */
   baseUrl: string
+  /** AWS region for the bedrock provider */
+  awsRegion: string
+  /** AWS profile for the bedrock provider; empty = default credential chain */
+  awsProfile: string
+  /** shell command run to refresh AWS credentials when Bedrock rejects them */
+  awsRefreshCmd: string
 }
 
 export type BoardCol = 'backlog' | 'routed' | 'progress' | 'review' | 'done'
