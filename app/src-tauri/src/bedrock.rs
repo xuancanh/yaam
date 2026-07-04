@@ -119,7 +119,13 @@ async fn make_client(region: &str, profile: &str, cred_cmd: &str) -> Result<Cach
     let mut expires = None;
     if !cred_cmd.is_empty() {
         let creds = parse_aws_creds(&run_shell(cred_cmd.to_string()).await?)?;
-        expires = creds.expiry();
+        // match Claude Code's documented caching: until the stated expiration,
+        // or one hour when the command reports none
+        expires = Some(
+            creds
+                .expiry()
+                .unwrap_or_else(|| SystemTime::now() + Duration::from_secs(3600)),
+        );
         loader = loader.credentials_provider(creds);
     } else if !profile.is_empty() {
         loader = loader.profile_name(profile);
@@ -153,8 +159,9 @@ fn is_auth_error(msg: &str) -> bool {
 
 fn still_fresh(c: &CachedClient) -> bool {
     match c.expires {
-        // rebuild a minute early so a request never rides an expiring token
-        Some(t) => t > SystemTime::now() + Duration::from_secs(60),
+        // rebuild five minutes early (Claude Code's documented margin) so a
+        // request never rides an expiring token
+        Some(t) => t > SystemTime::now() + Duration::from_secs(300),
         None => true,
     }
 }
