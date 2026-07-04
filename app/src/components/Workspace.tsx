@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useActions, useConductor } from '../store'
 import { ACCENT, hexToRgba, indicatorColor } from '../data'
 import type { Agent, TabGroup } from '../types'
-import { IC, Icon } from './ui'
+import { IC, Icon, StatusPill } from './ui'
 import { NewSessionDialog } from './workspace/NewSessionDialog'
 import { Divider } from './workspace/Divider'
 import { Pane } from './workspace/Pane'
@@ -248,6 +248,7 @@ export function Workspace() {
                     {a?.name ?? `empty · ${g.slots.length} pane${g.slots.length > 1 ? 's' : ''}`}
                   </span>
                   {a && <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>}
+                  {a && <StatusPill agent={a} small />}
                 </button>
               )
             }
@@ -279,6 +280,7 @@ export function Workspace() {
                     >
                       {tabDot(a)}
                       <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
+                      <StatusPill agent={a} small />
                     </button>
                   )
                 })}
@@ -304,6 +306,7 @@ export function Workspace() {
               {tabDot(a)}
               <span style={{ fontSize: 12.5, fontWeight: 600, color: '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
               <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>
+              <StatusPill agent={a} small />
             </button>
           ))}
         </div>
