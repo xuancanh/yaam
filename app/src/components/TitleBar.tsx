@@ -167,10 +167,10 @@ export function TitleBar() {
           {needsCount} needs action
         </button>
       )}
+      <button className="icon-btn" title="Activity timeline" style={{ width: 30, height: 30 }} onClick={() => setView('timeline')}>
+        <Icon paths={['M3 12h4l2.5 6 5-12 2.5 6h4']} />
+      </button>
       <div style={{ position: 'relative' }}>
-        <button className="icon-btn" title="Activity timeline" style={{ width: 30, height: 30 }} onClick={() => setView('timeline')}>
-          <Icon paths={['M3 12h4l2.5 6 5-12 2.5 6h4']} />
-        </button>
         <button className="icon-btn" title="Notifications" style={{ width: 30, height: 30, position: 'relative' }} onClick={toggleNotif}>
           <Icon paths={IC.bell} />
           {unread > 0 && (
