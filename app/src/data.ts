@@ -169,6 +169,17 @@ export function seedState(): AppState {
       },
     ],
     mcpServers: [],
+    personas: [
+      {
+        id: 'persona-terse-engineer',
+        name: 'terse-engineer',
+        description: 'Senior engineer voice: short, direct, evidence-first.',
+        body: 'Speak like a senior engineer in a hurry: lead with the answer, cite file:line for claims about code, prefer diffs over descriptions, flag risks in one line each, no pleasantries.',
+      },
+    ],
+    skillRegistries: [
+      { id: 'sr-anthropic', name: 'anthropic', url: 'https://github.com/anthropics/skills/tree/main/skills', enabled: true },
+    ],
     chatAgentTypes: [
       { id: 'chat-claude', name: 'Claude', provider: 'anthropic', model: 'claude-sonnet-5', models: ['claude-sonnet-5', 'claude-haiku-4-5-20251001', 'claude-opus-4-8'], enabled: true, desc: 'Shares the Master Brain credentials unless a key is set.' },
       { id: 'chat-gpt', name: 'GPT', provider: 'openai', model: 'gpt-4o', models: ['gpt-4o', 'gpt-4o-mini', 'o4-mini'], enabled: false, desc: 'Needs an OpenAI API key.' },

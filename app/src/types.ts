@@ -99,6 +99,10 @@ export interface Agent {
   chatTypeId?: string
   /** model chosen for this session (from the type's models list) */
   chatModel?: string
+  /** persona adopted by this chat session */
+  personaId?: string
+  /** skill sources for this chat: 'local' and/or SkillRegistry ids */
+  skillSourceIds?: string[]
 }
 
 /** one message in a chat-mode session */
@@ -285,6 +289,27 @@ export interface ChatAgentType {
   /** extra persona appended to the chat agent's system prompt */
   systemPrompt?: string
   enabled: boolean
+}
+
+/** a named persona chat agents can adopt (picked per chat) */
+export interface Persona {
+  id: string
+  name: string
+  description: string
+  /** appended to the chat agent's system prompt */
+  body: string
+}
+
+/** a remote or local source of skills (e.g. Anthropic's github skills repo) */
+export interface SkillRegistry {
+  id: string
+  name: string
+  /** github tree URL (https://github.com/o/r/tree/branch/path) or a local folder of skill dirs with SKILL.md */
+  url: string
+  enabled: boolean
+  /** last successful fetch's skill count */
+  skillCount?: number
+  lastError?: string
 }
 
 /** a reusable instruction pack chat agents can load on demand */
@@ -486,6 +511,8 @@ export interface PersistedState {
   templates?: AgentTemplate[]
   mcpServers?: McpServer[]
   skills?: Skill[]
+  personas?: Persona[]
+  skillRegistries?: SkillRegistry[]
   chatAgentTypes?: ChatAgentType[]
   workspaces?: Workspace[]
   activeWorkspace?: string
@@ -591,6 +618,8 @@ export interface AppState {
   templates: AgentTemplate[]
   mcpServers: McpServer[]
   skills: Skill[]
+  personas: Persona[]
+  skillRegistries: SkillRegistry[]
   chatAgentTypes: ChatAgentType[]
   settings: OrchestrationSettings
   tasks: BoardTask[]

@@ -6,7 +6,8 @@
 import * as native from '../native'
 import { mcpCallTool } from '../mcp'
 import type { McpSession } from '../mcp'
-import type { Agent, Skill } from '../types'
+import type { CatalogSkill } from '../skills'
+import type { Agent } from '../types'
 import { callApiStream } from './client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from './client'
 
@@ -22,7 +23,7 @@ const MCP_PREFIX = 'mcp__'
 /** sanitize server/tool names into a valid tool identifier */
 const ident = (x: string) => x.replace(/[^a-zA-Z0-9_]/g, '_')
 
-function builtinTools(skills: Skill[]) {
+function builtinTools(skills: CatalogSkill[]) {
   return [
     {
       name: 'list_dir',
@@ -59,7 +60,7 @@ function builtinTools(skills: Skill[]) {
     },
     {
       name: 'load_skill',
-      description: `Load a skill (reusable instruction pack) from the registry and follow it. Available: ${skills.map(s => `${s.name} — ${s.description}`).join(' · ') || '(none registered)'}`,
+      description: `Load a skill (reusable instruction pack) and follow it. Available: ${skills.map(s => `${s.name} [${s.source}] — ${s.description.slice(0, 120)}`).join(' · ') || '(none available)'}`,
       input_schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
     },
   ]
@@ -73,7 +74,7 @@ function mcpToolDefs(sessions: McpSession[]) {
   })))
 }
 
-async function runBuiltin(name: string, input: Record<string, unknown>, agent: Agent, skills: Skill[]): Promise<string> {
+async function runBuiltin(name: string, input: Record<string, unknown>, agent: Agent, skills: CatalogSkill[]): Promise<string> {
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '')
   switch (name) {
     case 'list_dir': {
@@ -120,14 +121,14 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
   }
 }
 
-function chatSystem(agent: Agent, skills: Skill[], mcp: McpSession[], persona?: string): string {
+function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], persona?: string): string {
   return `You are a chat agent inside YAAM (an agent-orchestration desktop app) — the user's hands-on assistant in this workspace, like a desktop Claude. You live in a pane named "${agent.name}".
 
 WORKING FOLDER: ${agent.cwd || '(none set — ask before touching files, or use absolute paths)'}
 
 You can navigate and read files (list_dir/read_file), change them (edit_file for surgical replacements, write_file for new/replaced files), run shell scripts and commands (run_command — real execution on the user's machine), load skills from the user's registry (load_skill) and follow them, and call tools on the user's connected MCP servers${mcp.length ? ` (${mcp.map(s => `${s.serverName}: ${s.tools.length} tools`).join(', ')})` : ' (none connected)'}.
 
-SKILLS REGISTRY${skills.length ? skills.map(s => `\n- ${s.name}: ${s.description || '(no description)'}`).join('') : '\n(empty)'}
+SKILLS (load with load_skill when relevant — descriptions say when)${skills.length ? skills.map(s => `\n- ${s.name} [${s.source}]: ${(s.description || '(no description)').slice(0, 200)}`).join('') : '\n(none available)'}
 
 RULES
 - Ground every claim in tool results; read before you edit; verify after you change (re-read or run the relevant check).
@@ -144,7 +145,7 @@ RULES
 export async function runChatTurn(
   cfg: LlmConfig,
   getAgent: () => Agent | undefined,
-  skills: Skill[],
+  skills: CatalogSkill[],
   mcp: McpSession[],
   userText: string,
   history: ApiMessage[],

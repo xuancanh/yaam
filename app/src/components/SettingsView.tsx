@@ -136,6 +136,117 @@ function SkillsSection() {
   )
 }
 
+/** Personas: named voices/roles a chat adopts (picked per chat). */
+function PersonasSection() {
+  const s = useConductor()
+  const { addPersona, updatePersona, removePersona } = useActions()
+  const [openId, setOpenId] = useState<string | null>(null)
+
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
+        <SectionLabel>PERSONAS — pick one when starting a chat; appended to the agent's instructions</SectionLabel>
+        <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5, marginBottom: 11 }} onClick={() => setOpenId(addPersona())}>
+          + New persona
+        </button>
+      </div>
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
+        {s.personas.length === 0 && (
+          <div style={{ padding: '14px 0', fontSize: 12, color: 'var(--dim)' }}>No personas yet.</div>
+        )}
+        {s.personas.map(pe => (
+          <div key={pe.id} style={{ padding: '11px 0', borderBottom: '1px solid #1a1e26' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                onClick={() => setOpenId(openId === pe.id ? null : pe.id)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--dim)', fontSize: 10, width: 16, cursor: 'pointer' }}
+              >
+                {openId === pe.id ? '▾' : '▸'}
+              </button>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{pe.name}</span>
+                <span style={{ fontSize: 11.5, color: 'var(--mut)', marginLeft: 8 }}>{pe.description || 'no description'}</span>
+              </div>
+              <button className="icon-btn danger" title="Remove persona" style={{ width: 24, height: 24 }} onClick={() => removePersona(pe.id)}>
+                <Icon paths={IC.close} size={11} stroke={2} />
+              </button>
+            </div>
+            {openId === pe.id && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '9px 0 4px 26px' }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input value={pe.name} onChange={e => updatePersona(pe.id, { name: e.target.value.replace(/\s+/g, '-').toLowerCase() })} placeholder="name" style={{ ...FIELD_STYLE, width: 200 }} />
+                  <input value={pe.description} onChange={e => updatePersona(pe.id, { description: e.target.value })} placeholder="one-line description (shown in the picker)" style={{ ...FIELD_STYLE, flex: 1 }} />
+                </div>
+                <textarea
+                  value={pe.body}
+                  onChange={e => updatePersona(pe.id, { body: e.target.value })}
+                  placeholder="the persona instructions appended to the chat agent's system prompt"
+                  rows={4}
+                  style={{ ...FIELD_STYLE, resize: 'vertical', fontFamily: "'IBM Plex Sans', system-ui, sans-serif", lineHeight: 1.5 }}
+                />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+/** Skill registries: remote (github tree) or local-folder skill sources. */
+function SkillRegistriesSection() {
+  const s = useConductor()
+  const { addSkillRegistry, updateSkillRegistry, removeSkillRegistry, refreshSkillRegistry } = useActions()
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+
+  return (
+    <>
+      <SectionLabel>SKILL REGISTRIES — SKILL.md folders (GitHub tree URL or local path)</SectionLabel>
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
+        {s.skillRegistries.map(r => (
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: '1px solid #1a1e26' }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+              background: r.lastError ? 'var(--red-soft)' : r.skillCount !== undefined ? 'var(--green)' : '#3a4150',
+            }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {r.name}
+                <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 7 }}>
+                  {r.lastError ? 'error' : r.skillCount !== undefined ? `${r.skillCount} skills` : 'not fetched'}
+                </span>
+              </div>
+              <div className="mono" title={r.lastError ?? r.url} style={{ fontSize: 10.5, color: r.lastError ? 'var(--red-soft)' : 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {r.lastError ?? r.url}
+              </div>
+            </div>
+            <button className="open-btn" style={{ flex: 'none', padding: '4px 11px', fontSize: 11.5 }} onClick={() => { void refreshSkillRegistry(r.id) }}>
+              Refresh
+            </button>
+            <Switch on={r.enabled} onToggle={() => updateSkillRegistry(r.id, { enabled: !r.enabled })} />
+            <button className="icon-btn danger" title="Remove registry" style={{ width: 26, height: 26 }} onClick={() => removeSkillRegistry(r.id)}>
+              <Icon paths={IC.close} size={12} stroke={2} />
+            </button>
+          </div>
+        ))}
+        <div style={{ padding: '13px 0', display: 'flex', gap: 8 }}>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="name" style={{ ...FIELD_STYLE, width: 140 }} />
+          <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://github.com/o/r/tree/main/skills — or /local/folder" style={{ ...FIELD_STYLE, flex: 1 }} />
+          <button
+            className="open-btn"
+            style={{ flex: 'none', padding: '6px 13px', fontSize: 12, opacity: url.trim() ? 1 : 0.5 }}
+            disabled={!url.trim()}
+            onClick={() => { addSkillRegistry(name, url); setName(''); setUrl('') }}
+          >
+            Add & fetch
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 /** Small header button that adds a chat-agent type (needs its own hook scope). */
 function AddChatTypeButton() {
   const { addChatAgentType } = useActions()
@@ -274,7 +385,6 @@ const SETTINGS_TABS = [
   ['types', 'Terminal Agents'],
   ['chatagents', 'Chat Agents'],
   ['mcp', 'MCP Servers'],
-  ['skills', 'Skills'],
   ['tools', 'Tools & Permissions'],
 ] as const
 type SettingsTab = (typeof SETTINGS_TABS)[number][0]
@@ -283,6 +393,7 @@ export function SettingsView() {
   const s = useConductor()
   const { toggleSetting, toggleAgentType, updateSettings, setAgentTypeCmd, updateAgentType, addAgentType, deleteAgentType } = useActions()
   const [tab, setTab] = useState<SettingsTab>('general')
+  const [chatTab, setChatTab] = useState<'agents' | 'personas' | 'skills'>('agents')
 
   // Fill the default working directory from the native folder picker.
   const browseDefaultCwd = async () => {
@@ -594,18 +705,39 @@ export function SettingsView() {
           </>}
 
           {tab === 'chatagents' && <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
-            <SectionLabel>CHAT AGENTS — in-app agents for the Chat view</SectionLabel>
-            <AddChatTypeButton />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 9, padding: 3 }}>
+              {([['agents', 'Agents'], ['personas', 'Personas'], ['skills', 'Skills']] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setChatTab(id)}
+                  style={{
+                    border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    background: chatTab === id ? 'rgba(245,196,81,.14)' : 'transparent',
+                    color: chatTab === id ? 'var(--accent)' : 'var(--mut)',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div style={{ flex: 1 }} />
+            {chatTab === 'agents' && <AddChatTypeButton />}
           </div>
-          <div style={{ fontSize: 11.5, color: 'var(--dim)', marginBottom: 12, lineHeight: 1.5 }}>
-            Each chat agent picks a provider, a model list (pickable per chat), credentials, and an optional persona. Empty API key = share the Master Brain credentials when the provider matches.
-          </div>
-          <ChatTypesSection />
+          {chatTab === 'agents' && <>
+            <div style={{ fontSize: 11.5, color: 'var(--dim)', marginBottom: 12, lineHeight: 1.5 }}>
+              Each chat agent picks a provider, a model list (pickable per chat), credentials, and an optional base persona. Empty API key = share the Master Brain credentials when the provider matches.
+            </div>
+            <ChatTypesSection />
+          </>}
+          {chatTab === 'personas' && <PersonasSection />}
+          {chatTab === 'skills' && <>
+            <SkillRegistriesSection />
+            <SkillsSection />
+          </>}
           </>}
 
           {tab === 'mcp' && <McpSection />}
-          {tab === 'skills' && <SkillsSection />}
 
           {tab === 'tools' && <>
           <SectionLabel>MASTER TOOLS — what Master may do; click a permission to cycle it</SectionLabel>

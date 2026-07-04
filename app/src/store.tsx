@@ -3,7 +3,7 @@ import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 
 import type { ReactNode } from 'react'
 import type {
   Addon, AddonHookName, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
-  ChatAgentType, ChatMsg, McpServer, NotifKind, Notification, Panel, PersistedState, Skill, TabGroup, TaskChatMsg, View,
+  ChatAgentType, ChatMsg, McpServer, NotifKind, Notification, Panel, Persona, PersistedState, Skill, SkillRegistry, TabGroup, TaskChatMsg, View,
 } from './types'
 import { ACCENT, defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState, SHELLS } from './data'
 import * as native from './native'
@@ -19,6 +19,8 @@ import { runAddonEditorTurn } from './llm/addon-editor'
 import { runAddonAgentTurn } from './llm/addon-agent'
 import { generateAddonPackage } from './llm/addon-gen'
 import { runChatTurn } from './llm/chat-agent'
+import { fetchSkillRegistry } from './skills'
+import type { CatalogSkill } from './skills'
 import { buildChatCfg, chatTypeHasCreds } from './llm/client'
 import { mcpConnect } from './mcp'
 import type { McpSession } from './mcp'
@@ -158,16 +160,26 @@ export interface ConductorActions {
   removeMcpServer: (id: string) => void
   /** (re)connect and cache the server's tool list; resolves to error or '' */
   connectMcpServer: (id: string) => Promise<string>
-  /** skills registry */
+  /** skills registry (local) */
   addSkill: () => string
   updateSkill: (id: string, patch: Partial<Pick<Skill, 'name' | 'description' | 'body'>>) => void
   removeSkill: (id: string) => void
+  /** personas (picked per chat) */
+  addPersona: () => string
+  updatePersona: (id: string, patch: Partial<Pick<Persona, 'name' | 'description' | 'body'>>) => void
+  removePersona: (id: string) => void
+  /** skill registries (github tree URLs or local folders of SKILL.md dirs) */
+  addSkillRegistry: (name: string, url: string) => void
+  updateSkillRegistry: (id: string, patch: Partial<Pick<SkillRegistry, 'name' | 'url' | 'enabled'>>) => void
+  removeSkillRegistry: (id: string) => void
+  /** (re)fetch a registry's catalog; resolves to '' or an error message */
+  refreshSkillRegistry: (id: string) => Promise<string>
   /** chat-agent types (provider + model + credentials presets) */
   addChatAgentType: () => void
   updateChatAgentType: (id: string, patch: Partial<Omit<ChatAgentType, 'id'>>) => void
   deleteChatAgentType: (id: string) => void
   /** chat-mode sessions */
-  newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string) => string
+  newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string, personaId?: string, skillSourceIds?: string[]) => string
   /** open a chat in the Chat view */
   openChat: (id: string | null) => void
   sendChatMessage: (agentId: string, text: string) => void
@@ -1002,6 +1014,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             templates: p.templates ?? s.templates ?? [],
             mcpServers: p.mcpServers ?? s.mcpServers,
             skills: p.skills ?? s.skills,
+            personas: p.personas ?? s.personas,
+            skillRegistries: p.skillRegistries ?? s.skillRegistries,
             chatAgentTypes: p.chatAgentTypes ?? s.chatAgentTypes,
             agents: restoredAgents.length ? restoredAgents : s.agents,
             groups,
@@ -1070,6 +1084,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       templates: state.templates,
       mcpServers: state.mcpServers,
       skills: state.skills,
+      personas: state.personas,
+      skillRegistries: state.skillRegistries,
       chatAgentTypes: state.chatAgentTypes,
       workspaces: state.workspaces,
       activeWorkspace: state.activeWorkspace,
@@ -1088,7 +1104,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       native.saveStateFile(JSON.stringify(persisted)).catch(() => {})
     }, 800)
   }, [
-    state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.templates, state.mcpServers, state.skills, state.chatAgentTypes,
+    state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.templates, state.mcpServers, state.skills, state.personas, state.skillRegistries, state.chatAgentTypes,
     state.agents, state.groups, state.activeGroup, state.minimizedIds,
     state.addons, state.addonStorage, state.messages, state.events, state.notifications,
     state.workspaces, state.activeWorkspace, state.workspaceData,
@@ -1101,7 +1117,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const st = stateRef.current
       const persisted: PersistedState = {
         tasks: st.tasks, crons: st.crons, settings: st.settings,
-        toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, templates: st.templates, mcpServers: st.mcpServers, skills: st.skills, chatAgentTypes: st.chatAgentTypes,
+        toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, templates: st.templates, mcpServers: st.mcpServers, skills: st.skills, personas: st.personas, skillRegistries: st.skillRegistries, chatAgentTypes: st.chatAgentTypes,
         workspaces: st.workspaces, activeWorkspace: st.activeWorkspace, workspaceData: st.workspaceData,
         agents: st.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
         groups: st.groups, activeGroup: st.activeGroup,
@@ -1551,6 +1567,30 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // skill-registry catalogs (fetched lazily, cached per registry id)
+  const skillCatalogsRef = useRef<Map<string, CatalogSkill[]>>(new Map())
+
+  const refreshSkillCatalog = useCallback(async (id: string): Promise<string> => {
+    const reg = stateRef.current.skillRegistries.find(r => r.id === id)
+    if (!reg) return 'registry not found'
+    try {
+      const catalog = await fetchSkillRegistry(reg.name, reg.url)
+      skillCatalogsRef.current.set(id, catalog)
+      dispatch(s2 => ({
+        ...s2,
+        skillRegistries: s2.skillRegistries.map(r => (r.id === id ? { ...r, skillCount: catalog.length, lastError: undefined } : r)),
+      }))
+      return ''
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      dispatch(s2 => ({
+        ...s2,
+        skillRegistries: s2.skillRegistries.map(r => (r.id === id ? { ...r, skillCount: undefined, lastError: msg } : r)),
+      }))
+      return msg
+    }
+  }, [])
+
   // keep the embedded search index in sync with chat transcripts (debounced)
   const reindexTimer = useRef<number | undefined>(undefined)
   useEffect(() => {
@@ -1569,9 +1609,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const t = window.setTimeout(() => {
       for (const srv of stateRef.current.mcpServers) if (srv.enabled) void connectMcp(srv.id)
+      for (const reg of stateRef.current.skillRegistries) if (reg.enabled) void refreshSkillCatalog(reg.id)
     }, 1500)
     return () => window.clearTimeout(t)
-  }, [connectMcp])
+  }, [connectMcp, refreshSkillCatalog])
 
   const runChatMessage = useCallback(async (agentId: string, text: string) => {
     const st = stateRef.current.settings
@@ -1612,6 +1653,19 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         .filter(x => x.enabled)
         .map(x => mcpSessionsRef.current.get(x.id))
         .filter((x): x is McpSession => !!x)
+      // skill sources chosen at chat creation (default: local + enabled registries)
+      const sources = agent.skillSourceIds
+        ?? ['local', ...stateRef.current.skillRegistries.filter(r => r.enabled).map(r => r.id)]
+      const skills: CatalogSkill[] = []
+      if (sources.includes('local')) {
+        skills.push(...stateRef.current.skills.map(k => ({ name: k.name, description: k.description, body: k.body, source: 'local' })))
+      }
+      for (const reg of stateRef.current.skillRegistries.filter(r => sources.includes(r.id))) {
+        if (!skillCatalogsRef.current.has(reg.id)) await refreshSkillCatalog(reg.id)
+        skills.push(...(skillCatalogsRef.current.get(reg.id) ?? []))
+      }
+      const personaBody = stateRef.current.personas.find(pp => pp.id === agent.personaId)?.body
+      const persona = [chatType.systemPrompt, personaBody].filter(Boolean).join('\n\n')
       // streaming: deltas grow one live assistant bubble; a tool round seals
       // the current bubble; the final text replaces (or creates) it
       let streamId: string | null = null
@@ -1628,7 +1682,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       await runChatTurn(
         buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
         () => stateRef.current.agents.find(a => a.id === agentId),
-        stateRef.current.skills,
+        skills,
         mcp,
         text,
         history,
@@ -1654,7 +1708,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             pushChatLog(agentId, { role: 'tool', text: e.text })
           }
         },
-        chatType.systemPrompt,
+        persona || undefined,
       )
       seal()
     } catch (e) {
@@ -1663,7 +1717,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       chatBusy.current.delete(agentId)
       dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
     }
-  }, [flash, pushChatLog, updateChatLog])
+  }, [flash, pushChatLog, refreshSkillCatalog, updateChatLog])
 
   // Run one lifecycle hook for each enabled addon without blocking the caller;
   // addons whose agent subscribes to the hook get woken with the event too.
@@ -2649,6 +2703,49 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     removeSkill: id => dispatch(s => ({ ...s, skills: s.skills.filter(x => x.id !== id) })),
 
+    addPersona: () => {
+      const id = mkId('pe')
+      dispatch(s => ({
+        ...s,
+        personas: s.personas.concat([{ id, name: `persona-${s.personas.length + 1}`, description: '', body: '' }]),
+      }))
+      return id
+    },
+
+    updatePersona: (id, patch) => dispatch(s => ({
+      ...s,
+      personas: s.personas.map(x => (x.id === id ? { ...x, ...patch } : x)),
+    })),
+
+    removePersona: id => dispatch(s => ({ ...s, personas: s.personas.filter(x => x.id !== id) })),
+
+    addSkillRegistry: (name, url) => {
+      const id = mkId('sr')
+      dispatch(s => ({
+        ...s,
+        skillRegistries: s.skillRegistries.concat([{
+          id, name: name.trim() || (/^https?:/.test(url) ? url.split('/')[4] ?? 'registry' : 'local'), url: url.trim(), enabled: true,
+        }]),
+      }))
+      later(50, () => { void refreshSkillCatalog(id) })
+    },
+
+    updateSkillRegistry: (id, patch) => {
+      dispatch(s => ({
+        ...s,
+        skillRegistries: s.skillRegistries.map(x => (x.id === id ? { ...x, ...patch } : x)),
+      }))
+      if (patch.url !== undefined || patch.enabled === true) later(50, () => { void refreshSkillCatalog(id) })
+      if (patch.enabled === false) skillCatalogsRef.current.delete(id)
+    },
+
+    removeSkillRegistry: id => {
+      skillCatalogsRef.current.delete(id)
+      dispatch(s => ({ ...s, skillRegistries: s.skillRegistries.filter(x => x.id !== id) }))
+    },
+
+    refreshSkillRegistry: id => refreshSkillCatalog(id),
+
     addChatAgentType: () => dispatch(s => ({
       ...s,
       chatAgentTypes: s.chatAgentTypes.concat([{
@@ -2667,7 +2764,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       chatAgentTypes: s.chatAgentTypes.filter(t => t.id !== id),
     })),
 
-    newChatSession: (name, cwd, chatTypeId, model) => {
+    newChatSession: (name, cwd, chatTypeId, model, personaId, skillSourceIds) => {
       const id = mkId('a')
       const dir = (cwd ?? stateRef.current.settings.defaultCwd ?? '').trim()
       const chatType = stateRef.current.chatAgentTypes.find(t => t.id === chatTypeId)
@@ -2679,6 +2776,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         status: 'idle', model: chatType ? `${chatType.name} · ${model || chatType.model}` : 'chat agent', kind: 'chat', cwd: dir,
         chatTypeId: chatType?.id,
         chatModel: model || chatType?.model,
+        personaId,
+        skillSourceIds,
         workspaceId: stateRef.current.activeWorkspace,
         memory: mkMemory(), tools: mkTools(), log: [],
         chatLog: [{
@@ -3040,7 +3139,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [armResponseWatch, connectMcp, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, pushTaskChat, runChatMessage, runMaster, runWatcher, sendAddonChatImpl, spawnSessionForTask, startTaskViaWatcher])
+  }), [armResponseWatch, connectMcp, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, pushTaskChat, refreshSkillCatalog, runChatMessage, runMaster, runWatcher, sendAddonChatImpl, spawnSessionForTask, startTaskViaWatcher])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {
