@@ -52,11 +52,16 @@ Key properties:
   (`makeAddonApi(addonId)` in `store.tsx`) and wrapped by
   `enforcePermissions()` so every method checks the addon's granted scopes.
 - **Views are untrusted; code capabilities are trusted-but-scoped.** The
-  iframe has `sandbox="allow-scripts"` only: no network, no cookies, no parent
-  DOM. Tool handlers and hooks run in the app's JS context via
+  iframe has `sandbox="allow-scripts"` plus an injected CSP
+  (`default-src 'none'`), so no cookies, no parent DOM, and no outbound
+  requests of any kind (fetch/XHR/WebSocket/remote images are all blocked);
+  postMessage to the host is the only channel out, and the host only pushes
+  state snapshots to views whose addon holds `state:read`. Tool handlers and
+  hooks run in the app's JS context via
   `new Function('input', 'api', source)` — powerful by design, bounded by the
-  permission grants and by the API surface (they receive no globals beyond
-  `input`/`api`, though as app-context code they are ultimately trusted).
+  permission grants and by the API surface, but as app-context code they are
+  ultimately trusted: only install packages with tools/hooks that you'd trust
+  like a browser extension.
 - **Addons are data.** Installing, exporting, and editing an addon is JSON
   manipulation; there is no build step and no core-code change. Packages are
   validated by `parseAddonPackage()` and persisted with the rest of app state.
@@ -461,9 +466,18 @@ seed.
 
 ## 9. Security model
 
-- **Views**: hard-sandboxed (`allow-scripts` only). Worst case, a malicious
-  view can call whatever scopes you granted it — nothing else. No network
-  exfiltration path exists from the iframe.
+- **Views**: hard-sandboxed (`allow-scripts` plus a `default-src 'none'` CSP
+  injected into the srcdoc, blocking fetch/XHR/WebSockets and all remote
+  resources). Worst case, a malicious view can call whatever scopes you
+  granted it over the postMessage bridge — nothing else; it cannot phone
+  home from inside the iframe. State snapshots are only pushed to views
+  whose addon has been granted `state:read`.
+- **Install-time grants**: fresh installs auto-grant only the low-risk scopes
+  (`state:read`, `ui`, `storage`). Scopes that act on the machine or steer
+  LLMs (`sessions:send`, `sessions:launch`, `tasks`, `schedules`, `agent`,
+  `master:prompt`) start **off** and must be enabled per-addon in
+  Settings → Addons. Appending to Master's system prompt requires the
+  dedicated `master:prompt` scope.
 - **Tools/hooks**: run in the app context. The `api` argument is
   permission-checked, but this is app-privileged JS — treat installing a
   package with tools/hooks like installing a browser extension. Read the

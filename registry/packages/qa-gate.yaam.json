@@ -12,6 +12,7 @@
     "sessions:send",
     "schedules",
     "agent",
+    "master:prompt",
     "ui",
     "storage"
   ],

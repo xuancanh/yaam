@@ -77,6 +77,18 @@ function AddonChat({ addon }: { addon: Addon }) {
   )
 }
 
+// Lock the iframe down with a CSP that blocks every outbound request (no
+// fetch/XHR/WebSocket, no remote images/fonts/styles) — combined with
+// sandbox="allow-scripts" this leaves postMessage as the only channel out.
+const VIEW_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:">'
+
+/** Inject the addon-view CSP into arbitrary addon HTML. */
+function withViewCsp(html: string): string {
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, m => m + VIEW_CSP)
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, m => `${m}<head>${VIEW_CSP}</head>`)
+  return `<!DOCTYPE html><html><head>${VIEW_CSP}</head><body>${html}</body></html>`
+}
+
 /** Render an addon's preview, source, or customization mode. */
 export function AddonView() {
   const s = useConductor()
@@ -88,10 +100,13 @@ export function AddonView() {
 
   const addon = s.addons.find(a => a.id === s.activeAddon)
 
-  // Push the latest permission-filtered state snapshot into the addon iframe.
+  // Push the latest state snapshot into the addon iframe — only when the
+  // addon actually holds state:read; otherwise it gets a denial marker.
   const push = useCallback(() => {
+    const a = stateRef.current.addons.find(x => x.id === stateRef.current.activeAddon)
+    const allowed = !!a?.enabled && a.granted.includes('state:read')
     iframeRef.current?.contentWindow?.postMessage(
-      { type: 'yaam:state', state: addonSnapshot(stateRef.current) }, '*')
+      { type: 'yaam:state', state: allowed ? addonSnapshot(stateRef.current) : null, denied: allowed ? undefined : 'state:read' }, '*')
   }, [])
 
   useEffect(() => {
@@ -161,7 +176,7 @@ export function AddonView() {
           key={addon.id + addon.createdAt}
           title={addon.name}
           sandbox="allow-scripts"
-          srcDoc={addon.html}
+          srcDoc={withViewCsp(addon.html)}
           onLoad={push}
           style={{ flex: 1, border: 'none', background: '#0A0B0F' }}
         />

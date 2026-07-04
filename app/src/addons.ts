@@ -80,8 +80,15 @@ export const ALL_PERMISSIONS: { id: AddonPermission; label: string }[] = [
   { id: 'tasks', label: 'manage board tasks (spec, spawning, watcher chat)' },
   { id: 'schedules', label: 'create / toggle / remove schedules' },
   { id: 'agent', label: "wake the addon's own LLM agent (spends API tokens)" },
+  { id: 'master:prompt', label: "append directives to Master's system prompt" },
   { id: 'ui', label: 'notifications, toasts, focus, activity log' },
   { id: 'storage', label: 'private key-value storage' },
+]
+
+/** Scopes that can act on the machine or steer LLMs — never auto-granted on
+ *  install; the user turns them on per-addon in Settings. */
+export const DANGEROUS_PERMISSIONS: AddonPermission[] = [
+  'sessions:send', 'sessions:launch', 'tasks', 'schedules', 'agent', 'master:prompt',
 ]
 
 /** Which permission each API method requires. */
@@ -438,10 +445,10 @@ export function addonToolDefs(s: AppState) {
     })))
 }
 
-/** Prompt snippets contributed by enabled addons. */
+/** Prompt snippets contributed by enabled addons holding the master:prompt scope. */
 export function addonPromptAppends(s: AppState): string {
   const parts = s.addons
-    .filter(a => a.enabled && a.hooks?.masterPromptAppend)
+    .filter(a => a.enabled && a.granted.includes('master:prompt') && a.hooks?.masterPromptAppend)
     .map(a => `[addon: ${a.name}]\n${a.hooks!.masterPromptAppend}`)
   return parts.length ? `\n\nADDON DIRECTIVES (installed by the user):\n${parts.join('\n\n')}` : ''
 }
@@ -483,7 +490,11 @@ export async function execAddonHook(
     try {
       await runHandler(src, event, api)
     } catch (e) {
-      api.logEvent(`addon "${a.name}" ${hook} failed: ${e instanceof Error ? e.message : String(e)}`)
+      // logEvent is itself permission-guarded (ui) — a hook failure in an
+      // addon without that scope must not escape as an unhandled rejection
+      try {
+        api.logEvent(`addon "${a.name}" ${hook} failed: ${e instanceof Error ? e.message : String(e)}`)
+      } catch { /* no ui scope — swallow */ }
     }
   }
 }

@@ -454,7 +454,7 @@ export interface AddonAgent {
   on?: AddonHookName[]
 }
 
-export type AddonPermission = 'state:read' | 'sessions:send' | 'sessions:launch' | 'tasks' | 'schedules' | 'agent' | 'ui' | 'storage'
+export type AddonPermission = 'state:read' | 'sessions:send' | 'sessions:launch' | 'tasks' | 'schedules' | 'agent' | 'master:prompt' | 'ui' | 'storage'
 
 export interface Addon {
   id: string
@@ -608,6 +608,8 @@ export interface AppState {
   /** per-addon customization chat (in-memory) */
   addonChats: Record<string, { role: 'you' | 'master'; text: string }[]>
   addonChatBusy: string | null
+  /** Master tool calls blocked on the "Ask first" policy, awaiting the user */
+  pendingToolApprovals: { id: string; toolId: string }[]
   agents: Agent[]
   messages: Message[]
   crons: Cron[]

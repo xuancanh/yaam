@@ -146,6 +146,7 @@ export function seedState(): AppState {
     addonStorage: {},
     addonChats: {},
     addonChatBusy: null,
+    pendingToolApprovals: [],
     agents: [],
     events: [],
     notifications: [],
