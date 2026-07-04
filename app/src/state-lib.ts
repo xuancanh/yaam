@@ -1,7 +1,7 @@
 // Pure helpers shared by the store: ids, cron parsing, prompt/dialog
 // detection, agent-type utilities, pane focus semantics, and PTY input.
 import * as native from './native'
-import type { AgentTemplate, AgentType, AppState, EscOption, WorkspaceData } from './types'
+import type { AgentTemplate, AgentType, AppState, EscOption, TabGroup, WorkspaceData } from './types'
 
 let uid = 0
 /** Generate a short UI identifier with a readable entity prefix. */
@@ -104,35 +104,93 @@ export function typeForCommand(command: string, types: AppState['agentTypes']) {
   return types.find(t => t.model.trim().split(/\s+/)[0] === bin)
 }
 
-// Chrome-split-like focus: if the session is already in a slot, activate that
-// pane; otherwise fill an empty slot (active one first). When the grid is
-// full the session is shown SOLO on top of it — the split group stays intact
-// and is never silently replaced. Never duplicates a session across panes
-// (two panes would fight over the same terminal element).
+// ---------- tab groups (Chrome-style: each group owns its pane layout) ----------
+
+/** Build a fresh tab group around the given slots. */
+export function mkGroup(slots: (string | null)[], stacked = false): TabGroup {
+  return {
+    id: mkId('g'),
+    slots: slots.length ? slots.slice(0, 4) : [null],
+    stacked,
+    activePane: 0,
+    maximizedPane: null,
+    splits: { row: 0.5, cols: [0.5, 0.5] },
+  }
+}
+
+/** The group currently shown in the workspace grid. */
+export function activeGroupOf(s: Pick<AppState, 'groups' | 'activeGroup'>): TabGroup | undefined {
+  return s.groups.find(g => g.id === s.activeGroup)
+}
+
+/** Migrate legacy flat pane state (focusedIds/soloId/…) into tab groups. */
+export function groupsFromLegacy(d: {
+  focusedIds?: (string | null)[]
+  activePane?: number
+  soloId?: string | null
+  paneStacked?: boolean
+  paneSplits?: { row: number; cols: number[] }
+}): { groups: TabGroup[]; activeGroup: string | null } {
+  const groups: TabGroup[] = []
+  const slots = (d.focusedIds ?? []).slice(0, 4)
+  if (slots.some(Boolean)) {
+    const g = mkGroup(slots, d.paneStacked ?? false)
+    g.activePane = Math.max(0, Math.min(d.activePane ?? 0, g.slots.length - 1))
+    if (d.paneSplits) g.splits = d.paneSplits
+    groups.push(g)
+  }
+  let activeGroup = groups[0]?.id ?? null
+  if (d.soloId && !slots.includes(d.soloId)) {
+    const solo = mkGroup([d.soloId])
+    groups.push(solo)
+    activeGroup = solo.id
+  }
+  return { groups, activeGroup }
+}
+
+/** Drop a session from every group; prune groups that end up fully empty
+ *  (except the active one, whose empty grid the user may be assigning). */
+export function removeFromGroups(s: AppState, id: string): Pick<AppState, 'groups' | 'activeGroup'> {
+  let groups = s.groups.map(g => g.slots.includes(id)
+    ? { ...g, slots: g.slots.map(x => (x === id ? null : x)), maximizedPane: null }
+    : g)
+  groups = groups.filter(g => g.slots.some(Boolean) || g.id === s.activeGroup)
+  const activeGroup = groups.some(g => g.id === s.activeGroup) ? s.activeGroup : groups[0]?.id ?? null
+  return { groups, activeGroup }
+}
+
+// Chrome-like focus: if the session already lives in a group, activate that
+// group and pane. Otherwise fill an empty slot of the ACTIVE group (its active
+// slot first) so tabs clicked into a split merge into it — and when the active
+// group is full, the session opens as its own tab (a new single group).
+// A session never appears in two groups (panes would fight over its terminal).
 export function focusSessionIn(s: AppState, id: string): AppState {
   s = { ...s, agents: s.agents.map(a => (a.id === id ? { ...a, archived: false, attention: false } : a)) }
   const minimizedIds = s.minimizedIds.filter(x => x !== id)
-  const focusedIds: (string | null)[] = s.focusedIds.length ? s.focusedIds.slice() : [null]
-  const existing = focusedIds.indexOf(id)
-  if (existing >= 0) {
+  const owner = s.groups.find(g => g.slots.includes(id))
+  if (owner) {
+    const pane = owner.slots.indexOf(id)
     return {
-      ...s, focusedIds, minimizedIds, activePane: existing, soloId: null, view: 'workspace',
-      maximizedPane: s.maximizedPane === null ? null : existing,
+      ...s, minimizedIds, activeGroup: owner.id, view: 'workspace',
+      groups: s.groups.map(g => g.id === owner.id
+        ? { ...g, activePane: pane, maximizedPane: g.maximizedPane === null ? null : pane }
+        : g),
     }
   }
-  let slot = Math.min(s.activePane, focusedIds.length - 1)
-  if (focusedIds[slot] !== null) {
-    const empty = focusedIds.indexOf(null)
-    if (empty < 0) return { ...s, focusedIds, minimizedIds, soloId: id, view: 'workspace' }
-    slot = empty
+  const ag = activeGroupOf(s)
+  if (ag) {
+    const slot = ag.slots[ag.activePane] === null ? ag.activePane : ag.slots.indexOf(null)
+    if (slot >= 0) {
+      return {
+        ...s, minimizedIds, view: 'workspace',
+        groups: s.groups.map(g => g.id === ag.id
+          ? { ...g, slots: g.slots.map((x, i) => (i === slot ? id : x)), activePane: slot }
+          : g),
+      }
+    }
   }
-  focusedIds[slot] = id
-  return {
-    ...s, focusedIds, minimizedIds,
-    activePane: slot,
-    soloId: null,
-    view: 'workspace',
-  }
+  const ng = mkGroup([id])
+  return { ...s, minimizedIds, groups: s.groups.concat([ng]), activeGroup: ng.id, view: 'workspace' }
 }
 
 // KEY=value lines → shell assignment prefix (we spawn via sh -lc)
@@ -179,8 +237,7 @@ export function sendLineToSession(id: string, text: string) {
 /** Create the isolated state slice for a new workspace. */
 export function emptyScoped(greeting: string): WorkspaceData {
   return {
-    focusedIds: [], activePane: 0, soloId: null, paneStacked: false, minimizedIds: [],
-    paneSplits: { row: 0.5, cols: [0.5, 0.5] }, maximizedPane: null,
+    groups: [], activeGroup: null, minimizedIds: [],
     messages: [{ id: mkId('m'), role: 'master', kind: 'text', text: greeting }],
     crons: [], tasks: [], events: [], notifications: [], pendingMasterNotes: [],
   }
@@ -189,8 +246,7 @@ export function emptyScoped(greeting: string): WorkspaceData {
 /** Snapshot the active workspace's flat fields into a storable workspace slice. */
 export function scopedFromState(s: AppState): WorkspaceData {
   return {
-    focusedIds: s.focusedIds, activePane: s.activePane, soloId: s.soloId, paneStacked: s.paneStacked, minimizedIds: s.minimizedIds,
-    paneSplits: s.paneSplits, maximizedPane: s.maximizedPane,
+    groups: s.groups, activeGroup: s.activeGroup, minimizedIds: s.minimizedIds,
     messages: s.messages, crons: s.crons, tasks: s.tasks,
     events: s.events, notifications: s.notifications, pendingMasterNotes: [],
   }
@@ -198,11 +254,12 @@ export function scopedFromState(s: AppState): WorkspaceData {
 
 /** Replace the flat active-workspace fields with a workspace slice. */
 export function applyScoped(s: AppState, d: WorkspaceData): AppState {
+  const { groups, activeGroup } = d.groups
+    ? { groups: d.groups, activeGroup: d.activeGroup && d.groups.some(g => g.id === d.activeGroup) ? d.activeGroup : d.groups[0]?.id ?? null }
+    : groupsFromLegacy(d)
   return {
     ...s,
-    focusedIds: d.focusedIds.slice(0, 4), activePane: d.activePane,
-    soloId: d.soloId ?? null, paneStacked: d.paneStacked ?? false, minimizedIds: d.minimizedIds,
-    paneSplits: d.paneSplits, maximizedPane: d.maximizedPane,
+    groups, activeGroup, minimizedIds: d.minimizedIds,
     messages: d.messages, crons: d.crons, tasks: d.tasks,
     events: d.events, notifications: d.notifications,
   }

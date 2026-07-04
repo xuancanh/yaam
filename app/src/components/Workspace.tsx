@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useActions, useConductor } from '../store'
 import { ACCENT, hexToRgba, indicatorColor } from '../data'
-import type { Agent } from '../types'
+import type { Agent, TabGroup } from '../types'
 import { IC, Icon } from './ui'
 import { NewSessionDialog } from './workspace/NewSessionDialog'
 import { Divider } from './workspace/Divider'
@@ -17,7 +17,11 @@ const LAYOUTS: { key: LayoutKey; n: number; stacked?: boolean; label: string; hi
   { key: '4', n: 4, label: 'Grid', hint: '2 × 2' },
 ]
 
-/** mini preview of a pane layout, Chrome-split-menu style */
+/** Layout key describing a group's current pane arrangement. */
+function layoutKeyOf(g: TabGroup): LayoutKey {
+  return g.slots.length === 2 ? (g.stacked ? '2row' : '2col') : String(Math.max(1, Math.min(4, g.slots.length))) as LayoutKey
+}
+
 /** Draw a compact visual preview for one terminal-pane layout. */
 function LayoutGlyph({ k, color }: { k: LayoutKey; color: string }) {
   const cells: [number, number, number, number][] =
@@ -36,23 +40,18 @@ function LayoutGlyph({ k, color }: { k: LayoutKey; color: string }) {
   )
 }
 
-/** Chrome-like split button: dropdown of pane-layout options (1–4 sessions) */
-/** Choose and persist a one-to-four-pane workspace layout. */
-function LayoutMenu() {
-  const s = useConductor()
+/** Chrome-like split button: choose the ACTIVE group's pane layout (1–4 sessions). */
+function LayoutMenu({ group }: { group: TabGroup | undefined }) {
   const { setPaneLayout } = useActions()
   const [open, setOpen] = useState(false)
-  // A solo tab (a session outside the split) renders alone, so the indicator
-  // must reflect the single visible pane — not the split group hidden underneath.
-  const count = s.soloId ? 1 : Math.max(1, s.focusedIds.length)
-  const current: LayoutKey = count === 2 ? (s.paneStacked ? '2row' : '2col') : String(count) as LayoutKey
-  const split = count > 1
+  const current: LayoutKey = group ? layoutKeyOf(group) : '1'
+  const split = (group?.slots.length ?? 1) > 1
 
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
       <button
         className="icon-btn"
-        title="Pane layout"
+        title="Pane layout (applies to the current tab group)"
         onClick={() => setOpen(o => !o)}
         style={{
           width: 38, height: 30, gap: 3,
@@ -72,7 +71,7 @@ function LayoutMenu() {
             zIndex: 45, overflow: 'hidden', padding: 6,
           }}>
             <div className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)', padding: '5px 10px 6px' }}>
-              PANE LAYOUT
+              PANE LAYOUT · THIS TAB
             </div>
             {LAYOUTS.map(l => {
               const active = l.key === current
@@ -101,13 +100,13 @@ function LayoutMenu() {
 }
 
 /** empty grid section: click to pick which session lives here */
-/** Offer eligible sessions for assignment into an unoccupied pane slot. */
 function EmptySlot({ index }: { index: number }) {
   const s = useConductor()
   const { assignPane, openNewSession, setActivePane } = useActions()
   const [picking, setPicking] = useState(false)
+  const inAnyGroup = new Set(s.groups.flatMap(g => g.slots).filter(Boolean))
   const available = s.agents.filter(a =>
-    !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace && !s.focusedIds.includes(a.id))
+    !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace && !inAnyGroup.has(a.id))
 
   return (
     <div
@@ -157,7 +156,7 @@ function EmptySlot({ index }: { index: number }) {
           ))}
           {!available.length && (
             <div style={{ fontSize: 11.5, color: 'var(--dim)', padding: '6px 10px 8px' }}>
-              All sessions are already on screen.
+              All sessions already live in a tab group.
             </div>
           )}
           <button
@@ -178,12 +177,14 @@ function EmptySlot({ index }: { index: number }) {
   )
 }
 
-/** Compose session tabs, split layout, terminal panes, and minimized sessions. */
+/** Compose group/loose tabs, the active group's split grid, and the dock. */
 export function Workspace() {
   const s = useConductor()
-  const { focusTab, setActivePane, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit } = useActions()
+  const { focusTab, activateGroup, closeGroup, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit } = useActions()
   const byId = new Map(s.agents.map(a => [a.id, a]))
-  const slots: (string | null)[] = s.focusedIds.length ? s.focusedIds : [null]
+  const ag = s.groups.find(g => g.id === s.activeGroup)
+  const slots: (string | null)[] = ag?.slots ?? [null]
+  const splits = ag?.splits ?? { row: 0.5, cols: [0.5, 0.5] }
 
   // slot → agent cells; a duplicated id degrades to an empty slot (two panes
   // would fight over the same terminal element)
@@ -194,28 +195,16 @@ export function Workspace() {
     if (agent) seen.add(agent.id)
     return { agent, i }
   })
-  // Chrome-like solo view: a tab outside the split renders alone (index -1);
-  // the split group stays intact underneath
-  const soloAgent = (s.soloId && byId.get(s.soloId)) || null
-  if (soloAgent) cells = [{ agent: soloAgent, i: -1 }]
-  else if (s.maximizedPane !== null && cells[s.maximizedPane]?.agent) cells = [cells[s.maximizedPane]]
-  const stacked2 = cells.length === 2 && s.paneStacked
+  if (ag && ag.maximizedPane !== null && cells[ag.maximizedPane]?.agent) cells = [cells[ag.maximizedPane]]
+  const stacked2 = cells.length === 2 && (ag?.stacked ?? false)
   const rows = stacked2 ? [[cells[0]], [cells[1]]]
     : cells.length <= 2 ? [cells] : [cells.slice(0, 2), cells.slice(2)]
 
   const wsAgents = s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
   const minimized = s.minimizedIds.map(id => byId.get(id)).filter((a): a is Agent => !!a)
+  const inAnyGroup = new Set(s.groups.flatMap(g => g.slots).filter(Boolean))
+  const looseTabs = wsAgents.filter(a => !inAnyGroup.has(a.id))
 
-  // Chrome-like merge: sessions living in the split grid collapse into one
-  // grouped tab; everything else stays a plain tab
-  const members = slots
-    .map((id, slot) => ({ agent: id ? byId.get(id) : undefined, slot }))
-    .filter((m): m is { agent: Agent; slot: number } => !!m.agent)
-  const merged = members.length > 1
-  const inGrid = new Set(members.map(m => m.agent.id))
-  const looseTabs = wsAgents.filter(a => !merged || !inGrid.has(a.id))
-
-  // Render a status dot that pulses for attention or input requests.
   const tabDot = (a: Agent) => {
     const flash = a.status === 'needs' || a.attention
     return (
@@ -235,62 +224,97 @@ export function Workspace() {
         display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px',
       }}>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto' }}>
-          {merged && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, padding: '0 4px 0 8px',
-              height: 34, background: soloAgent ? 'transparent' : 'var(--panel2)', borderRadius: 9,
-              border: `1px solid ${soloAgent ? 'var(--line2)' : hexToRgba(ACCENT, 0.35)}`,
-            }}>
-              <span title={`Split view · ${members.length} sessions`} style={{ color: soloAgent ? 'var(--dim)' : 'var(--accent)', display: 'flex', marginRight: 4 }}>
-                <LayoutGlyph k={slots.length === 2 ? (s.paneStacked ? '2row' : '2col') : String(slots.length) as LayoutKey} color="currentColor" />
-              </span>
-              {members.map(({ agent: a, slot }) => {
-                const active = !soloAgent && slot === s.activePane
-                return (
-                  <button
-                    key={a.id}
-                    onClick={() => setActivePane(slot)}
-                    title={`${a.name} · ${a.repo}`}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 7,
-                      background: active ? hexToRgba(a.color, 0.16) : 'transparent', border: 'none',
-                    }}
-                  >
-                    {tabDot(a)}
-                    <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          {looseTabs.map(a => {
-            const active = soloAgent ? a.id === soloAgent.id : !merged && slots.includes(a.id)
+          {s.groups.map(g => {
+            const members = g.slots
+              .map((id, slot) => ({ agent: id ? byId.get(id) : undefined, slot }))
+              .filter((m): m is { agent: Agent; slot: number } => !!m.agent)
+            const activeG = g.id === s.activeGroup
+            // single sessions render as plain tabs; real splits as merged pills
+            if (members.length <= 1) {
+              const a = members[0]?.agent
+              if (!a && !activeG) return null
+              return (
+                <button
+                  key={g.id}
+                  className="tab-btn"
+                  onClick={() => (a ? focusTab(a.id) : activateGroup(g.id))}
+                  style={{
+                    background: activeG ? 'var(--panel2)' : 'transparent',
+                    borderTop: `2px solid ${activeG ? (a?.color ?? 'var(--line2)') : 'transparent'}`,
+                  }}
+                >
+                  {a ? tabDot(a) : <LayoutGlyph k={layoutKeyOf(g)} color="var(--dim)" />}
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: activeG ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>
+                    {a?.name ?? `empty · ${g.slots.length} pane${g.slots.length > 1 ? 's' : ''}`}
+                  </span>
+                  {a && <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>}
+                </button>
+              )
+            }
             return (
-              <button
-                key={a.id}
-                className="tab-btn"
-                title={merged ? 'Show in split view' : undefined}
-                onClick={() => focusTab(a.id)}
+              <div
+                key={g.id}
+                onClick={() => { if (!activeG) activateGroup(g.id) }}
                 style={{
-                  background: active ? 'var(--panel2)' : 'transparent',
-                  borderTop: `2px solid ${active ? a.color : 'transparent'}`,
+                  display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, padding: '0 4px 0 8px',
+                  height: 34, background: activeG ? 'var(--panel2)' : 'transparent', borderRadius: 9,
+                  border: `1px solid ${activeG ? hexToRgba(ACCENT, 0.35) : 'var(--line2)'}`,
+                  cursor: activeG ? 'default' : 'pointer',
                 }}
               >
-                {tabDot(a)}
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: active ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
-                <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>
-              </button>
+                <span title={`Split view · ${members.length} sessions`} style={{ color: activeG ? 'var(--accent)' : 'var(--dim)', display: 'flex', marginRight: 4 }}>
+                  <LayoutGlyph k={layoutKeyOf(g)} color="currentColor" />
+                </span>
+                {members.map(({ agent: a, slot }) => {
+                  const active = activeG && slot === g.activePane
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={e => { e.stopPropagation(); focusTab(a.id) }}
+                      title={`${a.name} · ${a.repo}`}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 7,
+                        background: active ? hexToRgba(a.color, 0.16) : 'transparent', border: 'none',
+                      }}
+                    >
+                      {tabDot(a)}
+                      <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
+                    </button>
+                  )
+                })}
+                <button
+                  className="icon-btn"
+                  title="Dissolve group (sessions return to plain tabs)"
+                  style={{ width: 20, height: 20, borderRadius: 5, marginLeft: 2 }}
+                  onClick={e => { e.stopPropagation(); closeGroup(g.id) }}
+                >
+                  <Icon paths={IC.close} size={10} stroke={2} />
+                </button>
+              </div>
             )
           })}
+          {looseTabs.map(a => (
+            <button
+              key={a.id}
+              className="tab-btn"
+              title="Open this session"
+              onClick={() => focusTab(a.id)}
+              style={{ background: 'transparent', borderTop: '2px solid transparent' }}
+            >
+              {tabDot(a)}
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
+              <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>
+            </button>
+          ))}
         </div>
-        <LayoutMenu />
+        <LayoutMenu group={ag} />
         <button className="icon-btn" title="New agent session" onClick={openNewSession} style={{ width: 30, height: 30, flexShrink: 0, color: '#9AA3B2' }}>
           <Icon paths={IC.plus} size={17} stroke={1.8} />
         </button>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--line)' }}>
-        {wsAgents.length === 0 && slots.length <= 1 ? (
+        {wsAgents.length === 0 && s.groups.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: '#0A0B0F' }}>
             <div className="grotesk" style={{ fontSize: 17, fontWeight: 600, color: 'var(--mut)' }}>No sessions yet</div>
             <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
@@ -306,11 +330,11 @@ export function Workspace() {
               {ri > 0 && <Divider dir="row" onRatio={setRowSplit} />}
               <div style={{
                 display: 'flex', minHeight: 0,
-                flexBasis: rows.length === 1 ? '100%' : `${(ri === 0 ? s.paneSplits.row : 1 - s.paneSplits.row) * 100}%`,
+                flexBasis: rows.length === 1 ? '100%' : `${(ri === 0 ? splits.row : 1 - splits.row) * 100}%`,
                 flexGrow: 0, flexShrink: 1,
               }}>
                 {row.map(({ agent, i }, ci) => {
-                  const ratio = s.paneSplits.cols[ri] ?? 0.5
+                  const ratio = splits.cols[ri] ?? 0.5
                   const width = row.length === 1 ? '100%'
                     : row.length === 2 ? `${(ci === 0 ? ratio : 1 - ratio) * 100}%`
                     : `${100 / row.length}%`
@@ -324,9 +348,9 @@ export function Workspace() {
                             <Pane
                               agent={agent}
                               index={i}
-                              active={i === -1 || i === s.activePane}
+                              active={i === (ag?.activePane ?? 0)}
                               showRing={cells.length > 1}
-                              maximized={i >= 0 && s.maximizedPane === i}
+                              maximized={ag?.maximizedPane === i}
                             />
                           ) : (
                             <EmptySlot index={i} />
@@ -353,7 +377,7 @@ export function Workspace() {
               <button
                 key={a.id}
                 className="dock-chip"
-                title="Restore to grid"
+                title="Restore from dock"
                 onClick={() => restoreSession(a.id)}
               >
                 <span style={{

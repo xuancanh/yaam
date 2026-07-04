@@ -408,12 +408,16 @@ export interface PersistedState {
   addonStorage?: Record<string, Record<string, unknown>>
   /** session definitions + output tails; restored as paused sessions */
   agents?: Agent[]
+  groups?: TabGroup[]
+  activeGroup?: string | null
+  /** legacy (pre-groups) pane state, migrated on load */
   focusedIds?: (string | null)[]
   activePane?: number
   soloId?: string | null
   paneStacked?: boolean
-  minimizedIds?: string[]
   paneSplits?: { row: number; cols: number[] }
+  maximizedPane?: number | null
+  minimizedIds?: string[]
   addons?: Addon[]
   messages?: Message[]
   events?: EventItem[]
@@ -425,16 +429,34 @@ export interface Workspace {
   name: string
 }
 
+/** A Chrome-style tab group: one or more pane slots with their own layout.
+ *  Single-slot groups render as plain tabs; multi-slot groups as merged tabs. */
+export interface TabGroup {
+  id: string
+  /** pane slots: length = chosen layout (1–4), null = empty slot awaiting assignment */
+  slots: (string | null)[]
+  /** 2-pane orientation: true = stacked top/bottom instead of side by side */
+  stacked: boolean
+  activePane: number
+  /** index into slots of the pane currently maximized, or null */
+  maximizedPane: number | null
+  /** divider ratios: row = first row height fraction, cols = first pane width fraction per row */
+  splits: { row: number; cols: number[] }
+}
+
 /** Per-workspace slice. The ACTIVE workspace's copy lives flat on AppState;
  *  inactive workspaces are stashed here and swapped in on switch. */
 export interface WorkspaceData {
-  focusedIds: (string | null)[]
-  activePane: number
-  soloId: string | null
-  paneStacked: boolean
+  groups?: TabGroup[]
+  activeGroup?: string | null
+  /** legacy (pre-groups) pane state, migrated when the slice is applied */
+  focusedIds?: (string | null)[]
+  activePane?: number
+  soloId?: string | null
+  paneStacked?: boolean
+  paneSplits?: { row: number; cols: number[] }
+  maximizedPane?: number | null
   minimizedIds: string[]
-  paneSplits: { row: number; cols: number[] }
-  maximizedPane: number | null
   messages: Message[]
   crons: Cron[]
   tasks: BoardTask[]
@@ -449,19 +471,12 @@ export interface AppState {
   activeWorkspace: string
   workspaceData: Record<string, WorkspaceData>
   view: View
-  activePane: number
-  /** index into focusedIds of the pane that is currently maximized, or null */
-  maximizedPane: number | null
-  /** pane slots: length = chosen layout (1–4), null = empty slot awaiting assignment */
-  focusedIds: (string | null)[]
-  /** Chrome-like solo view: session shown alone while the split group stays intact */
-  soloId: string | null
-  /** 2-pane layout orientation: true = stacked top/bottom instead of side by side */
-  paneStacked: boolean
+  /** Chrome-style tab groups; each keeps its own pane layout. A session lives in at most one group. */
+  groups: TabGroup[]
+  /** id of the group currently displayed in the workspace grid */
+  activeGroup: string | null
   /** sessions minimized to the dock strip */
   minimizedIds: string[]
-  /** divider ratios: row = first row height fraction, cols = first pane width fraction per row */
-  paneSplits: { row: number; cols: number[] }
   composer: string
   panel: Panel | null
   toast: string | null

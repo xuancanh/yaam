@@ -3,7 +3,7 @@ import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 
 import type { ReactNode } from 'react'
 import type {
   Addon, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
-  NotifKind, Notification, Panel, PersistedState, TaskChatMsg, View,
+  NotifKind, Notification, Panel, PersistedState, TabGroup, TaskChatMsg, View,
 } from './types'
 import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState, SHELLS } from './data'
 import * as native from './native'
@@ -25,6 +25,12 @@ type Updater = (s: AppState) => AppState
 /** Apply a pure state updater; side effects must remain outside this reducer. */
 function reducer(s: AppState, f: Updater): AppState {
   return f(s)
+}
+
+/** Apply a change to the active tab group (no-op when none is active). */
+function withActiveGroup(s: AppState, f: (g: TabGroup) => TabGroup): AppState {
+  if (!s.activeGroup || !s.groups.some(g => g.id === s.activeGroup)) return s
+  return { ...s, groups: s.groups.map(g => (g.id === s.activeGroup ? f(g) : g)) }
 }
 
 interface LocatedTask {
@@ -105,6 +111,10 @@ export interface ConductorActions {
   restoreSession: (id: string) => void
   setRowSplit: (v: number) => void
   setColSplit: (row: number, v: number) => void
+  /** display an existing tab group in the workspace grid */
+  activateGroup: (id: string) => void
+  /** dissolve a tab group; its sessions return to loose tabs */
+  closeGroup: (id: string) => void
   renameSession: (id: string, name: string) => void
   archiveSession: (id: string) => void
   unarchiveSession: (id: string) => void
@@ -183,7 +193,8 @@ export interface ConductorActions {
 
 import {
   KEYMAP, PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
-  buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, humanizeCron, mkId,
+  activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, groupsFromLegacy,
+  humanizeCron, mkGroup, mkId, removeFromGroups,
   sendLineToSession, shQuote, spawnAgentProcess, switchWorkspaceIn, taskPrompt, typeForCommand, wait,
 } from './state-lib'
 
@@ -595,7 +606,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         // deterministic indicator, independent of the LLM layer: if the user
         // isn't looking at this session, flash its tab and ring the bell
         const st2 = stateRef.current
-        const watching = (st2.soloId ?? st2.focusedIds[st2.activePane]) === id
+        const g2 = activeGroupOf(st2)
+        const watching = (g2 ? g2.slots[g2.activePane] : null) === id
           && (agent.workspaceId ?? st2.activeWorkspace) === st2.activeWorkspace
           && document.hasFocus()
         if (!watching) {
@@ -781,11 +793,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             // give the monitor a moment to read the final screen, then tidy up
             window.setTimeout(() => dispatch(s => ({
               ...s,
+              ...removeFromGroups(s, e.id),
               agents: s.agents.map(a => a.id === e.id ? { ...a, archived: true, attention: false } : a),
-              focusedIds: s.focusedIds.map(x => (x === e.id ? null : x)),
               minimizedIds: s.minimizedIds.filter(x => x !== e.id),
-              soloId: s.soloId === e.id ? null : s.soloId,
-              maximizedPane: null,
             })), 12000)
           }
         } else {
@@ -838,13 +848,30 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
               }
             })
           const ids = new Set(restoredAgents.map(a => a.id))
-          // slot array: invalid/duplicate ids become empty slots, layout capped at 4
+          // tab groups: invalid/duplicate ids become empty slots (a session may
+          // live in only one group), slots capped at 4, fully-empty groups dropped
           const seenFocus = new Set<string>()
-          const focusedIds: (string | null)[] = (p.focusedIds ?? []).slice(0, 4).map(id => {
-            if (!id || !ids.has(id) || seenFocus.has(id)) return null
-            seenFocus.add(id)
-            return id
-          })
+          const rawGroups = p.groups ?? groupsFromLegacy(p).groups
+          const groups = rawGroups
+            .map(g => ({
+              ...g,
+              slots: g.slots.slice(0, 4).map(id => {
+                if (!id || !ids.has(id) || seenFocus.has(id)) return null
+                seenFocus.add(id)
+                return id
+              }),
+            }))
+            .filter(g => g.slots.some(Boolean))
+            .map(g => ({
+              ...g,
+              activePane: Math.max(0, Math.min(g.activePane ?? 0, g.slots.length - 1)),
+              maximizedPane: null,
+              splits: g.splits ?? { row: 0.5, cols: [0.5, 0.5] },
+              stacked: g.stacked ?? false,
+            }))
+          const activeGroup = p.activeGroup && groups.some(g => g.id === p.activeGroup)
+            ? p.activeGroup
+            : groups[0]?.id ?? null
           dispatch(s => ({
             ...s,
             tasks: p.tasks ?? s.tasks,
@@ -861,12 +888,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             templates: p.templates ?? s.templates ?? [],
             integrations: p.integrations ?? s.integrations,
             agents: restoredAgents.length ? restoredAgents : s.agents,
-            focusedIds: focusedIds.length ? focusedIds : s.focusedIds,
-            activePane: Math.min(p.activePane ?? 0, Math.max(0, focusedIds.length - 1)),
-            soloId: p.soloId && ids.has(p.soloId) ? p.soloId : null,
-            paneStacked: p.paneStacked ?? false,
+            groups,
+            activeGroup,
             minimizedIds: (p.minimizedIds ?? []).filter(id => ids.has(id)),
-            paneSplits: p.paneSplits ?? s.paneSplits,
             workspaces,
             activeWorkspace,
             workspaceData: p.workspaceData ?? {},
@@ -933,12 +957,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       activeWorkspace: state.activeWorkspace,
       workspaceData: state.workspaceData,
       agents: state.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
-      focusedIds: state.focusedIds,
-      activePane: state.activePane,
-      soloId: state.soloId,
-      paneStacked: state.paneStacked,
+      groups: state.groups,
+      activeGroup: state.activeGroup,
       minimizedIds: state.minimizedIds,
-      paneSplits: state.paneSplits,
       addons: state.addons,
       addonStorage: state.addonStorage,
       messages: state.messages.slice(-60),
@@ -950,7 +971,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }, 800)
   }, [
     state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.templates, state.integrations,
-    state.agents, state.focusedIds, state.activePane, state.soloId, state.paneStacked, state.minimizedIds, state.paneSplits,
+    state.agents, state.groups, state.activeGroup, state.minimizedIds,
     state.addons, state.addonStorage, state.messages, state.events, state.notifications,
     state.workspaces, state.activeWorkspace, state.workspaceData,
   ])
@@ -965,8 +986,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, templates: st.templates, integrations: st.integrations,
         workspaces: st.workspaces, activeWorkspace: st.activeWorkspace, workspaceData: st.workspaceData,
         agents: st.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
-        focusedIds: st.focusedIds, activePane: st.activePane, soloId: st.soloId, paneStacked: st.paneStacked,
-        minimizedIds: st.minimizedIds, paneSplits: st.paneSplits, addons: st.addons, addonStorage: st.addonStorage,
+        groups: st.groups, activeGroup: st.activeGroup,
+        minimizedIds: st.minimizedIds, addons: st.addons, addonStorage: st.addonStorage,
         messages: st.messages.slice(-60), events: st.events.slice(0, 60),
         notifications: st.notifications.slice(0, 30),
       }
@@ -1729,135 +1750,133 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     },
 
     setActivePane: i => dispatch(s => {
-      // i === -1: the solo pane — nothing to activate, just clear its attention
-      const id = i >= 0 ? s.focusedIds[i] : s.soloId
+      const ag = activeGroupOf(s)
+      if (!ag || i < 0 || i >= ag.slots.length) return s
+      const id = ag.slots[i]
       return {
-        ...s,
-        activePane: i >= 0 ? i : s.activePane,
-        soloId: i >= 0 ? null : s.soloId,
+        ...withActiveGroup(s, g => ({ ...g, activePane: i })),
         agents: id ? s.agents.map(a => (a.id === id ? { ...a, attention: false } : a)) : s.agents,
       }
     }),
 
     focusTab: id => dispatch(s => focusSessionIn(s, id)),
 
+    activateGroup: gid => dispatch(s => (s.groups.some(g => g.id === gid)
+      ? { ...s, activeGroup: gid, view: 'workspace' }
+      : s)),
+
+    closeGroup: gid => dispatch(s => {
+      const groups = s.groups.filter(g => g.id !== gid)
+      return {
+        ...s,
+        groups,
+        activeGroup: s.activeGroup === gid ? groups[0]?.id ?? null : s.activeGroup,
+      }
+    }),
+
+    // layout changes apply to the ACTIVE group only — other tab groups keep
+    // their own pane arrangement (each group remembers its layout, Chrome-style)
     setPaneLayout: (n, stacked) => dispatch(s => {
       const count = Math.max(1, Math.min(4, Math.round(n)))
-      // While viewing a solo tab, the solo session is what's on screen — promote
-      // it to slot 0 of the new layout instead of silently reconfiguring the
-      // split group hidden underneath (which would yank the user off their tab).
-      if (s.soloId) {
-        const rest = s.focusedIds.filter((id): id is string => id !== null && id !== s.soloId)
-        const kept = [s.soloId, ...rest].slice(0, count)
-        const focusedIds: (string | null)[] = kept.concat(Array(count - kept.length).fill(null))
-        return {
-          ...s, focusedIds,
-          paneStacked: !!stacked,
-          activePane: 0,
-          maximizedPane: null,
-          soloId: null,
-          view: 'workspace',
-        }
+      if (!activeGroupOf(s)) {
+        const g = mkGroup(Array(count).fill(null), !!stacked)
+        return { ...s, groups: s.groups.concat([g]), activeGroup: g.id, view: 'workspace' }
       }
-      // keep visible sessions in order, then pad with empty slots
-      const kept = s.focusedIds.filter((id): id is string => id !== null).slice(0, count)
-      const focusedIds: (string | null)[] = kept.concat(Array(count - kept.length).fill(null))
       return {
-        ...s, focusedIds,
-        paneStacked: !!stacked,
-        activePane: Math.min(s.activePane, count - 1),
-        maximizedPane: null,
-        soloId: null,
+        ...withActiveGroup(s, g => {
+          // keep visible sessions in order, then pad with empty slots
+          const kept = g.slots.filter((id): id is string => id !== null).slice(0, count)
+          const slots: (string | null)[] = kept.concat(Array(count - kept.length).fill(null))
+          return {
+            ...g, slots,
+            stacked: !!stacked,
+            activePane: Math.min(g.activePane, count - 1),
+            maximizedPane: null,
+          }
+        }),
         view: 'workspace',
       }
     }),
 
     assignPane: (i, id) => dispatch(s => {
-      const focusedIds: (string | null)[] = s.focusedIds.length ? s.focusedIds.slice() : [null]
-      if (i < 0 || i >= focusedIds.length) return s
-      const prev = focusedIds.indexOf(id)
-      if (prev >= 0) focusedIds[prev] = null
-      focusedIds[i] = id
+      const ag = activeGroupOf(s)
+      if (!ag) {
+        // empty grid with no group yet — assigning creates one
+        const g = mkGroup([id])
+        return {
+          ...s,
+          groups: s.groups.concat([g]),
+          activeGroup: g.id,
+          agents: s.agents.map(a => (a.id === id ? { ...a, archived: false, attention: false } : a)),
+          minimizedIds: s.minimizedIds.filter(x => x !== id),
+          view: 'workspace',
+        }
+      }
+      if (i < 0 || i >= ag.slots.length) return s
+      // a session lives in at most one group — pull it out of any other slot
+      const cleared = s.groups.map(g => (g.slots.includes(id)
+        ? { ...g, slots: g.slots.map(x => (x === id ? null : x)), maximizedPane: null }
+        : g))
+      const groups = cleared
+        .map(g => (g.id === ag.id
+          ? { ...g, slots: g.slots.map((x, k) => (k === i ? id : x)), activePane: i, maximizedPane: null }
+          : g))
+        .filter(g => g.slots.some(Boolean) || g.id === s.activeGroup)
       return {
-        ...s, focusedIds,
+        ...s, groups,
         agents: s.agents.map(a => (a.id === id ? { ...a, archived: false, attention: false } : a)),
         minimizedIds: s.minimizedIds.filter(x => x !== id),
-        activePane: i,
-        maximizedPane: null,
-        soloId: null,
         view: 'workspace',
       }
     }),
 
     closePane: i => dispatch(s => {
-      // solo pane: closing it returns to the split view
-      if (i < 0) return { ...s, soloId: null }
-      if (s.focusedIds.length <= 1) {
-        // last slot: clear it back to an empty section instead of removing it
-        if (!s.focusedIds[0]) return s
-        return { ...s, focusedIds: [null], activePane: 0, maximizedPane: null }
+      const ag = activeGroupOf(s)
+      if (!ag || i < 0 || i >= ag.slots.length) return s
+      if (ag.slots.length <= 1) {
+        // last pane: dissolve the group; its session returns to a loose tab
+        const groups = s.groups.filter(g => g.id !== ag.id)
+        return { ...s, groups, activeGroup: groups[0]?.id ?? null }
       }
-      const focusedIds = s.focusedIds.slice()
-      focusedIds.splice(i, 1)
-      return {
-        ...s,
-        focusedIds,
-        activePane: Math.min(s.activePane, focusedIds.length - 1),
-        maximizedPane: null,
-      }
+      return withActiveGroup(s, g => {
+        const slots = g.slots.slice()
+        slots.splice(i, 1)
+        return { ...g, slots, activePane: Math.min(g.activePane, slots.length - 1), maximizedPane: null }
+      })
     }),
 
-    toggleMaximize: i => dispatch(s => (i < 0 ? s : {
-      ...s,
-      maximizedPane: s.maximizedPane === i ? null : i,
+    toggleMaximize: i => dispatch(s => withActiveGroup(s, g => (i < 0 || i >= g.slots.length ? g : {
+      ...g,
+      maximizedPane: g.maximizedPane === i ? null : i,
       activePane: i,
-    })),
+    }))),
 
     minimizePane: i => dispatch(s => {
-      // solo pane: park it in the dock and return to the split view
-      if (i < 0) {
-        if (!s.soloId) return s
-        return {
-          ...s,
-          soloId: null,
-          minimizedIds: s.minimizedIds.includes(s.soloId) ? s.minimizedIds : s.minimizedIds.concat([s.soloId]),
-        }
-      }
-      const id = s.focusedIds[i]
-      if (!id) return s
-      const focusedIds = s.focusedIds.slice()
+      const ag = activeGroupOf(s)
+      const id = ag?.slots[i]
+      if (!ag || !id) return s
       // keep the layout — the slot goes empty, ready for reassignment
-      focusedIds[i] = null
-      return {
-        ...s,
-        focusedIds,
-        minimizedIds: s.minimizedIds.includes(id) ? s.minimizedIds : s.minimizedIds.concat([id]),
+      const next = withActiveGroup(s, g => ({
+        ...g,
+        slots: g.slots.map((x, k) => (k === i ? null : x)),
         maximizedPane: null,
+      }))
+      return {
+        ...next,
+        minimizedIds: s.minimizedIds.includes(id) ? s.minimizedIds : s.minimizedIds.concat([id]),
       }
     }),
 
-    restoreSession: id => dispatch(s => {
-      // restoring from the dock fills an empty slot if there is one (it was
-      // deliberately parked, not swapped away)
-      const empty = s.focusedIds.indexOf(null)
-      if (!s.focusedIds.includes(id) && empty >= 0) {
-        const focusedIds = s.focusedIds.slice()
-        focusedIds[empty] = id
-        return {
-          ...s, focusedIds,
-          minimizedIds: s.minimizedIds.filter(x => x !== id),
-          activePane: empty, view: 'workspace', maximizedPane: null,
-        }
-      }
-      return focusSessionIn(s, id)
-    }),
+    // restoring from the dock: focusSessionIn already prefers an empty slot of
+    // the active group and otherwise opens the session as its own tab
+    restoreSession: id => dispatch(s => focusSessionIn(s, id)),
 
-    setRowSplit: v => dispatch(s => ({ ...s, paneSplits: { ...s.paneSplits, row: v } })),
-    setColSplit: (row, v) => dispatch(s => {
-      const cols = s.paneSplits.cols.slice()
+    setRowSplit: v => dispatch(s => withActiveGroup(s, g => ({ ...g, splits: { ...g.splits, row: v } }))),
+    setColSplit: (row, v) => dispatch(s => withActiveGroup(s, g => {
+      const cols = g.splits.cols.slice()
       cols[row] = v
-      return { ...s, paneSplits: { ...s.paneSplits, cols } }
-    }),
+      return { ...g, splits: { ...g.splits, cols } }
+    })),
 
     renameSession: (id, name) => dispatch(s => ({
       ...s,
@@ -1871,11 +1890,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       if (agent?.status === 'running' || agent?.status === 'needs') native.killSession(id).catch(() => {})
       dispatch(s => ({
         ...s,
+        ...removeFromGroups(s, id),
         agents: s.agents.map(a => a.id === id ? { ...a, archived: true, status: 'idle' as const, escReason: undefined } : a),
-        focusedIds: s.focusedIds.map(x => (x === id ? null : x)),
         minimizedIds: s.minimizedIds.filter(x => x !== id),
-        soloId: s.soloId === id ? null : s.soloId,
-        maximizedPane: null,
         drawer: s.drawer?.agentId === id ? null : s.drawer,
       }))
       flash(`Archived ${agent?.name ?? 'session'}`)
@@ -1892,12 +1909,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       taskSessionsRef.current.delete(id)
       dispatch(s => ({
         ...s,
+        ...removeFromGroups(s, id),
         agents: s.agents.filter(a => a.id !== id),
         tasks: s.tasks.map(t => (t.agentId === id ? { ...t, agentId: null } : t)),
-        focusedIds: s.focusedIds.map(x => (x === id ? null : x)),
         minimizedIds: s.minimizedIds.filter(x => x !== id),
-        soloId: s.soloId === id ? null : s.soloId,
-        maximizedPane: null,
         drawer: s.drawer?.agentId === id ? null : s.drawer,
         panel: s.panel?.agentId === id ? null : s.panel,
       }))
