@@ -222,9 +222,27 @@ function MessageRow({ msg }: { msg: Message }) {
 
 export function Sidebar() {
   const s = useConductor()
-  const { setComposer, send } = useActions()
+  const { setComposer, send, updateSettings } = useActions()
   const scrollRef = useRef<HTMLDivElement>(null)
   const isMac = navigator.platform.toUpperCase().includes('MAC')
+  const width = Math.max(280, Math.min(640, s.settings.sidebarWidth ?? 392))
+
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = width
+    const move = (ev: PointerEvent) => {
+      updateSettings({ sidebarWidth: Math.max(280, Math.min(640, startW + ev.clientX - startX)) })
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      document.body.style.cursor = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   useEffect(() => {
     const el = scrollRef.current
@@ -240,15 +258,45 @@ export function Sidebar() {
     }
   }
 
+  if (s.settings.sidebarHidden) {
+    return (
+      <button
+        title="Show Master chat"
+        onClick={() => updateSettings({ sidebarHidden: false })}
+        style={{
+          width: 30, flexShrink: 0, background: 'var(--panel)', borderRight: '1px solid var(--line)',
+          border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center',
+          padding: '12px 0', gap: 10, cursor: 'pointer',
+        }}
+      >
+        <MasterMark size={20} glow={false} />
+        {s.masterBusy && (
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'cpulse 0.9s ease-in-out infinite' }} />
+        )}
+        <span style={{
+          writingMode: 'vertical-rl', fontSize: 10, fontWeight: 600, letterSpacing: 0.6,
+          color: 'var(--dim)', marginTop: 2,
+        }}>
+          MASTER
+        </span>
+      </button>
+    )
+  }
+
   return (
     <div style={{
-      width: 392, flexShrink: 0, background: 'var(--panel)', borderRight: '1px solid var(--line)',
+      width, flexShrink: 0, background: 'var(--panel)', borderRight: '1px solid var(--line)',
       display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative',
     }}>
       <div style={{
         position: 'absolute', top: 0, left: 0, bottom: 0, width: 2,
         background: 'linear-gradient(180deg, rgba(245,196,81,.5), transparent 60%)',
       }} />
+      <div
+        onPointerDown={startResize}
+        title="Drag to resize"
+        style={{ position: 'absolute', top: 0, right: -3, bottom: 0, width: 7, cursor: 'col-resize', zIndex: 5 }}
+      />
 
       <div style={{ padding: '15px 17px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 11 }}>
         <MasterMark size={32} />
@@ -270,6 +318,14 @@ export function Sidebar() {
             </span>
           </div>
         </div>
+        <button
+          className="icon-btn"
+          title="Hide Master chat"
+          style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0 }}
+          onClick={() => updateSettings({ sidebarHidden: true })}
+        >
+          <Icon paths={['M15 6l-6 6 6 6']} size={14} stroke={1.8} />
+        </button>
       </div>
 
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 15px', display: 'flex', flexDirection: 'column', gap: 15 }}>

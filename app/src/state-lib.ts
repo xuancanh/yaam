@@ -82,25 +82,33 @@ export function typeForCommand(command: string, types: AppState['agentTypes']) {
   return types.find(t => t.model.trim().split(/\s+/)[0] === bin)
 }
 
-// iTerm-like focus: if the session is already visible, activate that pane;
-// otherwise show it in the active pane. Never duplicates a session across
-// panes (two panes would fight over the same terminal element).
+// Chrome-split-like focus: if the session is already in a slot, activate that
+// pane; otherwise fill an empty slot (active one first). When the grid is
+// full the session is shown SOLO on top of it — the split group stays intact
+// and is never silently replaced. Never duplicates a session across panes
+// (two panes would fight over the same terminal element).
 export function focusSessionIn(s: AppState, id: string): AppState {
   s = { ...s, agents: s.agents.map(a => (a.id === id ? { ...a, archived: false, attention: false } : a)) }
   const minimizedIds = s.minimizedIds.filter(x => x !== id)
-  const existing = s.focusedIds.indexOf(id)
+  const focusedIds: (string | null)[] = s.focusedIds.length ? s.focusedIds.slice() : [null]
+  const existing = focusedIds.indexOf(id)
   if (existing >= 0) {
     return {
-      ...s, minimizedIds, activePane: existing, view: 'workspace',
+      ...s, focusedIds, minimizedIds, activePane: existing, soloId: null, view: 'workspace',
       maximizedPane: s.maximizedPane === null ? null : existing,
     }
   }
-  const focusedIds = s.focusedIds.slice()
-  if (!focusedIds.length) focusedIds.push(id)
-  else focusedIds[Math.min(s.activePane, focusedIds.length - 1)] = id
+  let slot = Math.min(s.activePane, focusedIds.length - 1)
+  if (focusedIds[slot] !== null) {
+    const empty = focusedIds.indexOf(null)
+    if (empty < 0) return { ...s, focusedIds, minimizedIds, soloId: id, view: 'workspace' }
+    slot = empty
+  }
+  focusedIds[slot] = id
   return {
     ...s, focusedIds, minimizedIds,
-    activePane: Math.min(s.activePane, focusedIds.length - 1),
+    activePane: slot,
+    soloId: null,
     view: 'workspace',
   }
 }
@@ -144,7 +152,7 @@ export function sendLineToSession(id: string, text: string) {
 
 export function emptyScoped(greeting: string): WorkspaceData {
   return {
-    focusedIds: [], activePane: 0, minimizedIds: [],
+    focusedIds: [], activePane: 0, soloId: null, paneStacked: false, minimizedIds: [],
     paneSplits: { row: 0.5, cols: [0.5, 0.5] }, maximizedPane: null,
     messages: [{ id: mkId('m'), role: 'master', kind: 'text', text: greeting }],
     crons: [], tasks: [], events: [], notifications: [], pendingMasterNotes: [],
@@ -153,7 +161,7 @@ export function emptyScoped(greeting: string): WorkspaceData {
 
 export function scopedFromState(s: AppState): WorkspaceData {
   return {
-    focusedIds: s.focusedIds, activePane: s.activePane, minimizedIds: s.minimizedIds,
+    focusedIds: s.focusedIds, activePane: s.activePane, soloId: s.soloId, paneStacked: s.paneStacked, minimizedIds: s.minimizedIds,
     paneSplits: s.paneSplits, maximizedPane: s.maximizedPane,
     messages: s.messages, crons: s.crons, tasks: s.tasks,
     events: s.events, notifications: s.notifications, pendingMasterNotes: [],
@@ -163,7 +171,8 @@ export function scopedFromState(s: AppState): WorkspaceData {
 export function applyScoped(s: AppState, d: WorkspaceData): AppState {
   return {
     ...s,
-    focusedIds: d.focusedIds, activePane: d.activePane, minimizedIds: d.minimizedIds,
+    focusedIds: d.focusedIds.slice(0, 4), activePane: d.activePane,
+    soloId: d.soloId ?? null, paneStacked: d.paneStacked ?? false, minimizedIds: d.minimizedIds,
     paneSplits: d.paneSplits, maximizedPane: d.maximizedPane,
     messages: d.messages, crons: d.crons, tasks: d.tasks,
     events: d.events, notifications: d.notifications,

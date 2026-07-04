@@ -42,7 +42,11 @@ export function CommandPalette() {
     const cmds: Command[] = [
       { id: 'route', label: 'Route a task…', hint: 'compose', icon: 'route', run: a.focusComposer },
       { id: 'new', label: 'New agent session', hint: 'spawn', icon: 'plus', run: a.openNewSession },
-      { id: 'split', label: 'Add split pane', hint: 'layout', icon: 'split', run: a.addPane },
+      { id: 'layout-1', label: 'Layout: single pane', hint: 'layout', icon: 'split', run: () => a.setPaneLayout(1) },
+      { id: 'layout-2', label: 'Layout: split vertical', hint: 'layout', icon: 'split', run: () => a.setPaneLayout(2) },
+      { id: 'layout-2h', label: 'Layout: split horizontal', hint: 'layout', icon: 'split', run: () => a.setPaneLayout(2, true) },
+      { id: 'layout-3', label: 'Layout: 3 panes', hint: 'layout', icon: 'split', run: () => a.setPaneLayout(3) },
+      { id: 'layout-4', label: 'Layout: 2×2 grid', hint: 'layout', icon: 'split', run: () => a.setPaneLayout(4) },
       { id: 'build', label: 'Build a tool or panel', hint: 'compose', icon: 'build', run: a.focusComposer },
     ]
     s.agents.filter(x => x.status === 'idle').forEach(x =>

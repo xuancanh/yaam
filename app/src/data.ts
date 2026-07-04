@@ -123,6 +123,8 @@ export function seedState(): AppState {
     activePane: 0,
     maximizedPane: null,
     focusedIds: [],
+    soloId: null,
+    paneStacked: false,
     minimizedIds: [],
     paneSplits: { row: 0.5, cols: [0.5, 0.5] },
     composer: '',

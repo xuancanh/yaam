@@ -259,6 +259,10 @@ export interface OrchestrationSettings {
   /** shell command that prints the API credential (raw key or JSON);
    *  re-run automatically on expiry or when the API rejects it */
   credCmd: string
+  /** Master chat panel width (px, drag-resizable) */
+  sidebarWidth?: number
+  /** Master chat panel collapsed to a slim rail */
+  sidebarHidden?: boolean
 }
 
 export type BoardCol = 'backlog' | 'routed' | 'progress' | 'review' | 'done'
@@ -376,8 +380,10 @@ export interface PersistedState {
   addonStorage?: Record<string, Record<string, unknown>>
   /** session definitions + output tails; restored as paused sessions */
   agents?: Agent[]
-  focusedIds?: string[]
+  focusedIds?: (string | null)[]
   activePane?: number
+  soloId?: string | null
+  paneStacked?: boolean
   minimizedIds?: string[]
   paneSplits?: { row: number; cols: number[] }
   addons?: Addon[]
@@ -394,8 +400,10 @@ export interface Workspace {
 /** Per-workspace slice. The ACTIVE workspace's copy lives flat on AppState;
  *  inactive workspaces are stashed here and swapped in on switch. */
 export interface WorkspaceData {
-  focusedIds: string[]
+  focusedIds: (string | null)[]
   activePane: number
+  soloId: string | null
+  paneStacked: boolean
   minimizedIds: string[]
   paneSplits: { row: number; cols: number[] }
   maximizedPane: number | null
@@ -416,7 +424,12 @@ export interface AppState {
   activePane: number
   /** index into focusedIds of the pane that is currently maximized, or null */
   maximizedPane: number | null
-  focusedIds: string[]
+  /** pane slots: length = chosen layout (1–4), null = empty slot awaiting assignment */
+  focusedIds: (string | null)[]
+  /** Chrome-like solo view: session shown alone while the split group stays intact */
+  soloId: string | null
+  /** 2-pane layout orientation: true = stacked top/bottom instead of side by side */
+  paneStacked: boolean
   /** sessions minimized to the dock strip */
   minimizedIds: string[]
   /** divider ratios: row = first row height fraction, cols = first pane width fraction per row */

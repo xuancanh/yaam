@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useActions, useConductor } from '../store'
 import { ACCENT, hexToRgba, indicatorColor } from '../data'
 import type { Agent } from '../types'
@@ -6,87 +7,291 @@ import { NewSessionDialog } from './workspace/NewSessionDialog'
 import { Divider } from './workspace/Divider'
 import { Pane } from './workspace/Pane'
 
+type LayoutKey = '1' | '2col' | '2row' | '3' | '4'
+
+const LAYOUTS: { key: LayoutKey; n: number; stacked?: boolean; label: string; hint: string }[] = [
+  { key: '1', n: 1, label: 'Single', hint: '1 session' },
+  { key: '2col', n: 2, label: 'Split vertical', hint: 'side by side' },
+  { key: '2row', n: 2, stacked: true, label: 'Split horizontal', hint: 'top / bottom' },
+  { key: '3', n: 3, label: 'Three panes', hint: '2 top · 1 bottom' },
+  { key: '4', n: 4, label: 'Grid', hint: '2 × 2' },
+]
+
+/** mini preview of a pane layout, Chrome-split-menu style */
+function LayoutGlyph({ k, color }: { k: LayoutKey; color: string }) {
+  const cells: [number, number, number, number][] =
+    k === '1' ? [[1, 1, 20, 14]]
+    : k === '2col' ? [[1, 1, 9, 14], [12, 1, 9, 14]]
+    : k === '2row' ? [[1, 1, 20, 6], [1, 9, 20, 6]]
+    : k === '3' ? [[1, 1, 9, 6.5], [12, 1, 9, 6.5], [1, 9.5, 20, 5.5]]
+    : [[1, 1, 9, 6.5], [12, 1, 9, 6.5], [1, 9.5, 9, 5.5], [12, 9.5, 9, 5.5]]
+  return (
+    <svg width="22" height="16" viewBox="0 0 22 16" style={{ flexShrink: 0 }}>
+      {cells.map((c, i) => (
+        <rect key={i} x={c[0]} y={c[1]} width={c[2]} height={c[3]} rx="1.5"
+          fill="none" stroke={color} strokeWidth="1.4" />
+      ))}
+    </svg>
+  )
+}
+
+/** Chrome-like split button: dropdown of pane-layout options (1–4 sessions) */
+function LayoutMenu() {
+  const s = useConductor()
+  const { setPaneLayout } = useActions()
+  const [open, setOpen] = useState(false)
+  const count = Math.max(1, s.focusedIds.length)
+  const current: LayoutKey = count === 2 ? (s.paneStacked ? '2row' : '2col') : String(count) as LayoutKey
+  const split = count > 1
+
+  return (
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        className="icon-btn"
+        title="Pane layout"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: 38, height: 30, gap: 3,
+          background: split || open ? hexToRgba(ACCENT, 0.14) : 'transparent',
+          color: split || open ? 'var(--accent)' : '#9AA3B2',
+        }}
+      >
+        <LayoutGlyph k={current} color="currentColor" />
+        <span style={{ fontSize: 8, transform: open ? 'rotate(180deg)' : 'none' }}>▼</span>
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 44 }} />
+          <div style={{
+            position: 'absolute', top: 34, right: 0, width: 210, background: 'var(--panel2)',
+            border: '1px solid var(--line2)', borderRadius: 12, boxShadow: '0 18px 50px rgba(0,0,0,.55)',
+            zIndex: 45, overflow: 'hidden', padding: 6,
+          }}>
+            <div className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)', padding: '5px 10px 6px' }}>
+              PANE LAYOUT
+            </div>
+            {LAYOUTS.map(l => {
+              const active = l.key === current
+              return (
+                <button
+                  key={l.key}
+                  className={active ? '' : 'palette-item'}
+                  onClick={() => { setPaneLayout(l.n, l.stacked); setOpen(false) }}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                    background: active ? 'rgba(245,196,81,.08)' : 'transparent', border: 'none', borderRadius: 8,
+                    color: active ? 'var(--accent)' : 'var(--text)', textAlign: 'left',
+                  }}
+                >
+                  <LayoutGlyph k={l.key} color={active ? 'var(--accent)' : '#9AA3B2'} />
+                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600 }}>{l.label}</span>
+                  <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{l.hint}</span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** empty grid section: click to pick which session lives here */
+function EmptySlot({ index }: { index: number }) {
+  const s = useConductor()
+  const { assignPane, openNewSession, setActivePane } = useActions()
+  const [picking, setPicking] = useState(false)
+  const available = s.agents.filter(a =>
+    !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace && !s.focusedIds.includes(a.id))
+
+  return (
+    <div
+      onClick={() => setPicking(p => !p)}
+      style={{
+        flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', background: '#0A0B0F', cursor: 'pointer',
+      }}
+    >
+      {!picking ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: 20 }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: 12, border: '1.5px dashed var(--line2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)',
+          }}>
+            <Icon paths={IC.plus} size={18} stroke={1.8} />
+          </div>
+          <div className="grotesk" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--mut)' }}>Empty pane</div>
+          <div style={{ fontSize: 11.5, color: 'var(--dim)' }}>Click to assign a session</div>
+        </div>
+      ) : (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            width: 300, maxWidth: '86%', maxHeight: '82%', overflowY: 'auto', background: 'var(--panel2)',
+            border: '1px solid var(--line2)', borderRadius: 12, boxShadow: '0 18px 50px rgba(0,0,0,.55)',
+            padding: 6, cursor: 'default',
+          }}
+        >
+          <div className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)', padding: '5px 10px 6px' }}>
+            ASSIGN SESSION
+          </div>
+          {available.map(a => (
+            <button
+              key={a.id}
+              className="palette-item"
+              onClick={() => assignPane(index, a.id)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px',
+                background: 'transparent', border: 'none', borderRadius: 8, textAlign: 'left',
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: indicatorColor(a), flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</span>
+              <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>
+            </button>
+          ))}
+          {!available.length && (
+            <div style={{ fontSize: 11.5, color: 'var(--dim)', padding: '6px 10px 8px' }}>
+              All sessions are already on screen.
+            </div>
+          )}
+          <button
+            className="palette-item"
+            onClick={() => { setActivePane(index); openNewSession(); setPicking(false) }}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+              background: 'transparent', border: 'none', borderTop: '1px solid var(--line)',
+              marginTop: 4, color: 'var(--accent)', fontSize: 12.5, fontWeight: 600, borderRadius: 8,
+            }}
+          >
+            <Icon paths={IC.plus} size={13} stroke={2} />
+            New session…
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function Workspace() {
   const s = useConductor()
-  const { focusTab, addPane, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit } = useActions()
-  const focused = s.focusedIds
+  const { focusTab, setActivePane, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit } = useActions()
   const byId = new Map(s.agents.map(a => [a.id, a]))
+  const slots: (string | null)[] = s.focusedIds.length ? s.focusedIds : [null]
+
+  // slot → agent cells; a duplicated id degrades to an empty slot (two panes
+  // would fight over the same terminal element)
   const seen = new Set<string>()
-  let panes = focused
-    .map((id, i) => ({ agent: byId.get(id) || s.agents[0], i }))
-    .filter((p): p is { agent: Agent; i: number } => {
-      if (!p.agent || seen.has(p.agent.id)) return false
-      seen.add(p.agent.id)
-      return true
-    })
-  if (s.maximizedPane !== null && panes[s.maximizedPane]) panes = [panes[s.maximizedPane]]
-  const rows = panes.length <= 2 ? [panes] : panes.length <= 4 ? [panes.slice(0, 2), panes.slice(2)] : [panes.slice(0, 3), panes.slice(3)]
+  let cells: { agent: Agent | null; i: number }[] = slots.map((id, i) => {
+    const agent = (id && byId.get(id)) || null
+    if (agent && seen.has(agent.id)) return { agent: null, i }
+    if (agent) seen.add(agent.id)
+    return { agent, i }
+  })
+  // Chrome-like solo view: a tab outside the split renders alone (index -1);
+  // the split group stays intact underneath
+  const soloAgent = (s.soloId && byId.get(s.soloId)) || null
+  if (soloAgent) cells = [{ agent: soloAgent, i: -1 }]
+  else if (s.maximizedPane !== null && cells[s.maximizedPane]?.agent) cells = [cells[s.maximizedPane]]
+  const stacked2 = cells.length === 2 && s.paneStacked
+  const rows = stacked2 ? [[cells[0]], [cells[1]]]
+    : cells.length <= 2 ? [cells] : [cells.slice(0, 2), cells.slice(2)]
+
+  const wsAgents = s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
   const minimized = s.minimizedIds.map(id => byId.get(id)).filter((a): a is Agent => !!a)
+
+  // Chrome-like merge: sessions living in the split grid collapse into one
+  // grouped tab; everything else stays a plain tab
+  const members = slots
+    .map((id, slot) => ({ agent: id ? byId.get(id) : undefined, slot }))
+    .filter((m): m is { agent: Agent; slot: number } => !!m.agent)
+  const merged = members.length > 1
+  const inGrid = new Set(members.map(m => m.agent.id))
+  const looseTabs = wsAgents.filter(a => !merged || !inGrid.has(a.id))
+
+  const tabDot = (a: Agent) => {
+    const flash = a.status === 'needs' || a.attention
+    return (
+      <span style={{
+        width: flash ? 9 : 8, height: flash ? 9 : 8, borderRadius: '50%',
+        background: indicatorColor(a), flexShrink: 0,
+        animation: flash ? 'cpulse 1.1s ease-in-out infinite' : 'none',
+        boxShadow: flash ? `0 0 7px ${indicatorColor(a)}` : 'none',
+      }} />
+    )
+  }
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{
         height: 46, flexShrink: 0, background: 'var(--panel)', borderBottom: '1px solid var(--line)',
-        display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', overflowX: 'auto',
+        display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px',
       }}>
-        {s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace).map(a => {
-          const active = focused.includes(a.id)
-          const flash = a.status === 'needs' || a.attention
-          return (
-            <button
-              key={a.id}
-              className="tab-btn"
-              onClick={() => focusTab(a.id)}
-              style={{
-                background: active ? 'var(--panel2)' : 'transparent',
-                borderTop: `2px solid ${active ? a.color : 'transparent'}`,
-              }}
-            >
-              <span style={{
-                width: flash ? 9 : 8, height: flash ? 9 : 8, borderRadius: '50%',
-                background: indicatorColor(a), flexShrink: 0,
-                animation: flash ? 'cpulse 1.1s ease-in-out infinite' : 'none',
-                boxShadow: flash ? `0 0 7px ${indicatorColor(a)}` : 'none',
-              }} />
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: active ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
-              <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>
-            </button>
-          )
-        })}
-        <div style={{ flex: 1 }} />
-        <button
-          className="icon-btn"
-          title="Add split pane"
-          onClick={addPane}
-          style={{
-            width: 30, height: 30, flexShrink: 0,
-            background: focused.length > 1 ? hexToRgba(ACCENT, 0.14) : 'transparent',
-            color: focused.length > 1 ? 'var(--accent)' : '#9AA3B2',
-          }}
-        >
-          <Icon paths={['M4 5h16v14H4z', 'M12 5v14', 'M8 12h0', 'M16 10v4', 'M14 12h4']} size={17} />
-        </button>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto' }}>
+          {merged && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, padding: '0 4px 0 8px',
+              height: 34, background: soloAgent ? 'transparent' : 'var(--panel2)', borderRadius: 9,
+              border: `1px solid ${soloAgent ? 'var(--line2)' : hexToRgba(ACCENT, 0.35)}`,
+            }}>
+              <span title={`Split view · ${members.length} sessions`} style={{ color: soloAgent ? 'var(--dim)' : 'var(--accent)', display: 'flex', marginRight: 4 }}>
+                <LayoutGlyph k={slots.length === 2 ? (s.paneStacked ? '2row' : '2col') : String(slots.length) as LayoutKey} color="currentColor" />
+              </span>
+              {members.map(({ agent: a, slot }) => {
+                const active = !soloAgent && slot === s.activePane
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => setActivePane(slot)}
+                    title={`${a.name} · ${a.repo}`}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 7,
+                      background: active ? hexToRgba(a.color, 0.16) : 'transparent', border: 'none',
+                    }}
+                  >
+                    {tabDot(a)}
+                    <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {looseTabs.map(a => {
+            const active = soloAgent ? a.id === soloAgent.id : !merged && slots.includes(a.id)
+            return (
+              <button
+                key={a.id}
+                className="tab-btn"
+                title={merged ? 'Show in split view' : undefined}
+                onClick={() => focusTab(a.id)}
+                style={{
+                  background: active ? 'var(--panel2)' : 'transparent',
+                  borderTop: `2px solid ${active ? a.color : 'transparent'}`,
+                }}
+              >
+                {tabDot(a)}
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: active ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
+                <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>
+              </button>
+            )
+          })}
+        </div>
+        <LayoutMenu />
         <button className="icon-btn" title="New agent session" onClick={openNewSession} style={{ width: 30, height: 30, flexShrink: 0, color: '#9AA3B2' }}>
           <Icon paths={IC.plus} size={17} stroke={1.8} />
         </button>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--line)' }}>
-        {panes.length === 0 ? (
+        {wsAgents.length === 0 && slots.length <= 1 ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: '#0A0B0F' }}>
-            <div className="grotesk" style={{ fontSize: 17, fontWeight: 600, color: 'var(--mut)' }}>
-              {minimized.length ? 'All sessions minimized' : 'No sessions yet'}
+            <div className="grotesk" style={{ fontSize: 17, fontWeight: 600, color: 'var(--mut)' }}>No sessions yet</div>
+            <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
+              Launch any CLI as a live session — Claude Code, Codex, Aider, a REPL, or a plain shell.
             </div>
-            {!minimized.length && (
-              <>
-                <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
-                  Launch any CLI as a live session — Claude Code, Codex, Aider, a REPL, or a plain shell.
-                </div>
-                <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={openNewSession}>
-                  New agent session
-                </button>
-              </>
-            )}
+            <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={openNewSession}>
+              New agent session
+            </button>
           </div>
         ) : (
           rows.map((row, ri) => (
@@ -103,18 +308,22 @@ export function Workspace() {
                     : row.length === 2 ? `${(ci === 0 ? ratio : 1 - ratio) * 100}%`
                     : `${100 / row.length}%`
                   return (
-                    <div key={`${agent.id}-${i}`} style={{ display: 'contents' }}>
+                    <div key={`${agent?.id ?? 'empty'}-${i}`} style={{ display: 'contents' }}>
                       {ci > 0 && row.length === 2 && <Divider dir="col" onRatio={r => setColSplit(ri, r)} />}
                       {ci > 0 && row.length !== 2 && <div style={{ width: 1, flexShrink: 0 }} />}
                       <div style={{ width, minWidth: 0, display: 'flex' }}>
                         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                          <Pane
-                            agent={agent}
-                            index={i}
-                            active={i === s.activePane}
-                            showRing={focused.length > 1}
-                            maximized={s.maximizedPane === i}
-                          />
+                          {agent ? (
+                            <Pane
+                              agent={agent}
+                              index={i}
+                              active={i === -1 || i === s.activePane}
+                              showRing={cells.length > 1}
+                              maximized={i >= 0 && s.maximizedPane === i}
+                            />
+                          ) : (
+                            <EmptySlot index={i} />
+                          )}
                         </div>
                       </div>
                     </div>
