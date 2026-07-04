@@ -17,7 +17,7 @@ function FieldLabel({ children }: { children: string }) {
 /** Launch a template, configured agent type, terminal, or custom command. */
 export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const s = useConductor()
-  const { newRealSession, runTemplate } = useActions()
+  const { newRealSession, newChatSession, runTemplate } = useActions()
   const enabledTypes = useMemo(() => s.agentTypes.filter(t => t.enabled), [s.agentTypes])
   const [typeId, setTypeId] = useState(enabledTypes[0]?.id ?? 'shell')
   const [templateId, setTemplateId] = useState('')
@@ -25,8 +25,12 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const [command, setCommand] = useState(enabledTypes[0]?.model ?? '')
   const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
   const [task, setTask] = useState('')
+  const [chatName, setChatName] = useState('')
 
   const isShell = typeId === 'shell'
+  const isChat = typeId.startsWith('chat:')
+  const chatTypes = s.chatAgentTypes.filter(t => t.enabled)
+  const chatType = isChat ? s.chatAgentTypes.find(t => t.id === typeId.slice(5)) : undefined
   const isCustom = typeId === 'custom'
   const shell = shellOverride || s.settings.shell || 'zsh'
   const templates = s.templates ?? []
@@ -53,6 +57,11 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const launch = () => {
     if (tpl) {
       runTemplate(tpl.id, task.trim() || undefined)
+      onClose()
+      return
+    }
+    if (isChat) {
+      newChatSession(chatName.trim() || undefined, cwd, chatType?.id)
       onClose()
       return
     }
@@ -93,6 +102,11 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
                 {enabledTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 <option value="shell">Terminal</option>
                 <option value="custom">Custom command…</option>
+                {chatTypes.length > 0 && (
+                  <optgroup label="Chat agents — files, scripts, skills, MCP">
+                    {chatTypes.map(t => <option key={t.id} value={`chat:${t.id}`}>{t.name} · {t.model}</option>)}
+                  </optgroup>
+                )}
               </select>
             </div>
           )}
@@ -109,6 +123,22 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 5, lineHeight: 1.5 }}>
                 {tpl.mode === 'ephemeral' ? 'One-shot: runs the task and exits by itself.' : 'Interactive: stays open after the prompt.'}
                 {tpl.cwd ? ` · cwd ${tpl.cwd}` : ''}
+              </div>
+            </div>
+          ) : isChat ? (
+            <div>
+              <FieldLabel>Name</FieldLabel>
+              <input
+                value={chatName}
+                onChange={e => setChatName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') launch() }}
+                placeholder="chat (optional)"
+                disabled={!isTauri}
+                style={FIELD_STYLE}
+              />
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 5, lineHeight: 1.5 }}>
+                An in-app agent that chats like Claude Desktop: browses & edits files, runs commands and scripts, loads your skills, and calls your MCP servers.
+                {chatType ? ` Runs on ${chatType.name} (${chatType.model}).` : ''} Configure providers in Settings → Agent Types → Chat agents.
               </div>
             </div>
           ) : isShell ? (
@@ -151,13 +181,15 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button
             className="approve-btn"
-            style={{ flex: 1, padding: 9, opacity: isTauri && (tpl || effectiveCommand.trim()) ? 1 : 0.45 }}
+            style={{ flex: 1, padding: 9, opacity: isTauri && (tpl || isChat || effectiveCommand.trim()) ? 1 : 0.45 }}
             onClick={launch}
-            disabled={!isTauri || (!tpl && !effectiveCommand.trim())}
+            disabled={!isTauri || (!tpl && !isChat && !effectiveCommand.trim())}
           >
             Launch {tpl
               ? <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {tpl.name}</span>
-              : effectiveCommand.trim() && <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {effectiveCommand.trim().slice(0, 28)}</span>}
+              : isChat
+                ? <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {chatType?.name ?? 'chat'}</span>
+                : effectiveCommand.trim() && <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {effectiveCommand.trim().slice(0, 28)}</span>}
           </button>
           <button className="deny-btn" style={{ flex: 1, padding: 9 }} onClick={onClose}>
             Cancel

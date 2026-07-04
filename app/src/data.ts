@@ -167,13 +167,20 @@ export function seedState(): AppState {
         cwd: '', extraArgs: '', autoArchive: false,
       },
     ],
-    integrations: [
-      { id: 'github', name: 'GitHub', cat: 'Source control', detail: 'not connected', connected: false },
-      { id: 'linear', name: 'Linear', cat: 'Issue tracking', detail: 'not connected', connected: false },
-      { id: 'slack', name: 'Slack', cat: 'Notifications', detail: 'not connected', connected: false },
-      { id: 'postgres', name: 'Postgres', cat: 'Databases', detail: 'not connected', connected: false },
-      { id: 'figma', name: 'Figma (MCP)', cat: 'Design', detail: 'not connected', connected: false },
-      { id: 'sentry', name: 'Sentry', cat: 'Monitoring', detail: 'not connected', connected: false },
+    mcpServers: [],
+    chatAgentTypes: [
+      { id: 'chat-claude', name: 'Claude', provider: 'anthropic', model: 'claude-sonnet-5', enabled: true, desc: 'Shares the Master Brain credentials unless a key is set.' },
+      { id: 'chat-gpt', name: 'GPT', provider: 'openai', model: 'gpt-4o', enabled: false, desc: 'Needs an OpenAI API key.' },
+      { id: 'chat-deepseek', name: 'DeepSeek', provider: 'deepseek', model: 'deepseek-chat', enabled: false, desc: 'Needs a DeepSeek API key.' },
+      { id: 'chat-gemini', name: 'Gemini', provider: 'gemini', model: 'gemini-2.5-flash', enabled: false, desc: 'Needs a Google AI Studio key.' },
+    ],
+    skills: [
+      {
+        id: 'skill-commit-style',
+        name: 'clean-commits',
+        description: 'House rules for writing commit messages and splitting commits.',
+        body: 'When committing: imperative mood subject under 65 chars; body explains WHY, wrapped at 72; one logical change per commit — split refactors from behavior changes; never commit commented-out code or debug prints.',
+      },
     ],
     settings: {
       autoRoute: true, approveDestructive: true, followMode: true,

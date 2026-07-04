@@ -3,6 +3,7 @@ import { useActions } from '../../store'
 import { ACCENT, memTokens } from '../../data'
 import type { Agent } from '../../types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../ui'
+import { ChatPane } from './ChatPane'
 import { FilesPane } from './FilesPane'
 import { TerminalPane } from './TerminalPane'
 
@@ -62,7 +63,7 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         <button className="icon-btn" title="Tools & permissions" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); openPanel(agent.id, 'tools') }}>
           <Icon paths={[...IC.sliders, 'M6 9m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 15m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']} size={15} />
         </button>
-        {(agent.status === 'idle' || agent.status === 'error') && (
+        {agent.kind !== 'chat' && (agent.status === 'idle' || agent.status === 'error') && (
           <button className="icon-btn" title="Resume session" style={{ width: 27, height: 27, borderRadius: 7, color: 'var(--green)' }} onClick={e => { e.stopPropagation(); resume(agent.id) }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z" /></svg>
           </button>
@@ -85,7 +86,11 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         </button>
       </div>
 
-      {filesOpen ? <FilesPane agent={agent} active={active} /> : <TerminalPane agent={agent} active={active} />}
+      {filesOpen
+        ? <FilesPane agent={agent} active={active} />
+        : agent.kind === 'chat'
+          ? <ChatPane agent={agent} active={active} />
+          : <TerminalPane agent={agent} active={active} />}
 
       <div className="mono" style={{
         height: 26, flexShrink: 0, background: 'var(--panel)', borderTop: '1px solid var(--line)',

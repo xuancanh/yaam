@@ -52,8 +52,8 @@ export interface Agent {
   branch: string
   status: AgentStatus
   model: string
-  /** 'real' agents are OS processes managed by the Tauri backend; the rest are simulated */
-  kind?: 'sim' | 'real'
+  /** 'real' = PTY process · 'chat' = in-app LLM chat agent (Claude-Desktop-style) */
+  kind?: 'sim' | 'real' | 'chat'
   cmd?: string
   cwd?: string
   /** executable used for a plain terminal; bypasses the generic /bin/sh command wrapper */
@@ -93,6 +93,18 @@ export interface Agent {
   autoArchive?: boolean
   /** template this session was launched from */
   templateId?: string
+  /** chat-mode conversation (kind === 'chat') */
+  chatLog?: ChatMsg[]
+  /** which ChatAgentType powers this chat session */
+  chatTypeId?: string
+}
+
+/** one message in a chat-mode session */
+export interface ChatMsg {
+  id: string
+  role: 'user' | 'assistant' | 'tool'
+  text: string
+  at: number
 }
 
 export interface RouteEntry {
@@ -238,12 +250,45 @@ export interface AgentType {
   probe?: 'claude' | 'codex'
 }
 
-export interface Integration {
+/** a streamable-HTTP MCP server chat agents can call tools on */
+export interface McpServer {
   id: string
   name: string
-  cat: string
-  detail: string
-  connected: boolean
+  /** http(s) endpoint implementing MCP streamable HTTP */
+  url: string
+  /** extra request headers, one "KEY: value" per line (auth tokens etc.) */
+  headers?: string
+  enabled: boolean
+  /** last successful connection's tool count */
+  toolCount?: number
+  /** last connection error, if any */
+  lastError?: string
+}
+
+/** a configurable chat-agent type: provider + model + credentials */
+export interface ChatAgentType {
+  id: string
+  name: string
+  desc?: string
+  /** provider id from llm/client PROVIDERS (anthropic, openai, deepseek, kimi, gemini, glm, bedrock, custom, anthropic-compat) */
+  provider: string
+  model: string
+  /** empty = share the Master Brain credentials when the provider matches */
+  apiKey?: string
+  /** endpoint for the custom / anthropic-compat providers */
+  baseUrl?: string
+  /** extra persona appended to the chat agent's system prompt */
+  systemPrompt?: string
+  enabled: boolean
+}
+
+/** a reusable instruction pack chat agents can load on demand */
+export interface Skill {
+  id: string
+  name: string
+  description: string
+  /** the instructions injected when the skill is loaded */
+  body: string
 }
 
 export interface OrchestrationSettings {
@@ -433,7 +478,9 @@ export interface PersistedState {
   toolsCatalog: CatalogTool[]
   agentTypes: AgentType[]
   templates?: AgentTemplate[]
-  integrations: Integration[]
+  mcpServers?: McpServer[]
+  skills?: Skill[]
+  chatAgentTypes?: ChatAgentType[]
   workspaces?: Workspace[]
   activeWorkspace?: string
   workspaceData?: Record<string, WorkspaceData>
@@ -534,7 +581,9 @@ export interface AppState {
   notifications: Notification[]
   agentTypes: AgentType[]
   templates: AgentTemplate[]
-  integrations: Integration[]
+  mcpServers: McpServer[]
+  skills: Skill[]
+  chatAgentTypes: ChatAgentType[]
   settings: OrchestrationSettings
   tasks: BoardTask[]
 }

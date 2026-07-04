@@ -21,8 +21,11 @@ export const PROVIDERS: ProviderDef[] = [
   { id: 'openai', label: 'OpenAI', base: 'https://api.openai.com/v1', protocol: 'openai', models: ['gpt-4o', 'gpt-4o-mini', 'o4-mini'], keyHint: 'sk-…' },
   { id: 'deepseek', label: 'DeepSeek', base: 'https://api.deepseek.com', protocol: 'openai', models: ['deepseek-chat', 'deepseek-reasoner'], keyHint: 'sk-…' },
   { id: 'kimi', label: 'Kimi (Moonshot)', base: 'https://api.moonshot.ai/v1', protocol: 'openai', models: ['kimi-k2-0905-preview', 'kimi-latest'], keyHint: 'sk-…' },
+  { id: 'gemini', label: 'Google Gemini', base: 'https://generativelanguage.googleapis.com/v1beta/openai', protocol: 'openai', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], keyHint: 'AIza…' },
+  { id: 'glm', label: 'GLM (Z.ai / Zhipu)', base: 'https://api.z.ai/api/paas/v4', protocol: 'openai', models: ['glm-4.6', 'glm-4.5-air'], keyHint: 'api key' },
   { id: 'bedrock', label: 'AWS Bedrock (Claude)', base: '', protocol: 'anthropic', models: ['us.anthropic.claude-sonnet-4-5-20250929-v1:0', 'us.anthropic.claude-haiku-4-5-20251001-v1:0', 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'], keyHint: 'no key — AWS credential chain' },
   { id: 'custom', label: 'Custom (OpenAI-compatible)', base: '', protocol: 'openai', models: [], keyHint: 'api key' },
+  { id: 'anthropic-compat', label: 'Custom (Anthropic-compatible)', base: '', protocol: 'anthropic', models: [], keyHint: 'api key' },
 ]
 
 /** Resolve a provider id, falling back to the first supported provider. */
@@ -127,7 +130,8 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
     return JSON.parse(raw) as ApiResponse
   }
   // Build the request with a supplied key so auth failures can refresh and retry once.
-  const send = async (key: string) => doFetch(`${cfg.provider.base}/v1/messages`, {
+  const anthropicBase = (cfg.provider.id === 'anthropic-compat' ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
+  const send = async (key: string) => doFetch(`${anthropicBase}/v1/messages`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -188,7 +192,7 @@ function toOpenAiMessages(system: string, messages: ApiMessage[]): OaiMessage[] 
 
 /** Adapt one request to OpenAI chat completions and normalize its response. */
 async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
-  const base = (cfg.provider.id === 'custom' ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
+  const base = (cfg.provider.models.length === 0 && cfg.baseUrl ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
   if (!base) throw new Error('custom provider needs a base URL (Settings → Master Brain)')
   // Build the request with a supplied key so auth failures can refresh and retry once.
   const send = async (key: string) => doFetch(`${base}/chat/completions`, {
@@ -236,6 +240,35 @@ export function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[], 
  *  Bedrock has no API key — it authenticates via the AWS credential chain. */
 export function hasCreds(settings: AppState['settings']): boolean {
   return settings.provider === 'bedrock' || Boolean(settings.apiKey) || Boolean(settings.credCmd.trim())
+}
+
+/** Config for a chat-agent type: its own provider/key/base, falling back to
+ *  the Master Brain credentials when it shares the provider and sets no key. */
+export function buildChatCfg(
+  t: { provider: string; model: string; apiKey?: string; baseUrl?: string },
+  settings: AppState['settings'],
+): LlmConfig {
+  const shared = t.provider === settings.provider && !t.apiKey
+  return {
+    provider: providerFor(t.provider),
+    baseUrl: t.baseUrl || (shared ? settings.baseUrl : ''),
+    apiKey: t.apiKey || (shared ? settings.apiKey : ''),
+    model: t.model,
+    awsRegion: settings.awsRegion,
+    awsProfile: settings.awsProfile,
+    awsRefreshCmd: settings.awsRefreshCmd,
+    credCmd: shared ? settings.credCmd : '',
+  }
+}
+
+/** True when a chat-agent type can authenticate (own key, Bedrock chain, or shared Master creds). */
+export function chatTypeHasCreds(
+  t: { provider: string; apiKey?: string },
+  settings: AppState['settings'],
+): boolean {
+  if (t.provider === 'bedrock') return true
+  if (t.apiKey) return true
+  return t.provider === settings.provider && (Boolean(settings.apiKey) || Boolean(settings.credCmd.trim()))
 }
 
 /** Project persisted orchestration settings into the provider-neutral client config. */

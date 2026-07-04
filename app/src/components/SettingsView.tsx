@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useActions, useConductor } from '../store'
 import { hexToRgba } from '../data'
 import { pickFolder } from '../native'
@@ -10,6 +11,234 @@ const FIELD_STYLE = {
   padding: '7px 10px', color: 'var(--text)', outline: 'none', fontSize: 12.5,
   fontFamily: "'JetBrains Mono', monospace",
 } as const
+
+/** MCP servers chat agents can call tools on (streamable HTTP). */
+function McpSection() {
+  const s = useConductor()
+  const { addMcpServer, updateMcpServer, removeMcpServer, connectMcpServer } = useActions()
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+  const [headers, setHeaders] = useState('')
+
+  return (
+    <>
+      <SectionLabel>MCP SERVERS — tools for chat agents</SectionLabel>
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
+        {s.mcpServers.length === 0 && (
+          <div style={{ padding: '14px 0', fontSize: 12, color: 'var(--dim)' }}>
+            No MCP servers yet — add a streamable-HTTP endpoint below; its tools become available to every chat agent.
+          </div>
+        )}
+        {s.mcpServers.map(m => (
+          <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: '1px solid #1a1e26' }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+              background: m.lastError ? 'var(--red-soft)' : m.toolCount !== undefined ? 'var(--green)' : '#3a4150',
+            }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {m.name}
+                <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 7 }}>
+                  {m.lastError ? 'error' : m.toolCount !== undefined ? `${m.toolCount} tools` : 'not connected'}
+                </span>
+              </div>
+              <div className="mono" title={m.lastError ?? m.url} style={{ fontSize: 10.5, color: m.lastError ? 'var(--red-soft)' : 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {m.lastError ?? m.url}
+              </div>
+            </div>
+            <button className="open-btn" style={{ flex: 'none', padding: '4px 11px', fontSize: 11.5 }} onClick={() => { void connectMcpServer(m.id) }}>
+              {m.toolCount !== undefined ? 'Reconnect' : 'Connect'}
+            </button>
+            <Switch on={m.enabled} onToggle={() => updateMcpServer(m.id, { enabled: !m.enabled })} />
+            <button className="icon-btn danger" title="Remove server" style={{ width: 26, height: 26 }} onClick={() => removeMcpServer(m.id)}>
+              <Icon paths={IC.close} size={12} stroke={2} />
+            </button>
+          </div>
+        ))}
+        <div style={{ padding: '13px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="name" style={{ ...FIELD_STYLE, width: 140 }} />
+            <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/mcp (streamable HTTP endpoint)" style={{ ...FIELD_STYLE, flex: 1 }} />
+            <button
+              className="open-btn"
+              style={{ flex: 'none', padding: '6px 13px', fontSize: 12, opacity: url.trim() ? 1 : 0.5 }}
+              disabled={!url.trim()}
+              onClick={() => { addMcpServer(name, url, headers); setName(''); setUrl(''); setHeaders('') }}
+            >
+              Add & connect
+            </button>
+          </div>
+          <textarea
+            value={headers}
+            onChange={e => setHeaders(e.target.value)}
+            placeholder={'extra headers, one per line — e.g.\nAuthorization: Bearer sk-…'}
+            rows={2}
+            style={{ ...FIELD_STYLE, resize: 'vertical', fontSize: 11.5 }}
+          />
+        </div>
+      </div>
+    </>
+  )
+}
+
+/** Skills registry: reusable instruction packs chat agents load on demand. */
+function SkillsSection() {
+  const s = useConductor()
+  const { addSkill, updateSkill, removeSkill } = useActions()
+  const [openId, setOpenId] = useState<string | null>(null)
+
+  return (
+    <>
+      <SectionLabel>SKILLS — reusable instructions for chat agents</SectionLabel>
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
+        {s.skills.map(sk => (
+          <div key={sk.id} style={{ padding: '11px 0', borderBottom: '1px solid #1a1e26' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                onClick={() => setOpenId(openId === sk.id ? null : sk.id)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--dim)', fontSize: 10, width: 16, cursor: 'pointer' }}
+              >
+                {openId === sk.id ? '▾' : '▸'}
+              </button>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{sk.name}</span>
+                <span style={{ fontSize: 11.5, color: 'var(--mut)', marginLeft: 8 }}>{sk.description || 'no description'}</span>
+              </div>
+              <button className="icon-btn danger" title="Remove skill" style={{ width: 24, height: 24 }} onClick={() => removeSkill(sk.id)}>
+                <Icon paths={IC.close} size={11} stroke={2} />
+              </button>
+            </div>
+            {openId === sk.id && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '9px 0 4px 26px' }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input value={sk.name} onChange={e => updateSkill(sk.id, { name: e.target.value.replace(/\s+/g, '-').toLowerCase() })} placeholder="name (agents load it by this)" style={{ ...FIELD_STYLE, width: 200 }} />
+                  <input value={sk.description} onChange={e => updateSkill(sk.id, { description: e.target.value })} placeholder="one-line description — agents pick skills by this" style={{ ...FIELD_STYLE, flex: 1 }} />
+                </div>
+                <textarea
+                  value={sk.body}
+                  onChange={e => updateSkill(sk.id, { body: e.target.value })}
+                  placeholder="the instructions injected when a chat agent loads this skill"
+                  rows={4}
+                  style={{ ...FIELD_STYLE, resize: 'vertical', fontFamily: "'IBM Plex Sans', system-ui, sans-serif", lineHeight: 1.5 }}
+                />
+              </div>
+            )}
+          </div>
+        ))}
+        <div style={{ padding: '12px 0' }}>
+          <button className="open-btn" style={{ flex: 'none', padding: '6px 13px', fontSize: 12 }} onClick={() => setOpenId(addSkill())}>
+            New skill
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
+/** Small header button that adds a chat-agent type (needs its own hook scope). */
+function AddChatTypeButton() {
+  const { addChatAgentType } = useActions()
+  return (
+    <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5 }} onClick={addChatAgentType}>
+      + Add chat agent
+    </button>
+  )
+}
+
+/** Configurable chat-agent types: provider, model, credentials, persona. */
+function ChatTypesSection() {
+  const s = useConductor()
+  const { updateChatAgentType, deleteChatAgentType } = useActions()
+  return (
+    <>
+      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', marginBottom: 26 }}>
+        {s.chatAgentTypes.map(t => {
+          const prov = providerFor(t.provider)
+          const needsBase = prov.models.length === 0
+          const sharesMaster = t.provider === s.settings.provider && !t.apiKey
+          return (
+            <div key={t.id} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: 15, display: 'flex', gap: 12 }}>
+              <div className="mono" style={{
+                width: 38, height: 38, borderRadius: 10, background: hexToRgba('#7FD1FF', 0.14),
+                border: '1px solid ' + hexToRgba('#7FD1FF', 0.4), display: 'flex', alignItems: 'center',
+                justifyContent: 'center', fontSize: 12, fontWeight: 600, color: '#7FD1FF', flexShrink: 0,
+              }}>
+                {t.name.slice(0, 2).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <EditableName name={t.name} onRename={name => updateChatAgentType(t.id, { name })} />
+                  <button
+                    className="icon-btn danger"
+                    title="Delete chat agent type"
+                    style={{ width: 22, height: 22, borderRadius: 6, marginLeft: 'auto' }}
+                    onClick={() => deleteChatAgentType(t.id)}
+                  >
+                    <Icon paths={IC.close} size={11} stroke={2} />
+                  </button>
+                </div>
+                {t.desc && <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 4, lineHeight: 1.45 }}>{t.desc}</div>}
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <select
+                    value={t.provider}
+                    onChange={e => {
+                      const next = providerFor(e.target.value)
+                      updateChatAgentType(t.id, { provider: next.id, model: next.models[0] ?? t.model })
+                    }}
+                    className="select-field"
+                    style={{ ...FIELD_STYLE, flex: 1, padding: '5px 9px', fontSize: 11.5 }}
+                  >
+                    {PROVIDERS.map(pr => <option key={pr.id} value={pr.id}>{pr.label}</option>)}
+                  </select>
+                  <input
+                    value={t.model}
+                    onChange={e => updateChatAgentType(t.id, { model: e.target.value })}
+                    placeholder="model"
+                    list={'models-' + t.id}
+                    style={{ ...FIELD_STYLE, flex: 1, padding: '5px 9px', fontSize: 11.5 }}
+                  />
+                  <datalist id={'models-' + t.id}>
+                    {prov.models.map(m => <option key={m} value={m} />)}
+                  </datalist>
+                </div>
+                {t.provider !== 'bedrock' && (
+                  <input
+                    type="password"
+                    value={t.apiKey ?? ''}
+                    onChange={e => updateChatAgentType(t.id, { apiKey: e.target.value || undefined })}
+                    placeholder={sharesMaster ? 'API key (empty = share Master Brain credentials)' : 'API key · ' + prov.keyHint}
+                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11.5 }}
+                  />
+                )}
+                {needsBase && (
+                  <input
+                    value={t.baseUrl ?? ''}
+                    onChange={e => updateChatAgentType(t.id, { baseUrl: e.target.value || undefined })}
+                    placeholder={prov.protocol === 'anthropic' ? 'base URL · https://…  (Anthropic-compatible /v1/messages)' : 'base URL · https://…/v1  (OpenAI-compatible)'}
+                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11.5 }}
+                  />
+                )}
+                <textarea
+                  value={t.systemPrompt ?? ''}
+                  onChange={e => updateChatAgentType(t.id, { systemPrompt: e.target.value || undefined })}
+                  placeholder="persona (optional) · appended to the agent's system prompt"
+                  rows={2}
+                  style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11, resize: 'vertical', minHeight: 30, fontFamily: "'IBM Plex Sans', system-ui, sans-serif" }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
+                  <span style={{ fontSize: 11, color: t.enabled ? 'var(--green)' : '#6B7280', fontWeight: 600 }}>
+                    {t.enabled ? 'Enabled' : 'Disabled'}{t.provider === 'bedrock' ? ' · AWS chain' : t.apiKey ? ' · own key' : sharesMaster ? ' · shares Master creds' : ' · no credentials'}
+                  </span>
+                  <Switch on={t.enabled} onToggle={() => updateChatAgentType(t.id, { enabled: !t.enabled })} />
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}
 
 /** Render a consistent settings-section heading. */
 function SectionLabel({ children }: { children: string }) {
@@ -27,9 +256,20 @@ const ORCHESTRATION: Array<{ id: 'autoRoute' | 'approveDestructive' | 'followMod
 ]
 
 /** Render global provider, orchestration, session, agent-type, and addon settings. */
+const SETTINGS_TABS = [
+  ['general', 'General'],
+  ['brain', 'Master Brain'],
+  ['types', 'Agent Types'],
+  ['mcp', 'MCP Servers'],
+  ['skills', 'Skills'],
+] as const
+type SettingsTab = (typeof SETTINGS_TABS)[number][0]
+
 export function SettingsView() {
   const s = useConductor()
-  const { toggleSetting, toggleAgentType, toggleIntegration, updateSettings, setAgentTypeCmd, updateAgentType, addAgentType, deleteAgentType } = useActions()
+  const { toggleSetting, toggleAgentType, updateSettings, setAgentTypeCmd, updateAgentType, addAgentType, deleteAgentType } = useActions()
+  const [tab, setTab] = useState<SettingsTab>('general')
+  const [typesTab, setTypesTab] = useState<'terminal' | 'chat'>('terminal')
 
   // Fill the default working directory from the native folder picker.
   const browseDefaultCwd = async () => {
@@ -40,11 +280,32 @@ export function SettingsView() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <ViewHeader title="Settings">
-        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Agent types, integrations, and orchestration policy</span>
+        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Agent types, MCP servers, skills, and orchestration policy</span>
       </ViewHeader>
+      <div style={{
+        display: 'flex', gap: 4, padding: '10px 22px 0', borderBottom: '1px solid var(--line)',
+        background: 'var(--panel)', flexShrink: 0,
+      }}>
+        {SETTINGS_TABS.map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            style={{
+              background: 'transparent', border: 'none', padding: '8px 14px 10px', fontSize: 12.5,
+              fontWeight: 600, cursor: 'pointer',
+              color: tab === id ? 'var(--accent)' : 'var(--mut)',
+              borderBottom: `2px solid ${tab === id ? 'var(--accent)' : 'transparent'}`,
+              marginBottom: -1,
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: 22 }}>
         <div style={{ maxWidth: 820 }}>
 
+          {tab === 'brain' && <>
           <SectionLabel>MASTER BRAIN</SectionLabel>
           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
@@ -214,6 +475,9 @@ export function SettingsView() {
             )}
           </div>
 
+          </>}
+
+          {tab === 'general' && <>
           <SectionLabel>SESSION DEFAULTS</SectionLabel>
           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
@@ -257,12 +521,37 @@ export function SettingsView() {
             ))}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
-            <SectionLabel>AGENT TYPES</SectionLabel>
-            <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5, marginBottom: 11 }} onClick={addAgentType}>
-              + Add agent type
-            </button>
+          </>}
+
+          {tab === 'types' && <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 9, padding: 3 }}>
+              {([['terminal', 'Terminal agents'], ['chat', 'Chat agents']] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setTypesTab(id)}
+                  style={{
+                    border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    background: typesTab === id ? 'rgba(245,196,81,.14)' : 'transparent',
+                    color: typesTab === id ? 'var(--accent)' : 'var(--mut)',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div style={{ flex: 1 }} />
+            {typesTab === 'terminal'
+              ? <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5 }} onClick={addAgentType}>+ Add terminal agent</button>
+              : <AddChatTypeButton />}
           </div>
+          <div style={{ fontSize: 11.5, color: 'var(--dim)', marginBottom: 12, lineHeight: 1.5 }}>
+            {typesTab === 'terminal'
+              ? 'Terminal agents are external CLIs launched in PTY sessions (claude, codex, …).'
+              : 'Chat agents are in-app Claude-Desktop-style agents (files, scripts, skills, MCP) — each type picks its own provider, model, and credentials.'}
+          </div>
+          {typesTab === 'chat' && <ChatTypesSection />}
+          {typesTab === 'terminal' && (
           <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', marginBottom: 26 }}>
             {s.agentTypes.map(t => (
               <div key={t.id} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: 15, display: 'flex', gap: 12 }}>
@@ -315,30 +604,11 @@ export function SettingsView() {
           </div>
 
 
-          <SectionLabel>INTEGRATIONS</SectionLabel>
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))' }}>
-            {s.integrations.map(g => (
-              <div key={g.id} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: 15 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div className="grotesk" style={{
-                    width: 34, height: 34, borderRadius: 9, background: 'var(--panel3)', border: '1px solid var(--line2)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: '#C7CCD6',
-                  }}>
-                    {g.name.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{g.name}</div>
-                    <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>{g.cat}</div>
-                  </div>
-                  <Switch on={g.connected} onToggle={() => toggleIntegration(g.id)} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 11 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: g.connected ? 'var(--green)' : '#3a4150' }} />
-                  <span style={{ fontSize: 11.5, color: g.connected ? 'var(--green)' : 'var(--dim)' }}>{g.detail}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+          )}
+          </>}
+
+          {tab === 'mcp' && <McpSection />}
+          {tab === 'skills' && <SkillsSection />}
 
         </div>
       </div>

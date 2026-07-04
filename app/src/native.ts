@@ -102,6 +102,25 @@ export async function httpGetText(url: string): Promise<string> {
   return await res.text()
 }
 
+/** POST text (JSON-RPC etc.) through Tauri's HTTP plugin; returns body + headers of interest. */
+export async function httpPostText(url: string, body: string, headers: Record<string, string>): Promise<{ text: string; contentType: string; mcpSessionId: string | null }> {
+  const res = await (isTauri ? tauriFetch : fetch)(url, { method: 'POST', headers, body })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`)
+  return { text, contentType: res.headers.get('content-type') ?? '', mcpSessionId: res.headers.get('mcp-session-id') }
+}
+
+export interface ExecResult {
+  code: number
+  output: string
+}
+
+/** One-shot shell execution with timeout + output cap (chat agents' run_command). */
+export async function execCommand(cmd: string, cwd?: string, timeoutMs?: number): Promise<ExecResult> {
+  if (!isTauri) throw new Error('running commands requires the desktop app')
+  return await invoke<ExecResult>('exec_command', { cmd, cwd: cwd || null, timeoutMs: timeoutMs ?? null })
+}
+
 /** Open the native single-file picker when available. */
 export async function pickFile(): Promise<string | null> {
   if (!isTauri) return null

@@ -435,6 +435,78 @@ pub async fn run_credential_command(cmd: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+#[derive(serde::Serialize)]
+pub struct ExecResult {
+    pub code: i32,
+    pub output: String,
+}
+
+/// One-shot shell execution for chat agents: run a command, capture merged
+/// output (capped), enforce a wall-clock timeout by killing the child.
+#[tauri::command]
+pub async fn exec_command(
+    cmd: String,
+    cwd: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<ExecResult, String> {
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(60_000).min(300_000));
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut c = Command::new("/bin/sh");
+        c.args(["-lc", &cmd])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        if let Some(dir) = cwd.filter(|d| !d.trim().is_empty()) {
+            c.current_dir(expand_tilde(&dir));
+        }
+        let mut child = c.spawn().map_err(|e| format!("failed to run: {e}"))?;
+        let start = std::time::Instant::now();
+        loop {
+            match child.try_wait().map_err(|e| e.to_string())? {
+                Some(status) => {
+                    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+                    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    if !err.trim().is_empty() {
+                        if !text.trim().is_empty() {
+                            text.push('\n');
+                        }
+                        text.push_str(&err);
+                    }
+                    // cap what travels back to the LLM
+                    const CAP: usize = 40_000;
+                    if text.len() > CAP {
+                        let tail_at = text.len() - CAP;
+                        let cut = text
+                            .char_indices()
+                            .map(|(i, _)| i)
+                            .find(|&i| i >= tail_at)
+                            .unwrap_or(0);
+                        text = format!("… (output truncated)\n{}", &text[cut..]);
+                    }
+                    return Ok(ExecResult {
+                        code: status.code().unwrap_or(-1),
+                        output: text,
+                    });
+                }
+                None => {
+                    if start.elapsed() > timeout {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Ok(ExecResult {
+                            code: -1,
+                            output: format!("command timed out after {}s and was killed", timeout.as_secs()),
+                        });
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 /// Read one UTF-8 text file after expanding its home-directory shorthand.
 pub fn read_text_file(path: String) -> Result<String, String> {

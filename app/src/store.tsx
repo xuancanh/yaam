@@ -3,7 +3,7 @@ import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 
 import type { ReactNode } from 'react'
 import type {
   Addon, AddonHookName, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
-  NotifKind, Notification, Panel, PersistedState, TabGroup, TaskChatMsg, View,
+  ChatAgentType, ChatMsg, McpServer, NotifKind, Notification, Panel, PersistedState, Skill, TabGroup, TaskChatMsg, View,
 } from './types'
 import { ACCENT, defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState, SHELLS } from './data'
 import * as native from './native'
@@ -18,6 +18,10 @@ import { ALL_PERMISSIONS, addonSnapshot, dispatchAddonRpc, enforcePermissions, e
 import { runAddonEditorTurn } from './llm/addon-editor'
 import { runAddonAgentTurn } from './llm/addon-agent'
 import { generateAddonPackage } from './llm/addon-gen'
+import { runChatTurn } from './llm/chat-agent'
+import { buildChatCfg, chatTypeHasCreds } from './llm/client'
+import { mcpConnect } from './mcp'
+import type { McpSession } from './mcp'
 import { estimateLogUsage, estimateOutputUsage } from './usage'
 import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
@@ -148,7 +152,23 @@ export interface ConductorActions {
   closeDrawer: () => void
   approveDiff: (id: string) => void
   requestChanges: (id: string) => void
-  toggleIntegration: (id: string) => void
+  /** MCP servers (chat agents call their tools) */
+  addMcpServer: (name: string, url: string, headers?: string) => void
+  updateMcpServer: (id: string, patch: Partial<Pick<McpServer, 'name' | 'url' | 'headers' | 'enabled'>>) => void
+  removeMcpServer: (id: string) => void
+  /** (re)connect and cache the server's tool list; resolves to error or '' */
+  connectMcpServer: (id: string) => Promise<string>
+  /** skills registry */
+  addSkill: () => string
+  updateSkill: (id: string, patch: Partial<Pick<Skill, 'name' | 'description' | 'body'>>) => void
+  removeSkill: (id: string) => void
+  /** chat-agent types (provider + model + credentials presets) */
+  addChatAgentType: () => void
+  updateChatAgentType: (id: string, patch: Partial<Omit<ChatAgentType, 'id'>>) => void
+  deleteChatAgentType: (id: string) => void
+  /** chat-mode sessions */
+  newChatSession: (name?: string, cwd?: string, chatTypeId?: string) => void
+  sendChatMessage: (agentId: string, text: string) => void
   toggleAgentType: (id: string) => void
   toggleSetting: (k: 'autoRoute' | 'approveDestructive' | 'followMode') => void
   updateSettings: (patch: Partial<AppState['settings']>) => void
@@ -906,7 +926,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             ? p.activeWorkspace
             : workspaces[0].id
           const restoredAgents: Agent[] = (p.agents ?? [])
-            .filter(a => a.kind === 'real' && a.cmd)
+            .filter(a => (a.kind === 'real' && a.cmd) || a.kind === 'chat')
             .map(a => {
               const log = (a.log ?? []).slice(-200)
               const usage = a.usageVersion === 1 ? { used: a.used, cost: a.cost } : estimateLogUsage(log)
@@ -965,7 +985,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
                   .concat(p.agentTypes.filter(x => x.custom && !s.agentTypes.some(t => t.id === x.id)))
               : s.agentTypes,
             templates: p.templates ?? s.templates ?? [],
-            integrations: p.integrations ?? s.integrations,
+            mcpServers: p.mcpServers ?? s.mcpServers,
+            skills: p.skills ?? s.skills,
+            chatAgentTypes: p.chatAgentTypes ?? s.chatAgentTypes,
             agents: restoredAgents.length ? restoredAgents : s.agents,
             groups,
             activeGroup,
@@ -1031,7 +1053,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       toolsCatalog: state.toolsCatalog,
       agentTypes: state.agentTypes,
       templates: state.templates,
-      integrations: state.integrations,
+      mcpServers: state.mcpServers,
+      skills: state.skills,
+      chatAgentTypes: state.chatAgentTypes,
       workspaces: state.workspaces,
       activeWorkspace: state.activeWorkspace,
       workspaceData: state.workspaceData,
@@ -1049,7 +1073,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       native.saveStateFile(JSON.stringify(persisted)).catch(() => {})
     }, 800)
   }, [
-    state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.templates, state.integrations,
+    state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.templates, state.mcpServers, state.skills, state.chatAgentTypes,
     state.agents, state.groups, state.activeGroup, state.minimizedIds,
     state.addons, state.addonStorage, state.messages, state.events, state.notifications,
     state.workspaces, state.activeWorkspace, state.workspaceData,
@@ -1062,7 +1086,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const st = stateRef.current
       const persisted: PersistedState = {
         tasks: st.tasks, crons: st.crons, settings: st.settings,
-        toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, templates: st.templates, integrations: st.integrations,
+        toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, templates: st.templates, mcpServers: st.mcpServers, skills: st.skills, chatAgentTypes: st.chatAgentTypes,
         workspaces: st.workspaces, activeWorkspace: st.activeWorkspace, workspaceData: st.workspaceData,
         agents: st.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
         groups: st.groups, activeGroup: st.activeGroup,
@@ -1463,6 +1487,109 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [logEvent, makeAddonApi])
 
   runAddonAgentRef.current = runAddonAgent
+
+  // ---- chat-mode sessions: Claude-Desktop-style agents living in panes ----
+  const chatHistories = useRef<Map<string, ApiMessage[]>>(new Map())
+  const chatBusy = useRef<Set<string>>(new Set())
+  const mcpSessionsRef = useRef<Map<string, McpSession>>(new Map())
+
+  // Append one visible message to a chat session's persisted transcript.
+  const pushChatLog = useCallback((id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => {
+    dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === id
+        ? { ...a, chatLog: [...(a.chatLog ?? []), { id: mkId('cm'), at: Date.now(), ...msg }].slice(-200) }
+        : a),
+    }))
+  }, [])
+
+  // (Re)connect one MCP server and cache its live session + tool inventory.
+  const connectMcp = useCallback(async (id: string): Promise<string> => {
+    const server = stateRef.current.mcpServers.find(x => x.id === id)
+    if (!server) return 'server not found'
+    try {
+      const session = await mcpConnect(server.name, server.url, server.headers)
+      mcpSessionsRef.current.set(id, session)
+      dispatch(s => ({
+        ...s,
+        mcpServers: s.mcpServers.map(x => x.id === id ? { ...x, toolCount: session.tools.length, lastError: undefined } : x),
+      }))
+      return ''
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      mcpSessionsRef.current.delete(id)
+      dispatch(s => ({
+        ...s,
+        mcpServers: s.mcpServers.map(x => x.id === id ? { ...x, toolCount: undefined, lastError: msg } : x),
+      }))
+      return msg
+    }
+  }, [])
+
+  // connect enabled MCP servers shortly after launch (post-hydration)
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      for (const srv of stateRef.current.mcpServers) if (srv.enabled) void connectMcp(srv.id)
+    }, 1500)
+    return () => window.clearTimeout(t)
+  }, [connectMcp])
+
+  const runChatMessage = useCallback(async (agentId: string, text: string) => {
+    const st = stateRef.current.settings
+    const agent = stateRef.current.agents.find(a => a.id === agentId)
+    if (!agent || agent.kind !== 'chat') return
+    const chatType = stateRef.current.chatAgentTypes.find(t => t.id === agent.chatTypeId)
+      ?? stateRef.current.chatAgentTypes.find(t => t.enabled)
+      ?? stateRef.current.chatAgentTypes[0]
+    if (!chatType) {
+      pushChatLog(agentId, { role: 'user', text })
+      pushChatLog(agentId, { role: 'assistant', text: 'No chat agent types configured — add one in Settings → Agent Types → Chat agents.' })
+      return
+    }
+    if (!chatTypeHasCreds(chatType, st)) {
+      pushChatLog(agentId, { role: 'user', text })
+      pushChatLog(agentId, { role: 'assistant', text: `“${chatType.name}” has no credentials — set an API key in Settings → Agent Types → Chat agents (or match the Master Brain provider to share its key).` })
+      return
+    }
+    if (chatBusy.current.has(agentId)) {
+      flash('Chat agent is still working on the previous message')
+      return
+    }
+    chatBusy.current.add(agentId)
+    pushChatLog(agentId, { role: 'user', text })
+    dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'running' as const } : a)) }))
+    try {
+      let history = chatHistories.current.get(agentId)
+      if (!history) {
+        // after a restart the private API history is gone — rebuild it from
+        // the persisted visible transcript (tool traces excluded)
+        history = (agent.chatLog ?? [])
+          .filter(m => m.role !== 'tool')
+          .map(m => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.text }))
+        while (history.length && history[0].role !== 'user') history.shift()
+        chatHistories.current.set(agentId, history)
+      }
+      const mcp = stateRef.current.mcpServers
+        .filter(x => x.enabled)
+        .map(x => mcpSessionsRef.current.get(x.id))
+        .filter((x): x is McpSession => !!x)
+      await runChatTurn(
+        buildChatCfg(chatType, st),
+        () => stateRef.current.agents.find(a => a.id === agentId),
+        stateRef.current.skills,
+        mcp,
+        text,
+        history,
+        e => pushChatLog(agentId, { role: e.kind === 'tool' ? 'tool' : 'assistant', text: e.text }),
+        chatType.systemPrompt,
+      )
+    } catch (e) {
+      pushChatLog(agentId, { role: 'assistant', text: `Error: ${e instanceof Error ? e.message : String(e)}` })
+    } finally {
+      chatBusy.current.delete(agentId)
+      dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const } : a)) }))
+    }
+  }, [flash, pushChatLog])
 
   // Run one lifecycle hook for each enabled addon without blocking the caller;
   // addons whose agent subscribes to the hook get woken with the event too.
@@ -2205,6 +2332,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       native.killSession(id).catch(() => {})
       disposeTerminal(id)
       monitorHistories.current.delete(id)
+      chatHistories.current.delete(id)
       taskSessionsRef.current.delete(id)
       dispatch(s => ({
         ...s,
@@ -2223,6 +2351,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     resume: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
+      if (agent?.kind === 'chat') return // chat agents have no process; just send a message
       const terminalShell = agent?.terminalShell ?? inferLegacyTerminalShell(agent?.cmd)
       let resumeNote = 'session resumed'
       if (agent?.kind === 'real' && agent.cmd && agent.status !== 'running') {
@@ -2398,17 +2527,99 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       flash('Requested changes')
     },
 
-    toggleIntegration: id => dispatch(s => ({
-      ...s,
-      integrations: s.integrations.map(x => x.id === id
-        ? { ...x, connected: !x.connected, detail: !x.connected ? 'connected just now' : 'not connected' }
-        : x),
-    })),
-
     toggleAgentType: id => dispatch(s => ({
       ...s,
       agentTypes: s.agentTypes.map(x => (x.id === id ? { ...x, enabled: !x.enabled } : x)),
     })),
+
+    addMcpServer: (name, url, headers) => {
+      const id = mkId('mcp')
+      dispatch(s => ({
+        ...s,
+        mcpServers: s.mcpServers.concat([{
+          id, name: name.trim() || url.trim(), url: url.trim(), headers: headers?.trim() || undefined, enabled: true,
+        }]),
+      }))
+      later(50, () => { void connectMcp(id) })
+    },
+
+    updateMcpServer: (id, patch) => {
+      dispatch(s => ({
+        ...s,
+        mcpServers: s.mcpServers.map(x => (x.id === id ? { ...x, ...patch } : x)),
+      }))
+      if (patch.url !== undefined || patch.headers !== undefined || patch.enabled === true) later(50, () => { void connectMcp(id) })
+      if (patch.enabled === false) mcpSessionsRef.current.delete(id)
+    },
+
+    removeMcpServer: id => {
+      mcpSessionsRef.current.delete(id)
+      dispatch(s => ({ ...s, mcpServers: s.mcpServers.filter(x => x.id !== id) }))
+    },
+
+    connectMcpServer: id => connectMcp(id),
+
+    addSkill: () => {
+      const id = mkId('sk')
+      dispatch(s => ({
+        ...s,
+        skills: s.skills.concat([{ id, name: `skill-${s.skills.length + 1}`, description: '', body: '' }]),
+      }))
+      return id
+    },
+
+    updateSkill: (id, patch) => dispatch(s => ({
+      ...s,
+      skills: s.skills.map(x => (x.id === id ? { ...x, ...patch } : x)),
+    })),
+
+    removeSkill: id => dispatch(s => ({ ...s, skills: s.skills.filter(x => x.id !== id) })),
+
+    addChatAgentType: () => dispatch(s => ({
+      ...s,
+      chatAgentTypes: s.chatAgentTypes.concat([{
+        id: mkId('ct'), name: `chat-${s.chatAgentTypes.length + 1}`, provider: 'anthropic',
+        model: 'claude-sonnet-5', enabled: true,
+      }]),
+    })),
+
+    updateChatAgentType: (id, patch) => dispatch(s => ({
+      ...s,
+      chatAgentTypes: s.chatAgentTypes.map(t => (t.id === id ? { ...t, ...patch } : t)),
+    })),
+
+    deleteChatAgentType: id => dispatch(s => ({
+      ...s,
+      chatAgentTypes: s.chatAgentTypes.filter(t => t.id !== id),
+    })),
+
+    newChatSession: (name, cwd, chatTypeId) => {
+      const id = mkId('a')
+      const dir = (cwd ?? stateRef.current.settings.defaultCwd ?? '').trim()
+      const chatType = stateRef.current.chatAgentTypes.find(t => t.id === chatTypeId)
+        ?? stateRef.current.chatAgentTypes.find(t => t.enabled)
+        ?? stateRef.current.chatAgentTypes[0]
+      const agent: Agent = {
+        id, name: name?.trim() || chatType?.name || 'chat', short: (name?.trim() || chatType?.name || 'CH').slice(0, 2).toUpperCase(),
+        color: '#7FD1FF', repo: dir ? dir.split('/').pop() || dir : '~', branch: 'chat',
+        status: 'idle', model: chatType ? `${chatType.name} · ${chatType.model}` : 'chat agent', kind: 'chat', cwd: dir,
+        chatTypeId: chatType?.id,
+        workspaceId: stateRef.current.activeWorkspace,
+        memory: mkMemory(), tools: mkTools(), log: [],
+        chatLog: [{
+          id: mkId('cm'), role: 'assistant', at: Date.now(),
+          text: `Hi — I'm a chat agent${dir ? ` working in \`${dir}\`` : ''}. I can browse and edit files, run commands and scripts, load skills, and call your MCP servers. What are we doing?`,
+        }],
+        ...defaultDetail(), usageVersion: 1,
+      }
+      dispatch(s => ({ ...focusSessionIn({ ...s, agents: s.agents.concat([agent]) }, id), newSessionOpen: false }))
+      logEvent('route', id, `Started chat agent “${agent.name}”`)
+    },
+
+    sendChatMessage: (agentId, text) => {
+      const msg = text.trim()
+      if (msg) void runChatMessage(agentId, msg)
+    },
 
     toggleSetting: k => dispatch(s => ({ ...s, settings: { ...s.settings, [k]: !s.settings[k] } })),
     updateSettings: patch => dispatch(s => ({ ...s, settings: { ...s.settings, ...patch } })),
@@ -2750,7 +2961,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [armResponseWatch, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, pushTaskChat, runMaster, runWatcher, sendAddonChatImpl, spawnSessionForTask, startTaskViaWatcher])
+  }), [armResponseWatch, connectMcp, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, pushTaskChat, runChatMessage, runMaster, runWatcher, sendAddonChatImpl, spawnSessionForTask, startTaskViaWatcher])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {
