@@ -14,7 +14,7 @@ import type { MonitorExec } from './monitor'
 import { draftTaskSpec, runWatcherTurn } from './llm/watcher'
 import type { TaskSpecDraft, WatcherExec } from './llm/watcher'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './terminals'
-import { ALL_PERMISSIONS, addonSnapshot, dispatchAddonRpc, enforcePermissions, execAddonHook, execAddonTool, exportAddonPackage, loadAddonFolder, parseAddonPackage } from './addons'
+import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS, addonSnapshot, dispatchAddonRpc, enforcePermissions, execAddonHook, execAddonTool, exportAddonPackage, loadAddonFolder, parseAddonPackage } from './addons'
 import { runAddonEditorTurn } from './llm/addon-editor'
 import { runAddonAgentTurn } from './llm/addon-agent'
 import { generateAddonPackage } from './llm/addon-gen'
@@ -185,6 +185,8 @@ export interface ConductorActions {
   sendChatMessage: (agentId: string, text: string) => void
   toggleAgentType: (id: string) => void
   toggleSetting: (k: 'autoRoute' | 'approveDestructive' | 'followMode') => void
+  /** approve (once) or deny a Master tool blocked on the Ask-first policy */
+  resolveToolApproval: (id: string, approve: boolean) => void
   updateSettings: (patch: Partial<AppState['settings']>) => void
   setAgentTypeCmd: (id: string, cmd: string) => void
   updateAgentType: (id: string, patch: Partial<AppState['agentTypes'][number]>) => void
@@ -381,6 +383,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const runAddonAgentRef = useRef<(addonId: string, note: string) => Promise<string>>(async () => 'agent not ready')
   /** sessions the user stopped via ■ — their exit is a STOP, not a completion/failure */
   const userStoppedRef = useRef<Set<string>>(new Set())
+  /** one-shot user approvals for Ask-first Master tools (consumed on use) */
+  const toolApprovalsRef = useRef<Set<string>>(new Set())
 
   const lastFlaggedRef = useRef<Map<string, string>>(new Map())
 
@@ -960,6 +964,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
                 ...a,
                 ...usage,
                 usageVersion: 1 as const,
+                tools: a.tools ?? mkTools(),
+                memory: a.memory ?? mkMemory(),
                 status: 'idle' as const,
                 escReason: undefined,
                 terminalShell: a.terminalShell ?? inferLegacyTerminalShell(a.cmd),
@@ -997,7 +1003,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           const migrateCols = (tasks: BoardTask[]) =>
             tasks.map(t => ((t.col as string) === 'routed' ? { ...t, col: 'backlog' as const } : t))
           const workspaceData = Object.fromEntries(Object.entries(p.workspaceData ?? {}).map(([wid, d]) =>
-            [wid, { ...d, tasks: migrateCols(d.tasks ?? []) }]))
+            [wid, {
+              ...d,
+              tasks: migrateCols(d.tasks ?? []),
+              crons: d.crons ?? [], messages: d.messages ?? [], events: d.events ?? [],
+              notifications: d.notifications ?? [], minimizedIds: d.minimizedIds ?? [],
+              pendingMasterNotes: d.pendingMasterNotes ?? [],
+            }]))
           dispatch(s => ({
             ...s,
             tasks: migrateCols(p.tasks ?? s.tasks),
@@ -1346,7 +1358,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return screen.filter(l => l.trim()).slice(-n).join('\n')
       },
       stop: sid => {
-        if (stateRef.current.agents.some(a => a.id === sid)) native.killSession(String(sid)).catch(() => {})
+        if (!stateRef.current.agents.some(a => a.id === sid)) return
+        userStoppedRef.current.add(String(sid))
+        native.killSession(String(sid)).catch(() => {})
       },
     },
     tasks: {
@@ -1407,7 +1421,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         const t = stateRef.current.tasks.find(x => x.id === id)
         if (!t) return
         const prev = t.agentId ? stateRef.current.agents.find(a => a.id === t.agentId) : undefined
-        if (prev && (prev.status === 'running' || prev.status === 'needs')) native.killSession(prev.id).catch(() => {})
+        if (prev && (prev.status === 'running' || prev.status === 'needs')) {
+          userStoppedRef.current.add(prev.id)
+          native.killSession(prev.id).catch(() => {})
+        }
         dispatch(s2 => ({ ...s2, tasks: s2.tasks.map(x => (x.id === id ? { ...x, agentId: null } : x)) }))
         later(50, () => spawnSessionForTask(String(id)))
       },
@@ -1472,20 +1489,25 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     },
     storage: {
       get: key => stateRef.current.addonStorage[addonId]?.[String(key)],
-      set: (key, value) => dispatch(s2 => ({
-        ...s2,
-        addonStorage: {
-          ...s2.addonStorage,
-          [addonId]: { ...(s2.addonStorage[addonId] ?? {}), [String(key)]: value },
-        },
-      })),
+      set: (key, value) => {
+        let size = 0
+        try { size = (JSON.stringify(value) ?? '').length } catch { throw new Error('storage.set: value is not JSON-serializable') }
+        if (size > 262_144) throw new Error('storage.set: value exceeds 256 KB')
+        dispatch(s2 => ({
+          ...s2,
+          addonStorage: {
+            ...s2.addonStorage,
+            [addonId]: { ...(s2.addonStorage[addonId] ?? {}), [String(key)]: value },
+          },
+        }))
+      },
     },
   }), [flash, later, launchFromTemplate, launchSession, logEvent, notify, pushTaskChat, spawnSessionForTask])
 
   // Wrap an addon's raw API with its current permission grants.
   const makeAddonApi = useCallback((addonId: string): AddonApi => {
     const addon = stateRef.current.addons.find(a => a.id === addonId)
-    return enforcePermissions(makeAddonApiRaw(addonId), addon?.granted ?? [])
+    return enforcePermissions(makeAddonApiRaw(addonId), addon?.enabled ? addon.granted : [])
   }, [makeAddonApiRaw])
 
   // ---- per-addon LLM agents: an addon's own mini-Master, tools = its API ----
@@ -1904,6 +1926,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const perm = stateRef.current.toolsCatalog.find(t => t.id === toolId)?.perm ?? 'Auto'
       if (perm === 'Off') return `blocked: the user disabled "${toolId}" in the Tools registry`
       if (perm === 'Approval') return `blocked: "${toolId}" is set to Approval — ask the user to change it in Tools`
+      if (perm === 'Ask first') {
+        if (toolApprovalsRef.current.delete(toolId)) return null // consume the one-shot approval
+        dispatch(s2 => s2.pendingToolApprovals.some(pa => pa.toolId === toolId)
+          ? s2
+          : { ...s2, pendingToolApprovals: s2.pendingToolApprovals.concat([{ id: mkId('ap'), toolId }]) })
+        return `blocked: "${toolId}" is set to Ask first — the user has been shown an Approve button in the Master chat; wait for their decision, do not retry on your own`
+      }
       return null
     }
     // Combine global policy with the target session's per-tool toggle.
@@ -1995,12 +2024,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return `set ${toolId} to ${perm}`
       },
       toggleSchedule: (name, on) => {
+        const gated = catalogGate('create_schedule')
+        if (gated) return gated
         const cron = stateRef.current.crons.find(c => c.name === name)
         if (!cron) return `no schedule named ${name}`
         dispatch(s2 => ({ ...s2, crons: s2.crons.map(c => (c.name === name ? { ...c, on } : c)) }))
         return `${name} is now ${on ? 'on' : 'off'}`
       },
       deleteSchedule: name => {
+        const gated = catalogGate('create_schedule')
+        if (gated) return gated
         const cron = stateRef.current.crons.find(c => c.name === name)
         if (!cron) return `no schedule named ${name}`
         dispatch(s2 => ({ ...s2, crons: s2.crons.filter(c => c.name !== name) }))
@@ -2027,7 +2060,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         const addon: Addon = {
           ...parsed,
           id: existing?.id ?? mkId('ad'),
-          granted: existing?.granted ?? parsed.permissions,
+          granted: (existing?.granted ?? parsed.permissions).filter(g => parsed.permissions.includes(g)),
           enabled: true,
           source: 'master',
           createdAt: new Date().toLocaleString(),
@@ -2047,12 +2080,21 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       removeAddon: name => {
         const addon = stateRef.current.addons.find(a => a.name === name)
         if (!addon) return `no addon named ${name}`
-        dispatch(s2 => ({
-          ...s2,
-          addons: s2.addons.filter(a => a.id !== addon.id),
-          view: s2.activeAddon === addon.id ? 'workspace' : s2.view,
-          activeAddon: s2.activeAddon === addon.id ? null : s2.activeAddon,
-        }))
+        addonAgentHistories.current.delete(addon.id)
+        addonEditorHistories.current.delete(addon.id)
+        dispatch(s2 => {
+          const addonStorage = { ...s2.addonStorage }
+          delete addonStorage[addon.id]
+          const addonChats = { ...s2.addonChats }
+          delete addonChats[addon.id]
+          return {
+            ...s2,
+            addons: s2.addons.filter(a => a.id !== addon.id),
+            addonStorage, addonChats,
+            view: s2.activeAddon === addon.id ? 'workspace' : s2.view,
+            activeAddon: s2.activeAddon === addon.id ? null : s2.activeAddon,
+          }
+        })
         return `removed addon "${name}"`
       },
       runAddonTool: (name, input) => execAddonTool(stateRef.current, name, input, makeAddonApi),
@@ -2092,6 +2134,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       stopSession: sid => {
         const gated = catalogGate('stop_session') || sessionGate(sid, 'stop')
         if (gated) return gated
+        userStoppedRef.current.add(sid)
         native.killSession(sid).catch(() => {})
         dispatch(s => ({
           ...s,
@@ -2120,6 +2163,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return `created schedule ${name} (${cron})${tpl ? ` firing template ${tpl.name}` : ''}`
       },
       runTemplate: (templateName, task) => {
+        const gated = catalogGate('launch_session')
+        if (gated) return gated
         const tpl = (stateRef.current.templates ?? []).find(t => t.name.toLowerCase() === templateName.toLowerCase())
         if (!tpl) return `no template named "${templateName}" — available: ${(stateRef.current.templates ?? []).map(t => t.name).join(', ') || 'none'}`
         const id = launchFromTemplate(tpl.id, task)
@@ -2224,7 +2269,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         dispatch(s2 => ({
           ...s2,
           addons: s2.addons.map(a => a.id === id
-            ? { ...a, ...parsed, id, source: a.source, enabled: a.enabled, createdAt: new Date().toLocaleString() }
+            ? { ...a, ...parsed, id, source: a.source, enabled: a.enabled, granted: a.granted.filter(g => parsed.permissions.includes(g)), createdAt: new Date().toLocaleString() }
             : a),
         }))
         logEvent('build', null, `Addon “${parsed.name}” updated via its chat (v${parsed.version})`)
@@ -2250,9 +2295,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const addon: Addon = {
       ...parsed,
       id: existing?.id ?? mkId('ad'),
-      // upgrades keep the user's grant choices; fresh installs grant what's
-      // requested (visible + revocable per-permission in Settings)
-      granted: existing ? existing.granted.filter(g => parsed.permissions.includes(g)) : parsed.permissions,
+      // upgrades keep the user's grant choices (intersected with what's now
+      // requested); fresh installs never auto-grant dangerous scopes — the
+      // user enables them per-addon in Settings -> Addons
+      granted: existing
+        ? existing.granted.filter(g => parsed.permissions.includes(g))
+        : parsed.permissions.filter(g => !DANGEROUS_PERMISSIONS.includes(g)),
       enabled: true,
       source,
       createdAt: new Date().toLocaleString(),
@@ -2263,7 +2311,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       ...(addon.html ? { view: 'addon' as const, activeAddon: addon.id } : {}),
     }))
     logEvent('build', null, `Installed addon “${addon.name}” v${addon.version} (${source})`)
-    flash(`Installed ${addon.name} v${addon.version}`)
+    const withheld = addon.permissions.filter(g => !addon.granted.includes(g))
+    flash(withheld.length
+      ? `Installed ${addon.name} · grant ${withheld.join(', ')} in Settings → Addons to enable those features`
+      : `Installed ${addon.name} v${addon.version}`)
   }, [flash, logEvent])
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
@@ -2441,7 +2492,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     archiveSession: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
-      if (agent?.status === 'running' || agent?.status === 'needs') native.killSession(id).catch(() => {})
+      if (agent?.status === 'running' || agent?.status === 'needs') {
+        userStoppedRef.current.add(id)
+        native.killSession(id).catch(() => {})
+      }
       dispatch(s => ({
         ...s,
         ...removeFromGroups(s, id),
@@ -2457,6 +2511,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     deleteSession: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
+      userStoppedRef.current.add(id)
       native.killSession(id).catch(() => {})
       disposeTerminal(id)
       monitorHistories.current.delete(id)
@@ -2843,7 +2898,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const t = stateRef.current.tasks.find(x => x.id === taskId)
       if (!t) return
       const prev = t.agentId ? stateRef.current.agents.find(a => a.id === t.agentId) : undefined
-      if (prev && (prev.status === 'running' || prev.status === 'needs')) native.killSession(prev.id).catch(() => {})
+      if (prev && (prev.status === 'running' || prev.status === 'needs')) {
+        userStoppedRef.current.add(prev.id)
+        native.killSession(prev.id).catch(() => {})
+      }
       dispatch(s => ({
         ...s,
         tasks: s.tasks.map(x => (x.id === taskId ? { ...x, agentId: null } : x)),
@@ -3041,12 +3099,23 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         }
       })()
     },
-    removeAddon: id => dispatch(s => ({
-      ...s,
-      addons: s.addons.filter(a => a.id !== id),
-      view: s.activeAddon === id ? 'workspace' : s.view,
-      activeAddon: s.activeAddon === id ? null : s.activeAddon,
-    })),
+    removeAddon: id => {
+      addonAgentHistories.current.delete(id)
+      addonEditorHistories.current.delete(id)
+      dispatch(s => {
+        const addonStorage = { ...s.addonStorage }
+        delete addonStorage[id]
+        const addonChats = { ...s.addonChats }
+        delete addonChats[id]
+        return {
+          ...s,
+          addons: s.addons.filter(a => a.id !== id),
+          addonStorage, addonChats,
+          view: s.activeAddon === id ? 'workspace' : s.view,
+          activeAddon: s.activeAddon === id ? null : s.activeAddon,
+        }
+      })
+    },
 
     switchWorkspace: id => {
       // Master events that queued while this workspace was inactive
@@ -3083,6 +3152,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
       // kill the workspace's sessions and drop their terminals
       for (const a of s0.agents.filter(a => a.workspaceId === id)) {
+        userStoppedRef.current.add(a.id)
         native.killSession(a.id).catch(() => {})
         disposeTerminal(a.id)
         monitorHistories.current.delete(a.id)
@@ -3126,6 +3196,18 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           : a),
       }))
       sendLineToSession(id, text)
+    },
+
+    resolveToolApproval: (id, approve) => {
+      const pa = stateRef.current.pendingToolApprovals.find(x => x.id === id)
+      dispatch(s => ({ ...s, pendingToolApprovals: s.pendingToolApprovals.filter(x => x.id !== id) }))
+      if (!pa) return
+      if (approve) toolApprovalsRef.current.add(pa.toolId)
+      later(50, () => {
+        void runMaster(approve
+          ? `[the user approved one use of "${pa.toolId}" — retry the blocked call now]`
+          : `[the user denied "${pa.toolId}" — do not retry it; adjust your plan or ask the user]`)
+      })
     },
 
     stopSession: id => {

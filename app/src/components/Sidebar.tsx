@@ -232,7 +232,7 @@ function MessageRow({ msg }: { msg: Message }) {
 /** Render the resizable Master conversation, composer, and collapsed rail. */
 export function Sidebar() {
   const s = useConductor()
-  const { setComposer, send, updateSettings } = useActions()
+  const { setComposer, send, updateSettings, resolveToolApproval } = useActions()
   const scrollRef = useRef<HTMLDivElement>(null)
   const isMac = navigator.platform.toUpperCase().includes('MAC')
   const width = Math.max(280, Math.min(640, s.settings.sidebarWidth ?? 392))
@@ -345,6 +345,20 @@ export function Sidebar() {
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 15px', display: 'flex', flexDirection: 'column', gap: 15 }}>
         {s.messages.map(m => <MessageRow key={m.id} msg={m} />)}
       </div>
+
+      {s.pendingToolApprovals.length > 0 && (
+        <div style={{ borderTop: '1px solid var(--line)', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {s.pendingToolApprovals.map(pa => (
+            <div key={pa.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(245,196,81,.07)', border: '1px solid rgba(245,196,81,.3)', borderRadius: 10, padding: '8px 10px' }}>
+              <span style={{ flex: 1, fontSize: 12, lineHeight: 1.4 }}>
+                Master wants to use <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{pa.toolId}</span> <span style={{ color: 'var(--dim)' }}>(Ask first)</span>
+              </span>
+              <button className="approve-btn" style={{ padding: '4px 12px', fontSize: 11.5 }} onClick={() => resolveToolApproval(pa.id, true)}>Approve once</button>
+              <button className="deny-btn" style={{ padding: '4px 12px', fontSize: 11.5 }} onClick={() => resolveToolApproval(pa.id, false)}>Deny</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ borderTop: '1px solid var(--line)', padding: '12px 14px' }}>
         <div style={{ background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 12, padding: '10px 12px' }}>
