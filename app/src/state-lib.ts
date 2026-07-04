@@ -16,10 +16,14 @@ export function fieldMatches(field: string, value: number): boolean {
   return field.split(',').some(part => {
     if (part === '*') return true
     const step = part.match(/^\*\/(\d+)$/)
-    if (step) return value % parseInt(step[1], 10) === 0
+    if (step) {
+      const n = parseInt(step[1], 10)
+      return n > 0 && value % n === 0 // */0 never matches instead of crashing on modulo
+    }
     const range = part.match(/^(\d+)-(\d+)$/)
     if (range) return value >= parseInt(range[1], 10) && value <= parseInt(range[2], 10)
-    return parseInt(part, 10) === value
+    const n = parseInt(part, 10)
+    return !Number.isNaN(n) && n === value
   })
 }
 
@@ -28,12 +32,16 @@ export function cronMatches(expr: string, d: Date): boolean {
   const fields = expr.trim().split(/\s+/)
   if (fields.length !== 5) return false
   const [min, hour, dom, mon, dow] = fields
+  // standard crontab rule: when BOTH day-of-month and day-of-week are
+  // restricted (not *), the entry fires when EITHER matches
+  const dayOk = dom !== '*' && dow !== '*'
+    ? fieldMatches(dom, d.getDate()) || fieldMatches(dow, d.getDay())
+    : fieldMatches(dom, d.getDate()) && fieldMatches(dow, d.getDay())
   return (
     fieldMatches(min, d.getMinutes()) &&
     fieldMatches(hour, d.getHours()) &&
-    fieldMatches(dom, d.getDate()) &&
     fieldMatches(mon, d.getMonth() + 1) &&
-    fieldMatches(dow, d.getDay())
+    dayOk
   )
 }
 

@@ -16,11 +16,12 @@ interface Entry {
   /** called on every raw output chunk — TUI redraws often contain no newlines */
   onActivity: (() => void) | null
   pending: string
+  /** per-session streaming decoder — partial UTF-8 must not mix across PTYs */
+  decoder: TextDecoder
 }
 
 const entries = new Map<string, Entry>()
 let listenerStarted = false
-const decoder = new TextDecoder()
 
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-_]|[\x00-\x08\x0b-\x1f\x7f]/g
@@ -35,7 +36,7 @@ function ensureListener() {
     entry.term.write(e.bytes)
     entry.onActivity?.()
     if (entry.onPlainLine) {
-      entry.pending += decoder.decode(e.bytes, { stream: true })
+      entry.pending += entry.decoder.decode(e.bytes, { stream: true })
       const parts = entry.pending.split(/\r\n|\n|\r/)
       entry.pending = parts.pop() ?? ''
       for (const raw of parts) {
@@ -87,7 +88,7 @@ export function getTerminal(
       }
       writeSession(id, data).catch(() => {})
     })
-    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, onActivity: onActivity ?? null, onUserSubmit: onUserSubmit ?? null, pending: '' }
+    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, onActivity: onActivity ?? null, onUserSubmit: onUserSubmit ?? null, pending: '', decoder: new TextDecoder() }
     entries.set(id, entry)
   } else {
     if (onPlainLine) entry.onPlainLine = onPlainLine

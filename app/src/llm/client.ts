@@ -93,7 +93,11 @@ function parseCredOutput(raw: string): { key: string; exp: number } {
     .find((v): v is string => typeof v === 'string' && v.length > 0)
   if (!key) throw new Error('credential command printed JSON without a recognizable key/token field')
   const expiresAt = nested.expiresAt ?? json.expiresAt ?? nested.expires_at ?? json.expires_at
-  if (typeof expiresAt === 'number') exp = Math.min(exp, expiresAt - 60_000)
+  if (typeof expiresAt === 'number') {
+    // epoch seconds (< ~2001 when read as ms) vs milliseconds
+    const ms = expiresAt < 1e12 ? expiresAt * 1000 : expiresAt
+    exp = Math.min(exp, ms - 60_000)
+  }
   else if (typeof expiresAt === 'string') {
     const t = Date.parse(expiresAt)
     if (!Number.isNaN(t)) exp = Math.min(exp, t - 60_000)
