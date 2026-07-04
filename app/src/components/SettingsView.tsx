@@ -183,7 +183,7 @@ function ChatTypesSection() {
                     value={t.provider}
                     onChange={e => {
                       const next = providerFor(e.target.value)
-                      updateChatAgentType(t.id, { provider: next.id, model: next.models[0] ?? '' })
+                      updateChatAgentType(t.id, { provider: next.id, models: next.models.length ? next.models : [], model: next.models[0] ?? '' })
                     }}
                     className="select-field"
                     style={{ ...FIELD_STYLE, flex: 1, minWidth: 0, padding: '5px 9px', fontSize: 11.5 }}
@@ -191,25 +191,27 @@ function ChatTypesSection() {
                     {PROVIDERS.map(pr => <option key={pr.id} value={pr.id}>{pr.label}</option>)}
                   </select>
                   {prov.models.length > 0 && (
-                    <select
-                      value={prov.models.includes(t.model) ? t.model : '__custom__'}
-                      onChange={e => updateChatAgentType(t.id, { model: e.target.value === '__custom__' ? '' : e.target.value })}
-                      className="select-field"
-                      style={{ ...FIELD_STYLE, flex: 1, minWidth: 0, padding: '5px 9px', fontSize: 11.5 }}
+                    <button
+                      className="open-btn"
+                      title="Fill the model list with this provider's known models"
+                      style={{ flex: 'none', padding: '0 10px', fontSize: 10.5 }}
+                      onClick={() => updateChatAgentType(t.id, { models: prov.models, model: prov.models[0] })}
                     >
-                      {prov.models.map(m => <option key={m} value={m}>{m}</option>)}
-                      <option value="__custom__">custom model…</option>
-                    </select>
+                      defaults
+                    </button>
                   )}
                 </div>
-                {(prov.models.length === 0 || !prov.models.includes(t.model)) && (
-                  <input
-                    value={t.model}
-                    onChange={e => updateChatAgentType(t.id, { model: e.target.value })}
-                    placeholder="model id · e.g. claude-sonnet-5"
-                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11.5 }}
-                  />
-                )}
+                <textarea
+                  value={(t.models ?? (t.model ? [t.model] : [])).join('\n')}
+                  onChange={e => {
+                    const models = e.target.value.split('\n').map(x => x.trim())
+                    updateChatAgentType(t.id, { models, model: models.find(Boolean) ?? '' })
+                  }}
+                  placeholder={'models — one per line, first is the default\n' + (prov.models[0] ?? 'model-id')}
+                  rows={Math.min(5, Math.max(2, (t.models?.length ?? 1) + 1))}
+                  title="Pickable per session in the new-session dialog; the first line is the default"
+                  style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11.5, resize: 'vertical', minHeight: 34 }}
+                />
                 {t.provider !== 'bedrock' && (
                   <input
                     type="password"

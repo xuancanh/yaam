@@ -167,7 +167,7 @@ export interface ConductorActions {
   updateChatAgentType: (id: string, patch: Partial<Omit<ChatAgentType, 'id'>>) => void
   deleteChatAgentType: (id: string) => void
   /** chat-mode sessions */
-  newChatSession: (name?: string, cwd?: string, chatTypeId?: string) => void
+  newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string) => void
   sendChatMessage: (agentId: string, text: string) => void
   toggleAgentType: (id: string) => void
   toggleSetting: (k: 'autoRoute' | 'approveDestructive' | 'followMode') => void
@@ -1586,7 +1586,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         .map(x => mcpSessionsRef.current.get(x.id))
         .filter((x): x is McpSession => !!x)
       await runChatTurn(
-        buildChatCfg(chatType, st),
+        buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
         () => stateRef.current.agents.find(a => a.id === agentId),
         stateRef.current.skills,
         mcp,
@@ -2605,7 +2605,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       chatAgentTypes: s.chatAgentTypes.filter(t => t.id !== id),
     })),
 
-    newChatSession: (name, cwd, chatTypeId) => {
+    newChatSession: (name, cwd, chatTypeId, model) => {
       const id = mkId('a')
       const dir = (cwd ?? stateRef.current.settings.defaultCwd ?? '').trim()
       const chatType = stateRef.current.chatAgentTypes.find(t => t.id === chatTypeId)
@@ -2614,8 +2614,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const agent: Agent = {
         id, name: name?.trim() || chatType?.name || 'chat', short: (name?.trim() || chatType?.name || 'CH').slice(0, 2).toUpperCase(),
         color: '#7FD1FF', repo: dir ? dir.split('/').pop() || dir : '~', branch: 'chat',
-        status: 'idle', model: chatType ? `${chatType.name} · ${chatType.model}` : 'chat agent', kind: 'chat', cwd: dir,
+        status: 'idle', model: chatType ? `${chatType.name} · ${model || chatType.model}` : 'chat agent', kind: 'chat', cwd: dir,
         chatTypeId: chatType?.id,
+        chatModel: model || chatType?.model,
         workspaceId: stateRef.current.activeWorkspace,
         memory: mkMemory(), tools: mkTools(), log: [],
         chatLog: [{

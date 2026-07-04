@@ -169,10 +169,10 @@ export function seedState(): AppState {
     ],
     mcpServers: [],
     chatAgentTypes: [
-      { id: 'chat-claude', name: 'Claude', provider: 'anthropic', model: 'claude-sonnet-5', enabled: true, desc: 'Shares the Master Brain credentials unless a key is set.' },
-      { id: 'chat-gpt', name: 'GPT', provider: 'openai', model: 'gpt-4o', enabled: false, desc: 'Needs an OpenAI API key.' },
-      { id: 'chat-deepseek', name: 'DeepSeek', provider: 'deepseek', model: 'deepseek-chat', enabled: false, desc: 'Needs a DeepSeek API key.' },
-      { id: 'chat-gemini', name: 'Gemini', provider: 'gemini', model: 'gemini-2.5-flash', enabled: false, desc: 'Needs a Google AI Studio key.' },
+      { id: 'chat-claude', name: 'Claude', provider: 'anthropic', model: 'claude-sonnet-5', models: ['claude-sonnet-5', 'claude-haiku-4-5-20251001', 'claude-opus-4-8'], enabled: true, desc: 'Shares the Master Brain credentials unless a key is set.' },
+      { id: 'chat-gpt', name: 'GPT', provider: 'openai', model: 'gpt-4o', models: ['gpt-4o', 'gpt-4o-mini', 'o4-mini'], enabled: false, desc: 'Needs an OpenAI API key.' },
+      { id: 'chat-deepseek', name: 'DeepSeek', provider: 'deepseek', model: 'deepseek-chat', models: ['deepseek-chat', 'deepseek-reasoner'], enabled: false, desc: 'Needs a DeepSeek API key.' },
+      { id: 'chat-gemini', name: 'Gemini', provider: 'gemini', model: 'gemini-2.5-flash', models: ['gemini-2.5-flash', 'gemini-2.5-pro'], enabled: false, desc: 'Needs a Google AI Studio key.' },
     ],
     skills: [
       {

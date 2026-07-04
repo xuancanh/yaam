@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useActions, useConductor } from '../../store'
 import { isTauri, pickFolder } from '../../native'
-import { SHELLS } from '../../data'
+import { hexToRgba } from '../../data'
+import { ACCENT, SHELLS } from '../../data'
 
 const FIELD_STYLE = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
@@ -14,28 +15,46 @@ function FieldLabel({ children }: { children: string }) {
   return <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--mut)', marginBottom: 5, letterSpacing: 0.3 }}>{children}</div>
 }
 
-/** Launch a template, configured agent type, terminal, or custom command. */
+/** effective model list of a chat-agent type (trimmed, default first) */
+function modelsOf(t: { model: string; models?: string[] } | undefined): string[] {
+  if (!t) return []
+  const list = (t.models ?? []).map(m => m.trim()).filter(Boolean)
+  return list.length ? list : t.model ? [t.model] : []
+}
+
+/** Launch a terminal session (CLI/template/shell) or a chat-mode agent. */
 export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const s = useConductor()
   const { newRealSession, newChatSession, runTemplate } = useActions()
+  const [mode, setMode] = useState<'terminal' | 'chat'>('terminal')
+
+  // terminal mode
   const enabledTypes = useMemo(() => s.agentTypes.filter(t => t.enabled), [s.agentTypes])
   const [typeId, setTypeId] = useState(enabledTypes[0]?.id ?? 'shell')
   const [templateId, setTemplateId] = useState('')
   const [shellOverride, setShellOverride] = useState('')
   const [command, setCommand] = useState(enabledTypes[0]?.model ?? '')
-  const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
   const [task, setTask] = useState('')
+
+  // chat mode
+  const chatTypes = s.chatAgentTypes.filter(t => t.enabled)
+  const [chatTypeId, setChatTypeId] = useState(chatTypes[0]?.id ?? '')
+  const [chatModel, setChatModel] = useState('')
   const [chatName, setChatName] = useState('')
 
+  // shared
+  const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
+
   const isShell = typeId === 'shell'
-  const isChat = typeId.startsWith('chat:')
-  const chatTypes = s.chatAgentTypes.filter(t => t.enabled)
-  const chatType = isChat ? s.chatAgentTypes.find(t => t.id === typeId.slice(5)) : undefined
   const isCustom = typeId === 'custom'
   const shell = shellOverride || s.settings.shell || 'zsh'
   const templates = s.templates ?? []
-  const tpl = templateId ? templates.find(t => t.id === templateId) : undefined
+  const tpl = mode === 'terminal' && templateId ? templates.find(t => t.id === templateId) : undefined
   const effectiveCommand = isShell ? `${shell} -i` : command
+
+  const chatType = s.chatAgentTypes.find(t => t.id === chatTypeId) ?? chatTypes[0]
+  const chatModels = modelsOf(chatType)
+  const effectiveChatModel = chatModel && chatModels.includes(chatModel) ? chatModel : chatModels[0] ?? ''
 
   // Select an agent type and synchronize its default command.
   const selectType = (id: string) => {
@@ -53,15 +72,18 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
     if (dir) setCwd(dir)
   }
 
-  // Dispatch either a template run or a manually configured real session.
+  const canLaunch = mode === 'chat' ? Boolean(chatType) : Boolean(tpl || effectiveCommand.trim())
+
+  // Dispatch a template run, a real PTY session, or a chat-mode agent.
   const launch = () => {
-    if (tpl) {
-      runTemplate(tpl.id, task.trim() || undefined)
+    if (mode === 'chat') {
+      if (!chatType) return
+      newChatSession(chatName.trim() || undefined, cwd, chatType.id, effectiveChatModel || undefined)
       onClose()
       return
     }
-    if (isChat) {
-      newChatSession(chatName.trim() || undefined, cwd, chatType?.id)
+    if (tpl) {
+      runTemplate(tpl.id, task.trim() || undefined)
       onClose()
       return
     }
@@ -82,11 +104,29 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
         <div className="grotesk" style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>New agent session</div>
         <div style={{ fontSize: 12, color: 'var(--mut)', marginBottom: 14, lineHeight: 1.5 }}>
           {isTauri
-            ? 'Pick an agent type or a plain terminal — output streams into a workspace pane, input goes to its stdin.'
+            ? mode === 'terminal'
+              ? 'A CLI in a PTY — output streams into a workspace pane, input goes to its stdin.'
+              : 'An in-app agent that chats like Claude Desktop: browses & edits files, runs commands, loads skills, calls MCP servers.'
             : 'Sessions need the desktop app — this browser build cannot spawn processes.'}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {templates.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9, padding: 4 }}>
+            {([['terminal', 'Terminal'], ['chat', 'Chat']] as const).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setMode(id)}
+                style={{
+                  flex: 1, padding: '7px 0', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  background: mode === id ? hexToRgba(ACCENT, 0.16) : 'transparent',
+                  color: mode === id ? 'var(--accent)' : 'var(--mut)',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {mode === 'terminal' && templates.length > 0 && (
             <div>
               <FieldLabel>Template (optional)</FieldLabel>
               <select value={templateId} onChange={e => setTemplateId(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
@@ -95,22 +135,17 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               </select>
             </div>
           )}
-          {!tpl && (
+          {mode === 'terminal' && !tpl && (
             <div>
               <FieldLabel>Agent type</FieldLabel>
               <select value={typeId} onChange={e => selectType(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
                 {enabledTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 <option value="shell">Terminal</option>
                 <option value="custom">Custom command…</option>
-                {chatTypes.length > 0 && (
-                  <optgroup label="Chat agents — files, scripts, skills, MCP">
-                    {chatTypes.map(t => <option key={t.id} value={`chat:${t.id}`}>{t.name} · {t.model}</option>)}
-                  </optgroup>
-                )}
               </select>
             </div>
           )}
-          {tpl ? (
+          {mode === 'terminal' && (tpl ? (
             <div>
               <FieldLabel>Task</FieldLabel>
               <textarea
@@ -123,22 +158,6 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 5, lineHeight: 1.5 }}>
                 {tpl.mode === 'ephemeral' ? 'One-shot: runs the task and exits by itself.' : 'Interactive: stays open after the prompt.'}
                 {tpl.cwd ? ` · cwd ${tpl.cwd}` : ''}
-              </div>
-            </div>
-          ) : isChat ? (
-            <div>
-              <FieldLabel>Name</FieldLabel>
-              <input
-                value={chatName}
-                onChange={e => setChatName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') launch() }}
-                placeholder="chat (optional)"
-                disabled={!isTauri}
-                style={FIELD_STYLE}
-              />
-              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 5, lineHeight: 1.5 }}>
-                An in-app agent that chats like Claude Desktop: browses & edits files, runs commands and scripts, loads your skills, and calls your MCP servers.
-                {chatType ? ` Runs on ${chatType.name} (${chatType.model}).` : ''} Configure providers in Settings → Agent Types → Chat agents.
               </div>
             </div>
           ) : isShell ? (
@@ -160,35 +179,85 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
                 style={FIELD_STYLE}
               />
             </div>
-          )}
-          {!tpl && <div>
-            <FieldLabel>Working directory</FieldLabel>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                value={cwd}
-                onChange={e => setCwd(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') launch() }}
-                placeholder="folder (optional)"
-                disabled={!isTauri}
-                style={FIELD_STYLE}
-              />
-              <button className="open-btn" style={{ flex: 'none', padding: '0 14px' }} onClick={browse} disabled={!isTauri}>
-                Browse…
-              </button>
+          ))}
+
+          {mode === 'chat' && (chatTypes.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
+              No chat agents enabled — configure one in Settings → Agent Types → Chat agents.
             </div>
-          </div>}
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <FieldLabel>Chat agent</FieldLabel>
+                  <select
+                    value={chatType?.id ?? ''}
+                    onChange={e => { setChatTypeId(e.target.value); setChatModel('') }}
+                    disabled={!isTauri}
+                    className="select-field"
+                    style={FIELD_STYLE}
+                  >
+                    {chatTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <FieldLabel>Model</FieldLabel>
+                  <select
+                    value={effectiveChatModel}
+                    onChange={e => setChatModel(e.target.value)}
+                    disabled={!isTauri || chatModels.length <= 1}
+                    className="select-field"
+                    style={FIELD_STYLE}
+                  >
+                    {chatModels.map(m => <option key={m} value={m}>{m}</option>)}
+                    {!chatModels.length && <option value="">no models configured</option>}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <FieldLabel>Name</FieldLabel>
+                <input
+                  value={chatName}
+                  onChange={e => setChatName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') launch() }}
+                  placeholder={chatType ? `${chatType.name.toLowerCase()} (optional)` : 'chat (optional)'}
+                  disabled={!isTauri}
+                  style={FIELD_STYLE}
+                />
+              </div>
+            </>
+          ))}
+
+          {!tpl && (
+            <div>
+              <FieldLabel>Working directory</FieldLabel>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  value={cwd}
+                  onChange={e => setCwd(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') launch() }}
+                  placeholder="folder (optional)"
+                  disabled={!isTauri}
+                  style={FIELD_STYLE}
+                />
+                <button className="open-btn" style={{ flex: 'none', padding: '0 14px' }} onClick={browse} disabled={!isTauri}>
+                  Browse…
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button
             className="approve-btn"
-            style={{ flex: 1, padding: 9, opacity: isTauri && (tpl || isChat || effectiveCommand.trim()) ? 1 : 0.45 }}
+            style={{ flex: 1, padding: 9, opacity: isTauri && canLaunch ? 1 : 0.45 }}
             onClick={launch}
-            disabled={!isTauri || (!tpl && !isChat && !effectiveCommand.trim())}
+            disabled={!isTauri || !canLaunch}
           >
-            Launch {tpl
-              ? <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {tpl.name}</span>
-              : isChat
-                ? <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {chatType?.name ?? 'chat'}</span>
+            Launch {mode === 'chat'
+              ? chatType && <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {chatType.name}{effectiveChatModel ? ` · ${effectiveChatModel}` : ''}</span>
+              : tpl
+                ? <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {tpl.name}</span>
                 : effectiveCommand.trim() && <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {effectiveCommand.trim().slice(0, 28)}</span>}
           </button>
           <button className="deny-btn" style={{ flex: 1, padding: 9 }} onClick={onClose}>

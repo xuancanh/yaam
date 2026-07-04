@@ -97,6 +97,8 @@ export interface Agent {
   chatLog?: ChatMsg[]
   /** which ChatAgentType powers this chat session */
   chatTypeId?: string
+  /** model chosen for this session (from the type's models list) */
+  chatModel?: string
 }
 
 /** one message in a chat-mode session */
@@ -272,7 +274,10 @@ export interface ChatAgentType {
   desc?: string
   /** provider id from llm/client PROVIDERS (anthropic, openai, deepseek, kimi, gemini, glm, bedrock, custom, anthropic-compat) */
   provider: string
+  /** default model (first of `models`) */
   model: string
+  /** predefined model list for this agent — pickable per session */
+  models?: string[]
   /** empty = share the Master Brain credentials when the provider matches */
   apiKey?: string
   /** endpoint for the custom / anthropic-compat providers */
