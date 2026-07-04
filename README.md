@@ -135,3 +135,13 @@ npm install
 npm run tauri dev      # run the desktop app with hot reload
 npm run tauri build    # produce a distributable bundle
 ```
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a PR, run the checks in
+[DEVELOPMENT.md](DEVELOPMENT.md) (typecheck, lint, and `cargo check`) and keep
+changes focused.
+
+## License
+
+Released under the [MIT License](LICENSE) — © 2026 xuancanh.
