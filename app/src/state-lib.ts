@@ -82,12 +82,19 @@ export function extractOptions(lines: string[]): { options: EscOption[]; cursorN
   return options.length >= 2 ? { options, cursorNum } : { options: [], cursorNum: 1 }
 }
 
-/** full prompt handed to the one-shot session working a kanban task */
-export function taskPrompt(task: { title: string; description?: string; criteria?: string[] }): string {
+/** full prompt handed to the one-shot session working a kanban task.
+ *  `withGoal` appends /goal-style stop-condition semantics (neither claude -p
+ *  nor codex exec exposes a goal flag, so the criteria become an explicit
+ *  self-verified stop condition in the prompt). */
+export function taskPrompt(task: { title: string; description?: string; criteria?: string[] }, withGoal?: boolean): string {
+  const criteria = task.criteria ?? []
   return [
     task.title,
     task.description,
-    task.criteria?.length ? `Acceptance criteria:\n${task.criteria.map(c => `- ${c}`).join('\n')}` : '',
+    criteria.length ? `Acceptance criteria:\n${criteria.map(c => `- ${c}`).join('\n')}` : '',
+    withGoal && criteria.length
+      ? 'GOAL — treat the acceptance criteria above as your stop condition. Before finishing, re-verify each criterion against your actual changes and outputs; if any is unmet, keep working until it is. If something genuinely blocks you, stop and state precisely what is blocking and what you completed.'
+      : '',
   ].filter(Boolean).join('\n\n')
 }
 

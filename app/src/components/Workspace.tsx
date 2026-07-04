@@ -42,7 +42,9 @@ function LayoutMenu() {
   const s = useConductor()
   const { setPaneLayout } = useActions()
   const [open, setOpen] = useState(false)
-  const count = Math.max(1, s.focusedIds.length)
+  // A solo tab (a session outside the split) renders alone, so the indicator
+  // must reflect the single visible pane — not the split group hidden underneath.
+  const count = s.soloId ? 1 : Math.max(1, s.focusedIds.length)
   const current: LayoutKey = count === 2 ? (s.paneStacked ? '2row' : '2col') : String(count) as LayoutKey
   const split = count > 1
 

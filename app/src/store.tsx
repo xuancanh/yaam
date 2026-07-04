@@ -1076,7 +1076,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const st = stateRef.current
     const task = st.tasks.find(t => t.id === taskId)
     if (!task || task.agentId) return
-    const prompt = taskPrompt(task)
+    const prompt = taskPrompt(task, true)
     let id: string | null = null
     // watcher-driven task sessions are ALWAYS one-shot: they run the task and exit
     if (task.templateId && (st.templates ?? []).some(t => t.id === task.templateId)) {
@@ -1106,7 +1106,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     armResponseWatch(id)
     pushTaskChat(taskId, 'system', `Spawned one-shot session “${sessionName}” for this task`)
     runWatcherRef.current(taskId,
-      `A one-shot session "${sessionName}" was just spawned to work this task; it received the title, description and criteria as its prompt. ` +
+      `A one-shot session "${sessionName}" was just spawned to work this task; it received the title, description and criteria as its prompt, with the criteria set as an explicit goal (stop condition) it must self-verify before exiting. ` +
       'Set your card note, make sure the task sits in the right column, and post one short kickoff message for the user.')
     logEvent('route', id, `Spawned session for task “${task.title.slice(0, 48)}”`)
     flash(`Session spawned for “${task.title.slice(0, 28)}”`)
@@ -1271,10 +1271,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           }
           const id = !native.isTauri ? null
             : t.templateId && (st.templates ?? []).some(x => x.id === t.templateId)
-              ? launchFromTemplate(t.templateId, taskPrompt(t), pool.wid, t.cwd, true)
+              ? launchFromTemplate(t.templateId, taskPrompt(t, true), pool.wid, t.cwd, true)
               : (() => {
                   const type = st.agentTypes.find(x => x.enabled)
-                  return type ? launchSession(`${type.model} ${shQuote(taskPrompt(t))}`, t.cwd || st.settings.defaultCwd || '', t.title.slice(0, 18), type.id, pool.wid) : null
+                  return type ? launchSession(`${type.model} ${shQuote(taskPrompt(t, true))}`, t.cwd || st.settings.defaultCwd || '', t.title.slice(0, 18), type.id, pool.wid) : null
                 })()
           if (id) {
             taskSessionsRef.current.set(id, { taskId: t.id, workspaceId: pool.wid })
@@ -1743,6 +1743,22 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     setPaneLayout: (n, stacked) => dispatch(s => {
       const count = Math.max(1, Math.min(4, Math.round(n)))
+      // While viewing a solo tab, the solo session is what's on screen — promote
+      // it to slot 0 of the new layout instead of silently reconfiguring the
+      // split group hidden underneath (which would yank the user off their tab).
+      if (s.soloId) {
+        const rest = s.focusedIds.filter((id): id is string => id !== null && id !== s.soloId)
+        const kept = [s.soloId, ...rest].slice(0, count)
+        const focusedIds: (string | null)[] = kept.concat(Array(count - kept.length).fill(null))
+        return {
+          ...s, focusedIds,
+          paneStacked: !!stacked,
+          activePane: 0,
+          maximizedPane: null,
+          soloId: null,
+          view: 'workspace',
+        }
+      }
       // keep visible sessions in order, then pad with empty slots
       const kept = s.focusedIds.filter((id): id is string => id !== null).slice(0, count)
       const focusedIds: (string | null)[] = kept.concat(Array(count - kept.length).fill(null))
