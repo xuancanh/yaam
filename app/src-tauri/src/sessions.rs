@@ -245,6 +245,100 @@ pub fn git_diff(cwd: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+#[derive(Serialize)]
+pub struct DirEntryInfo {
+    name: String,
+    path: String,
+    is_dir: bool,
+}
+
+#[tauri::command]
+pub fn list_dir(path: String) -> Result<Vec<DirEntryInfo>, String> {
+    let dir = expand_tilde(&path);
+    let mut out: Vec<DirEntryInfo> = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        out.push(DirEntryInfo {
+            name,
+            path: entry.path().to_string_lossy().to_string(),
+            is_dir,
+        });
+    }
+    out.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(out)
+}
+
+#[derive(Serialize)]
+pub struct GitFileStatus {
+    path: String,
+    status: String,
+}
+
+#[derive(Serialize)]
+pub struct GitStatusResult {
+    root: String,
+    files: Vec<GitFileStatus>,
+}
+
+/// Repo root + porcelain status (paths relative to the root).
+#[tauri::command]
+pub fn git_status(cwd: String) -> Result<GitStatusResult, String> {
+    let dir = expand_tilde(&cwd);
+    let root_out = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&dir)
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !root_out.status.success() {
+        return Err("not a git repository".to_string());
+    }
+    let root = String::from_utf8_lossy(&root_out.stdout).trim().to_string();
+    let out = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&dir)
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let mut files = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        if line.len() < 4 {
+            continue;
+        }
+        let status = line[..2].trim().to_string();
+        let mut path = line[3..].to_string();
+        if let Some((_, to)) = path.split_once(" -> ") {
+            path = to.to_string();
+        }
+        files.push(GitFileStatus {
+            path: path.trim_matches('"').to_string(),
+            status,
+        });
+    }
+    Ok(GitStatusResult { root, files })
+}
+
+/// Zero-context diff of one file vs HEAD — the frontend parses hunk headers
+/// into added/modified line markers for the gutter.
+#[tauri::command]
+pub fn git_file_diff(cwd: String, path: String) -> Result<String, String> {
+    let out = Command::new("git")
+        .args(["diff", "--no-color", "-U0", "HEAD", "--", &path])
+        .current_dir(expand_tilde(&cwd))
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
 #[tauri::command]
 pub fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(expand_tilde(&path)).map_err(|e| e.to_string())

@@ -1,11 +1,23 @@
+import { useState } from 'react'
 import { useActions } from '../../store'
 import { ACCENT, memTokens } from '../../data'
 import type { Agent } from '../../types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../ui'
+import { FilesPane } from './FilesPane'
 import { TerminalPane } from './TerminalPane'
+
+// explorer visibility survives tab switches (panes remount freely)
+const filesOpenCache = new Map<string, boolean>()
 
 export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
   const { setActivePane, closePane, openPanel, resume, approve, deny, stopSession, toggleMaximize, minimizePane, renameSession } = useActions()
+  const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
+  const toggleFiles = () => {
+    setFilesOpen(v => {
+      filesOpenCache.set(agent.id, !v)
+      return !v
+    })
+  }
   const memOn = agent.memory.filter(m => m.on)
   const memTotal = memOn.reduce((n, m) => n + memTokens(agent, m.id), 0)
   const toolCount = agent.tools.filter(t => t.on).length
@@ -34,6 +46,14 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
           <StatusPill agent={agent} />
         </div>
         <div style={{ flex: 1 }} />
+        <button
+          className="icon-btn"
+          title={filesOpen ? 'Hide file explorer' : 'File explorer & viewer'}
+          style={{ width: 27, height: 27, borderRadius: 7, color: filesOpen ? 'var(--accent)' : undefined }}
+          onClick={e => { e.stopPropagation(); toggleFiles() }}
+        >
+          <Icon paths={['M3 7a2 2 0 012-2h4l2 2h9a1 1 0 011 1v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z']} size={15} stroke={1.6} />
+        </button>
         <button className="icon-btn" title="Memory & context" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); openPanel(agent.id, 'memory') }}>
           <Icon paths={['M7 7h10v10H7z', ...IC.chip]} size={15} />
         </button>
@@ -63,7 +83,7 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         </button>
       </div>
 
-      <TerminalPane agent={agent} active={active} />
+      {filesOpen ? <FilesPane agent={agent} active={active} /> : <TerminalPane agent={agent} active={active} />}
 
       {agent.status === 'needs' && (
         <div style={{

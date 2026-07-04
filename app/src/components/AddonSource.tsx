@@ -1,52 +1,7 @@
 import { useState } from 'react'
+import { highlight } from '../highlight'
 import { useActions } from '../store'
 import type { Addon } from '../types'
-
-// ---------- tiny regex highlighter (escape first, then colorize) ----------
-
-function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-const C = {
-  comment: '#5B6472',
-  string: '#7FE3B0',
-  keyword: '#C77DFF',
-  number: '#F5C451',
-  tag: '#7FD1FF',
-  attr: '#E8A87C',
-}
-
-function highlightJs(code: string): string {
-  return esc(code).replace(
-    /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|(&#?\w+;)?('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\b(const|let|var|function|return|if|else|for|while|do|await|async|new|typeof|instanceof|of|in|try|catch|finally|throw|class|extends|switch|case|break|continue|default|null|undefined|true|false|this)\b|\b(\d+(?:\.\d+)?)\b/g,
-    (m, comment, _amp, str, kw, num) => {
-      if (comment) return `<span style="color:${C.comment};font-style:italic">${comment}</span>`
-      if (str) return `<span style="color:${C.string}">${(_amp || '') + str}</span>`
-      if (kw) return `<span style="color:${C.keyword}">${kw}</span>`
-      if (num) return `<span style="color:${C.number}">${num}</span>`
-      return m
-    },
-  )
-}
-
-function highlightHtml(code: string): string {
-  return esc(code).replace(
-    /(&lt;!--[\s\S]*?--&gt;)|(&lt;\/?)([a-zA-Z][\w-]*)|((?:[\w-]+)=)("(?:[^"])*")/g,
-    (m, comment, open, tag, attr, val) => {
-      if (comment) return `<span style="color:${C.comment};font-style:italic">${comment}</span>`
-      if (open !== undefined && tag) return `${open}<span style="color:${C.tag}">${tag}</span>`
-      if (attr && val) return `<span style="color:${C.attr}">${attr}</span><span style="color:${C.string}">${val}</span>`
-      return m
-    },
-  )
-}
-
-function highlight(code: string, lang: 'js' | 'html' | 'json' | 'text'): string {
-  if (lang === 'js' || lang === 'json') return highlightJs(code)
-  if (lang === 'html') return highlightHtml(code)
-  return esc(code)
-}
 
 // ---------- editor-style code block ----------
 

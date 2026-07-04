@@ -110,6 +110,33 @@ export async function writeTextFile(path: string, contents: string): Promise<voi
   await invoke('write_text_file', { path, contents })
 }
 
+export interface DirEntryInfo {
+  name: string
+  path: string
+  isDir: boolean
+}
+
+export async function listDir(path: string): Promise<DirEntryInfo[]> {
+  if (!isTauri) return []
+  const raw = await invoke<{ name: string; path: string; is_dir: boolean }[]>('list_dir', { path })
+  return raw.map(e => ({ name: e.name, path: e.path, isDir: e.is_dir }))
+}
+
+export interface GitStatusResult {
+  root: string
+  files: { path: string; status: string }[]
+}
+
+export async function gitStatus(cwd: string): Promise<GitStatusResult> {
+  if (!isTauri) throw new Error('git requires the desktop app')
+  return await invoke<GitStatusResult>('git_status', { cwd })
+}
+
+export async function gitFileDiff(cwd: string, path: string): Promise<string> {
+  if (!isTauri) throw new Error('git requires the desktop app')
+  return await invoke<string>('git_file_diff', { cwd, path })
+}
+
 export async function gitDiff(cwd: string): Promise<string> {
   if (!isTauri) throw new Error('git diff requires the desktop app')
   return await invoke<string>('git_diff', { cwd })
