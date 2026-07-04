@@ -12,9 +12,10 @@ import { callApiStream } from './client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from './client'
 
 export interface ChatTurnEvent {
-  /** delta = streamed text chunk · round = current stream bubble is complete
-   *  (a tool round follows) · text = final reply · tool = tool trace */
-  kind: 'tool' | 'text' | 'delta' | 'round'
+  /** delta = streamed text chunk · thinking = streamed reasoning chunk ·
+   *  round = current stream bubble is complete (a tool round follows) ·
+   *  text = final reply · tool = tool trace */
+  kind: 'tool' | 'text' | 'delta' | 'thinking' | 'round'
   text: string
 }
 
@@ -74,16 +75,51 @@ function mcpToolDefs(sessions: McpSession[]) {
   })))
 }
 
+/** Collapse `.`/`..` segments in a POSIX-style path without touching the disk. */
+function normalizePath(p: string): string {
+  const abs = p.startsWith('/')
+  const out: string[] = []
+  for (const seg of p.split('/')) {
+    if (!seg || seg === '.') continue
+    if (seg === '..') { if (out.length && out[out.length - 1] !== '..') out.pop(); else if (!abs) out.push('..') }
+    else out.push(seg)
+  }
+  return (abs ? '/' : '') + out.join('/')
+}
+
+class ToolError extends Error {}
+
 async function runBuiltin(name: string, input: Record<string, unknown>, agent: Agent, skills: CatalogSkill[]): Promise<string> {
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '')
+  const root = agent.cwd ? normalizePath(agent.cwd.replace(/\/+$/, '')) : ''
+  // Reads/lists resolve relative to the working folder; absolute paths pass through.
+  const readPath = (k = 'path') => {
+    const p = str(k)
+    if (!p) throw new ToolError(`${name}: "${k}" is required`)
+    if (p.startsWith('~')) throw new ToolError(`${name}: use an absolute path or one relative to the working folder, not "~"`)
+    return p.startsWith('/') ? normalizePath(p) : root ? normalizePath(`${root}/${p}`) : p
+  }
+  // Writes are sandboxed to the working folder: paths are taken relative to it
+  // and must resolve to somewhere inside it (no absolute escapes, no `..` out).
+  const writePath = (k = 'path') => {
+    const p = str(k)
+    if (!p) throw new ToolError(`${name}: "${k}" is required`)
+    if (!root) throw new ToolError(`${name}: this chat has no working folder set — cannot write files. Set one on the chat, then use paths relative to it.`)
+    if (p.startsWith('~')) throw new ToolError(`${name}: use a path relative to the working folder, not "~"`)
+    const full = normalizePath(p.startsWith('/') ? p : `${root}/${p}`)
+    if (full !== root && !full.startsWith(`${root}/`)) {
+      throw new ToolError(`${name}: refusing to write outside the working folder (${root}). Use a relative path that stays inside it.`)
+    }
+    return full
+  }
   switch (name) {
     case 'list_dir': {
-      const entries = await native.listDir(str('path'))
+      const entries = await native.listDir(readPath())
       if (!entries.length) return '(empty directory)'
       return entries.map(e => `${e.isDir ? 'd' : '-'} ${e.name}`).join('\n')
     }
     case 'read_file': {
-      const text = await native.readTextFile(str('path'))
+      const text = await native.readTextFile(readPath())
       const lines = text.split('\n')
       const offset = Math.max(1, Number(input.offset) || 1)
       const limit = Math.max(1, Math.min(2000, Number(input.limit) || 800))
@@ -92,22 +128,27 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
       const capped = body.length > 40_000 ? `${body.slice(0, 40_000)}\n… (truncated — page with offset/limit)` : body
       return `${lines.length} lines total\n${capped}`
     }
-    case 'write_file':
-      await native.writeTextFile(str('path'), str('content'))
-      return `wrote ${str('content').length} chars to ${str('path')}`
+    case 'write_file': {
+      if (input.content === undefined) throw new ToolError('write_file: "content" is required')
+      const target = writePath()
+      await native.writeTextFile(target, str('content'))
+      return `wrote ${str('content').length} chars to ${target}`
+    }
     case 'edit_file': {
-      const path = str('path')
-      const text = await native.readTextFile(path)
+      const target = writePath()
+      const text = await native.readTextFile(target)
       const oldStr = str('old_string')
       if (!oldStr) return 'old_string is required'
       const count = text.split(oldStr).length - 1
       if (count === 0) return 'old_string not found — read the file and match exactly (whitespace matters)'
       if (count > 1) return `old_string occurs ${count} times — add surrounding context to make it unique`
-      await native.writeTextFile(path, text.replace(oldStr, str('new_string')))
-      return `edited ${path}`
+      await native.writeTextFile(target, text.replace(oldStr, str('new_string')))
+      return `edited ${target}`
     }
     case 'run_command': {
-      const res = await native.execCommand(str('command'), str('cwd') || agent.cwd || undefined, 60_000)
+      const command = str('command')
+      if (!command.trim()) throw new ToolError('run_command: "command" is required')
+      const res = await native.execCommand(command, str('cwd') || agent.cwd || undefined, 60_000)
       return `exit ${res.code}\n${res.output || '(no output)'}`
     }
     case 'load_skill': {
@@ -124,7 +165,8 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
 function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], persona?: string): string {
   return `You are a chat agent inside YAAM (an agent-orchestration desktop app) — the user's hands-on assistant in this workspace, like a desktop Claude. You live in a pane named "${agent.name}".
 
-WORKING FOLDER: ${agent.cwd || '(none set — ask before touching files, or use absolute paths)'}
+WORKING FOLDER: ${agent.cwd || '(none set — you cannot write files until the user sets one)'}
+- Writes (write_file / edit_file) are sandboxed to the working folder: pass paths relative to it (e.g. "report.docx", "src/main.py"). Absolute paths or ".."/"~" that escape the folder are refused. Reads may use absolute paths.
 
 You can navigate and read files (list_dir/read_file), change them (edit_file for surgical replacements, write_file for new/replaced files), run shell scripts and commands (run_command — real execution on the user's machine), load skills from the user's registry (load_skill) and follow them, and call tools on the user's connected MCP servers${mcp.length ? ` (${mcp.map(s => `${s.serverName}: ${s.tools.length} tools`).join(', ')})` : ' (none connected)'}.
 
@@ -157,7 +199,8 @@ export async function runChatTurn(
   for (let i = 0; i < 24; i++) {
     const agent = getAgent()
     if (!agent) return
-    const res = await callApiStream(cfg, chatSystem(agent, skills, mcp, persona), history, tools, d => onEvent({ kind: 'delta', text: d }))
+    const res = await callApiStream(cfg, chatSystem(agent, skills, mcp, persona), history, tools,
+      (d, ch) => onEvent({ kind: ch === 'thinking' ? 'thinking' : 'delta', text: d }))
     if (res.stop_reason !== 'tool_use') {
       const text = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
       history.push({ role: 'assistant', content: text || '(ok)' })
@@ -172,6 +215,13 @@ export async function runChatTurn(
         const name = b.name ?? ''
         const input = (b.input ?? {}) as Record<string, unknown>
         let content: string
+        // args that didn't fully arrive (token-limit truncation) must not run
+        // with {} — that silently wrote to an empty path / ran a bare shell
+        if (b.incompleteArgs) {
+          content = `error: the arguments for "${name}" were cut off before they finished (likely the response hit the token limit). Retry with a smaller payload — for large files, write in sections with write_file then append via edit_file.`
+          onEvent({ kind: 'tool', text: `${name} — arguments truncated, not executed` })
+          return { type: 'tool_result', tool_use_id: b.id, content }
+        }
         try {
           if (name.startsWith(MCP_PREFIX)) {
             const [, server, ...rest] = name.split('__')
@@ -188,7 +238,9 @@ export async function runChatTurn(
         onEvent({ kind: 'tool', text: `${name} ${argPreview} → ${content.split('\n')[0]?.slice(0, 120) ?? ''}` })
         return { type: 'tool_result', tool_use_id: b.id, content: content.slice(0, 50_000) }
       }))
-    history.push({ role: 'assistant', content: res.content })
+    // thinking blocks never go back over the wire — providers reject or
+    // mis-handle replayed reasoning, and it wastes tokens
+    history.push({ role: 'assistant', content: res.content.filter(b => b.type !== 'thinking') })
     history.push({ role: 'user', content: results })
   }
   // cap the persistent conversation so long chats stay affordable

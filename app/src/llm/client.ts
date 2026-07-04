@@ -39,6 +39,8 @@ export interface ApiContentBlock {
   id?: string
   name?: string
   input?: Record<string, unknown>
+  /** tool_use args failed to parse — usually truncated by the token limit */
+  incompleteArgs?: boolean
 }
 
 export interface ApiResponse {
@@ -129,7 +131,7 @@ function anthropicAuthHeaders(key: string): Record<string, string> {
 async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
   if (cfg.provider.id === 'bedrock') {
     // model id goes in the URL on Bedrock; auth is SigV4 in the backend
-    const body = JSON.stringify({ anthropic_version: 'bedrock-2023-05-31', max_tokens: 2048, temperature: 0.2, system, messages, tools })
+    const body = JSON.stringify({ anthropic_version: 'bedrock-2023-05-31', max_tokens: 8192, temperature: 0.2, system, messages, tools })
     const raw = await bedrockInvoke(cfg.awsRegion || 'us-east-1', cfg.awsProfile, cfg.awsRefreshCmd, cfg.credCmd, cfg.model, body)
     return JSON.parse(raw) as ApiResponse
   }
@@ -143,7 +145,7 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model: cfg.model, max_tokens: 2048, temperature: 0.2, system, messages, tools }),
+    body: JSON.stringify({ model: cfg.model, max_tokens: 8192, temperature: 0.2, system, messages, tools }),
   })
   let res = await send(await resolveKey(cfg))
   if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
@@ -207,7 +209,7 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
     },
     body: JSON.stringify({
       model: cfg.model,
-      max_tokens: 2048,
+      max_tokens: 8192,
       temperature: 0.2,
       messages: toOpenAiMessages(system, messages),
       tools: (tools as Array<{ name: string; description: string; input_schema: unknown }>).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
@@ -225,12 +227,20 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
   const msg = data.choices?.[0]?.message
   const content: ApiContentBlock[] = []
-  if (msg?.reasoning_content) content.push({ type: 'thinking', text: msg.reasoning_content })
-  if (msg?.content) content.push({ type: 'text', text: msg.content })
+  let bodyText = msg?.content ?? ''
+  let thinking = msg?.reasoning_content ?? ''
+  const inlineThink = bodyText.match(/^\s*<think>([\s\S]*?)<\/think>\s*/)
+  if (inlineThink) {
+    thinking = [thinking, inlineThink[1].trim()].filter(Boolean).join('\n')
+    bodyText = bodyText.slice(inlineThink[0].length)
+  }
+  if (thinking) content.push({ type: 'thinking', text: thinking })
+  if (bodyText) content.push({ type: 'text', text: bodyText })
   for (const tc of msg?.tool_calls ?? []) {
     let input: Record<string, unknown> = {}
-    try { input = JSON.parse(tc.function.arguments || '{}') } catch { /* malformed args */ }
-    content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input })
+    let incompleteArgs = false
+    try { input = JSON.parse(tc.function.arguments || '{}') } catch { incompleteArgs = true }
+    content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input, incompleteArgs })
   }
   return { content, stop_reason: msg?.tool_calls?.length ? 'tool_use' : 'end_turn' }
 }
@@ -241,6 +251,61 @@ export function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[], 
 }
 
 // ---------------------------------------------------------------- streaming
+
+/** Streaming callback: `channel` distinguishes reasoning ('thinking') from the answer. */
+export type StreamDelta = (text: string, channel?: 'thinking') => void
+
+/** Some OpenAI-compatible reasoning models inline their reasoning as
+ *  <think>…</think> at the head of content. Route those spans to the thinking
+ *  channel as they stream instead of showing raw tags in the answer. */
+function makeThinkSplitter(route: StreamDelta): { push: (chunk: string) => void; flush: () => void } {
+  let mode: 'start' | 'text' | 'think' = 'start'
+  let buf = ''
+  const step = (): boolean => {
+    if (mode === 'start') {
+      const lead = buf.replace(/^\s+/, '')
+      if (!lead) return false
+      if ('<think>'.startsWith(lead.slice(0, 7))) {
+        if (!lead.startsWith('<think>')) return false // may still become <think> — wait
+        mode = 'think'
+        buf = lead.slice(7)
+        return true
+      }
+      mode = 'text'
+      buf = lead
+      return true
+    }
+    if (mode === 'think') {
+      const end = buf.indexOf('</think>')
+      if (end === -1) {
+        const safe = Math.max(0, buf.length - 8) // hold back a partial closing tag
+        if (safe) {
+          route(buf.slice(0, safe), 'thinking')
+          buf = buf.slice(safe)
+        }
+        return false
+      }
+      if (end) route(buf.slice(0, end), 'thinking')
+      buf = buf.slice(end + 8)
+      mode = 'start' // a second reasoning span is legal; text otherwise
+      return true
+    }
+    if (buf) route(buf)
+    buf = ''
+    return false
+  }
+  return {
+    push: chunk => {
+      buf += chunk
+      while (step()) { /* consume */ }
+    },
+    flush: () => {
+      if (!buf) return
+      route(buf, mode === 'think' ? 'thinking' : undefined)
+      buf = ''
+    },
+  }
+}
 
 /** Consume an SSE response — incrementally when the body streams, or from the
  *  buffered text otherwise (plugin fallback) — invoking onData per event. */
@@ -274,7 +339,7 @@ async function consumeSse(res: Response, onData: (data: string) => void): Promis
 }
 
 /** Streaming Anthropic Messages call: text deltas flow through onDelta. */
-async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: (text: string) => void): Promise<ApiResponse> {
+async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta): Promise<ApiResponse> {
   const anthropicBase = (cfg.provider.id === 'anthropic-compat' ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
   const send = async (key: string) => doFetch(`${anthropicBase}/v1/messages`, {
     method: 'POST',
@@ -285,7 +350,7 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model: cfg.model, max_tokens: 2048, temperature: 0.2, system, messages, tools, stream: true }),
+    body: JSON.stringify({ model: cfg.model, max_tokens: 8192, temperature: 0.2, system, messages, tools, stream: true }),
   })
   let res = await send(await resolveKey(cfg))
   if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
@@ -316,6 +381,7 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
         onDelta(d.text)
       } else if (d.type === 'thinking_delta' && d.thinking) {
         b.text = (b.text ?? '') + d.thinking
+        onDelta(d.thinking, 'thinking')
       } else if (d.type === 'input_json_delta' && d.partial_json) {
         b.partialJson = (b.partialJson ?? '') + d.partial_json
       }
@@ -330,14 +396,15 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
   const content = blocks.filter(Boolean).map(b => {
     if (b.type !== 'tool_use') return b
     let input: Record<string, unknown> = {}
-    try { input = JSON.parse(b.partialJson || '{}') } catch { /* malformed tool args */ }
-    return { type: 'tool_use', id: b.id, name: b.name, input }
+    let incompleteArgs = false
+    try { input = JSON.parse(b.partialJson || '{}') } catch { incompleteArgs = true }
+    return { type: 'tool_use', id: b.id, name: b.name, input, incompleteArgs }
   })
   return { content, stop_reason: stopReason }
 }
 
 /** Streaming OpenAI chat-completions call: content deltas flow through onDelta. */
-async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: (text: string) => void): Promise<ApiResponse> {
+async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta): Promise<ApiResponse> {
   const base = (cfg.provider.models.length === 0 && cfg.baseUrl ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
   if (!base) throw new Error('custom provider needs a base URL')
   const send = async (key: string) => doFetch(`${base}/chat/completions`, {
@@ -349,7 +416,7 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
     },
     body: JSON.stringify({
       model: cfg.model,
-      max_tokens: 2048,
+      max_tokens: 8192,
       temperature: 0.2,
       stream: true,
       messages: toOpenAiMessages(system, messages),
@@ -366,6 +433,12 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
   }
   let text = ''
   let reasoning = ''
+  const route: StreamDelta = (t, ch) => {
+    if (ch === 'thinking') reasoning += t
+    else text += t
+    onDelta(t, ch)
+  }
+  const splitter = makeThinkSplitter(route)
   const calls: { id: string; name: string; args: string }[] = []
   let finish = ''
   await consumeSse(res, data => {
@@ -373,11 +446,8 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
     try { ev = JSON.parse(data) } catch { return }
     const c = ev.choices?.[0]
     if (!c) return
-    if (c.delta?.content) {
-      text += c.delta.content
-      onDelta(c.delta.content)
-    }
-    if (c.delta?.reasoning_content) reasoning += c.delta.reasoning_content
+    if (c.delta?.content) splitter.push(c.delta.content)
+    if (c.delta?.reasoning_content) route(c.delta.reasoning_content, 'thinking')
     for (const tc of c.delta?.tool_calls ?? []) {
       const idx = tc.index ?? 0
       calls[idx] = calls[idx] ?? { id: '', name: '', args: '' }
@@ -387,13 +457,15 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
     }
     if (c.finish_reason) finish = c.finish_reason
   })
+  splitter.flush()
   const content: ApiContentBlock[] = []
   if (reasoning) content.push({ type: 'thinking', text: reasoning })
   if (text) content.push({ type: 'text', text })
   for (const tc of calls.filter(Boolean)) {
     let input: Record<string, unknown> = {}
-    try { input = JSON.parse(tc.args || '{}') } catch { /* malformed args */ }
-    content.push({ type: 'tool_use', id: tc.id, name: tc.name, input })
+    let incompleteArgs = false
+    try { input = JSON.parse(tc.args || '{}') } catch { incompleteArgs = true }
+    content.push({ type: 'tool_use', id: tc.id, name: tc.name, input, incompleteArgs })
   }
   return { content, stop_reason: calls.filter(Boolean).length || finish === 'tool_calls' ? 'tool_use' : 'end_turn' }
 }
@@ -401,7 +473,7 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
 /** Streaming variant of callApi: text deltas arrive through onDelta as the
  *  model produces them. Bedrock's invoke bridge cannot stream — it falls back
  *  to the buffered call (onDelta simply never fires). */
-export function callApiStream(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: (text: string) => void): Promise<ApiResponse> {
+export function callApiStream(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta): Promise<ApiResponse> {
   if (cfg.provider.id === 'bedrock') return callAnthropic(cfg, system, messages, tools)
   return cfg.provider.protocol === 'anthropic'
     ? streamAnthropic(cfg, system, messages, tools, onDelta)

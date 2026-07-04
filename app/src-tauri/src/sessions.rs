@@ -572,9 +572,15 @@ pub fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-/// Replace one file with UTF-8 text after expanding its path.
+/// Create or replace one file with UTF-8 text, creating parent directories.
 pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    std::fs::write(expand_tilde(&path), contents).map_err(|e| e.to_string())
+    let full = expand_tilde(&path);
+    if let Some(parent) = std::path::Path::new(&full).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+    }
+    std::fs::write(&full, contents).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
