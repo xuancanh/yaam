@@ -21,7 +21,7 @@ import { generateAddonPackage } from './llm/addon-gen'
 import { runChatTurn } from './llm/chat-agent'
 import { fetchSkillRegistry } from './skills'
 import type { CatalogSkill } from './skills'
-import { buildChatCfg, chatTypeHasCreds } from './llm/client'
+import { buildChatCfg, callApi, chatTypeHasCreds } from './llm/client'
 import { mcpConnect } from './mcp'
 import type { McpSession } from './mcp'
 import { estimateLogUsage, estimateOutputUsage } from './usage'
@@ -960,8 +960,17 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             .map(a => {
               const log = (a.log ?? []).slice(-200)
               const usage = a.usageVersion === 1 ? { used: a.used, cost: a.cost } : estimateLogUsage(log)
+              // a chat persisted while running (or with an unanswered user
+              // message) died mid-reply — say so instead of a silent gap
+              const lastChat = (a.chatLog ?? [])[(a.chatLog ?? []).length - 1]
+              const interrupted = a.kind === 'chat'
+                && (a.status === 'running' || lastChat?.role === 'user' || lastChat?.role === 'thinking')
+              const chatLog = interrupted
+                ? [...(a.chatLog ?? []), { id: mkId('cm'), role: 'assistant' as const, text: '*(interrupted — the app closed mid-reply; send a message to continue)*', at: Date.now() }]
+                : a.chatLog
               return {
                 ...a,
+                ...(chatLog ? { chatLog } : {}),
                 ...usage,
                 usageVersion: 1 as const,
                 tools: a.tools ?? mkTools(),
@@ -1621,7 +1630,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const docs = stateRef.current.agents
         .filter(a => a.kind === 'chat')
         .flatMap(a => (a.chatLog ?? [])
-          .filter(m => m.role !== 'tool')
+          .filter(m => m.role === 'user' || m.role === 'assistant')
           .map(m => ({ chatId: a.id, msgId: m.id, role: m.role, text: `${a.name}\n${m.text}` })))
       void native.chatSearchReindex(docs).catch(() => {})
     }, 1500)
@@ -1666,7 +1675,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         // after a restart the private API history is gone — rebuild it from
         // the persisted visible transcript (tool traces excluded)
         history = (agent.chatLog ?? [])
-          .filter(m => m.role !== 'tool')
+          .filter(m => m.role === 'user' || m.role === 'assistant')
           .map(m => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.text }))
         while (history.length && history[0].role !== 'user') history.shift()
         chatHistories.current.set(agentId, history)
@@ -1692,6 +1701,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       // the current bubble; the final text replaces (or creates) it
       let streamId: string | null = null
       let acc = ''
+      let thinkId: string | null = null
+      let thinkAcc = ''
+      const appendBubble = (id: string, role: 'assistant' | 'thinking', text: string) => {
+        dispatch(s2 => ({
+          ...s2,
+          agents: s2.agents.map(a => a.id === agentId
+            ? { ...a, chatLog: [...(a.chatLog ?? []), { id, role, text, at: Date.now() }].slice(-200) }
+            : a),
+        }))
+      }
       const seal = (finalText?: string) => {
         if (streamId) {
           if (finalText !== undefined && finalText !== acc) updateChatLog(agentId, streamId, finalText)
@@ -1713,19 +1732,26 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             acc += e.text
             if (!streamId) {
               streamId = mkId('cm')
-              dispatch(s2 => ({
-                ...s2,
-                agents: s2.agents.map(a => a.id === agentId
-                  ? { ...a, chatLog: [...(a.chatLog ?? []), { id: streamId as string, role: 'assistant' as const, text: acc, at: Date.now() }].slice(-200) }
-                  : a),
-              }))
+              appendBubble(streamId, 'assistant', acc)
             } else {
               updateChatLog(agentId, streamId, acc)
             }
+          } else if (e.kind === 'thinking') {
+            thinkAcc += e.text
+            if (!thinkId) {
+              thinkId = mkId('ct')
+              appendBubble(thinkId, 'thinking', thinkAcc)
+            } else {
+              updateChatLog(agentId, thinkId, thinkAcc)
+            }
           } else if (e.kind === 'round') {
             seal()
+            thinkId = null
+            thinkAcc = ''
           } else if (e.kind === 'text') {
             seal(e.text)
+            thinkId = null
+            thinkAcc = ''
           } else {
             pushChatLog(agentId, { role: 'tool', text: e.text })
           }
@@ -1733,7 +1759,33 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         persona || undefined,
       )
       seal()
+      // auto-title: after a successful turn, chats still carrying the default
+      // type name get a short LLM-derived title (a manual rename always wins)
+      if (stateRef.current.agents.find(a => a.id === agentId)?.nameIsDefault) {
+        void (async () => {
+          try {
+            const reply = (stateRef.current.agents.find(a => a.id === agentId)?.chatLog ?? [])
+              .filter(m => m.role === 'assistant').map(m => m.text).join(' ').slice(0, 400)
+            const res = await callApi(
+              buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
+              'You name chat conversations. Reply with ONLY a concise 2-5 word title for the conversation — no quotes, no trailing punctuation.',
+              [{ role: 'user', content: `Conversation so far:\nuser: ${text.slice(0, 600)}\nassistant: ${reply}\n\nName this conversation.` }],
+              [],
+            )
+            const title = res.content.filter(b => b.type === 'text').map(b => b.text).join(' ')
+              .trim().split('\n')[0].replace(/^["'“”]+|["'“”.]+$/g, '').slice(0, 60).trim()
+            if (!title) return
+            dispatch(s2 => ({
+              ...s2,
+              agents: s2.agents.map(a => a.id === agentId && a.nameIsDefault
+                ? { ...a, name: title, short: title.slice(0, 2).toUpperCase(), nameIsDefault: false }
+                : a),
+            }))
+          } catch { /* keep the default name */ }
+        })()
+      }
     } catch (e) {
+      console.error('[yaam] chat turn failed:', e) // reaches the dev/webview log for debugging
       pushChatLog(agentId, { role: 'assistant', text: `Error: ${e instanceof Error ? e.message : String(e)}` })
     } finally {
       chatBusy.current.delete(agentId)
@@ -2486,7 +2538,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     renameSession: (id, name) => dispatch(s => ({
       ...s,
       agents: s.agents.map(a => a.id === id
-        ? { ...a, name: name.trim() || a.name, short: (name.trim() || a.name).slice(0, 2).toUpperCase() }
+        ? { ...a, name: name.trim() || a.name, short: (name.trim() || a.name).slice(0, 2).toUpperCase(), nameIsDefault: false }
         : a),
     })),
 
@@ -2831,6 +2883,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         status: 'idle', model: chatType ? `${chatType.name} · ${model || chatType.model}` : 'chat agent', kind: 'chat', cwd: dir,
         chatTypeId: chatType?.id,
         chatModel: model || chatType?.model,
+        nameIsDefault: !name?.trim(),
         personaId,
         skillSourceIds,
         workspaceId: stateRef.current.activeWorkspace,
@@ -3222,6 +3275,19 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       flash('Session stopped')
     },
   }), [armResponseWatch, connectMcp, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, pushTaskChat, refreshSkillCatalog, runChatMessage, runMaster, runWatcher, sendAddonChatImpl, spawnSessionForTask, startTaskViaWatcher])
+
+  // surface background failures that would otherwise vanish (the webview
+  // console reaches the dev log / devtools — the app shows no crash UI)
+  useEffect(() => {
+    const onRejection = (e: PromiseRejectionEvent) => console.error('[yaam] unhandled rejection:', e.reason)
+    const onError = (e: ErrorEvent) => console.error('[yaam] uncaught error:', e.message, e.error)
+    window.addEventListener('unhandledrejection', onRejection)
+    window.addEventListener('error', onError)
+    return () => {
+      window.removeEventListener('unhandledrejection', onRejection)
+      window.removeEventListener('error', onError)
+    }
+  }, [])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {

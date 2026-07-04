@@ -95,6 +95,8 @@ export interface Agent {
   templateId?: string
   /** chat-mode conversation (kind === 'chat') */
   chatLog?: ChatMsg[]
+  /** name was never chosen by the user — safe to auto-title from the conversation */
+  nameIsDefault?: boolean
   /** which ChatAgentType powers this chat session */
   chatTypeId?: string
   /** model chosen for this session (from the type's models list) */
@@ -108,7 +110,7 @@ export interface Agent {
 /** one message in a chat-mode session */
 export interface ChatMsg {
   id: string
-  role: 'user' | 'assistant' | 'tool'
+  role: 'user' | 'assistant' | 'tool' | 'thinking'
   text: string
   at: number
 }

@@ -19,7 +19,7 @@ const FIELD = {
 
 /** last non-tool message of a chat, for the sidebar snippet */
 function lastSnippet(a: Agent): { text: string; at: number } {
-  const msgs = (a.chatLog ?? []).filter(m => m.role !== 'tool')
+  const msgs = (a.chatLog ?? []).filter(m => m.role === 'user' || m.role === 'assistant')
   const m = msgs[msgs.length - 1]
   return { text: m?.text.replace(/\s+/g, ' ').slice(0, 80) ?? '', at: m?.at ?? 0 }
 }
