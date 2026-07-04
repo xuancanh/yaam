@@ -2,6 +2,7 @@ import { useActions, useConductor } from '../store'
 import { ACCENT, PERM_COLORS, hexToRgba } from '../data'
 import { ViewHeader } from './ui'
 
+/** Render and edit the Master tool permission catalog. */
 export function ToolsView() {
   const s = useConductor()
   const { cycleCatalogPerm } = useActions()

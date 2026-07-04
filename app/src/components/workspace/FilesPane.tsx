@@ -22,6 +22,7 @@ interface FilesState {
 }
 const stateCache = new Map<string, FilesState>()
 
+/** Return the persistent per-session file-browser cache, creating it on demand. */
 function cached(id: string): FilesState {
   let st = stateCache.get(id)
   if (!st) {
@@ -36,12 +37,14 @@ const GIT_COLORS: Record<string, string> = {
   MM: 'var(--amber)', D: 'var(--red-soft)', R: 'var(--amber)', UU: 'var(--red-soft)',
 }
 
+/** Map porcelain git status to a shared gutter/tree color. */
 function gitColor(status: string | undefined): string | null {
   if (!status) return null
   return GIT_COLORS[status] ?? 'var(--amber)'
 }
 
 /** Parse `git diff -U0` hunk headers into per-line change markers. */
+/** Parse a file diff into line-number markers for the source gutter. */
 function parseDiffLines(diff: string): { added: Set<number>; modified: Set<number>; deletedAfter: Set<number> } {
   const added = new Set<number>()
   const modified = new Set<number>()
@@ -72,6 +75,7 @@ const MAX_LINES = 8000
 
 // ---------------------------------------------------------------- tree
 
+/** Recursively render one directory level and lazily loaded descendants. */
 function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git }: {
   dir: string
   depth: number
@@ -141,6 +145,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git }:
 
 // ---------------------------------------------------------------- viewer
 
+/** Load and display one file with syntax highlighting and optional diff gutter. */
 function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose, git }: {
   path: string
   gutter: 'numbers' | 'git'
@@ -160,6 +165,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   const lang = langForFile(name)
   const rel = git && path.startsWith(git.root + '/') ? path.slice(git.root.length + 1) : null
 
+  // Read the selected file and its diff, ignoring stale async completions.
   const load = useCallback(async () => {
     try {
       const text = await readTextFile(path)
@@ -205,6 +211,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   const untracked = !!marks?.added.has(-1)
   const changed = (marks?.added.size ?? 0) + (marks?.modified.size ?? 0) > 0 || untracked
 
+  // Resolve one source line's added, modified, or deletion-adjacent marker.
   const gutterFor = (n: number): { color: string | null; label: string } => {
     if (!marks) return { color: null, label: '' }
     if (untracked || marks.added.has(n)) return { color: 'var(--green)', label: 'new' }
@@ -320,6 +327,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
 
 // ---------------------------------------------------------------- pane
 
+/** Manage a session-scoped filesystem tree, selected file, and git metadata. */
 export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) {
   const init = cached(agent.id)
   const [file, setFile] = useState<string | null>(init.file)
@@ -335,6 +343,7 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
     stateCache.set(agent.id, { file, mode, gutter, expanded: [...expanded] })
   }, [agent.id, file, mode, gutter, expanded])
 
+  // Refresh repository status and rebuild the path-to-status lookup.
   const refreshGit = useCallback(() => {
     gitStatus(root)
       .then(res => {
@@ -360,6 +369,7 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
     return () => window.clearInterval(iv)
   }, [refreshGit])
 
+  // Expand a cached directory or lazily request its children before expanding.
   const toggleDir = (path: string) => {
     setExpanded(prev => {
       const next = new Set(prev)

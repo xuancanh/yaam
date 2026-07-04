@@ -3,6 +3,7 @@ import type { AppState } from '../types'
 import type { ApiMessage } from './client'
 import { addonPromptAppends } from '../addons'
 
+/** Serialize the bounded live app state that Master needs for one decision. */
 function describeState(s: AppState): string {
   const ws = s.workspaces.find(w => w.id === s.activeWorkspace)
   const live = s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
@@ -10,7 +11,9 @@ function describeState(s: AppState): string {
     ? live.map(a => `${a.name} (id=${a.id}, ${a.status})`).join(' · ')
     : 'none'
   const sessions = live.map(a => {
+    // Treat missing legacy memory toggles as enabled.
     const memOn = (id: string) => a.memory.find(m => m.id === id)?.on !== false
+    // Convert an agent tool id into the prompt's compact permission label.
     const perm = (id: string) => {
       const t = a.tools.find(x => x.id === id)
       return t ? (t.on ? t.perm : 'Off') : 'Auto'
@@ -51,6 +54,7 @@ function describeState(s: AppState): string {
   ].join('\n\n')
 }
 
+/** Build Master's system instructions from policy, tool, and addon configuration. */
 export function systemPrompt(s: AppState): string {
   return `You are Master, the orchestrator inside YAAM (Yet Another Agent Manager) — a desktop manager for multiple live agent sessions (CLI processes). You sit between the user and the sessions:
 - The user talks to you in chat.
@@ -65,6 +69,7 @@ CURRENT STATE
 ${describeState(s)}${addonPromptAppends(s)}`
 }
 
+/** Convert visible chat and an optional proactive event into bounded API history. */
 export function chatHistory(s: AppState, eventNote?: string): ApiMessage[] {
   const msgs: ApiMessage[] = []
   for (const m of s.messages) {
@@ -83,7 +88,5 @@ export function chatHistory(s: AppState, eventNote?: string): ApiMessage[] {
   if (!msgs.length) msgs.push({ role: 'user', content: eventNote || 'Hello' })
   return msgs.slice(-30)
 }
-
-
 
 

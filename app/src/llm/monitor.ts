@@ -49,6 +49,7 @@ const MONITOR_TOOLS = [
   },
 ]
 
+/** Describe one session and the monitor's strict escalation responsibilities. */
 function monitorSystem(agent: Agent): string {
   return `You are a session monitor inside YAAM (an agent manager). You watch exactly ONE terminal session:
 - name: ${agent.name}
@@ -64,7 +65,9 @@ You receive the session's output whenever it settles. Your duties, in order:
 Ground every tool argument in the output you actually received — never invent progress, intentions, or results that the text does not show. If the output is ambiguous, say so in the summary rather than guessing. Never reply with prose; use tools, then stop. If nothing changed, do nothing.`
 }
 
+/** Dispatch a monitor tool call to the session-specific execution callbacks. */
 function runMonitorTool(name: string, input: Record<string, unknown>, exec: MonitorExec): string {
+  // Read a string argument without trusting model-generated input types.
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '')
   switch (name) {
     case 'update_status':

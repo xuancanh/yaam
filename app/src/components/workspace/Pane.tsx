@@ -9,9 +9,11 @@ import { TerminalPane } from './TerminalPane'
 // explorer visibility survives tab switches (panes remount freely)
 const filesOpenCache = new Map<string, boolean>()
 
+/** Render one terminal pane with session controls and optional file explorer. */
 export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
   const { setActivePane, closePane, openPanel, resume, approve, deny, stopSession, toggleMaximize, minimizePane, renameSession } = useActions()
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
+  // Toggle the pane-local file explorer and repaint the terminal after resizing.
   const toggleFiles = () => {
     setFilesOpen(v => {
       filesOpenCache.set(agent.id, !v)
@@ -120,4 +122,3 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
     </div>
   )
 }
-

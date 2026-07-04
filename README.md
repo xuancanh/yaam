@@ -95,6 +95,8 @@ app/      Tauri app
 
 ## Development
 
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, runtime data flows, persistence rules, and change checklist.
+
 Requires Node 20+, Rust (rustup), and Xcode command-line tools on macOS.
 
 ```sh

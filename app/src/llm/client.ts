@@ -4,6 +4,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { bedrockInvoke, isTauri, runCredentialCommand } from '../native'
 import type { AppState } from '../types'
 
+/** Select Tauri HTTP on desktop and the browser fetch implementation in web previews. */
 const doFetch: typeof fetch = (...args) => (isTauri ? tauriFetch(...args) : fetch(...args))
 
 export interface ProviderDef {
@@ -24,6 +25,7 @@ export const PROVIDERS: ProviderDef[] = [
   { id: 'custom', label: 'Custom (OpenAI-compatible)', base: '', protocol: 'openai', models: [], keyHint: 'api key' },
 ]
 
+/** Resolve a provider id, falling back to the first supported provider. */
 export function providerFor(id: string): ProviderDef {
   return PROVIDERS.find(pr => pr.id === id) ?? PROVIDERS[0]
 }
@@ -116,6 +118,7 @@ function anthropicAuthHeaders(key: string): Record<string, string> {
   return { 'x-api-key': key }
 }
 
+/** Send one Anthropic-shaped request through direct HTTP or the Bedrock bridge. */
 async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
   if (cfg.provider.id === 'bedrock') {
     // model id goes in the URL on Bedrock; auth is SigV4 in the backend
@@ -123,6 +126,7 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
     const raw = await bedrockInvoke(cfg.awsRegion || 'us-east-1', cfg.awsProfile, cfg.awsRefreshCmd, cfg.credCmd, cfg.model, body)
     return JSON.parse(raw) as ApiResponse
   }
+  // Build the request with a supplied key so auth failures can refresh and retry once.
   const send = async (key: string) => doFetch(`${cfg.provider.base}/v1/messages`, {
     method: 'POST',
     headers: {
@@ -182,9 +186,11 @@ function toOpenAiMessages(system: string, messages: ApiMessage[]): OaiMessage[] 
   return out
 }
 
+/** Adapt one request to OpenAI chat completions and normalize its response. */
 async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
   const base = (cfg.provider.id === 'custom' ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
   if (!base) throw new Error('custom provider needs a base URL (Settings → Master Brain)')
+  // Build the request with a supplied key so auth failures can refresh and retry once.
   const send = async (key: string) => doFetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -221,6 +227,7 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
   return { content, stop_reason: msg?.tool_calls?.length ? 'tool_use' : 'end_turn' }
 }
 
+/** Route a normalized LLM request to the configured wire-protocol adapter. */
 export function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
   return cfg.provider.protocol === 'anthropic' ? callAnthropic(cfg, system, messages, tools) : callOpenAi(cfg, system, messages, tools)
 }
@@ -231,6 +238,7 @@ export function hasCreds(settings: AppState['settings']): boolean {
   return settings.provider === 'bedrock' || Boolean(settings.apiKey) || Boolean(settings.credCmd.trim())
 }
 
+/** Project persisted orchestration settings into the provider-neutral client config. */
 export function buildCfg(settings: AppState['settings'], modelOverride?: string): LlmConfig {
   return {
     provider: providerFor(settings.provider),
@@ -243,5 +251,3 @@ export function buildCfg(settings: AppState['settings'], modelOverride?: string)
     credCmd: settings.credCmd,
   }
 }
-
-

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { fitTerminal, getTerminal } from '../../terminals'
 import type { Agent } from '../../types'
 
+/** Attach a session's registry-owned xterm instance to the current pane DOM. */
 export function TerminalPane({ agent, active }: { agent: Agent; active: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -41,4 +42,3 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
     />
   )
 }
-

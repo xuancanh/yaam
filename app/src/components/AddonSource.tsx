@@ -5,12 +5,14 @@ import type { Addon } from '../types'
 
 // ---------- editor-style code block ----------
 
+/** Render highlighted addon source with an independent copy action. */
 function CodeBlock({ title, lang, code }: { title: string; lang: 'js' | 'html' | 'json' | 'text'; code: string }) {
   const [copied, setCopied] = useState(false)
   const [collapsed, setCollapsed] = useState(code.split('\n').length > 40)
   const lines = code.split('\n')
   const shown = collapsed ? lines.slice(0, 24) : lines
 
+  // Copy this block and briefly expose completion feedback.
   const copy = () => {
     navigator.clipboard.writeText(code).then(() => {
       setCopied(true)
@@ -76,6 +78,7 @@ const FIELD = {
   padding: '7px 10px', color: 'var(--text)', outline: 'none', fontSize: 12.5,
 } as const
 
+/** Group related addon package fields under a compact section label. */
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -85,8 +88,10 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
+/** Present an installed addon's manifest, view, tools, and hooks as source. */
 export function AddonSource({ addon }: { addon: Addon }) {
   const { updateAddonMeta } = useActions()
+  // Render one editable-looking manifest metadata cell from the installed addon.
   const meta = (key: 'name' | 'version' | 'icon' | 'desc' | 'author', label: string, width: number) => (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{label}</span>

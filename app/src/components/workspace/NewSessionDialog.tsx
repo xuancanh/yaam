@@ -9,10 +9,12 @@ const FIELD_STYLE = {
   fontFamily: "'JetBrains Mono', monospace",
 } as const
 
+/** Render a consistent label for session-launch fields. */
 function FieldLabel({ children }: { children: string }) {
   return <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--mut)', marginBottom: 5, letterSpacing: 0.3 }}>{children}</div>
 }
 
+/** Launch a template, configured agent type, terminal, or custom command. */
 export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const s = useConductor()
   const { newRealSession, runTemplate } = useActions()
@@ -30,6 +32,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const tpl = templateId ? templates.find(t => t.id === templateId) : undefined
   const effectiveCommand = isShell ? `${shell} -i` : command
 
+  // Select an agent type and synchronize its default command.
   const selectType = (id: string) => {
     setTypeId(id)
     if (id === 'custom') setCommand('')
@@ -39,11 +42,13 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // Fill the working directory from the native folder picker.
   const browse = async () => {
     const dir = await pickFolder(cwd || undefined)
     if (dir) setCwd(dir)
   }
 
+  // Dispatch either a template run or a manually configured real session.
   const launch = () => {
     if (tpl) {
       runTemplate(tpl.id, task.trim() || undefined)
@@ -161,4 +166,3 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
     </div>
   )
 }
-

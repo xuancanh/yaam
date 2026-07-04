@@ -33,11 +33,13 @@ interface Command {
   run: () => void
 }
 
+/** Filter keyboard actions and dispatch the selected command or session focus. */
 export function CommandPalette() {
   const s = useConductor()
   const a = useActions()
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Rebuild static actions plus current idle-session targets for the query.
   const commands = useMemo<Command[]>(() => {
     const cmds: Command[] = [
       { id: 'route', label: 'Route a task…', hint: 'compose', icon: 'route', run: a.focusComposer },
@@ -65,11 +67,13 @@ export function CommandPalette() {
 
   if (!s.paletteOpen) return null
 
+  // Close the palette before invoking the selected action.
   const runCommand = (c: Command) => {
     a.closePalette()
     c.run()
   }
 
+  // Navigate filtered commands and run the active row from the keyboard.
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()

@@ -225,7 +225,9 @@ Style to match the app: dark background #0A0B0F, text #E7E9F0, muted #8B93A1, ac
   },
 ]
 
+/** Validate and dispatch one Master tool call onto the store-owned execution surface. */
 export async function runTool(name: string, input: Record<string, unknown>, exec: MasterExec): Promise<string> {
+  // Read a string argument without trusting model-generated input types.
   const str = (k: string) => typeof input[k] === 'string' ? input[k] as string : ''
   switch (name) {
     case 'launch_session': return exec.launchSession(str('command'), str('cwd'), str('name') || undefined)
@@ -253,4 +255,3 @@ export async function runTool(name: string, input: Record<string, unknown>, exec
     default: return `unknown tool ${name}`
   }
 }
-

@@ -6,6 +6,7 @@ import { addonSnapshot } from '../addons'
 import type { Addon } from '../types'
 import { IC, Icon, MasterMark, ViewHeader } from './ui'
 
+/** Host the scoped LLM customization conversation for one addon package. */
 function AddonChat({ addon }: { addon: Addon }) {
   const s = useConductor()
   const { sendAddonChat } = useActions()
@@ -19,11 +20,13 @@ function AddonChat({ addon }: { addon: Addon }) {
     if (el) el.scrollTop = el.scrollHeight
   }, [msgs.length, busy])
 
+  // Send the customization prompt and clear the local composer.
   const send = () => {
     if (!draft.trim() || busy) return
     sendAddonChat(addon.id, draft.trim())
     setDraft('')
   }
+  // Send on Enter while preserving Shift+Enter for multiline input.
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
@@ -74,6 +77,7 @@ function AddonChat({ addon }: { addon: Addon }) {
   )
 }
 
+/** Render an addon's preview, source, or customization mode. */
 export function AddonView() {
   const s = useConductor()
   const { removeAddon, addonRpc } = useActions()
@@ -84,12 +88,14 @@ export function AddonView() {
 
   const addon = s.addons.find(a => a.id === s.activeAddon)
 
+  // Push the latest permission-filtered state snapshot into the addon iframe.
   const push = useCallback(() => {
     iframeRef.current?.contentWindow?.postMessage(
       { type: 'yaam:state', state: addonSnapshot(stateRef.current) }, '*')
   }, [])
 
   useEffect(() => {
+    // Validate iframe RPC messages, dispatch them, and return correlated results.
     const onMessage = (e: MessageEvent) => {
       if (e.source !== iframeRef.current?.contentWindow) return
       if (e.data?.type === 'yaam:getState') push()

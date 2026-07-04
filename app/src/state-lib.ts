@@ -4,12 +4,14 @@ import * as native from './native'
 import type { AgentTemplate, AgentType, AppState, EscOption, WorkspaceData } from './types'
 
 let uid = 0
+/** Generate a short UI identifier with a readable entity prefix. */
 export function mkId(prefix: string): string {
   uid += 1
   return `${prefix}${Date.now()}-${uid}`
 }
 
 // Matches one field of a five-field cron expression: *, */n, a, a-b, and comma lists.
+/** Match one cron field, supporting wildcards, steps, lists, and ranges. */
 export function fieldMatches(field: string, value: number): boolean {
   return field.split(',').some(part => {
     if (part === '*') return true
@@ -21,6 +23,7 @@ export function fieldMatches(field: string, value: number): boolean {
   })
 }
 
+/** Evaluate a five-field cron expression against a local Date. */
 export function cronMatches(expr: string, d: Date): boolean {
   const fields = expr.trim().split(/\s+/)
   if (fields.length !== 5) return false
@@ -34,6 +37,7 @@ export function cronMatches(expr: string, d: Date): boolean {
   )
 }
 
+/** Render common cron expressions as short labels and preserve uncommon input. */
 export function humanizeCron(expr: string): string {
   const f = expr.trim().split(/\s+/)
   if (f.length !== 5) return expr
@@ -63,6 +67,7 @@ export const QUESTION_MARK_LINE_RE = /^[^│┌└─]*\S[^?]*\?\s*$/
 // numbered dialog options, with optional ❯ cursor: "❯ 1. Yes" / "2. No"
 export const OPTION_RE = /^\s*[│]?\s*(❯)?\s*(\d+)[.)]\s+(.+?)\s*[│]?\s*$/
 
+/** Extract numbered TUI choices and the visible cursor from settled screen rows. */
 export function extractOptions(lines: string[]): { options: EscOption[]; cursorNum: number } {
   const options: EscOption[] = []
   let cursorNum = 1
@@ -86,6 +91,7 @@ export function taskPrompt(task: { title: string; description?: string; criteria
   ].filter(Boolean).join('\n\n')
 }
 
+/** Resolve a configured agent type from the executable at the start of a command. */
 export function typeForCommand(command: string, types: AppState['agentTypes']) {
   const bin = command.trim().split(/\s+/)[0]
   return types.find(t => t.model.trim().split(/\s+/)[0] === bin)
@@ -123,6 +129,7 @@ export function focusSessionIn(s: AppState, id: string): AppState {
 }
 
 // KEY=value lines → shell assignment prefix (we spawn via sh -lc)
+/** Convert newline-delimited environment assignments into a shell-safe prefix. */
 export function envPrefix(env?: string): string {
   if (!env) return ''
   const parts = env.split('\n')
@@ -135,10 +142,12 @@ export function envPrefix(env?: string): string {
   return parts.length ? `${parts.join(' ')} ` : ''
 }
 
+/** Launch a real PTY session through the native bridge. */
 export function spawnAgentProcess(id: string, command: string, cwd?: string): Promise<void> {
   return native.spawnSession(id, command.trim(), cwd || undefined)
 }
 
+/** Resolve after a browser timer delay. */
 export const wait = (ms: number) => new Promise<void>(r => window.setTimeout(r, ms))
 
 export const KEYMAP: Record<string, string> = {
@@ -147,9 +156,10 @@ export const KEYMAP: Record<string, string> = {
   'ctrl+c': '\x03', 'ctrl+d': '\x04',
 }
 
-// Write text, then Enter as a SEPARATE keypress. TUIs (Claude Code et al.)
-// treat text+\r in one chunk as a paste and insert a newline instead of
-// submitting.
+/**
+ * Send text and Enter as separate writes; terminal TUIs otherwise treat the
+ * combined chunk as pasted text and may insert a newline instead of submitting.
+ */
 export function sendLineToSession(id: string, text: string) {
   native.writeSession(id, text).catch(() => {})
   window.setTimeout(() => { native.writeSession(id, '\r').catch(() => {}) }, 250)
@@ -159,6 +169,7 @@ export function sendLineToSession(id: string, text: string) {
 
 // ---------- workspace scoping ----------
 
+/** Create the isolated state slice for a new workspace. */
 export function emptyScoped(greeting: string): WorkspaceData {
   return {
     focusedIds: [], activePane: 0, soloId: null, paneStacked: false, minimizedIds: [],
@@ -168,6 +179,7 @@ export function emptyScoped(greeting: string): WorkspaceData {
   }
 }
 
+/** Snapshot the active workspace's flat fields into a storable workspace slice. */
 export function scopedFromState(s: AppState): WorkspaceData {
   return {
     focusedIds: s.focusedIds, activePane: s.activePane, soloId: s.soloId, paneStacked: s.paneStacked, minimizedIds: s.minimizedIds,
@@ -177,6 +189,7 @@ export function scopedFromState(s: AppState): WorkspaceData {
   }
 }
 
+/** Replace the flat active-workspace fields with a workspace slice. */
 export function applyScoped(s: AppState, d: WorkspaceData): AppState {
   return {
     ...s,
@@ -189,6 +202,7 @@ export function applyScoped(s: AppState, d: WorkspaceData): AppState {
 }
 
 /** Switch the active workspace: stash current scoped data, load the target's. */
+/** Stash the current workspace and hydrate the target workspace atomically. */
 export function switchWorkspaceIn(s: AppState, id: string, greeting: string): AppState {
   if (id === s.activeWorkspace || !s.workspaces.some(w => w.id === id)) return s
   const stash = { ...s.workspaceData, [s.activeWorkspace]: scopedFromState(s) }
@@ -200,6 +214,7 @@ export function switchWorkspaceIn(s: AppState, id: string, greeting: string): Ap
 
 // ---------------------------------------------------------------- agent templates
 
+/** Quote an arbitrary string for safe use as one POSIX shell argument. */
 export function shQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
 }
@@ -211,6 +226,7 @@ export function shQuote(s: string): string {
  * seeded with the prompt. `{task}` in the prompt is replaced by the task text;
  * without the placeholder the task is appended after the prompt.
  */
+/** Translate a template into the real CLI invocation for its configured agent type. */
 export function buildTemplateCommand(tpl: AgentTemplate, type: AgentType | undefined, task?: string): string {
   const bin = (type?.model ?? tpl.typeId).trim() || 'claude'
   const base = tpl.prompt.includes('{task}')

@@ -4,13 +4,16 @@ import { ACCENT, hexToRgba } from '../data'
 import { IC, Icon, Switch, ViewHeader } from './ui'
 
 /** default for the one-time picker: next full hour, in datetime-local format */
+/** Return the next local clock hour in datetime-local input format. */
 function nextHourLocal(): string {
   const d = new Date(Date.now() + 60 * 60 * 1000)
   d.setMinutes(0, 0, 0)
+  // Pad date fields to the width required by datetime-local inputs.
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+/** Collect and normalize recurring or one-time schedule configuration. */
 function NewScheduleDialog({ onClose }: { onClose: () => void }) {
   const s = useConductor()
   const { addCron } = useActions()
@@ -34,6 +37,7 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
     && (action !== 'task' || Boolean(taskTitle.trim()))
     && (action !== 'template' || Boolean(tpl))
 
+  // Validate the selected mode and persist its normalized Cron record.
   const create = () => {
     if (!valid) return
     const once = kind === 'once'
@@ -153,6 +157,7 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
+/** List, toggle, remove, and create schedules for the active workspace. */
 export function Schedules() {
   const s = useConductor()
   const { toggleCron, deleteCron } = useActions()

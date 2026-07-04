@@ -65,6 +65,7 @@ export const DIFF_BG: Record<string, string> = {
 
 // dot color for a session's tab/card indicator: attention overrides toward
 // what happened (finished=green, error=red, needs=amber)
+/** Map an agent's lifecycle and attention state to its status-dot color. */
 export function indicatorColor(a: Agent): string {
   if (a.status === 'needs') return STATUS_META.needs.color
   if (a.status === 'error') return STATUS_META.error.color
@@ -72,6 +73,7 @@ export function indicatorColor(a: Agent): string {
   return (STATUS_META[a.status] || STATUS_META.idle).color
 }
 
+/** Convert a six-digit hex color to an rgba() value with the requested alpha. */
 export function hexToRgba(hex: string, a: number): string {
   const n = parseInt(hex.slice(1), 16)
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
@@ -79,6 +81,7 @@ export function hexToRgba(hex: string, a: number): string {
 
 // What of this session feeds Master's context — toggles are enforced when
 // building Master's system prompt. Token counts are computed live.
+/** Create an independent copy of the default memory-source configuration. */
 export function mkMemory(): MemorySource[] {
   return [
     { id: 'tail', label: 'Terminal output tail', detail: 'last 200 lines, ANSI-stripped', tokens: 0, on: true },
@@ -87,6 +90,7 @@ export function mkMemory(): MemorySource[] {
 }
 
 // What Master may do to this session — enforced in Master's tool executor.
+/** Create an independent copy of the default per-agent tool permissions. */
 export function mkTools(): AgentTool[] {
   return [
     { id: 'send', name: 'Send input', on: true, perm: 'Auto' },
@@ -96,6 +100,7 @@ export function mkTools(): AgentTool[] {
 }
 
 // Live token estimate for a memory source (chars / 4 ≈ tokens, in k)
+/** Return the effective token allocation for one enabled agent memory source. */
 export function memTokens(a: Agent, sourceId: string): number {
   if (sourceId === 'tail') return a.log.reduce((n, l) => n + l.x.length + 1, 0) / 4000
   if (sourceId === 'meta') return 0.05
@@ -110,10 +115,12 @@ export interface AgentDetail {
   diff: DiffFile[]
 }
 
+/** Seed the monitor-maintained detail fields for a newly created session. */
 export function defaultDetail(): AgentDetail {
   return { used: 0, cost: 0, budget: 3.0, snaps: [{ label: 'session start', time: 'just now' }], diff: [] }
 }
 
+/** Build a complete fresh AppState used before persisted state is hydrated. */
 export function seedState(): AppState {
   return {
     view: 'workspace',

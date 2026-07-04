@@ -2,6 +2,7 @@ import { useConductor } from '../store'
 import { ESTIMATED_OUTPUT_COST_PER_KTOK, formatEstimatedTokens } from '../usage'
 import { AgentAvatar, ViewHeader } from './ui'
 
+/** Render one aggregate usage metric with its explanatory subtitle. */
 function StatCard({ label, value, sub, valueColor }: { label: string; value: string; sub: string; valueColor?: string }) {
   return (
     <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: 16 }}>
@@ -12,6 +13,7 @@ function StatCard({ label, value, sub, valueColor }: { label: string; value: str
   )
 }
 
+/** Aggregate and display terminal-output usage estimates for active sessions. */
 export function UsageView() {
   const s = useConductor()
   const agents = s.agents.filter(a => (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)

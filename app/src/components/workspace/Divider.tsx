@@ -1,4 +1,6 @@
+/** Convert pointer drag distance into a clamped row or column split ratio. */
 export function Divider({ dir, onRatio }: { dir: 'col' | 'row'; onRatio: (r: number) => void }) {
+  // Capture the initial container geometry for a document-level drag.
   const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
     // walk past display:contents wrappers, which have no box
@@ -10,12 +12,14 @@ export function Divider({ dir, onRatio }: { dir: 'col' | 'row'; onRatio: (r: num
     }
     if (!parent) return
     const rect = parent.getBoundingClientRect()
+    // Convert pointer position into the requested split ratio.
     const move = (ev: MouseEvent) => {
       const raw = dir === 'col'
         ? (ev.clientX - rect.left) / rect.width
         : (ev.clientY - rect.top) / rect.height
       onRatio(Math.min(0.85, Math.max(0.15, raw)))
     }
+    // Stop tracking once the pointer is released anywhere in the document.
     const up = () => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
@@ -34,4 +38,3 @@ export function Divider({ dir, onRatio }: { dir: 'col' | 'row'; onRatio: (r: num
     />
   )
 }
-

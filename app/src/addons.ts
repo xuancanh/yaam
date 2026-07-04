@@ -59,10 +59,13 @@ export const METHOD_PERMISSION: Record<string, AddonPermission> = {
 
 /** Wrap an API so every method checks the addon's granted scopes. */
 export function enforcePermissions(api: AddonApi, granted: AddonPermission[]): AddonApi {
+  // Test a method against the static method-to-scope map.
   const has = (m: string) => granted.includes(METHOD_PERMISSION[m])
+  // Raise a consistent error before denied addon code reaches an implementation.
   const deny = (m: string) => {
     throw new Error(`permission "${METHOD_PERMISSION[m]}" not granted to this addon (Settings → Addons)`)
   }
+  // Preserve each method's signature while enforcing its required scope.
   const guard = <A extends unknown[], R>(m: string, fn: (...a: A) => R) =>
     (...a: A): R => (has(m) ? fn(...a) : deny(m))
   return {
@@ -94,6 +97,7 @@ export const ADDON_RPC_METHODS = [
   'storage.get', 'storage.set',
 ] as const
 
+/** Validate and invoke one whitelisted dotted addon RPC method. */
 export async function dispatchAddonRpc(api: AddonApi, method: string, args: unknown[]): Promise<unknown> {
   if (!(ADDON_RPC_METHODS as readonly string[]).includes(method)) {
     throw new Error(`unknown method ${method}`)
@@ -104,6 +108,7 @@ export async function dispatchAddonRpc(api: AddonApi, method: string, args: unkn
   return await f(...args)
 }
 
+/** Produce the bounded, read-only state shape exposed to addon code and views. */
 export function addonSnapshot(s: AppState): Record<string, unknown> {
   return {
     sessions: s.agents.filter(a => !a.archived).map(a => ({
@@ -204,6 +209,7 @@ export function addonPromptAppends(s: AppState): string {
   return parts.length ? `\n\nADDON DIRECTIVES (installed by the user):\n${parts.join('\n\n')}` : ''
 }
 
+/** Compile and execute a trusted addon handler against the permission-wrapped API. */
 async function runHandler(source: string, arg: unknown, api: AddonApi): Promise<unknown> {
   const fn = new Function('input', 'api', `"use strict";\n${source}`)
   return await fn(arg, api)

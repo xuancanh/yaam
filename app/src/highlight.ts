@@ -3,6 +3,7 @@
 
 export type HighlightLang = 'js' | 'html' | 'json' | 'text'
 
+/** Escape source text before inserting syntax-highlight markup around it. */
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
@@ -18,6 +19,7 @@ export const HL_COLORS = {
 
 const C = HL_COLORS
 
+/** Apply the lightweight shared JavaScript highlighter to escaped source. */
 export function highlightJs(code: string): string {
   return escapeHtml(code).replace(
     /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*)|(&#?\w+;)?('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\b(const|let|var|function|return|if|else|for|while|do|await|async|new|typeof|instanceof|of|in|try|catch|finally|throw|class|extends|switch|case|break|continue|default|null|undefined|true|false|this|pub|fn|impl|struct|enum|match|use|mut|def|import|from|export|interface|type|None|True|False|self)\b|\b(\d+(?:\.\d+)?)\b/g,
@@ -31,6 +33,7 @@ export function highlightJs(code: string): string {
   )
 }
 
+/** Highlight HTML structure and inline script/style bodies without a parser. */
 export function highlightHtml(code: string): string {
   return escapeHtml(code).replace(
     /(&lt;!--[\s\S]*?--&gt;)|(&lt;\/?)([a-zA-Z][\w-]*)|((?:[\w-]+)=)("(?:[^"])*")/g,
@@ -43,6 +46,7 @@ export function highlightHtml(code: string): string {
   )
 }
 
+/** Dispatch source text to the matching regex highlighter. */
 export function highlight(code: string, lang: HighlightLang): string {
   if (lang === 'js' || lang === 'json') return highlightJs(code)
   if (lang === 'html') return highlightHtml(code)
@@ -50,6 +54,7 @@ export function highlight(code: string, lang: HighlightLang): string {
 }
 
 /** Pick a highlighter for a filename (the JS highlighter covers most C-likes). */
+/** Infer the supported highlight mode from a file name or extension. */
 export function langForFile(name: string): HighlightLang {
   const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
   if (['html', 'htm', 'xml', 'svg', 'vue', 'svelte'].includes(ext)) return 'html'

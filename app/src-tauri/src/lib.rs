@@ -5,6 +5,7 @@ use bedrock::BedrockState;
 use sessions::SessionManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Configure plugins, shared state, commands, and platform setup before running Tauri.
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())

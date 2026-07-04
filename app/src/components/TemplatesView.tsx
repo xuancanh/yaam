@@ -16,6 +16,7 @@ const APPROVALS: Array<{ id: TemplateApproval; label: string; hint: string }> = 
   { id: 'full', label: 'Full access — no approvals', hint: 'claude: --dangerously-skip-permissions · codex: --dangerously-bypass-approvals-and-sandbox' },
 ]
 
+/** Pair a template editor control with its label and optional hint. */
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
@@ -29,11 +30,13 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 /** Full-view editor for one template — opened by create / edit */
+/** Edit every persisted launch option for one agent template. */
 function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => void }) {
   const s = useConductor()
   const { updateTemplate, runTemplate } = useActions()
   const type = s.agentTypes.find(t => t.id === tpl.typeId)
   const preview = buildTemplateCommand(tpl, type, tpl.prompt.includes('{task}') ? '<task>' : undefined)
+  // Scope every editor patch to the currently open template.
   const upd = (patch: Partial<AgentTemplate>) => updateTemplate(tpl.id, patch)
 
   return (
@@ -153,6 +156,7 @@ function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => v
 }
 
 /** compact card — summary only; click to open the full editor */
+/** Summarize a template and expose run, edit, and delete actions. */
 function TemplateCard({ tpl, onEdit }: { tpl: AgentTemplate; onEdit: () => void }) {
   const s = useConductor()
   const { deleteTemplate, runTemplate } = useActions()
@@ -203,6 +207,7 @@ function TemplateCard({ tpl, onEdit }: { tpl: AgentTemplate; onEdit: () => void 
   )
 }
 
+/** Manage global reusable agent launch templates. */
 export function TemplatesView() {
   const s = useConductor()
   const { addTemplate } = useActions()

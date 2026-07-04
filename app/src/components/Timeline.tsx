@@ -2,6 +2,7 @@ import { useConductor } from '../store'
 import { EVENT_COLORS, hexToRgba } from '../data'
 import { ViewHeader } from './ui'
 
+/** Render the active workspace's reverse-chronological activity feed. */
 export function Timeline() {
   const s = useConductor()
   const byId = new Map(s.agents.map(a => [a.id, a]))

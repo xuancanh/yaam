@@ -2,6 +2,7 @@ import { useActions, useConductor } from '../store'
 import { ACCENT, PERM_COLORS, hexToRgba, memTokens } from '../data'
 import { AgentAvatar, IC, Icon, Switch } from './ui'
 
+/** Route the active slide-over panel to its specialized content component. */
 export function SlideOver() {
   const s = useConductor()
   const { closePanel, setPanelTab, toggleMem, toggleTool, cyclePerm } = useActions()

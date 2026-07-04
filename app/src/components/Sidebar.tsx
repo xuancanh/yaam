@@ -6,6 +6,7 @@ import { ACCENT, hexToRgba } from '../data'
 import type { Message } from '../types'
 import { IC, Icon, MasterMark } from './ui'
 
+/** Render a Master routing decision with its target session context. */
 function RouteCard({ msg }: { msg: Message }) {
   return (
     <>
@@ -39,6 +40,7 @@ function RouteCard({ msg }: { msg: Message }) {
   )
 }
 
+/** Render an actionable session escalation and its response controls. */
 function EscalateCard({ msg }: { msg: Message }) {
   const { approve, deny, answerPrompt } = useActions()
   const esc = msg.esc!
@@ -93,6 +95,7 @@ function EscalateCard({ msg }: { msg: Message }) {
   )
 }
 
+/** Render the result of a Master-created tool or addon operation. */
 function BuildCard({ msg }: { msg: Message }) {
   const { setView } = useActions()
   const build = msg.build!
@@ -111,6 +114,7 @@ function BuildCard({ msg }: { msg: Message }) {
 
 const BUILD_STEPS = ['Planning layout', 'Generating components', 'Wiring live data', 'Mounting panel']
 
+/** Render a Master-created UI artifact message. */
 function BuildUICard({ msg }: { msg: Message }) {
   const b = msg.buildUI!
   return (
@@ -159,6 +163,7 @@ function BuildUICard({ msg }: { msg: Message }) {
   )
 }
 
+/** Hide verbose Master reasoning and tool traces behind a disclosure control. */
 function ThinkingBlock({ content }: { content: string }) {
   const [open, setOpen] = useState(false)
   const steps = content.split('\n').filter(Boolean).length
@@ -188,6 +193,7 @@ function ThinkingBlock({ content }: { content: string }) {
   )
 }
 
+/** Dispatch a chat message to its specialized row renderer. */
 function MessageRow({ msg }: { msg: Message }) {
   if (msg.role === 'you') {
     return (
@@ -220,6 +226,7 @@ function MessageRow({ msg }: { msg: Message }) {
   )
 }
 
+/** Render the resizable Master conversation, composer, and collapsed rail. */
 export function Sidebar() {
   const s = useConductor()
   const { setComposer, send, updateSettings } = useActions()
@@ -227,13 +234,16 @@ export function Sidebar() {
   const isMac = navigator.platform.toUpperCase().includes('MAC')
   const width = Math.max(280, Math.min(640, s.settings.sidebarWidth ?? 392))
 
+  // Track a window-level pointer drag and persist the clamped sidebar width.
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault()
     const startX = e.clientX
     const startW = width
+    // Convert horizontal pointer movement into a clamped width update.
     const move = (ev: PointerEvent) => {
       updateSettings({ sidebarWidth: Math.max(280, Math.min(640, startW + ev.clientX - startX)) })
     }
+    // Remove global drag listeners and restore the document cursor.
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
@@ -251,6 +261,7 @@ export function Sidebar() {
 
   const runningCount = s.agents.filter(a => a.status === 'running').length
 
+  // Send on Enter while preserving Shift+Enter for multiline input.
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()

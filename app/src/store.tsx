@@ -22,6 +22,7 @@ import { ActionsCtx, StateCtx } from './context'
 
 type Updater = (s: AppState) => AppState
 
+/** Apply a pure state updater; side effects must remain outside this reducer. */
 function reducer(s: AppState, f: Updater): AppState {
   return f(s)
 }
@@ -31,6 +32,7 @@ interface LocatedTask {
   workspaceId: string
 }
 
+/** Find a task across active and background workspace slices. */
 function findTaskInState(s: AppState, taskId: string, workspaceHint?: string): LocatedTask | undefined {
   if (!workspaceHint || workspaceHint === s.activeWorkspace) {
     const task = s.tasks.find(t => t.id === taskId)
@@ -47,6 +49,7 @@ function findTaskInState(s: AppState, taskId: string, workspaceHint?: string): L
   return undefined
 }
 
+/** Find the board task currently bound to a session in any workspace. */
 function findTaskForAgentInState(s: AppState, agentId: string): LocatedTask | undefined {
   const active = s.tasks.find(t => t.agentId === agentId)
   if (active) return { task: active, workspaceId: s.activeWorkspace }
@@ -57,6 +60,7 @@ function findTaskForAgentInState(s: AppState, agentId: string): LocatedTask | un
   return undefined
 }
 
+/** Immutably update a task in either the flat active slice or workspaceData. */
 function updateLocatedTask(
   s: AppState,
   taskId: string,
@@ -178,6 +182,7 @@ import {
 
 export { cronMatches, humanizeCron } from './state-lib'
 
+/** Own the complete app state, native/LLM effects, and action surface for the UI. */
 export function ConductorProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, seedState)
   const toastTimer = useRef<number | undefined>(undefined)
@@ -198,10 +203,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // Schedule a tracked timeout so provider unmount can cancel outstanding work.
   const later = useCallback((ms: number, fn: () => void) => {
     pending.current.push(window.setTimeout(fn, ms))
   }, [])
 
+  // Replace the transient toast and clear it after a short display window.
   const flash = useCallback((t: string) => {
     dispatch(s => ({ ...s, toast: t }))
     if (toastTimer.current) window.clearTimeout(toastTimer.current)
@@ -210,6 +217,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // events/notifications land in the OWNING workspace (sessions in background
   // workspaces keep reporting into their own stash)
+  // Resolve the workspace that should own an event associated with a session.
   const widOf = useCallback((s: AppState, agentId: string | null): string => {
     if (!agentId) return s.activeWorkspace
     const agent = s.agents.find(a => a.id === agentId)
@@ -218,6 +226,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       : s.activeWorkspace
   }, [])
 
+  // Append an activity item to the owning active or background workspace.
   const logEvent = useCallback((type: EventType, agentId: string | null, text: string) => {
     const item = { id: mkId('e'), type, agentId, text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
     dispatch(s => {
@@ -229,6 +238,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     })
   }, [widOf])
 
+  // Add a notification to the correct workspace and request native attention.
   const notify = useCallback((kind: NotifKind, title: string, detail: string, agentId: string | null) => {
     const item = {
       id: mkId('n'), kind, title, detail,
@@ -254,6 +264,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const armedRef = useRef<Map<string, { snapshot: string; at: number }>>(new Map())
   const settleRef = useRef<Map<string, { since: number; timer: number }>>(new Map())
 
+  // Prefer the rendered screen for TUI context and fall back to retained log lines.
   const sessionScreenTail = useCallback((id: string): string => {
     const lines = isAltScreen(id)
       ? readScreen(id)
@@ -261,6 +272,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return lines.filter(Boolean).slice(-10).join('\n') || '(no output)'
   }, [])
 
+  // Mark a session as awaiting fresh output so the next settle means completion.
   const armResponseWatch = useCallback((id: string) => {
     const alt = isAltScreen(id)
     const agent = stateRef.current.agents.find(a => a.id === id)
@@ -275,6 +287,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // set below; ref avoids a declaration cycle with onSettle
   const bumpSettleRef = useRef<(id: string) => void>(() => {})
 
+  // Record a settled prompt, deduplicate it, and surface user-action state.
   const setNeedsInput = useCallback((id: string, question: string, options?: EscOption[], cursorNum?: number) => {
     const agent = stateRef.current.agents.find(a => a.id === id)
     if (!agent || agent.status !== 'running') return
@@ -309,6 +322,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const lastFlaggedRef = useRef<Map<string, string>>(new Map())
 
   // shared by Master's update_agent_status tool and the per-session monitors
+  // Merge monitor-authored status fields into one session card.
   const applyAgentStatus = useCallback((sid: string, task?: string, summary?: string, actionNeeded?: string) => {
     const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     dispatch(s2 => ({
@@ -332,6 +346,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const monitorBusy = useRef<Set<string>>(new Set())
   const monitorQueue = useRef<Map<string, string>>(new Map())
 
+  // Serialize private monitor turns per session and cap their retained history.
   const runMonitor = useCallback(async (id: string, note: string) => {
     const st = stateRef.current.settings
     if (!(st.masterEnabled && hasCreds(st) && st.followMode)) return
@@ -403,6 +418,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // gap before React commits task.agentId, during which a fast one-shot can exit.
   const taskSessionsRef = useRef<Map<string, { taskId: string; workspaceId: string }>>(new Map())
 
+  // Resolve fast launch bindings before reducer state has committed agentId.
   const taskForSession = useCallback((sessionId: string): LocatedTask | undefined => {
     const binding = taskSessionsRef.current.get(sessionId)
     return binding
@@ -410,6 +426,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       : findTaskForAgentInState(stateRef.current, sessionId)
   }, [])
 
+  // Append a bounded message to a task watcher's visible chat.
   const pushTaskChat = useCallback((taskId: string, role: TaskChatMsg['role'], text: string) => {
     dispatch(s => updateLocatedTask(s, taskId, t => ({
       ...t,
@@ -417,6 +434,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     })))
   }, [])
 
+  // Serialize watcher turns per task and drain notes that arrive while one is running.
   const runWatcher = useCallback(async (taskId: string, note: string) => {
     const st = stateRef.current.settings
     if (!(st.masterEnabled && hasCreds(st))) return
@@ -431,7 +449,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       while (pending.length) {
         const current = pending.join('\n\n')
         pending = []
+        // Re-read the task after every tool call so watcher decisions see current state.
         const getTask = () => findTaskInState(stateRef.current, taskId)?.task
+        // Resolve the attached worker from committed state or the fast launch binding.
         const getAgent = () => {
           const t = getTask()
           const boundSession = Array.from(taskSessionsRef.current.entries()).find(([, binding]) => binding.taskId === taskId)?.[0]
@@ -493,6 +513,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   runWatcherRef.current = (taskId, note) => { void runWatcher(taskId, note) }
 
+  // Inspect a stable rendered screen for prompts, completion, monitors, and watchers.
   const onSettle = useCallback((id: string, since: number) => {
     settleRef.current.delete(id)
     const agent = stateRef.current.agents.find(a => a.id === id)
@@ -601,6 +622,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // (re)start the settle watcher — checks only run once output goes quiet.
   // Driven by RAW pty activity, because TUI redraws often contain no newlines.
+  // Reset a session's quiet-period timer whenever raw PTY activity arrives.
   const bumpSettle = useCallback((id: string) => {
     const prev = settleRef.current.get(id)
     if (prev) window.clearTimeout(prev.timer)
@@ -612,6 +634,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // ANSI-stripped tail of each terminal, kept for Master's context, overview
   // cards, and rough output-volume accounting (provider usage is unavailable).
+  // Retain bounded plain-text output and update character-based usage estimates.
   const appendTail = useCallback((id: string, line: string) => {
     dispatch(s => ({
       ...s,
@@ -673,6 +696,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [setNeedsInput])
 
   // typing into a terminal clears its "needs action" state
+  // Clear a session's prompt state after the user or Master answers it.
   const clearNeeds = useCallback((id: string) => {
     lastFlaggedRef.current.delete(id)
     dispatch(s => ({
@@ -925,6 +949,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // flush the latest state on quit/reload so nothing inside the debounce window is lost
   useEffect(() => {
+    // Persist synchronously from stateRef during page teardown.
     const flush = () => {
       const st = stateRef.current
       const persisted: PersistedState = {
@@ -947,12 +972,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // session file it creates. Interactive claude ignores --session-id for
   // local persistence, so file detection is the reliable mechanism; after a
   // resume we re-probe because --fork-session (and older CLIs) mint a new id.
+  // Poll native session files until the launched CLI's resume id is discoverable.
   const probeCliSession = useCallback((id: string, command: string, cwd: string, isResume: boolean) => {
     const probeType = typeForCommand(command, stateRef.current.agentTypes)
       ?? typeForCommand(stateRef.current.agents.find(a => a.id === id)?.cmd ?? '', stateRef.current.agentTypes)
     if (!probeType?.probe || !native.isTauri) return
     if (!isResume && /--resume|resume |--continue/.test(command)) return
     const spawnedAt = Date.now()
+    // Probe repeatedly because CLIs create their resume files after process start.
     const tryDetect = () => {
       const current = stateRef.current.agents.find(a => a.id === id)
       if (!current) return
@@ -972,6 +999,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     if (!isResume) later(60000, tryDetect)
   }, [later])
 
+  // Create optimistic session state, spawn its PTY, and attach lifecycle tracking.
   const launchSession = useCallback((command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string }): string | null => {
     const trimmed = command.trim()
     if (!trimmed) return null
@@ -1013,6 +1041,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // Launch a session from an agent template: the template decides the CLI,
   // one-shot vs interactive mode, prompt/system prompt, approval, and model.
+  // Resolve a persisted template into a command and launch it in the target workspace.
   const launchFromTemplate = useCallback((templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean): string | null => {
     const st = stateRef.current
     const stored = (st.templates ?? []).find(t => t.id === templateId)
@@ -1033,6 +1062,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // Board → session: an unassigned task dragged into work (or explicitly
   // started) spawns its template — or the default agent type — with the task
   // as its prompt.
+  // Launch a one-shot worker for a board task and bind its dedicated watcher.
   const spawnSessionForTask = useCallback((taskId: string) => {
     const st = stateRef.current
     const task = st.tasks.find(t => t.id === taskId)
@@ -1075,6 +1105,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // API surface handed to addon code (tools, hooks, and view RPC) — scoped
   // per addon so storage is namespaced
+  // Build the unguarded addon API implementation scoped to one addon's storage.
   const makeAddonApiRaw = useCallback((addonId: string): AddonApi => ({
     getState: () => addonSnapshot(stateRef.current),
     sendToSession: (sid, text) => {
@@ -1123,11 +1154,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     },
   }), [flash, launchSession, logEvent, notify, spawnSessionForTask])
 
+  // Wrap an addon's raw API with its current permission grants.
   const makeAddonApi = useCallback((addonId: string): AddonApi => {
     const addon = stateRef.current.addons.find(a => a.id === addonId)
     return enforcePermissions(makeAddonApiRaw(addonId), addon?.granted ?? [])
   }, [makeAddonApiRaw])
 
+  // Run one lifecycle hook for each enabled addon without blocking the caller.
   const fireAddonHook = useCallback((hook: 'onSessionExit' | 'onNeedsInput', event: Record<string, unknown>) => {
     void execAddonHook(stateRef.current, hook, event, makeAddonApi)
   }, [makeAddonApi])
@@ -1152,6 +1185,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         if (!due.length) continue
         dispatch(s => {
           // one-time schedules (at) disarm after firing
+          // Record each due schedule and disarm one-time entries after their fire.
           const mark = (crons: typeof s.crons) => crons.map(c => due.some(x => x.id === c.id)
             ? { ...c, lastFiredMinute: minuteKey, last: `ran · ${timeLabel}`, on: c.at ? false : c.on }
             : c)
@@ -1242,6 +1276,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           }
           // clear the schedule even on a failed launch so it doesn't refire every tick
           dispatch(s => {
+            // Attach the launched worker and clear the one-time schedule in its workspace.
             const patch = (tasks: typeof s.tasks) => tasks.map(x => x.id === t.id
               ? { ...x, scheduleAt: undefined, agentId: id ?? x.agentId, col: id ? 'progress' as const : x.col }
               : x)
@@ -1264,6 +1299,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   const lastEventRef = useRef<{ note: string; at: number } | null>(null)
 
+  // Serialize Master turns, coalesce proactive events, and append the final reply.
   const runMaster = useCallback(async (eventNote?: string) => {
     if (!hasCreds(stateRef.current.settings)) return
     if (eventNote) {
@@ -1279,12 +1315,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     dispatch(s => ({ ...s, masterBusy: true }))
 
     // permission gates: global Tools registry + per-session overrides
+    // Apply the global Auto/Ask/Off policy before a Master tool side effect.
     const catalogGate = (toolId: string): string | null => {
       const perm = stateRef.current.toolsCatalog.find(t => t.id === toolId)?.perm ?? 'Auto'
       if (perm === 'Off') return `blocked: the user disabled "${toolId}" in the Tools registry`
       if (perm === 'Approval') return `blocked: "${toolId}" is set to Approval — ask the user to change it in Tools`
       return null
     }
+    // Combine global policy with the target session's per-tool toggle.
     const sessionGate = (sid: string, toolId: string): string | null => {
       const agent = stateRef.current.agents.find(a => a.id === sid)
       const tool = agent?.tools.find(t => t.id === toolId)
@@ -1565,6 +1603,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // through the update_addon tool (full package replacement, validated)
   const addonEditorHistories = useRef<Map<string, ApiMessage[]>>(new Map())
 
+  // Run the scoped addon editor and apply its validated package replacement.
   const sendAddonChatImpl = useCallback(async (id: string, text: string) => {
     const st = stateRef.current.settings
     const addon = stateRef.current.addons.find(a => a.id === id)
@@ -1574,6 +1613,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       addonChats: { ...s2.addonChats, [id]: (s2.addonChats[id] ?? []).concat([{ role: 'you', text }]) },
       addonChatBusy: id,
     }))
+    // Append an editor reply to the addon's bounded customization history.
     const reply = (t: string) => dispatch(s2 => ({
       ...s2,
       addonChats: { ...s2.addonChats, [id]: (s2.addonChats[id] ?? []).concat([{ role: 'master', text: t }]) },
@@ -1588,6 +1628,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       history = []
       addonEditorHistories.current.set(id, history)
     }
+    // Validate and atomically replace the addon's editable package fields.
     const apply = (json: string): string => {
       try {
         const parsed = parseAddonPackage(json)
@@ -1613,6 +1654,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }
   }, [logEvent])
 
+  // Validate and install or replace an addon package while preserving grants.
   const installPackage = useCallback((json: string, source: Addon['source']) => {
     const parsed = parseAddonPackage(json) // throws readable errors
     const existing = stateRef.current.addons.find(a => a.name === parsed.name)
@@ -1635,6 +1677,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     flash(`Installed ${addon.name} v${addon.version}`)
   }, [flash, logEvent])
 
+  // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
     setView: v => dispatch(s => ({ ...s, view: v })),
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
@@ -2315,6 +2358,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {
+    // Open global UI shortcuts unless an editable control owns the keystroke.
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
@@ -2334,12 +2378,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   )
 }
 
+/** Read the current AppState and fail fast when rendered outside the provider. */
 export function useConductor(): AppState {
   const s = useContext(StateCtx)
   if (!s) throw new Error('useConductor outside provider')
   return s
 }
 
+/** Read the stable action surface and fail fast outside the provider. */
 export function useActions(): ConductorActions {
   const a = useContext(ActionsCtx)
   if (!a) throw new Error('useActions outside provider')

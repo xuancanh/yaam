@@ -18,6 +18,7 @@ const LAYOUTS: { key: LayoutKey; n: number; stacked?: boolean; label: string; hi
 ]
 
 /** mini preview of a pane layout, Chrome-split-menu style */
+/** Draw a compact visual preview for one terminal-pane layout. */
 function LayoutGlyph({ k, color }: { k: LayoutKey; color: string }) {
   const cells: [number, number, number, number][] =
     k === '1' ? [[1, 1, 20, 14]]
@@ -36,6 +37,7 @@ function LayoutGlyph({ k, color }: { k: LayoutKey; color: string }) {
 }
 
 /** Chrome-like split button: dropdown of pane-layout options (1–4 sessions) */
+/** Choose and persist a one-to-four-pane workspace layout. */
 function LayoutMenu() {
   const s = useConductor()
   const { setPaneLayout } = useActions()
@@ -97,6 +99,7 @@ function LayoutMenu() {
 }
 
 /** empty grid section: click to pick which session lives here */
+/** Offer eligible sessions for assignment into an unoccupied pane slot. */
 function EmptySlot({ index }: { index: number }) {
   const s = useConductor()
   const { assignPane, openNewSession, setActivePane } = useActions()
@@ -173,6 +176,7 @@ function EmptySlot({ index }: { index: number }) {
   )
 }
 
+/** Compose session tabs, split layout, terminal panes, and minimized sessions. */
 export function Workspace() {
   const s = useConductor()
   const { focusTab, setActivePane, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit } = useActions()
@@ -209,6 +213,7 @@ export function Workspace() {
   const inGrid = new Set(members.map(m => m.agent.id))
   const looseTabs = wsAgents.filter(a => !merged || !inGrid.has(a.id))
 
+  // Render a status dot that pulses for attention or input requests.
   const tabDot = (a: Agent) => {
     const flash = a.status === 'needs' || a.attention
     return (

@@ -17,6 +17,7 @@ import { Drawer } from './components/Drawer'
 import { CommandPalette } from './components/CommandPalette'
 import { Toast } from './components/Toast'
 
+/** Select the active top-level view from the centralized navigation state. */
 function MainArea() {
   const s = useConductor()
   return (
@@ -35,6 +36,7 @@ function MainArea() {
   )
 }
 
+/** Compose the persistent title bar, navigation, Master sidebar, and active view. */
 function Shell() {
   return (
     <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -52,6 +54,7 @@ function Shell() {
   )
 }
 
+/** Install the state provider around the complete desktop application shell. */
 export default function App() {
   return (
     <ConductorProvider>

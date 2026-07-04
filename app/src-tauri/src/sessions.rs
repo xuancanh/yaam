@@ -7,6 +7,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+/// Expand a leading home-directory shorthand before filesystem or process use.
 fn expand_tilde(path: &str) -> String {
     if path == "~" || path.starts_with("~/") {
         if let Ok(home) = std::env::var("HOME") {
@@ -41,6 +42,7 @@ struct ExitEvent {
 }
 
 #[tauri::command]
+/// Spawn a login-shell command in a PTY and stream data/exit events to React.
 pub fn spawn_session(
     app: AppHandle,
     state: State<'_, SessionManager>,
@@ -122,6 +124,7 @@ pub fn spawn_session(
 }
 
 #[tauri::command]
+/// Write text to a session's PTY writer and flush it immediately.
 pub fn write_session(
     state: State<'_, SessionManager>,
     id: String,
@@ -137,6 +140,7 @@ pub fn write_session(
 }
 
 #[tauri::command]
+/// Resize a session's PTY so terminal applications receive SIGWINCH.
 pub fn resize_session(
     state: State<'_, SessionManager>,
     id: String,
@@ -152,6 +156,7 @@ pub fn resize_session(
 }
 
 #[tauri::command]
+/// Remove a managed session and ask its child process to terminate.
 pub fn kill_session(state: State<'_, SessionManager>, id: String) -> Result<(), String> {
     let mut sessions = state.sessions.lock().unwrap();
     if let Some(mut handle) = sessions.remove(&id) {
@@ -160,6 +165,7 @@ pub fn kill_session(state: State<'_, SessionManager>, id: String) -> Result<(), 
     Ok(())
 }
 
+/// Find the newest JSONL file born after a launch timestamp, optionally recursively.
 fn newest_file_since(dir: &std::path::Path, since_ms: u64, recurse: bool) -> Option<(u64, std::path::PathBuf)> {
     let mut best: Option<(u64, std::path::PathBuf)> = None;
     let entries = std::fs::read_dir(dir).ok()?;
@@ -228,11 +234,13 @@ pub fn detect_cli_session(kind: String, cwd: Option<String>, since_ms: f64) -> O
 }
 
 #[tauri::command]
+/// Return the ids of PTYs still registered with the native session manager.
 pub fn live_sessions(state: State<'_, SessionManager>) -> Vec<String> {
     state.sessions.lock().unwrap().keys().cloned().collect()
 }
 
 #[tauri::command]
+/// Return the complete working-tree diff against HEAD for a session directory.
 pub fn git_diff(cwd: String) -> Result<String, String> {
     let out = Command::new("git")
         .args(["diff", "--no-color", "HEAD"])
@@ -253,6 +261,7 @@ pub struct DirEntryInfo {
 }
 
 #[tauri::command]
+/// List a directory with folders first and case-insensitive name ordering.
 pub fn list_dir(path: String) -> Result<Vec<DirEntryInfo>, String> {
     let dir = expand_tilde(&path);
     let mut out: Vec<DirEntryInfo> = Vec::new();
@@ -361,16 +370,19 @@ pub async fn run_credential_command(cmd: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+/// Read one UTF-8 text file after expanding its home-directory shorthand.
 pub fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(expand_tilde(&path)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
+/// Replace one file with UTF-8 text after expanding its path.
 pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(expand_tilde(&path), contents).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
+/// Persist the serialized frontend state under Tauri's application-data directory.
 pub fn save_state(app: AppHandle, json: String) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -378,6 +390,7 @@ pub fn save_state(app: AppHandle, json: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+/// Load persisted frontend state, treating a missing file as a fresh install.
 pub fn load_state(app: AppHandle) -> Result<Option<String>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     match std::fs::read_to_string(dir.join("conductor-state.json")) {

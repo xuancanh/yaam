@@ -25,6 +25,7 @@ const decoder = new TextDecoder()
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-_]|[\x00-\x08\x0b-\x1f\x7f]/g
 
+/** Install the single native-data listener that routes PTY bytes to registered terminals. */
 function ensureListener() {
   if (listenerStarted) return
   listenerStarted = true
@@ -46,6 +47,7 @@ function ensureListener() {
   })
 }
 
+/** Return an existing terminal or create and wire one for a session id. */
 export function getTerminal(
   id: string,
   onPlainLine?: (line: string) => void,
@@ -96,7 +98,7 @@ export function getTerminal(
   return entry
 }
 
-/** Read the currently rendered screen (visible rows, trimmed, non-empty). */
+/** Read the currently rendered screen as normalized, non-empty visible rows. */
 export function readScreen(id: string, maxRows = 30): string[] {
   const entry = entries.get(id)
   if (!entry) return []
@@ -112,11 +114,12 @@ export function readScreen(id: string, maxRows = 30): string[] {
   return lines.slice(-maxRows)
 }
 
-/** True when the session is showing a full-screen TUI (alternate buffer). */
+/** Report whether the session is showing a full-screen TUI buffer. */
 export function isAltScreen(id: string): boolean {
   return entries.get(id)?.term.buffer.active.type === 'alternate'
 }
 
+/** Fit xterm to its container and propagate the resulting size to the PTY. */
 export function fitTerminal(id: string) {
   const entry = entries.get(id)
   if (!entry || !entry.term.element) return
@@ -127,9 +130,8 @@ export function fitTerminal(id: string) {
 }
 
 /**
- * Force a running TUI to fully repaint: two SIGWINCHes (cols-1, then back).
- * Used after reattaching to a live PTY — injecting text would corrupt the
- * alternate screen, a resize makes the app redraw itself instead.
+ * Force a running TUI to repaint with two SIGWINCHes after its pane remounts;
+ * resizing is safe where injecting replayed terminal text would corrupt it.
  */
 export function repaintSession(id: string) {
   const entry = entries.get(id)
@@ -140,6 +142,7 @@ export function repaintSession(id: string) {
   }).catch(() => {})
 }
 
+/** Dispose xterm resources and remove a session from the module registry. */
 export function disposeTerminal(id: string) {
   const entry = entries.get(id)
   if (entry) {

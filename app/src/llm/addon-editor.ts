@@ -17,6 +17,7 @@ const EDITOR_TOOLS = [
   },
 ]
 
+/** Build the scoped addon-editor prompt with the current package as source of truth. */
 function editorSystem(addonJson: string): string {
   return `You customize exactly ONE addon package for YAAM (an agent-manager desktop app). The user chats with you to change it; apply changes with the update_addon tool, passing the COMPLETE updated package JSON.
 
@@ -36,6 +37,7 @@ CURRENT PACKAGE:
 ${addonJson}`
 }
 
+/** Run one addon-customization turn and return the validated replacement package. */
 export async function runAddonEditorTurn(
   cfg: LlmConfig,
   addonJson: string,

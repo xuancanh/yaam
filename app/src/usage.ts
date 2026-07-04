@@ -11,15 +11,18 @@ export interface UsageEstimate {
   cost: number
 }
 
+/** Convert a printable-character count into YAAM's token and cost estimates. */
 function estimateOutputChars(chars: number): UsageEstimate {
   const used = chars / (OUTPUT_CHARS_PER_TOKEN * 1000)
   return { used, cost: used * ESTIMATED_OUTPUT_COST_PER_KTOK }
 }
 
+/** Estimate provider-visible output usage for one terminal text fragment. */
 export function estimateOutputUsage(text: string): UsageEstimate {
   return estimateOutputChars(text.length)
 }
 
+/** Rebuild usage totals from the retained output entries in a session log. */
 export function estimateLogUsage(log: LogLine[]): UsageEstimate {
   let chars = 0
   for (const line of log) {
@@ -28,6 +31,7 @@ export function estimateLogUsage(log: LogLine[]): UsageEstimate {
   return estimateOutputChars(chars)
 }
 
+/** Format a thousand-token value for compact display without implying precision. */
 export function formatEstimatedTokens(kTokens: number): string {
   const tokens = Math.max(0, kTokens) * 1000
   if (tokens < 1000) return `${Math.round(tokens)} tok`

@@ -15,6 +15,7 @@ interface RegistryEntry {
   url: string
 }
 
+/** Manage addon installation, registry discovery, grants, and exports. */
 function AddonsSection() {
   const s = useConductor()
   const { toggleAddon, toggleAddonGrant, removeAddon, exportAddon, openAddon, installAddonFromFile, installAddonFromUrl, updateSettings } = useActions()
@@ -22,6 +23,7 @@ function AddonsSection() {
   const [registry, setRegistry] = useState<RegistryEntry[] | null>(null)
   const [regStatus, setRegStatus] = useState('')
 
+  // Read an addon package selected through the native file picker.
   const browse = async () => {
     setRegStatus('loading…')
     try {
@@ -146,6 +148,7 @@ const FIELD_STYLE = {
   fontFamily: "'JetBrains Mono', monospace",
 } as const
 
+/** Render a consistent settings-section heading. */
 function SectionLabel({ children }: { children: string }) {
   return (
     <div className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color: 'var(--mut)', marginBottom: 11 }}>
@@ -160,10 +163,12 @@ const ORCHESTRATION: Array<{ id: 'autoRoute' | 'approveDestructive' | 'followMod
   { id: 'followMode', label: 'Follow mode', detail: 'Master watches every session and escalates when action is needed.' },
 ]
 
+/** Render global provider, orchestration, session, agent-type, and addon settings. */
 export function SettingsView() {
   const s = useConductor()
   const { toggleSetting, toggleAgentType, toggleIntegration, updateSettings, setAgentTypeCmd, updateAgentType, addAgentType, deleteAgentType } = useActions()
 
+  // Fill the default working directory from the native folder picker.
   const browseDefaultCwd = async () => {
     const dir = await pickFolder(s.settings.defaultCwd || undefined)
     if (dir) updateSettings({ defaultCwd: dir })

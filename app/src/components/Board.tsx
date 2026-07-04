@@ -12,11 +12,13 @@ const FIELD = {
   fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
 } as const
 
+/** Convert an epoch timestamp to a datetime-local input value. */
 function toLocalInput(ms: number): string {
   const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60000)
   return d.toISOString().slice(0, 16)
 }
 
+/** Render a board-dialog field label and optional inline guidance. */
 function FieldLabel({ children, hint }: { children: string; hint?: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 5 }}>
@@ -28,6 +30,7 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
 
 // ---------- creation dialog: LLM helps fill in context, or rejects vague tasks ----------
 
+/** Draft, validate, and create a watcher-ready board task. */
 function NewTaskDialog({ onClose }: { onClose: () => void }) {
   const s = useConductor()
   const { createTask, draftTask } = useActions()
@@ -43,17 +46,21 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
   const enabledTypes = s.agentTypes.filter(t => t.enabled)
   const templates = s.templates ?? []
 
+  // Fill the task working directory from the native folder picker.
   const browse = async () => {
     const dir = await pickFolder(cwd || undefined)
     if (dir) setCwd(dir)
   }
 
+  // Translate the combined run selector into mutually exclusive task fields.
   const runConfig = () => runWith.startsWith('tpl:')
     ? { templateId: runWith.slice(4) }
     : { typeId: runWith || undefined }
 
+  // Normalize the criteria textarea into a non-empty string list.
   const parsedCriteria = () => criteria.split('\n').map(c => c.replace(/^[-•]\s*/, '').trim()).filter(Boolean)
 
+  // Ask the task-spec assistant to complete the current draft in place.
   const draft = async () => {
     if (!title.trim() || busy) return
     setBusy('draft')
@@ -72,6 +79,7 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // Validate the form, optionally improve it with the LLM, and add the task.
   const create = async () => {
     if (!title.trim() || busy) return
     setError('')
@@ -185,6 +193,7 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
 
 // ---------- task drawer: spec + watcher chat ----------
 
+/** Render one user, watcher, or system message from a task conversation. */
 function ChatBubble({ m }: { m: TaskChatMsg }) {
   if (m.role === 'system') {
     return (
@@ -209,6 +218,7 @@ function ChatBubble({ m }: { m: TaskChatMsg }) {
   )
 }
 
+/** Edit a task specification and converse with its dedicated watcher. */
 function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | null; onClose: () => void }) {
   const s = useConductor()
   const { updateTask, sendTaskChat, focusTab, startTask, deleteTask } = useActions()
@@ -227,14 +237,17 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
     if (el) el.scrollTop = el.scrollHeight
   }, [chat.length])
 
+  // Post the current draft to the task watcher and clear the composer.
   const send = () => {
     if (!draft.trim()) return
     sendTaskChat(task.id, draft)
     setDraft('')
   }
+  // Send on Enter while preserving Shift+Enter for multiline input.
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
+  // Persist edited task fields after trimming blank acceptance criteria.
   const saveSpec = () => {
     updateTask(task.id, {
       description: descDraft.trim(),
@@ -366,6 +379,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
 
 // ---------- board ----------
 
+/** Configure or clear a board task's one-time launch time and template. */
 function SchedulePopover({ card, onClose }: { card: BoardTask; onClose: () => void }) {
   const s = useConductor()
   const { scheduleTask } = useActions()
@@ -413,6 +427,7 @@ function SchedulePopover({ card, onClose }: { card: BoardTask; onClose: () => vo
   )
 }
 
+/** Render a draggable task summary with worker and watcher status. */
 function Card({ card, agent, onOpen }: { card: BoardTask; agent: Agent | null; onOpen: () => void }) {
   const s = useConductor()
   const { startCardDrag, deleteTask, startTask } = useActions()
@@ -513,6 +528,7 @@ const COLS: Array<{ id: BoardCol; label: string; dot: string }> = [
   { id: 'failed', label: 'Failed', dot: '#E5636F' },
 ]
 
+/** Render the active workspace's draggable watcher-driven kanban board. */
 export function Board() {
   const s = useConductor()
   const { enterCol, dropTo } = useActions()
@@ -521,6 +537,7 @@ export function Board() {
   const byId = new Map(s.agents.map(a => [a.id, a]))
   const openTask = openTaskId ? s.tasks.find(t => t.id === openTaskId) : undefined
 
+  // Enable column drops while a store-tracked card drag is active.
   const allowDrop = (e: DragEvent) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'

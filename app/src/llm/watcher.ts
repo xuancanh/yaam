@@ -37,6 +37,7 @@ Write a concise description (2-6 sentences, concrete: what, where, how to verify
 
 If the idea is too vague to produce a spec an agent could act on without guessing (no clear goal, unknown target, ambiguous scope), set ok=false and ask 1-3 targeted questions instead. Always call submit_spec exactly once.`
 
+/** Ask the configured LLM to complete or reject a rough board-task specification. */
 export async function draftTaskSpec(
   cfg: LlmConfig,
   title: string,
@@ -47,6 +48,7 @@ export async function draftTaskSpec(
   const res = await callApi(cfg, SPEC_SYSTEM, [{ role: 'user', content: user }], SPEC_TOOL)
   const call = res.content.find((b): b is ApiContentBlock => b.type === 'tool_use' && b.name === 'submit_spec')
   const input = (call?.input ?? {}) as Record<string, unknown>
+  // Keep only non-empty strings from model-generated array fields.
   const strArr = (v: unknown) => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x.trim()) : []
   if (!call) return { ok: false, description, criteria, questions: ['The assistant could not parse this task — add more detail and try again.'] }
   return {
@@ -105,6 +107,7 @@ const WATCHER_TOOLS = [
   },
 ]
 
+/** Describe a task, worker, and evidence rules for its dedicated watcher. */
 function watcherSystem(task: BoardTask, agent: Agent | undefined): string {
   const criteria = (task.criteria ?? []).map((c, i) => `${i + 1}. ${c}`).join('\n') || '(none set)'
   return `You are the dedicated watcher for ONE kanban task inside YAAM (an agent manager) — a mini orchestrator that owns this task end-to-end.
@@ -131,7 +134,9 @@ YOUR DUTIES
 You also chat with the user: your final plain-text reply (if any) is posted to the task's chat. Keep replies short and concrete. Use tools first, then reply only if there is something worth saying.`
 }
 
+/** Dispatch one watcher tool call onto the task-scoped execution surface. */
 function runWatcherTool(name: string, input: Record<string, unknown>, exec: WatcherExec): string {
+  // Read a string argument without trusting model-generated input types.
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '')
   switch (name) {
     case 'move_task': return exec.moveTask(str('col'))

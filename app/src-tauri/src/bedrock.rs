@@ -28,6 +28,7 @@ pub struct BedrockState {
     clients: Mutex<HashMap<String, CachedClient>>,
 }
 
+/// Parse ISO text or epoch seconds/milliseconds into a credential expiry time.
 fn parse_expiration(v: &serde_json::Value) -> Option<SystemTime> {
     if let Some(s) = v.as_str() {
         let dt = aws_smithy_types::DateTime::from_str(s, aws_smithy_types::date_time::Format::DateTime).ok()?;
@@ -96,6 +97,7 @@ fn parse_aws_creds(raw: &str) -> Result<Credentials, String> {
     }
 }
 
+/// Run a credential or refresh command in a login shell without blocking async tasks.
 async fn run_shell(cmd: String) -> Result<String, String> {
     let out = tauri::async_runtime::spawn_blocking(move || {
         std::process::Command::new("/bin/sh").args(["-lc", &cmd]).output()
@@ -113,6 +115,7 @@ async fn run_shell(cmd: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+/// Build a Bedrock client from exported credentials or the standard AWS chain.
 async fn make_client(region: &str, profile: &str, cred_cmd: &str) -> Result<CachedClient, String> {
     let mut loader =
         aws_config::defaults(BehaviorVersion::latest()).region(Region::new(region.to_string()));
@@ -133,6 +136,7 @@ async fn make_client(region: &str, profile: &str, cred_cmd: &str) -> Result<Cach
     Ok(CachedClient { client: Client::new(&loader.load().await), expires })
 }
 
+/// Invoke one Bedrock model and return its response body as UTF-8 text.
 async fn invoke(client: &Client, model: &str, body: &str) -> Result<String, String> {
     let res = client
         .invoke_model()
@@ -146,6 +150,7 @@ async fn invoke(client: &Client, model: &str, body: &str) -> Result<String, Stri
     Ok(String::from_utf8_lossy(res.body().as_ref()).to_string())
 }
 
+/// Classify SDK error text that can be recovered by refreshing credentials.
 fn is_auth_error(msg: &str) -> bool {
     let m = msg.to_lowercase();
     m.contains("expired")
@@ -157,6 +162,7 @@ fn is_auth_error(msg: &str) -> bool {
         || m.contains("dispatch failure")
 }
 
+/// Keep cached clients only when credentials outlive the five-minute safety margin.
 fn still_fresh(c: &CachedClient) -> bool {
     match c.expires {
         // rebuild five minutes early (Claude Code's documented margin) so a
@@ -167,6 +173,7 @@ fn still_fresh(c: &CachedClient) -> bool {
 }
 
 #[tauri::command]
+/// Invoke Bedrock with a cached client, refreshing credentials and retrying once.
 pub async fn bedrock_invoke(
     state: State<'_, BedrockState>,
     region: String,
@@ -217,6 +224,7 @@ mod tests {
     use super::parse_aws_creds;
 
     #[test]
+    /// Accept the shape emitted by `aws configure export-credentials`.
     fn parses_export_credentials_json() {
         let c = parse_aws_creds(
             r#"{"Version":1,"AccessKeyId":"AKIA1","SecretAccessKey":"S1","SessionToken":"T1","Expiration":"2030-01-01T00:00:00Z"}"#,
@@ -228,6 +236,7 @@ mod tests {
     }
 
     #[test]
+    /// Accept nested camel-case credentials and millisecond expirations.
     fn parses_nested_and_camel_case() {
         let c = parse_aws_creds(
             r#"{"credentials":{"accessKeyId":"AKIA2","secretAccessKey":"S2","sessionToken":"T2","expiration":1893456000000}}"#,
@@ -238,6 +247,7 @@ mod tests {
     }
 
     #[test]
+    /// Accept shell-style AWS environment assignments.
     fn parses_env_lines() {
         let c = parse_aws_creds(
             "export AWS_ACCESS_KEY_ID=AKIA3\nexport AWS_SECRET_ACCESS_KEY=\"S3\"\nexport AWS_SESSION_TOKEN='T3'\n",
@@ -248,6 +258,7 @@ mod tests {
     }
 
     #[test]
+    /// Reject non-AWS API-key output before constructing a Bedrock client.
     fn rejects_api_key_output() {
         assert!(parse_aws_creds("sk-ant-api-abc").is_err());
         assert!(parse_aws_creds(r#"{"apiKey":"sk-ant-api-abc"}"#).is_err());

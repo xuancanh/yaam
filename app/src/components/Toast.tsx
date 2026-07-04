@@ -1,5 +1,6 @@
 import { useConductor } from '../store'
 
+/** Display the current transient store toast when one is active. */
 export function Toast() {
   const s = useConductor()
   if (!s.toast) return null

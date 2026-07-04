@@ -3,11 +3,13 @@ import { useActions, useConductor } from '../store'
 import { NOTIF_COLORS, hexToRgba } from '../data'
 import { EditableName, IC, Icon, MasterMark } from './ui'
 
+/** Switch, create, rename, and delete workspace-scoped state pools. */
 function WorkspaceSwitcher() {
   const s = useConductor()
   const { switchWorkspace, createWorkspace, renameWorkspace, deleteWorkspace } = useActions()
   const [open, setOpen] = useState(false)
   const active = s.workspaces.find(w => w.id === s.activeWorkspace)
+  // Count visible sessions assigned to one workspace for its switcher badge.
   const countFor = (id: string) => s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === id).length
 
   return (
@@ -81,6 +83,7 @@ function WorkspaceSwitcher() {
   )
 }
 
+/** Render workspace notifications and actions from the title-bar bell. */
 function NotifPopover() {
   const s = useConductor()
   const { readAllNotif, clickNotif } = useActions()
@@ -130,6 +133,7 @@ function NotifPopover() {
   )
 }
 
+/** Render the draggable desktop title bar and global controls. */
 export function TitleBar() {
   const s = useConductor()
   const { openPalette, gotoNeeds, toggleNotif } = useActions()

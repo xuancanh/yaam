@@ -14,6 +14,7 @@ const NAV: Array<{ id: View; label: string; paths: string[] }> = [
   { id: 'tools', label: 'Tools', paths: ['M6 4v16', 'M12 4v16', 'M18 4v16', 'M6 8.5m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 14m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0'] },
 ]
 
+/** Render primary navigation plus enabled addon views for the active workspace. */
 export function IconRail() {
   const s = useConductor()
   const { setView, openAddon } = useActions()

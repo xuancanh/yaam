@@ -6,6 +6,7 @@ import type { Agent, DiffFile } from '../types'
 import { AgentAvatar, EditableName, IC, Icon } from './ui'
 
 /** Parse `git diff` unified output into per-file hunk lists (capped for display). */
+/** Convert a unified git diff into the drawer's per-file line model. */
 function parseUnifiedDiff(raw: string): DiffFile[] {
   const files: DiffFile[] = []
   let current: DiffFile | null = null
@@ -27,6 +28,7 @@ function parseUnifiedDiff(raw: string): DiffFile[] {
   return files
 }
 
+/** Load and render the selected session's working-tree diff. */
 function DiffBody({ agent }: { agent: Agent }) {
   const { approveDiff, requestChanges } = useActions()
   const canFetch = isTauri && agent.kind === 'real' && !!agent.cwd
@@ -91,6 +93,7 @@ function DiffBody({ agent }: { agent: Agent }) {
   )
 }
 
+/** Render session details, monitor state, tools, memory, and lifecycle actions. */
 function AgentBody({ agent }: { agent: Agent }) {
   const { closeDrawer, focusTab, resume, archiveSession, deleteSession } = useActions()
   const history = agent.log.slice(-16)
@@ -164,6 +167,7 @@ function AgentBody({ agent }: { agent: Agent }) {
   )
 }
 
+/** Render the store-selected agent drawer and close it on backdrop interaction. */
 export function Drawer() {
   const s = useConductor()
   const { closeDrawer, renameSession } = useActions()

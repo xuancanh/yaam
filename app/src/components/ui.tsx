@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { Agent } from '../types'
 import { STATUS_META, hexToRgba } from '../data'
 
+/** Render one or more SVG paths with the shared icon defaults. */
 export function Icon({ paths, size = 17, stroke = 1.6, style }: {
   paths: string[]
   size?: number
@@ -35,6 +36,7 @@ export const IC = {
   send: ['M12 20V5', 'M6 11l6-6 6 6'],
 }
 
+/** Render an agent lifecycle label using the shared status colors. */
 export function StatusPill({ agent, small }: { agent: Agent; small?: boolean }) {
   const sm = STATUS_META[agent.status] || STATUS_META.idle
   // running = calm static light; flashing means "look at me" (needs/attention)
@@ -51,6 +53,7 @@ export function StatusPill({ agent, small }: { agent: Agent; small?: boolean }) 
   )
 }
 
+/** Render a colored initial badge for one agent session. */
 export function AgentAvatar({ agent, size = 24 }: { agent: Agent; size?: number }) {
   return (
     <div className="mono" style={{
@@ -64,6 +67,7 @@ export function AgentAvatar({ agent, size = 24 }: { agent: Agent; size?: number 
   )
 }
 
+/** Switch a label into an inline editor and commit on blur or Enter. */
 export function EditableName({ name, onRename, fontSize = 13.5 }: {
   name: string
   onRename: (name: string) => void
@@ -73,6 +77,7 @@ export function EditableName({ name, onRename, fontSize = 13.5 }: {
   const [draft, setDraft] = useState(name)
 
   if (editing) {
+    // Commit the draft and leave edit mode from either blur or keyboard input.
     const commit = () => { onRename(draft); setEditing(false) }
     return (
       <input
@@ -117,6 +122,7 @@ export function EditableName({ name, onRename, fontSize = 13.5 }: {
   )
 }
 
+/** Render the shared accessible-looking binary toggle control. */
 export function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
     <button
@@ -135,6 +141,7 @@ export function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) 
   )
 }
 
+/** Render a consistent title row for full-height application views. */
 export function ViewHeader({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div style={{
@@ -147,6 +154,7 @@ export function ViewHeader({ title, children }: { title: string; children?: Reac
   )
 }
 
+/** Render the compact YAAM three-bar brand mark. */
 export function MasterMark({ size = 24, glow = true }: { size?: number; glow?: boolean }) {
   const accent = 'var(--accent)'
   return (
