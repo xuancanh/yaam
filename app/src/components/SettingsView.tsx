@@ -18,7 +18,7 @@ interface RegistryEntry {
 /** Manage addon installation, registry discovery, grants, and exports. */
 function AddonsSection() {
   const s = useConductor()
-  const { toggleAddon, toggleAddonGrant, removeAddon, exportAddon, openAddon, installAddonFromFile, installAddonFromUrl, updateSettings } = useActions()
+  const { toggleAddon, toggleAddonGrant, removeAddon, exportAddon, openAddon, installAddonFromFile, installAddonFromFolder, installAddonFromUrl, updateSettings } = useActions()
   const [url, setUrl] = useState('')
   const [registry, setRegistry] = useState<RegistryEntry[] | null>(null)
   const [regStatus, setRegStatus] = useState('')
@@ -100,6 +100,9 @@ function AddonsSection() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="open-btn" style={{ flex: 'none', padding: '6px 13px', fontSize: 12 }} onClick={installAddonFromFile}>
               Install from file…
+            </button>
+            <button className="open-btn" title="Multi-file addon: addon.yaml (or addon.json) + view.html / tools/*.js / hooks/*.js" style={{ flex: 'none', padding: '6px 13px', fontSize: 12 }} onClick={installAddonFromFolder}>
+              Install folder…
             </button>
             <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/addon.yaam.json" style={FIELD} />
             <button

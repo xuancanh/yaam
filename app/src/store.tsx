@@ -2,10 +2,10 @@
 import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  Addon, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
+  Addon, AddonHookName, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
   NotifKind, Notification, Panel, PersistedState, TabGroup, TaskChatMsg, View,
 } from './types'
-import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState, SHELLS } from './data'
+import { ACCENT, defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState, SHELLS } from './data'
 import * as native from './native'
 import { buildCfg, hasCreds, runMasterTurn } from './master'
 import type { ApiMessage, MasterExec } from './master'
@@ -14,8 +14,9 @@ import type { MonitorExec } from './monitor'
 import { draftTaskSpec, runWatcherTurn } from './llm/watcher'
 import type { TaskSpecDraft, WatcherExec } from './llm/watcher'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './terminals'
-import { ALL_PERMISSIONS, addonSnapshot, dispatchAddonRpc, enforcePermissions, execAddonHook, execAddonTool, exportAddonPackage, parseAddonPackage } from './addons'
+import { ALL_PERMISSIONS, addonSnapshot, dispatchAddonRpc, enforcePermissions, execAddonHook, execAddonTool, exportAddonPackage, loadAddonFolder, parseAddonPackage } from './addons'
 import { runAddonEditorTurn } from './llm/addon-editor'
+import { runAddonAgentTurn } from './llm/addon-agent'
 import { estimateLogUsage, estimateOutputUsage } from './usage'
 import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
@@ -176,6 +177,8 @@ export interface ConductorActions {
   toggleAddon: (id: string) => void
   toggleAddonGrant: (id: string, perm: AddonPermission) => void
   installAddonFromFile: () => void
+  /** install a multi-file addon folder (addon.yaml/json + referenced files) */
+  installAddonFromFolder: () => void
   installAddonFromUrl: (url: string) => void
   exportAddon: (id: string) => void
   sendAddonChat: (id: string, text: string) => void
@@ -337,7 +340,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [logEvent, notify, widOf])
 
   // ref: setNeedsInput is declared before the hook runner
-  const fireAddonHookRef = useRef<(hook: 'onSessionExit' | 'onNeedsInput', event: Record<string, unknown>) => void>(() => {})
+  const fireAddonHookRef = useRef<(hook: AddonHookName, event: Record<string, unknown>) => void>(() => {})
+  const runAddonAgentRef = useRef<(addonId: string, note: string) => Promise<string>>(async () => 'agent not ready')
 
   const lastFlaggedRef = useRef<Map<string, string>>(new Map())
 
@@ -504,6 +508,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             if (t.col === col) return `already in ${col}`
             dispatch(s2 => updateLocatedTask(s2, taskId, x => ({ ...x, col: col as BoardCol })))
             pushTaskChat(taskId, 'system', `Watcher moved the task to ${col}`)
+            fireAddonHookRef.current('onTaskMoved', { taskId, title: t.title, col, from: t.col })
             logEvent(col === 'failed' ? 'escalate' : 'edit', t.agentId, `Watcher moved “${t.title.slice(0, 40)}” to ${col}`)
             if (col === 'done') notify('done', 'Task done', t.title.slice(0, 60), t.agentId)
             if (col === 'failed') notify('escalate', 'Task failed', t.title.slice(0, 60), t.agentId)
@@ -1274,16 +1279,54 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     flash: t => flash(String(t).slice(0, 80)),
     logEvent: t => logEvent('edit', null, `[addon] ${String(t).slice(0, 120)}`),
     notify: (title, detail) => notify('done', String(title).slice(0, 80), String(detail).slice(0, 120), null),
+    sessions: {
+      readOutput: (sid, lines) => {
+        const a = stateRef.current.agents.find(x => x.id === sid)
+        if (!a) return ''
+        const n = Math.max(1, Math.min(80, Number(lines) || 30))
+        const screen = isAltScreen(sid) ? readScreen(sid) : (a.log ?? []).map(l => l.x)
+        return screen.filter(l => l.trim()).slice(-n).join('\n')
+      },
+      stop: sid => {
+        if (stateRef.current.agents.some(a => a.id === sid)) native.killSession(String(sid)).catch(() => {})
+      },
+    },
     tasks: {
-      add: (title, col) => {
+      add: (title, col, spec) => {
         const id = mkId('t')
         const validCols = ['backlog', 'progress', 'review', 'done', 'failed']
         const column = validCols.includes(String(col)) ? String(col) as BoardCol : 'backlog'
+        const sp = (spec ?? {}) as Record<string, unknown>
+        const strArr = (v: unknown) => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined
         dispatch(s2 => ({
           ...s2,
-          tasks: s2.tasks.concat([{ id, title: String(title).slice(0, 120), col: column, agentId: null }]),
+          tasks: s2.tasks.concat([{
+            id, title: String(title).slice(0, 120), col: column, agentId: null,
+            description: typeof sp.description === 'string' ? sp.description : undefined,
+            criteria: strArr(sp.criteria),
+            cwd: typeof sp.cwd === 'string' ? sp.cwd : undefined,
+            typeId: typeof sp.typeId === 'string' ? sp.typeId : undefined,
+            templateId: typeof sp.templateId === 'string' ? sp.templateId : undefined,
+            chat: [{ id: mkId('tc'), role: 'system', text: 'Task created by an addon', at: Date.now() }],
+          }]),
         }))
         return id
+      },
+      update: (id, patch) => {
+        const p = (patch ?? {}) as Record<string, unknown>
+        const strArr = (v: unknown) => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined
+        dispatch(s2 => ({
+          ...s2,
+          tasks: s2.tasks.map(t => (t.id === id ? {
+            ...t,
+            title: typeof p.title === 'string' && p.title.trim() ? p.title.slice(0, 120) : t.title,
+            description: typeof p.description === 'string' ? p.description : t.description,
+            criteria: strArr(p.criteria) ?? t.criteria,
+            cwd: typeof p.cwd === 'string' ? p.cwd : t.cwd,
+            typeId: typeof p.typeId === 'string' ? p.typeId : t.typeId,
+            templateId: typeof p.templateId === 'string' ? p.templateId : t.templateId,
+          } : t)),
+        }))
       },
       rename: (id, title) => dispatch(s2 => ({
         ...s2,
@@ -1292,13 +1335,82 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       move: (id, col) => {
         const validCols = ['backlog', 'progress', 'review', 'done', 'failed']
         if (!validCols.includes(String(col))) return
+        const prev = stateRef.current.tasks.find(t => t.id === id)
+        if (!prev || prev.col === col) return
         dispatch(s2 => ({
           ...s2,
           tasks: s2.tasks.map(t => (t.id === id ? { ...t, col: String(col) as BoardCol } : t)),
         }))
+        fireAddonHookRef.current('onTaskMoved', { taskId: id, title: prev.title, col: String(col), from: prev.col })
       },
       remove: id => dispatch(s2 => ({ ...s2, tasks: s2.tasks.filter(t => t.id !== id) })),
       start: id => spawnSessionForTask(String(id)),
+      restart: id => {
+        const t = stateRef.current.tasks.find(x => x.id === id)
+        if (!t) return
+        const prev = t.agentId ? stateRef.current.agents.find(a => a.id === t.agentId) : undefined
+        if (prev && (prev.status === 'running' || prev.status === 'needs')) native.killSession(prev.id).catch(() => {})
+        dispatch(s2 => ({ ...s2, tasks: s2.tasks.map(x => (x.id === id ? { ...x, agentId: null } : x)) }))
+        later(50, () => spawnSessionForTask(String(id)))
+      },
+      chat: (id, text) => {
+        const msg = String(text).trim().slice(0, 2000)
+        if (!msg || !stateRef.current.tasks.some(t => t.id === id)) return
+        pushTaskChat(String(id), 'user', msg)
+        dispatch(s2 => ({ ...s2, tasks: s2.tasks.map(t => (t.id === id ? { ...t, awaitingUser: false } : t)) }))
+        runWatcherRef.current(String(id), `[message from an addon on the user's behalf] ${msg}`)
+      },
+    },
+    templates: {
+      list: () => (stateRef.current.templates ?? []).map(t => ({ id: t.id, name: t.name, mode: t.mode, typeId: t.typeId })),
+      run: (idOrName, task) => {
+        const tpl = (stateRef.current.templates ?? []).find(t => t.id === idOrName || t.name === idOrName)
+        return tpl ? launchFromTemplate(tpl.id, task ? String(task) : undefined) : null
+      },
+    },
+    schedules: {
+      add: spec => {
+        const sp = (spec ?? {}) as Record<string, unknown>
+        const name = String(sp.name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')
+        if (!name) return 'schedule needs a name'
+        const schedule = typeof sp.schedule === 'string' ? sp.schedule.trim() : ''
+        const at = typeof sp.at === 'number' && sp.at > Date.now() ? sp.at : undefined
+        if (!at && schedule.split(/\s+/).length !== 5) return 'needs a 5-field cron "schedule" or a future epoch-ms "at"'
+        const bt = sp.task as (Record<string, unknown> | undefined)
+        const boardTask = bt && typeof bt.title === 'string' && bt.title.trim()
+          ? {
+              title: bt.title.slice(0, 120),
+              description: typeof bt.description === 'string' ? bt.description : undefined,
+              criteria: Array.isArray(bt.criteria) ? bt.criteria.filter((x): x is string => typeof x === 'string') : undefined,
+              templateId: typeof bt.templateId === 'string' ? bt.templateId : undefined,
+              typeId: typeof bt.typeId === 'string' ? bt.typeId : undefined,
+              cwd: typeof bt.cwd === 'string' ? bt.cwd : undefined,
+              startNow: bt.startNow !== false,
+            }
+          : undefined
+        dispatch(s2 => ({
+          ...s2,
+          crons: s2.crons.concat([{
+            id: mkId('c'), name, on: true, built: true, last: 'never',
+            schedule: at ? '' : schedule,
+            human: at ? `once · ${new Date(at).toLocaleString()}` : humanizeCron(schedule),
+            at,
+            target: 'workspace', agent: boardTask ? 'Board' : 'Master', color: ACCENT,
+            cmd: !boardTask && typeof sp.cmd === 'string' ? sp.cmd : undefined,
+            cwd: !boardTask && typeof sp.cwd === 'string' ? sp.cwd : undefined,
+            boardTask,
+          }]),
+        }))
+        return `schedule "${name}" created`
+      },
+      toggle: (name, on) => dispatch(s2 => ({
+        ...s2,
+        crons: s2.crons.map(c => (c.name === name ? { ...c, on: typeof on === 'boolean' ? on : !c.on } : c)),
+      })),
+      remove: name => dispatch(s2 => ({ ...s2, crons: s2.crons.filter(c => c.name !== name) })),
+    },
+    agent: {
+      wake: note => runAddonAgentRef.current(addonId, String(note)),
     },
     storage: {
       get: key => stateRef.current.addonStorage[addonId]?.[String(key)],
@@ -1310,7 +1422,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         },
       })),
     },
-  }), [flash, launchSession, logEvent, notify, spawnSessionForTask])
+  }), [flash, later, launchFromTemplate, launchSession, logEvent, notify, pushTaskChat, spawnSessionForTask])
 
   // Wrap an addon's raw API with its current permission grants.
   const makeAddonApi = useCallback((addonId: string): AddonApi => {
@@ -1318,10 +1430,47 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return enforcePermissions(makeAddonApiRaw(addonId), addon?.granted ?? [])
   }, [makeAddonApiRaw])
 
-  // Run one lifecycle hook for each enabled addon without blocking the caller.
-  const fireAddonHook = useCallback((hook: 'onSessionExit' | 'onNeedsInput', event: Record<string, unknown>) => {
+  // ---- per-addon LLM agents: an addon's own mini-Master, tools = its API ----
+  const addonAgentHistories = useRef<Map<string, ApiMessage[]>>(new Map())
+  const addonAgentBusy = useRef<Set<string>>(new Set())
+
+  const runAddonAgent = useCallback(async (addonId: string, note: string): Promise<string> => {
+    const st = stateRef.current.settings
+    const addon = stateRef.current.addons.find(a => a.id === addonId)
+    if (!addon?.agent) return 'this addon declares no agent'
+    if (!addon.enabled) return 'addon is disabled'
+    if (!(st.masterEnabled && hasCreds(st))) return 'no brain configured — enable LLM Master in Settings'
+    if (addonAgentBusy.current.has(addonId)) return 'agent is busy with a previous note — try again shortly'
+    addonAgentBusy.current.add(addonId)
+    try {
+      let history = addonAgentHistories.current.get(addonId)
+      if (!history) {
+        history = []
+        addonAgentHistories.current.set(addonId, history)
+      }
+      const reply = await runAddonAgentTurn(buildCfg(st, st.monitorModel || undefined), addon, note, history, makeAddonApi(addonId))
+      return reply || '(acted without a reply)'
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      logEvent('escalate', null, `Addon agent "${addon.name}" error: ${msg}`)
+      return `agent error: ${msg}`
+    } finally {
+      addonAgentBusy.current.delete(addonId)
+    }
+  }, [logEvent, makeAddonApi])
+
+  runAddonAgentRef.current = runAddonAgent
+
+  // Run one lifecycle hook for each enabled addon without blocking the caller;
+  // addons whose agent subscribes to the hook get woken with the event too.
+  const fireAddonHook = useCallback((hook: AddonHookName, event: Record<string, unknown>) => {
     void execAddonHook(stateRef.current, hook, event, makeAddonApi)
-  }, [makeAddonApi])
+    for (const a of stateRef.current.addons) {
+      if (a.enabled && a.agent?.on?.includes(hook)) {
+        void runAddonAgent(a.id, `[${hook}] ${JSON.stringify(event)}\n\nReact per your instructions; do nothing if this event is irrelevant.`)
+      }
+    }
+  }, [makeAddonApi, runAddonAgent])
 
   fireAddonHookRef.current = fireAddonHook
 
@@ -1353,6 +1502,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, crons: mark(d.crons) } } }
         })
         for (const c of due) {
+          fireAddonHookRef.current('onCronFired', {
+            name: c.name,
+            kind: c.boardTask || c.templateId ? 'task' : c.cmd ? 'command' : 'log',
+          })
           if (c.boardTask) {
             // schedule adds a task to the kanban board instead of launching;
             // it carries the full task spec, and startNow spawns its watcher-
@@ -2282,9 +2435,11 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     dropTo: col => {
       const id = dragId.current
       dragId.current = null
+      const prev = id ? stateRef.current.tasks.find(t => t.id === id) : undefined
       dispatch(s => id
         ? { ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, col } : t)), dragOverCol: null }
         : { ...s, dragOverCol: null })
+      if (prev && prev.col !== col) fireAddonHookRef.current('onTaskMoved', { taskId: prev.id, title: prev.title, col, from: prev.col })
       if (id && col === 'progress') {
         const task = stateRef.current.tasks.find(t => t.id === id)
         if (task && !task.agentId) later(50, () => spawnSessionForTask(id))
@@ -2420,6 +2575,27 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           const path = await native.pickFile()
           if (!path) return
           const json = await native.readTextFile(path)
+          installPackage(json, 'file')
+        } catch (e) {
+          flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      })()
+    },
+
+    installAddonFromFolder: () => {
+      void (async () => {
+        try {
+          const dir = await native.pickFolder()
+          if (!dir) return
+          let manifest: string | null = null
+          for (const cand of ['addon.yaml', 'addon.yml', 'addon.json']) {
+            try {
+              manifest = await native.readTextFile(`${dir}/${cand}`)
+              break
+            } catch { /* try the next manifest name */ }
+          }
+          if (!manifest) throw new Error('no addon.yaml / addon.yml / addon.json in that folder')
+          const json = await loadAddonFolder(manifest, rel => native.readTextFile(`${dir}/${rel}`))
           installPackage(json, 'file')
         } catch (e) {
           flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)

@@ -1,0 +1,46 @@
+# QA Gate — independent verification for board tasks.
+# Folder-format addon: this manifest references plain .js/.html files,
+# so everything is readable and debuggable. Pack for distribution with:
+#   node scripts/pack-addon.mjs registry/packages/qa-gate
+manifest: 3
+name: QA Gate
+version: 1.0.0
+icon: ✅
+description: Independent QA audits for board tasks — every task that reaches review gets a one-shot auditor session that re-verifies the acceptance criteria and reports its verdict to the task chat. Failing tasks bounce back to In progress.
+author: yaam
+
+permissions:
+  - state:read
+  - tasks
+  - sessions:launch
+  - sessions:send
+  - schedules
+  - agent
+  - ui
+  - storage
+
+view: view.html
+
+tools:
+  - name: qa_history
+    description: QA Gate audit history — the pass/fail record of review-gate audits.
+    input:
+      limit: number · max entries to return (default 10)
+    handler: tools/qa_history.js
+  - name: qa_audit_task
+    description: Run an independent QA audit for a board task right now (spawns an auditor one-shot that re-verifies the acceptance criteria without modifying files).
+    input:
+      task_id: string! · id of the board task to audit
+    handler: tools/qa_audit_task.js
+
+hooks:
+  onTaskMoved: hooks/onTaskMoved.js
+  onSessionExit: hooks/onSessionExit.js
+  masterPromptAppend: prompts/master.md
+
+# the addon's own LLM harness — chat with it from the QA tab; it also wakes
+# on failed audits (session exits) to decide whether escalation is warranted
+agent:
+  system: prompts/agent.md
+  on:
+    - onSessionExit

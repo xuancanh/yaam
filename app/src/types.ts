@@ -358,11 +358,26 @@ export interface AddonHooks {
   onSessionExit?: string
   /** JS body: (event = { sessionId, name, question }, api) => void — runs when a session needs input */
   onNeedsInput?: string
+  /** JS body: (event = { taskId, title, col, from }, api) => void — runs when a board task changes column */
+  onTaskMoved?: string
+  /** JS body: (event = { name, kind: 'command'|'task'|'log' }, api) => void — runs when a schedule fires */
+  onCronFired?: string
   /** appended to Master's system prompt while the addon is enabled — changes its behavior */
   masterPromptAppend?: string
 }
 
-export type AddonPermission = 'state:read' | 'sessions:send' | 'sessions:launch' | 'tasks' | 'ui' | 'storage'
+export type AddonHookName = 'onSessionExit' | 'onNeedsInput' | 'onTaskMoved' | 'onCronFired'
+
+/** An addon's own LLM harness (like Master / task watchers): a persistent
+ *  conversation whose tools are the addon's permission-scoped API. */
+export interface AddonAgent {
+  /** persona + instructions (system prompt) */
+  system: string
+  /** hook events that wake the agent with the event as its note */
+  on?: AddonHookName[]
+}
+
+export type AddonPermission = 'state:read' | 'sessions:send' | 'sessions:launch' | 'tasks' | 'schedules' | 'agent' | 'ui' | 'storage'
 
 export interface Addon {
   id: string
@@ -376,6 +391,8 @@ export interface Addon {
   html?: string
   tools?: AddonTool[]
   hooks?: AddonHooks
+  /** optional dedicated LLM harness for this addon */
+  agent?: AddonAgent
   /** capability scopes the package requests */
   permissions: AddonPermission[]
   /** scopes the user has granted (enforced at the API boundary) */

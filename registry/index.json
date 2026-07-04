@@ -2,6 +2,13 @@
   "registry": 1,
   "packages": [
     {
+      "name": "qa-gate",
+      "version": "1.0.0",
+      "icon": "\u2705",
+      "description": "Independent QA audits: tasks reaching review get a one-shot auditor that re-verifies the criteria; failures bounce back with findings. Ships its own QA-officer agent you can chat with.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/qa-gate.yaam.json"
+    },
+    {
       "name": "session-bell",
       "version": "1.0.0",
       "icon": "\ud83d\udd14",

@@ -8,6 +8,7 @@ package (`*.yaam.json`) that can ship any mix of:
 | **view** | A tab in the icon rail | Sandboxed iframe (no privileges) |
 | **tools** | New actions in Master's tool list | App context, permission-checked API |
 | **hooks** | Reactions to app lifecycle + Master behavior changes | App context, permission-checked API |
+| **agent** | The addon's own LLM harness (a mini-Master whose tools are the addon's API) | LLM loop over the permission-checked API |
 
 Built-in features are implemented against the same surface an addon gets —
 the kanban board is fully reproducible as an addon
@@ -82,7 +83,60 @@ the LLMs generate against it.
 
 ---
 
-## 2. Package format (manifest 2)
+## 2. Package formats
+
+### 2.1 Folder format (manifest 3 — recommended)
+
+Embedding HTML and JS inside JSON strings is hard to read and debug. The
+folder format keeps every part in its natural file type, referenced from a
+small manifest (`addon.yaml`, `addon.yml`, or `addon.json` — same shape):
+
+```
+my-addon/
+  addon.yaml
+  view.html            # the view, as a real HTML file
+  tools/audit.js       # each tool handler, as a real JS file
+  hooks/onTaskMoved.js
+  prompts/agent.md     # agent system prompt / masterPromptAppend text
+```
+
+```yaml
+manifest: 3
+name: my-addon
+version: 1.0.0
+icon: 🧩
+description: what it does
+permissions:
+  - state:read
+  - tasks
+view: view.html                    # file ref → becomes "html"
+tools:
+  - name: audit_task
+    description: Audit a board task.
+    input:                         # shorthand → JSON schema
+      task_id: string! · id of the task     # ! = required, text after · = description
+      limit: number · optional cap
+    handler: tools/audit.js        # .js ref → file content (or inline JS string)
+hooks:
+  onTaskMoved: hooks/onTaskMoved.js
+  masterPromptAppend: prompts/master.md   # .md/.txt refs load as text
+agent:
+  system: prompts/agent.md
+  on:
+    - onSessionExit
+```
+
+Install via **Settings → Addons → Install folder…**. The manifest YAML is a
+strict subset: `key: value` maps, `- item` lists (incl. lists of maps),
+2-space indentation, `#` comments, plain or quoted scalars — anything fancier
+fails with a line number. Values like `state:read` or URLs are safe (mappings
+require a space after the colon). Full `input_schema` is accepted anywhere
+the shorthand isn't enough.
+
+For URL/registry distribution, pack a folder into a single file:
+`node scripts/pack-addon.mjs registry/packages/my-addon` → `my-addon.yaam.json`.
+
+### 2.2 Single-file format (manifest 2)
 
 ```jsonc
 {
@@ -121,10 +175,12 @@ three entry points.
 
 | Scope | Grants access to |
 |---|---|
-| `state:read` | `getState()` |
-| `sessions:send` | `sendToSession(id, text)` |
-| `sessions:launch` | `launchSession(cmd, cwd?, name?)` |
-| `tasks` | `tasks.add/rename/move/remove/start` |
+| `state:read` | `getState()`, `sessions.readOutput`, `templates.list` |
+| `sessions:send` | `sendToSession(id, text)`, `sessions.stop(id)` |
+| `sessions:launch` | `launchSession(cmd, cwd?, name?)`, `templates.run` |
+| `tasks` | `tasks.add/update/rename/move/remove/start/restart/chat` |
+| `schedules` | `schedules.add/toggle/remove` |
+| `agent` | `agent.wake` (runs the addon's own LLM agent — spends API tokens) |
 | `ui` | `flash`, `notify`, `logEvent`, `focusSession` |
 | `storage` | `storage.get/set` |
 
@@ -163,13 +219,17 @@ Pushed on iframe load and every ~3 s. Shape:
 
 ```ts
 {
-  workspace: string,                       // active workspace name
-  sessions: { id, name, status,            // running | idle | needs | error
-              task, summary, actionNeeded, // monitor-maintained (or null)
+  workspace: string,                        // active workspace name
+  sessions: { id, name, status, ephemeral,  // running | idle | needs | error
+              repo, task, summary, actionNeeded,
               cwd, cost, used }[],
-  tasks:    { id, title, col, agentId }[], // col: backlog|progress|review|done|failed
-  crons:    { name, schedule, on, last }[],
-  events:   { time, type, text }[],        // latest 10
+  tasks:    { id, title, col, agentId,      // col: backlog|progress|review|done|failed
+              description, criteria, watcherNote, awaitingUser,
+              cwd, templateId, typeId,
+              chatTail }[],                 // last 5 watcher-chat messages
+  templates:{ id, name, mode, typeId }[],
+  crons:    { name, schedule, at, on, last, action }[], // action: task|template|command|log
+  events:   { time, type, text }[],         // latest 10
   totals:   { cost, used, running }
 }
 ```
@@ -209,11 +269,22 @@ Method reference (permission in brackets):
 | `yaam('flash', text)` | — | [ui] toast |
 | `yaam('notify', title, detail)` | — | [ui] bell notification |
 | `yaam('logEvent', text)` | — | [ui] Activity-timeline entry, prefixed `[addon]` |
-| `yaam('tasks.add', title, col?)` | new task id | [tasks] col defaults to `backlog` |
+| `yaam('sessions.readOutput', id, lines?)` | string | [state:read] rendered screen for TUIs, log tail otherwise |
+| `yaam('sessions.stop', id)` | — | [sessions:send] kills the session's process |
+| `yaam('tasks.add', title, col?, spec?)` | new task id | [tasks] spec = `{ description, criteria, cwd, typeId, templateId }` |
+| `yaam('tasks.update', id, patch)` | — | [tasks] patch any spec field + title |
 | `yaam('tasks.rename', id, title)` | — | [tasks] |
-| `yaam('tasks.move', id, col)` | — | [tasks] |
+| `yaam('tasks.move', id, col)` | — | [tasks] fires `onTaskMoved` |
 | `yaam('tasks.remove', id)` | — | [tasks] |
-| `yaam('tasks.start', id)` | — | [tasks] spawns the default agent type with the task title as its prompt and links the card |
+| `yaam('tasks.start', id)` | — | [tasks] watcher-driven one-shot with the full task spec + goal contract |
+| `yaam('tasks.restart', id)` | — | [tasks] detach a dead session, spawn a fresh one-shot |
+| `yaam('tasks.chat', id, text)` | — | [tasks] posts into the task's watcher chat; the watcher reacts |
+| `yaam('templates.list')` | `{id,name,mode,typeId}[]` | [state:read] |
+| `yaam('templates.run', idOrName, task?)` | session id \| null | [sessions:launch] |
+| `yaam('schedules.add', spec)` | status string | [schedules] `{ name, schedule?/at?, cmd?, task? }` — task specs land on the board |
+| `yaam('schedules.toggle', name, on?)` | — | [schedules] |
+| `yaam('schedules.remove', name)` | — | [schedules] |
+| `yaam('agent.wake', note)` | agent's reply | [agent] chat with / poke the addon's own agent |
 | `yaam('storage.get', key)` | stored value | [storage] |
 | `yaam('storage.set', key, value)` | — | [storage] persists across restarts, namespaced per addon |
 
@@ -285,12 +356,46 @@ Handler contract:
   `input = { sessionId, name, code }`.
 - `onNeedsInput` — fired when a session is detected waiting on the user
   (dialog/menu/prompt). `input = { sessionId, name, question }`.
-- Both are JS function bodies `(input, api) => void | Promise<void>`; each
+- `onTaskMoved` — fired when a board task changes column (drag, watcher, or
+  addon). `input = { taskId, title, col, from }`.
+- `onCronFired` — fired when a schedule fires.
+  `input = { name, kind: 'task' | 'command' | 'log' }`.
+- All are JS function bodies `(input, api) => void | Promise<void>`; each
   addon's hook runs independently and failures are contained (logged to the
   Activity feed as `addon "<name>" <hook> failed: …`).
 - `masterPromptAppend` — plain text appended to Master's system prompt under
   an `ADDON DIRECTIVES` section while the addon is enabled. This is the
   sanctioned way to change Master's behavior (tone, policies, extra duties).
+
+---
+
+## 6b. Addon agents — your own mini-Master
+
+An addon can declare an `agent`: a persistent LLM conversation (same brain as
+Master/monitors, configured in Settings) whose **tools are the addon's
+permission-scoped API** — `get_state`, `read_output`, `launch_session`,
+`add_task` (full spec, optionally auto-started), `move_task`, `task_chat`
+(talks to a task's watcher!), `run_template`, `add_schedule`, `storage`,
+`notify_user`, `send_to_session`, `stop_session`. Denied scopes fail loudly
+as tool errors, so the agent works within exactly what the user granted.
+
+```jsonc
+"agent": {
+  "system": "You are the QA officer… (persona + duties)",
+  "on": ["onSessionExit"]     // hook events that wake it (optional)
+}
+```
+
+- **Waking**: hook events listed in `on` wake it with the event JSON; views
+  and tool handlers wake it with `agent.wake(note)` — the promise resolves to
+  its reply, so a view can render a real chat UI around it (see QA Gate).
+- **Memory**: per-addon private history (in-memory, capped), like a watcher's.
+- **Cost**: each wake is an LLM turn — that's why `agent` is its own
+  permission. One turn runs at a time per addon; concurrent wakes are politely
+  refused.
+- **Layering**: Master orchestrates the app, each task's watcher owns one
+  task, and an addon agent owns its addon's domain — they interact through
+  the same surfaces you do (board, chats, sessions).
 
 ---
 
@@ -304,8 +409,9 @@ Handler contract:
    package and edits it via a validated `update_addon` tool (full-package
    replacement, auto version bump, iframe reload). *"make the bars green"*,
    *"add a tool that restarts idle sessions"*.
-3. **By hand** (full control): write the JSON, install via **Settings →
-   Addons → Install from file…**. Iterate by re-installing (same name
+3. **By hand** (full control): write a folder-format addon (section 2.1) and
+   install via **Settings → Addons → Install folder…**, or write the JSON and
+   use **Install from file…**. Iterate by re-installing (same name
    replaces, grants preserved) or by editing in Customize. Use the **Source**
    tab (manifest form + code-editor blocks with copy buttons) to inspect any
    installed addon.
@@ -365,3 +471,4 @@ seed.
 | `kanban-lite` | Full parity with a built-in feature: board rendering from state push, drag & drop, task CRUD over RPC, `tasks.start` spawning sessions, `focusSession` navigation |
 | `cost-pulse` | Minimal read-only view (state push only, one permission) |
 | `session-bell` | Hooks + a Master tool + `masterPromptAppend`, no view |
+| `qa-gate` | **The full platform** (folder format): `onTaskMoved` review gate spawning auditor sessions, `onSessionExit` verdict parsing via `sessions.readOutput`, watcher-chat reporting, auto bounce-back on fail, Master tools, `schedules.add` automation, storage history, a dashboard view, and its own chatable QA-officer agent |

@@ -1,0 +1,133 @@
+<!DOCTYPE html><html><head><style>
+body{margin:0;background:#0A0B0F;color:#E7E9F0;font-family:'IBM Plex Sans',system-ui,sans-serif;padding:24px}
+h1{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+small{color:#8B93A1}
+h2{font-size:11px;letter-spacing:.5px;color:#8B93A1;margin:26px 0 10px;text-transform:uppercase}
+.card{background:#12151C;border:1px solid #1a1e26;border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px}
+.title{flex:1;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#8B93A1}
+.pill{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;border-radius:5px;padding:2px 8px;flex-shrink:0}
+.pass{color:#3DDC97;border:1px solid rgba(61,220,151,.4)}
+.fail{color:#E5636F;border:1px solid rgba(229,99,111,.4)}
+.running{color:#F5C451;border:1px solid rgba(245,196,81,.4);animation:pulse 1.2s ease-in-out infinite}
+.unclear,.error{color:#8B93A1;border:1px solid #2a2f3a}
+@keyframes pulse{50%{opacity:.45}}
+button{background:transparent;border:1px solid #2a2f3a;border-radius:7px;color:#E7E9F0;font-size:11.5px;padding:5px 12px;cursor:pointer}
+button:hover{border-color:#F5C451;color:#F5C451}
+.empty{color:#5a6170;font-size:12px;padding:8px 0}
+#stats{display:flex;gap:14px;margin-top:14px}
+.stat{background:#12151C;border:1px solid #1a1e26;border-radius:10px;padding:10px 16px}
+.stat b{display:block;font-family:'JetBrains Mono',monospace;font-size:18px}
+.stat span{font-size:10.5px;color:#8B93A1}
+</style></head><body>
+<h1>✅ QA Gate</h1>
+<small>independent audits for every task that reaches review · verdicts land in the task chat</small>
+<div id="stats"></div>
+<h2>Tasks in review</h2>
+<div id="review"></div>
+<h2>Audit log</h2>
+<div id="log"></div>
+<h2>Ask the QA officer</h2>
+<div id="chat"></div>
+<div class="card" style="padding:8px 10px">
+  <input id="q" placeholder="e.g. what failed this week and why?" style="flex:1;background:transparent;border:none;outline:none;color:#E7E9F0;font-size:12.5px"
+    onkeydown="if(event.key==='Enter')ask()" />
+  <button onclick="ask()">Ask</button>
+</div>
+<h2>Automation</h2>
+<div class="card"><div class="title" style="font-weight:400;font-size:12px;color:#8B93A1">Add a weekly board task that sweeps every done card and re-runs its audit.</div><button onclick="scheduleSweep()">Schedule weekly sweep</button></div>
+<script>
+let seq = 0
+const pending = {}
+// promise-based RPC over the yaam:call / yaam:result bridge
+function call(method, ...args){
+  return new Promise((resolve, reject) => {
+    const callId = 'c' + (++seq)
+    pending[callId] = { resolve, reject }
+    parent.postMessage({ type: 'yaam:call', callId, method, args }, '*')
+  })
+}
+let state = { tasks: [] }
+async function refresh(){
+  const audits = (await call('storage.get', 'audits')) || []
+  const byTask = {}
+  for (const a of audits) byTask[a.taskId] = a
+  const done = audits.filter(a => a.verdict === 'pass' || a.verdict === 'fail')
+  const passRate = done.length ? Math.round(done.filter(a => a.verdict === 'pass').length / done.length * 100) : null
+  document.getElementById('stats').innerHTML = `
+    <div class=stat><b>${audits.length}</b><span>audits</span></div>
+    <div class=stat><b>${audits.filter(a => a.verdict === 'running').length}</b><span>running</span></div>
+    <div class=stat><b>${passRate === null ? '—' : passRate + '%'}</b><span>pass rate</span></div>`
+  const review = state.tasks.filter(t => t.col === 'review')
+  document.getElementById('review').innerHTML = review.length ? review.map(t => {
+    const a = byTask[t.id]
+    return `<div class=card>
+      <div class=title>${esc(t.title)}</div>
+      <span class="pill ${a ? a.verdict : 'unclear'}">${a ? a.verdict.toUpperCase() : 'NOT AUDITED'}</span>
+      <button onclick="audit('${t.id}')">Audit now</button>
+    </div>`
+  }).join('') : '<div class=empty>nothing awaiting review</div>'
+  document.getElementById('log').innerHTML = audits.length ? audits.slice().reverse().slice(0, 20).map(a => `
+    <div class=card>
+      <span class="pill ${a.verdict}">${a.verdict.toUpperCase()}</span>
+      <div class=title>${esc(a.title)}${a.detail ? ` <span class=meta>— ${esc(a.detail)}</span>` : ''}</div>
+      <span class=meta>${new Date(a.at).toLocaleString()}</span>
+    </div>`).join('') : '<div class=empty>no audits yet — move a task to review</div>'
+}
+function esc(x){ const d = document.createElement('div'); d.textContent = String(x ?? ''); return d.innerHTML }
+async function audit(taskId){
+  const t = state.tasks.find(x => x.id === taskId)
+  if (!t) return
+  const audits = (await call('storage.get', 'audits')) || []
+  if (audits.some(a => a.taskId === taskId && a.verdict === 'running')) return
+  const criteria = (t.criteria || []).map((c, i) => (i + 1) + '. ' + c).join('\n') || '(none recorded - judge from the description)'
+  const prompt = ['You are an independent QA auditor. Verify whether the acceptance criteria are ACTUALLY met in the current workspace - run checks and inspect files; never trust claims and never modify anything.',
+    'Task: ' + t.title,
+    t.description ? 'Description: ' + t.description : '',
+    'Acceptance criteria:\n' + criteria,
+    'Finish with exactly one line "QA VERDICT: pass" or "QA VERDICT: fail - <reason>", preceded by a short evidence list.'
+  ].filter(Boolean).join('\n\n')
+  const quoted = "'" + prompt.replace(/'/g, "'\\''") + "'"
+  const sid = await call('launchSession', 'claude -p --permission-mode plan ' + quoted, t.cwd || '', 'qa·' + t.title.slice(0, 14))
+  await call('storage.set', 'audits', [...audits, { taskId, title: t.title, at: Date.now(), sessionId: sid, verdict: sid ? 'running' : 'error', detail: '' }].slice(-50))
+  if (sid) await call('tasks.chat', taskId, 'QA Gate: a manual audit was requested from the QA tab - verdict incoming.')
+  refresh()
+}
+async function ask(){
+  const el = document.getElementById('q')
+  const q = el.value.trim()
+  if (!q) return
+  el.value = ''
+  const chat = document.getElementById('chat')
+  chat.insertAdjacentHTML('beforeend', `<div class=card><div class=title style="font-weight:400">${esc(q)}</div><span class=meta>you</span></div>`)
+  chat.insertAdjacentHTML('beforeend', `<div class="card thinking"><div class=title style="font-weight:400;color:#8B93A1">thinking…</div></div>`)
+  let reply
+  try { reply = await call('agent.wake', q) } catch (e) { reply = 'error: ' + e.message }
+  chat.querySelector('.thinking').outerHTML = `<div class=card><div class=title style="font-weight:400;white-space:normal">${esc(reply)}</div><span class="pill pass" style="border-color:#2a2f3a;color:#F5C451">QA</span></div>`
+}
+async function scheduleSweep(){
+  const msg = await call('schedules.add', {
+    name: 'weekly-qa-sweep',
+    schedule: '0 9 * * 1',
+    task: {
+      title: 'Weekly QA sweep',
+      description: 'Re-verify the acceptance criteria of every task completed this week. For each done card, run its checks again and report any regressions.',
+      criteria: ['every done task from the past week re-checked', 'regressions listed with the offending task'],
+      startNow: true,
+    },
+  })
+  await call('flash', String(msg))
+}
+window.addEventListener('message', e => {
+  const d = e.data
+  if (!d) return
+  if (d.type === 'yaam:state') { state = d.state; refresh() }
+  if (d.type === 'yaam:result' && pending[d.callId]) {
+    const p = pending[d.callId]
+    delete pending[d.callId]
+    d.error ? p.reject(new Error(d.error)) : p.resolve(d.result)
+  }
+})
+parent.postMessage({ type: 'yaam:getState' }, '*')
+setInterval(() => parent.postMessage({ type: 'yaam:getState' }, '*'), 4000)
+</script></body></html>
