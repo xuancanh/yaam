@@ -18,10 +18,10 @@ export interface SessionExit {
   code: number | null
 }
 
-/** Ask Tauri to launch a command in a real PTY; browser builds are a no-op. */
-export async function spawnSession(id: string, command: string, cwd?: string, rows?: number, cols?: number): Promise<void> {
+/** Ask Tauri to launch a command or direct terminal shell in a real PTY. */
+export async function spawnSession(id: string, command: string, cwd?: string, rows?: number, cols?: number, terminalShell?: string): Promise<void> {
   if (!isTauri) throw new Error('Real sessions require the desktop app')
-  await invoke('spawn_session', { id, command, cwd: cwd || null, rows: rows ?? null, cols: cols ?? null })
+  await invoke('spawn_session', { id, command, terminalShell: terminalShell || null, cwd: cwd || null, rows: rows ?? null, cols: cols ?? null })
 }
 
 /** Write raw input bytes to a live native PTY. */

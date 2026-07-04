@@ -5,7 +5,7 @@ import type {
   Addon, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
   NotifKind, Notification, Panel, PersistedState, TaskChatMsg, View,
 } from './types'
-import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
+import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState, SHELLS } from './data'
 import * as native from './native'
 import { buildCfg, hasCreds, runMasterTurn } from './master'
 import type { ApiMessage, MasterExec } from './master'
@@ -81,6 +81,13 @@ function updateLocatedTask(
       [located.workspaceId]: { ...data, tasks: data.tasks.map(t => (t.id === taskId ? update(t) : t)) },
     },
   }
+}
+
+/** Recognize the exact plain-terminal commands written by releases before terminalShell persisted. */
+function inferLegacyTerminalShell(command?: string): string | undefined {
+  const parts = command?.trim().split(/\s+/) ?? []
+  const shell = SHELLS.find(candidate => candidate === parts[0])
+  return shell && parts.slice(1).every(arg => /^-[il]+$/.test(arg)) ? shell : undefined
 }
 
 export interface ConductorActions {
@@ -168,7 +175,7 @@ export interface ConductorActions {
   deleteWorkspace: (id: string) => void
   openNewSession: () => void
   closeNewSession: () => void
-  newRealSession: (command: string, cwd: string) => void
+  newRealSession: (command: string, cwd: string, terminalShell?: string) => void
   sendInput: (id: string, text: string) => void
   stopSession: (id: string) => void
 }
@@ -825,6 +832,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
                 usageVersion: 1 as const,
                 status: 'idle' as const,
                 escReason: undefined,
+                terminalShell: a.terminalShell ?? inferLegacyTerminalShell(a.cmd),
                 workspaceId: a.workspaceId && workspaces.some(w => w.id === a.workspaceId) ? a.workspaceId : activeWorkspace,
                 log,
               }
@@ -1000,7 +1008,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [later])
 
   // Create optimistic session state, spawn its PTY, and attach lifecycle tracking.
-  const launchSession = useCallback((command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string }): string | null => {
+  const launchSession = useCallback((command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }): string | null => {
     const trimmed = command.trim()
     if (!trimmed) return null
     const id = mkId('a')
@@ -1015,6 +1023,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       typeId: typeId ?? typeForCommand(trimmed, stateRef.current.agentTypes)?.id,
       workspaceId: workspaceId ?? stateRef.current.activeWorkspace,
       ephemeral: opts?.ephemeral, autoArchive: opts?.autoArchive, templateId: opts?.templateId,
+      terminalShell: opts?.terminalShell,
       memory: mkMemory(), tools: mkTools(),
       log: [{ t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` }],
       ...defaultDetail(), usageVersion: 1,
@@ -1028,7 +1037,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
     probeCliSession(id, trimmed, dir, false)
     const launchType = stateRef.current.agentTypes.find(t => t.id === (typeId ?? '')) ?? typeForCommand(trimmed, stateRef.current.agentTypes)
-    native.spawnSession(id, `${envPrefix(launchType?.env)}${trimmed}`, dir || undefined).catch(err => {
+    native.spawnSession(id, `${envPrefix(launchType?.env)}${trimmed}`, dir || undefined, undefined, undefined, opts?.terminalShell).catch(err => {
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
@@ -1333,12 +1342,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }
 
     const exec: MasterExec = {
-      launchSession: (command, cwd, name) => {
+      launchSession: (command, cwd, name, terminal) => {
         const gated = catalogGate('launch_session')
         if (gated) return gated
-        const id = launchSession(command, cwd || '', name)
+        const terminalShell = terminal ? stateRef.current.settings.shell || 'zsh' : undefined
+        const effectiveCommand = terminalShell ? `${terminalShell} -l -i` : command
+        const id = launchSession(effectiveCommand, cwd || '', name || (terminal ? terminalShell : undefined), undefined, undefined, { terminalShell })
         if (!id) return 'failed: empty command'
-        logEvent('route', id, `Master launched · ${command}`)
+        logEvent('route', id, `Master launched · ${effectiveCommand}`)
         armResponseWatch(id) // relay the session's first output back to Master
         return `launched session id=${id} — its output will be relayed to you as an [event] once it settles; you can also read_session it`
       },
@@ -1386,6 +1397,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           return `set ${key} = ${v}`
         }
         if ((strings as readonly string[]).includes(key)) {
+          if (key === 'shell' && !SHELLS.includes(value)) {
+            return `invalid shell "${value}" — use ${SHELLS.join(' | ')}`
+          }
           dispatch(s2 => ({ ...s2, settings: { ...s2.settings, [key]: value } }))
           logEvent('edit', null, `Master set ${key} = ${value}`)
           return `set ${key} = ${value}`
@@ -1877,6 +1891,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     resume: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
+      const terminalShell = agent?.terminalShell ?? inferLegacyTerminalShell(agent?.cmd)
       let resumeNote = 'session resumed'
       if (agent?.kind === 'real' && agent.cmd && agent.status !== 'running') {
         // prefer the CLI's own resume flow so the conversation continues
@@ -1897,13 +1912,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             resumeNote = `resuming via · ${cmd}`
           }
         }
-        spawnAgentProcess(id, `${envPrefix(type?.env)}${cmd}`, agent.cwd).catch(() => {})
+        spawnAgentProcess(id, `${envPrefix(type?.env)}${cmd}`, agent.cwd, terminalShell).catch(() => {})
         probeCliSession(id, cmd, agent.cwd || '', true)
       }
       dispatch(s => focusSessionIn({
         ...s,
         agents: s.agents.map(a => a.id === id
-          ? { ...a, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]) }
+          ? { ...a, terminalShell, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]) }
           : a),
       }, id))
     },
@@ -2325,8 +2340,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     openNewSession: () => dispatch(s => ({ ...s, newSessionOpen: true })),
     closeNewSession: () => dispatch(s => ({ ...s, newSessionOpen: false })),
 
-    newRealSession: (command, cwd) => {
-      const id = launchSession(command, cwd)
+    newRealSession: (command, cwd, terminalShell) => {
+      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell })
       if (id) {
         logEvent('route', id, `Launched session · ${command.trim()}`)
         flash('Session launched')

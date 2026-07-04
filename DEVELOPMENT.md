@@ -58,7 +58,7 @@ The desktop process has three layers:
 ```text
 UI / Master / schedule / board task
   -> ConductorActions launch helper
-  -> native.spawnSession(...)
+  -> native.spawnSession(..., terminalShell?)
   -> Rust portable-pty process
   -> session-data Tauri event
   -> xterm registry + output tail + settle timer
@@ -67,6 +67,8 @@ UI / Master / schedule / board task
 ```
 
 Text and Enter are sent separately with a 250 ms gap. Several full-screen CLIs interpret a single `text + carriage-return` write as pasted input. Live PTYs never receive replayed scrollback because replaying bytes into an alternate-screen TUI corrupts its display; remounts use a resize repaint instead.
+
+Plain terminal sessions carry `Agent.terminalShell` and start that executable directly with login/interactive flags. Arbitrary commands still run through `/bin/sh -lc` because their quoting, operators, environment prefixes, and GUI-process PATH resolution require shell parsing. The backend resolves a named terminal shell using the user's login PATH and returns an error when it is missing; it never falls back silently to another shell.
 
 ### Master orchestration
 

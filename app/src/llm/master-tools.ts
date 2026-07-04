@@ -1,7 +1,7 @@
 // Master's tool surface: definitions + dispatcher. Implementations (exec)
 // live in the store, where app state and the PTY layer are reachable.
 export interface MasterExec {
-  launchSession: (command: string, cwd: string, name?: string) => string
+  launchSession: (command: string, cwd: string, name?: string, terminal?: boolean) => string
   sendToSession: (sessionId: string, text: string) => Promise<string>
   pressKeys: (sessionId: string, keys: string[]) => Promise<string>
   stopSession: (sessionId: string) => string
@@ -24,15 +24,15 @@ export interface MasterExec {
 export const TOOLS = [
   {
     name: 'launch_session',
-    description: 'Launch a CLI command as a new live agent session. Returns the new session id.',
+    description: 'Launch a CLI command or a plain terminal as a new live session. Set terminal=true to use the configured Terminal shell directly. Returns the new session id.',
     input_schema: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: 'full command line, e.g. "claude -p" or "zsh -i"' },
+        command: { type: 'string', description: 'full command line, e.g. "claude -p"; ignored when terminal=true' },
         cwd: { type: 'string', description: 'working directory (optional)' },
         name: { type: 'string', description: 'display name (optional)' },
+        terminal: { type: 'boolean', description: 'launch the configured Terminal shell directly instead of parsing command' },
       },
-      required: ['command'],
     },
   },
   {
@@ -230,7 +230,7 @@ export async function runTool(name: string, input: Record<string, unknown>, exec
   // Read a string argument without trusting model-generated input types.
   const str = (k: string) => typeof input[k] === 'string' ? input[k] as string : ''
   switch (name) {
-    case 'launch_session': return exec.launchSession(str('command'), str('cwd'), str('name') || undefined)
+    case 'launch_session': return exec.launchSession(str('command'), str('cwd'), str('name') || undefined, input.terminal === true)
     case 'send_to_session': return exec.sendToSession(str('session_id'), str('text'))
     case 'press_keys': return exec.pressKeys(str('session_id'), Array.isArray(input.keys) ? (input.keys as unknown[]).filter((k): k is string => typeof k === 'string') : [])
     case 'stop_session': return exec.stopSession(str('session_id'))

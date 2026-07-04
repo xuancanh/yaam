@@ -21,13 +21,14 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const enabledTypes = useMemo(() => s.agentTypes.filter(t => t.enabled), [s.agentTypes])
   const [typeId, setTypeId] = useState(enabledTypes[0]?.id ?? 'shell')
   const [templateId, setTemplateId] = useState('')
-  const [shell, setShell] = useState(s.settings.shell || 'zsh')
+  const [shellOverride, setShellOverride] = useState('')
   const [command, setCommand] = useState(enabledTypes[0]?.model ?? '')
   const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
   const [task, setTask] = useState('')
 
   const isShell = typeId === 'shell'
   const isCustom = typeId === 'custom'
+  const shell = shellOverride || s.settings.shell || 'zsh'
   const templates = s.templates ?? []
   const tpl = templateId ? templates.find(t => t.id === templateId) : undefined
   const effectiveCommand = isShell ? `${shell} -i` : command
@@ -56,7 +57,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
       return
     }
     if (!effectiveCommand.trim()) return
-    newRealSession(effectiveCommand, cwd)
+    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined)
     onClose()
   }
 
@@ -113,7 +114,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
           ) : isShell ? (
             <div>
               <FieldLabel>Shell</FieldLabel>
-              <select value={shell} onChange={e => setShell(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
+              <select value={shell} onChange={e => setShellOverride(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
                 {SHELLS.map(sh => <option key={sh} value={sh}>{sh}</option>)}
               </select>
             </div>

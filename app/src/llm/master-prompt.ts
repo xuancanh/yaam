@@ -41,7 +41,7 @@ function describeState(s: AppState): string {
     .map(t => `- "${t.name}": ${t.mode} ${t.typeId}${t.model ? ` (${t.model})` : ''}, approval=${t.approval}${t.cwd ? `, cwd=${t.cwd}` : ''} — use run_template for one-off runs or attach to create_schedule`)
     .join('\n')
   return [
-    `AGENT TYPES you can launch (use the exact command; a plain terminal is "${s.settings.shell || 'zsh'} -i"):\n${types || '(none enabled)'}`,
+    `AGENT TYPES you can launch (use the exact command; for a plain terminal call launch_session with terminal=true, which uses the configured "${s.settings.shell || 'zsh'}" shell):\n${types || '(none enabled)'}`,
     `AGENT TEMPLATES (preconfigured launches; ephemeral ones run a task and exit by themselves — prefer them for one-off jobs and schedules):\n${templates || '(none)'}`,
     `YOUR TOOL PERMISSIONS (Auto = act freely · Ask first = confirm with the user in chat before doing it · Approval/Off = blocked):\n${toolPerms}`,
     `WORKSPACE: "${ws?.name ?? 'Default'}"${s.workspaces.length > 1 ? ` (${s.workspaces.length - 1} other workspace(s) exist — you only see and manage this one)` : ''}`,
@@ -88,5 +88,4 @@ export function chatHistory(s: AppState, eventNote?: string): ApiMessage[] {
   if (!msgs.length) msgs.push({ role: 'user', content: eventNote || 'Hello' })
   return msgs.slice(-30)
 }
-
 

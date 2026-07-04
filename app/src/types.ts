@@ -56,6 +56,8 @@ export interface Agent {
   kind?: 'sim' | 'real'
   cmd?: string
   cwd?: string
+  /** executable used for a plain terminal; bypasses the generic /bin/sh command wrapper */
+  terminalShell?: string
   memory: MemorySource[]
   tools: AgentTool[]
   log: LogLine[]

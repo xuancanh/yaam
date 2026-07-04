@@ -17,6 +17,61 @@ fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
+/// Resolve a shell name with the user's login PATH without interpolating it
+/// into shell code.
+fn resolve_login_executable(executable: &str) -> Result<String, String> {
+    let requested = expand_tilde(executable.trim());
+    if requested.is_empty() {
+        return Err("terminal shell is empty".to_string());
+    }
+    if requested.contains('/') {
+        return std::path::Path::new(&requested)
+            .is_file()
+            .then_some(requested.clone())
+            .ok_or_else(|| format!("terminal shell does not exist: {requested}"));
+    }
+    let out = Command::new("/bin/sh")
+        .args(["-lc", "command -v \"$1\""])
+        .arg("yaam-shell-resolver")
+        .arg(&requested)
+        .output()
+        .map_err(|e| format!("failed to resolve terminal shell `{requested}`: {e}"))?;
+    let resolved = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .next_back()
+        .unwrap_or_default()
+        .to_string();
+    if !out.status.success()
+        || resolved.is_empty()
+        || !std::path::Path::new(&resolved).is_file()
+    {
+        return Err(format!("terminal shell not found in login PATH: {requested}"));
+    }
+    Ok(resolved)
+}
+
+/// Select the executable, arguments, and SHELL value for command or terminal mode.
+fn session_launch_spec(
+    command: &str,
+    terminal_shell: Option<&str>,
+) -> Result<(String, Vec<String>, Option<String>), String> {
+    if let Some(shell) = terminal_shell.filter(|shell| !shell.trim().is_empty()) {
+        let executable = resolve_login_executable(shell)?;
+        return Ok((
+            executable.clone(),
+            vec!["-l".to_string(), "-i".to_string()],
+            Some(executable),
+        ));
+    }
+    Ok((
+        "/bin/sh".to_string(),
+        vec!["-lc".to_string(), command.to_string()],
+        None,
+    ))
+}
+
 struct SessionHandle {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -42,12 +97,13 @@ struct ExitEvent {
 }
 
 #[tauri::command]
-/// Spawn a login-shell command in a PTY and stream data/exit events to React.
+/// Spawn a command or direct terminal shell and stream PTY events to React.
 pub fn spawn_session(
     app: AppHandle,
     state: State<'_, SessionManager>,
     id: String,
     command: String,
+    terminal_shell: Option<String>,
     cwd: Option<String>,
     rows: Option<u16>,
     cols: Option<u16>,
@@ -62,11 +118,21 @@ pub fn spawn_session(
         })
         .map_err(|e| e.to_string())?;
 
-    // Run through a login shell so quoting works and the user's PATH
-    // (nvm, homebrew, cargo, …) is available — GUI apps don't inherit it.
-    let mut cmd = CommandBuilder::new("/bin/sh");
-    cmd.args(["-lc", &command]);
+    // Plain terminals run the selected shell directly. Arbitrary commands still
+    // need a login-shell parser for quoting, operators, and the user's GUI PATH.
+    let (executable, args, shell_env) =
+        session_launch_spec(&command, terminal_shell.as_deref())?;
+    let launch_label = if shell_env.is_some() {
+        format!("{executable} -l -i")
+    } else {
+        command.clone()
+    };
+    let mut cmd = CommandBuilder::new(executable);
+    cmd.args(args);
     cmd.env("TERM", "xterm-256color");
+    if let Some(shell) = shell_env {
+        cmd.env("SHELL", shell);
+    }
     if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
         let dir = expand_tilde(&dir);
         if !std::path::Path::new(&dir).is_dir() {
@@ -78,7 +144,7 @@ pub fn spawn_session(
     let mut child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|e| format!("failed to spawn `{command}`: {e}"))?;
+        .map_err(|e| format!("failed to spawn `{launch_label}`: {e}"))?;
     drop(pair.slave);
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -397,5 +463,42 @@ pub fn load_state(app: AppHandle) -> Result<Option<String>, String> {
         Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_login_executable, session_launch_spec};
+
+    #[test]
+    /// Resolve a guaranteed system shell through an explicit path.
+    fn resolves_absolute_terminal_shell() {
+        assert_eq!(resolve_login_executable("/bin/sh").unwrap(), "/bin/sh");
+    }
+
+    #[test]
+    /// Reject a missing shell instead of silently falling back to another
+    /// executable.
+    fn rejects_missing_terminal_shell() {
+        assert!(resolve_login_executable("yaam-shell-that-does-not-exist").is_err());
+    }
+
+    #[test]
+    /// Direct terminal mode bypasses the generic command wrapper.
+    fn builds_direct_terminal_launch_spec() {
+        let (program, args, shell_env) =
+            session_launch_spec("ignored", Some("/bin/sh")).unwrap();
+        assert_eq!(program, "/bin/sh");
+        assert_eq!(args, ["-l", "-i"]);
+        assert_eq!(shell_env.as_deref(), Some("/bin/sh"));
+    }
+
+    #[test]
+    /// Arbitrary commands retain login-shell parsing and do not rewrite SHELL.
+    fn builds_wrapped_command_launch_spec() {
+        let (program, args, shell_env) = session_launch_spec("printf hello", None).unwrap();
+        assert_eq!(program, "/bin/sh");
+        assert_eq!(args, ["-lc", "printf hello"]);
+        assert_eq!(shell_env, None);
     }
 }
