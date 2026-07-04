@@ -5,6 +5,7 @@ import { useActions, useConductor } from '../store'
 import { ACCENT, hexToRgba } from '../data'
 import type { Message } from '../types'
 import { IC, Icon, MasterMark } from './ui'
+import { Markdown } from './Markdown'
 
 /** Render a Master routing decision with its target session context. */
 function RouteCard({ msg }: { msg: Message }) {
@@ -88,7 +89,9 @@ function EscalateCard({ msg }: { msg: Message }) {
       ) : (
         <div style={{ fontSize: 12, fontWeight: 600, color: decisionColor, display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: decisionColor }} />
-          {esc.decision === 'denied' ? 'Denied · dismissed' : esc.choice ? `Chose ${esc.choice}` : 'Approved · agent resumed'}
+          {esc.decision === 'denied' ? 'Denied · dismissed'
+            : esc.decision === 'approved' ? (esc.choice ? `Chose ${esc.choice}` : 'Approved · agent resumed')
+            : esc.choice ?? 'resolved'}
         </div>
       )}
     </div>
@@ -201,7 +204,7 @@ function MessageRow({ msg }: { msg: Message }) {
         alignSelf: 'flex-end', maxWidth: '90%', background: 'var(--panel3)', border: '1px solid var(--line2)',
         borderRadius: '12px 12px 3px 12px', padding: '9px 12px', fontSize: 13, lineHeight: 1.5, color: 'var(--text)',
       }}>
-        {msg.text}
+        <Markdown text={msg.text ?? ''} />
       </div>
     )
   }
@@ -214,7 +217,7 @@ function MessageRow({ msg }: { msg: Message }) {
         {msg.kind === 'text' && (
           <div style={{ paddingTop: 3 }}>
             {msg.thinking && <ThinkingBlock content={msg.thinking} />}
-            <div style={{ fontSize: 13, lineHeight: 1.55, color: '#C7CCD6' }}>{msg.text}</div>
+            <div style={{ fontSize: 13, lineHeight: 1.55, color: '#C7CCD6' }}><Markdown text={msg.text ?? ''} /></div>
           </div>
         )}
         {msg.kind === 'route' && <RouteCard msg={msg} />}
@@ -320,12 +323,12 @@ export function Sidebar() {
             <span style={{
               width: 6, height: 6, borderRadius: '50%',
               background: s.masterBusy ? 'var(--accent)' : 'var(--green)',
-              animation: `cpulse ${s.masterBusy ? '0.9s' : '1.7s'} ease-in-out infinite`,
+              animation: s.masterBusy ? 'cpulse 0.9s ease-in-out infinite' : 'none',
             }} />
             <span style={{ fontSize: 11.5, color: 'var(--mut)' }}>
               {s.masterBusy
                 ? 'thinking…'
-                : `${runningCount} sessions running${s.settings.masterEnabled && hasCreds(s.settings) ? ` · ${s.settings.masterModel}` : ' · brain off — configure in Settings'}`}
+                : `${runningCount} session${runningCount === 1 ? '' : 's'} running${s.settings.masterEnabled && hasCreds(s.settings) ? ` · ${s.settings.masterModel}` : ' · brain off — configure in Settings'}`}
             </span>
           </div>
         </div>

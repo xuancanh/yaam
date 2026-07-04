@@ -5,6 +5,7 @@ import { isTauri, pickFolder } from '../native'
 import { ACCENT, hexToRgba } from '../data'
 import type { Agent, BoardCol, BoardTask, TaskChatMsg } from '../types'
 import { IC, Icon, ViewHeader } from './ui'
+import { Markdown } from './Markdown'
 
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
@@ -206,13 +207,13 @@ function ChatBubble({ m }: { m: TaskChatMsg }) {
   return (
     <div style={{ display: 'flex', justifyContent: user ? 'flex-end' : 'flex-start' }}>
       <div style={{
-        maxWidth: '85%', borderRadius: 11, padding: '8px 11px', fontSize: 12.5, lineHeight: 1.5,
+        maxWidth: '85%', minWidth: 0, borderRadius: 11, padding: '8px 11px', fontSize: 12.5, lineHeight: 1.5,
         background: user ? hexToRgba(ACCENT, 0.14) : 'var(--panel2)',
         border: `1px solid ${user ? hexToRgba(ACCENT, 0.3) : 'var(--line2)'}`,
-        color: 'var(--text)', whiteSpace: 'pre-wrap',
+        color: 'var(--text)',
       }}>
         {!user && <div className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--accent)', marginBottom: 3 }}>WATCHER</div>}
-        {m.text}
+        <Markdown text={m.text} />
       </div>
     </div>
   )
