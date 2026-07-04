@@ -68,28 +68,32 @@ let credCache: { cmd: string; key: string; exp: number } | null = null
 function parseCredOutput(raw: string): { key: string; exp: number } {
   let exp = Date.now() + CRED_TTL_MS
   const text = raw.trim()
+  let json: Record<string, unknown> | null = null
   try {
-    const json = JSON.parse(text) as Record<string, unknown>
-    // Claude Code credential file shape: { claudeAiOauth: { accessToken, expiresAt } }
-    const oauth = json.claudeAiOauth as Record<string, unknown> | undefined
-    const nested = oauth ?? json
-    const key = ['accessToken', 'access_token', 'apiKey', 'api_key', 'token', 'key', 'credential', 'value']
-      .map(k => nested[k] ?? json[k])
-      .find((v): v is string => typeof v === 'string' && v.length > 0)
-    if (!key) throw new Error('no credential field')
-    const expiresAt = nested.expiresAt ?? json.expiresAt ?? nested.expires_at ?? json.expires_at
-    if (typeof expiresAt === 'number') exp = Math.min(exp, expiresAt - 60_000)
-    else if (typeof expiresAt === 'string') {
-      const t = Date.parse(expiresAt)
-      if (!Number.isNaN(t)) exp = Math.min(exp, t - 60_000)
-    }
-    return { key, exp }
+    json = JSON.parse(text) as Record<string, unknown>
   } catch {
-    // not JSON (or no known field) — treat the whole output as the credential
-    const key = text.split('\n').pop()?.trim() ?? ''
+    // not JSON — treat the last non-empty output line as the credential
+    const key = text.split('\n').filter(l => l.trim()).pop()?.trim() ?? ''
     if (!key) throw new Error('credential command printed nothing')
     return { key, exp }
   }
+  if (json.AccessKeyId || json.accessKeyId || json.Credentials || json.credentials) {
+    throw new Error('credential command printed AWS credentials — switch the provider to AWS Bedrock to use them')
+  }
+  // Claude Code credential file shape: { claudeAiOauth: { accessToken, expiresAt } }
+  const oauth = json.claudeAiOauth as Record<string, unknown> | undefined
+  const nested = oauth ?? json
+  const key = ['accessToken', 'access_token', 'apiKey', 'api_key', 'token', 'key', 'credential', 'value']
+    .map(k => nested[k] ?? json[k])
+    .find((v): v is string => typeof v === 'string' && v.length > 0)
+  if (!key) throw new Error('credential command printed JSON without a recognizable key/token field')
+  const expiresAt = nested.expiresAt ?? json.expiresAt ?? nested.expires_at ?? json.expires_at
+  if (typeof expiresAt === 'number') exp = Math.min(exp, expiresAt - 60_000)
+  else if (typeof expiresAt === 'string') {
+    const t = Date.parse(expiresAt)
+    if (!Number.isNaN(t)) exp = Math.min(exp, t - 60_000)
+  }
+  return { key, exp }
 }
 
 /** The credential to send: from the command (cached) or the static API key. */
@@ -116,7 +120,7 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
   if (cfg.provider.id === 'bedrock') {
     // model id goes in the URL on Bedrock; auth is SigV4 in the backend
     const body = JSON.stringify({ anthropic_version: 'bedrock-2023-05-31', max_tokens: 2048, temperature: 0.2, system, messages, tools })
-    const raw = await bedrockInvoke(cfg.awsRegion || 'us-east-1', cfg.awsProfile, cfg.awsRefreshCmd, cfg.model, body)
+    const raw = await bedrockInvoke(cfg.awsRegion || 'us-east-1', cfg.awsProfile, cfg.awsRefreshCmd, cfg.credCmd, cfg.model, body)
     return JSON.parse(raw) as ApiResponse
   }
   const send = async (key: string) => doFetch(`${cfg.provider.base}/v1/messages`, {

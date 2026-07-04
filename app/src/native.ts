@@ -117,9 +117,9 @@ export async function runCredentialCommand(cmd: string): Promise<string> {
 }
 
 /** Call Claude on AWS Bedrock via the backend (SigV4 + credential chain). */
-export async function bedrockInvoke(region: string, profile: string, refreshCmd: string, model: string, body: string): Promise<string> {
+export async function bedrockInvoke(region: string, profile: string, refreshCmd: string, credCmd: string, model: string, body: string): Promise<string> {
   if (!isTauri) throw new Error('Bedrock requires the desktop app')
-  return await invoke<string>('bedrock_invoke', { region, profile, refreshCmd, model, body })
+  return await invoke<string>('bedrock_invoke', { region, profile, refreshCmd, credCmd, model, body })
 }
 
 export interface DirEntryInfo {

@@ -233,6 +233,24 @@ export function SettingsView() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
                   <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>Credential command</div>
+                    <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
+                      Optional — overrides the profile. Any shell command that prints AWS credentials as JSON{' '}
+                      (<span className="mono">aws configure export-credentials</span>,{' '}
+                      <span className="mono">claude default-credential-export</span>) or{' '}
+                      <span className="mono">AWS_*</span> env lines. Edit freely, including the binary path. Cached until the
+                      credentials expire, then re-run automatically.
+                    </div>
+                  </div>
+                  <input
+                    value={s.settings.credCmd}
+                    onChange={e => updateSettings({ credCmd: e.target.value })}
+                    placeholder="claude default-credential-export"
+                    style={{ ...FIELD_STYLE, width: 260 }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600 }}>Credential refresh command</div>
                     <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
                       Optional. Runs automatically when Bedrock rejects expired credentials, then the call retries — e.g. <span className="mono">aws sso login --profile work</span> or your corporate credential tool.
