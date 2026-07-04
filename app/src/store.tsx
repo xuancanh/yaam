@@ -593,9 +593,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const content = alt ? readScreen(id) : streamLines.slice(-14)
     if (!content.length) return
     const lastLine = content[content.length - 1] ?? ''
-    const promptDetected = alt
+    // TUIs show a busy marker while generating — the turn is NOT over, so any
+    // question-looking text on screen is transient. Never flag input, and never
+    // relay half-answers, while the marker is visible.
+    const busy = alt && /esc to interrupt|ctrl\+c to interrupt/i.test(content.join('\n'))
+
+    const promptDetected = !busy && (alt
       ? TUI_PROMPT_RE.test(content.join('\n'))
-      : PROMPT_RE.test(content.slice(-3).join('\n')) || /[?:]\s*$/.test(lastLine.trim())
+      : PROMPT_RE.test(content.slice(-3).join('\n')) || /[?:]\s*$/.test(lastLine.trim()))
 
     if (promptDetected) {
       const question = (
@@ -625,7 +630,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    // prompt gone — it was answered in the terminal
+    // prompt gone (or the session is generating again) — it was answered
     if (agent.status === 'needs') {
       lastFlaggedRef.current.delete(id)
       dispatch(s => ({
@@ -637,9 +642,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     if (armed) {
       const joined = content.join('\n')
       const expired = Date.now() - armed.at > 15 * 60 * 1000
-      // TUIs pause silently mid-work (API calls) and show a busy marker while
-      // generating — don't relay a half-answer, keep checking until stable
-      const busy = alt && /esc to interrupt|ctrl\+c to interrupt/i.test(joined)
       const unchanged = joined === armed.snapshot
       if ((busy || unchanged) && !expired) {
         settleRef.current.delete(id)
@@ -764,13 +766,24 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // typing into a terminal clears its "needs action" state
   // Clear a session's prompt state after the user or Master answers it.
+  // The user typed into the terminal — they are handling it themselves, so
+  // dismiss everything we asked of them: needs status, the card's pending
+  // action, and any open approval card in the Master chat.
   const clearNeeds = useCallback((id: string) => {
     lastFlaggedRef.current.delete(id)
     dispatch(s => ({
       ...s,
       agents: s.agents.map(a => a.id === id
-        ? { ...a, attention: false, ...(a.status === 'needs' ? { status: 'running' as const, escReason: undefined } : {}) }
+        ? {
+            ...a,
+            attention: false,
+            actionNeeded: undefined,
+            ...(a.status === 'needs' ? { status: 'running' as const, escReason: undefined } : {}),
+          }
         : a),
+      messages: s.messages.map(m => (m.escFor === id && m.esc && !m.esc.resolved
+        ? { ...m, esc: { ...m.esc, resolved: true, choice: 'handled in the terminal' } }
+        : m)),
     }))
   }, [])
 

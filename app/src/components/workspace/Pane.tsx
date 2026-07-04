@@ -11,7 +11,7 @@ const filesOpenCache = new Map<string, boolean>()
 
 /** Render one terminal pane with session controls and optional file explorer. */
 export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
-  const { setActivePane, closePane, openPanel, resume, approve, deny, stopSession, toggleMaximize, minimizePane, renameSession } = useActions()
+  const { setActivePane, closePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession } = useActions()
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
   // Toggle the pane-local file explorer and repaint the terminal after resizing.
   const toggleFiles = () => {
@@ -86,23 +86,6 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
       </div>
 
       {filesOpen ? <FilesPane agent={agent} active={active} /> : <TerminalPane agent={agent} active={active} />}
-
-      {agent.status === 'needs' && (
-        <div style={{
-          borderTop: '1px solid rgba(255,176,32,.4)', background: 'rgba(255,176,32,.07)',
-          padding: '12px 15px', display: 'flex', flexDirection: 'column', gap: 9,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: 'var(--amber)' }}>
-            <Icon paths={IC.warn} size={15} stroke={1.8} />
-            Blocked — waiting for your approval
-          </div>
-          <div style={{ fontSize: 12.5, lineHeight: 1.5, color: '#C7CCD6' }}>{agent.escReason}</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="approve-btn" style={{ padding: '7px 16px' }} onClick={e => { e.stopPropagation(); approve(agent.id) }}>Approve</button>
-            <button className="deny-btn" style={{ padding: '7px 16px' }} onClick={e => { e.stopPropagation(); deny(agent.id) }}>Deny</button>
-          </div>
-        </div>
-      )}
 
       <div className="mono" style={{
         height: 26, flexShrink: 0, background: 'var(--panel)', borderTop: '1px solid var(--line)',
