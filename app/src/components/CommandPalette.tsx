@@ -19,7 +19,6 @@ const NAV_COMMANDS: Array<[View, string]> = [
   ['overview', 'Go to Agents'],
   ['board', 'Go to Board'],
   ['timeline', 'Go to Activity'],
-  ['usage', 'Go to Usage'],
   ['crons', 'Go to Schedules'],
   ['tools', 'Go to Tools'],
   ['settings', 'Go to Settings'],

@@ -311,7 +311,10 @@ export interface BoardTask {
   id: string
   title: string
   col: BoardCol
+  /** most recent session working this task (primary, shown on the card) */
   agentId: string | null
+  /** every session the watcher spawned for this task, in spawn order */
+  agentIds?: string[]
   /** what needs to be done, in enough detail for a one-shot agent */
   description?: string
   /** acceptance criteria the watcher verifies before moving to done */
@@ -377,7 +380,6 @@ export type View =
   | 'overview'
   | 'board'
   | 'timeline'
-  | 'usage'
   | 'crons'
   | 'templates'
   | 'tools'

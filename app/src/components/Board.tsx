@@ -221,7 +221,7 @@ function ChatBubble({ m }: { m: TaskChatMsg }) {
 /** Edit a task specification and converse with its dedicated watcher. */
 function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | null; onClose: () => void }) {
   const s = useConductor()
-  const { updateTask, sendTaskChat, focusTab, startTask, deleteTask } = useActions()
+  const { updateTask, sendTaskChat, focusTab, startTask, restartTask, deleteTask } = useActions()
   const runWith = task.templateId
     ? `template · ${(s.templates ?? []).find(t => t.id === task.templateId)?.name ?? task.templateId}`
     : (s.agentTypes.find(t => t.id === task.typeId)?.name ?? 'default agent type')
@@ -229,6 +229,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
   const [editingSpec, setEditingSpec] = useState(false)
   const [descDraft, setDescDraft] = useState(task.description ?? '')
   const [critDraft, setCritDraft] = useState((task.criteria ?? []).join('\n'))
+  const [cwdDraft, setCwdDraft] = useState(task.cwd ?? '')
   const scrollRef = useRef<HTMLDivElement>(null)
   const chat = task.chat ?? []
 
@@ -252,6 +253,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
     updateTask(task.id, {
       description: descDraft.trim(),
       criteria: critDraft.split('\n').map(c => c.replace(/^[-•]\s*/, '').trim()).filter(Boolean),
+      cwd: cwdDraft.trim() || undefined,
     })
     setEditingSpec(false)
   }
@@ -277,10 +279,22 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
                 </span>
               )}
               {agent ? (
-                <button onClick={() => focusTab(agent.id)} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', border: 'none', color: '#9AA3B2', fontSize: 11, padding: 0 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: agent.color }} />
-                  {agent.name} — open session
-                </button>
+                <>
+                  <button onClick={() => focusTab(agent.id)} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', border: 'none', color: '#9AA3B2', fontSize: 11, padding: 0 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: agent.color }} />
+                    {agent.name} — open session
+                  </button>
+                  {(agent.status === 'idle' || agent.status === 'error') && task.col !== 'done' && (
+                    <button
+                      title="Detach the finished session and spawn a fresh one-shot for this task"
+                      onClick={() => restartTask(task.id)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none', color: 'var(--green)', fontSize: 11, fontWeight: 600, padding: 0 }}
+                    >
+                      <Icon paths={['M4 12a8 8 0 0113.6-5.7L20 8.5', 'M20 3.5v5h-5', 'M20 12a8 8 0 01-13.6 5.7L4 15.5', 'M4 20.5v-5h5']} size={11} stroke={1.8} />
+                      Relaunch
+                    </button>
+                  )}
+                </>
               ) : (
                 <button onClick={() => startTask(task.id)} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none', color: 'var(--green)', fontSize: 11, fontWeight: 600, padding: 0 }}>
                   <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z" /></svg>
@@ -307,6 +321,10 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
               <div>
                 <FieldLabel hint="one per line">Criteria</FieldLabel>
                 <textarea value={critDraft} onChange={e => setCritDraft(e.target.value)} rows={3} style={{ ...FIELD, resize: 'vertical', fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5 }} />
+              </div>
+              <div>
+                <FieldLabel hint="used when (re)launching the session">Working folder</FieldLabel>
+                <input value={cwdDraft} onChange={e => setCwdDraft(e.target.value)} placeholder="default" style={{ ...FIELD, fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5 }} />
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="approve-btn" style={{ padding: '6px 16px', fontSize: 11.5 }} onClick={saveSpec}>Save</button>

@@ -314,10 +314,13 @@ export function buildTemplateCommand(tpl: AgentTemplate, type: AgentType | undef
   }
 
   if (kind === 'codex') {
-    if (tpl.mode === 'ephemeral') parts.push('exec')
+    // exec refuses to run outside a trusted git directory unless told not to
+    // check — one-shot task sessions must not die on that
+    if (tpl.mode === 'ephemeral') parts.push('exec', '--skip-git-repo-check')
     if (tpl.model.trim()) parts.push('-m', shQuote(tpl.model.trim()))
     if (tpl.approval === 'safe') parts.push('--sandbox', 'read-only')
-    if (tpl.approval === 'edits') parts.push('--full-auto')
+    // --full-auto is deprecated in favor of the explicit sandbox mode
+    if (tpl.approval === 'edits') parts.push('--sandbox', 'workspace-write')
     if (tpl.approval === 'full') parts.push('--dangerously-bypass-approvals-and-sandbox')
     if (extra) parts.push(extra)
     // codex has no system-prompt flag — fold it into the prompt

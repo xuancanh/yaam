@@ -64,8 +64,10 @@ export async function draftTaskSpec(
 export interface WatcherExec {
   moveTask: (col: string) => string
   updateNote: (note: string) => string
-  sendToSession: (text: string) => string
+  sendToSession: (text: string, session?: string) => string
   askUser: (question: string) => string
+  checkSession: () => string
+  spawnSession: (extraInstructions: string) => string
 }
 
 const WATCHER_TOOLS = [
@@ -88,11 +90,19 @@ const WATCHER_TOOLS = [
     },
   },
   {
-    name: 'send_to_session',
-    description: "Type a line into the task's live session (answer a prompt, give a follow-up instruction, unblock it). Only works while the session is alive.",
+    name: 'spawn_session',
+    description: "Spawn a one-shot session to work this task — YOU own spawning. The task's title, description and criteria (with a goal stop-condition) are sent as its prompt automatically; extra_instructions are appended when you need to adjust the approach (e.g. retry guidance after a failure). You can run more than one session when parallel work genuinely helps, and you receive every session's output.",
     input_schema: {
       type: 'object',
-      properties: { text: { type: 'string' } },
+      properties: { extra_instructions: { type: 'string' } },
+    },
+  },
+  {
+    name: 'send_to_session',
+    description: "Type a line into one of the task's live sessions (answer a prompt, give a follow-up instruction, unblock it). `session` = session name when several are attached; defaults to the most recent. Only works while that session is alive.",
+    input_schema: {
+      type: 'object',
+      properties: { text: { type: 'string' }, session: { type: 'string' } },
       required: ['text'],
     },
   },
@@ -105,11 +115,21 @@ const WATCHER_TOOLS = [
       required: ['question'],
     },
   },
+  {
+    name: 'check_session',
+    description: "Query the LIVE state of every session attached to this task: status, whether each process is still running, runtime, and the latest terminal output. Call this before concluding anything about completion — digests can lag behind reality.",
+    input_schema: { type: 'object', properties: {} },
+  },
 ]
 
-/** Describe a task, worker, and evidence rules for its dedicated watcher. */
-function watcherSystem(task: BoardTask, agent: Agent | undefined): string {
+/** Describe a task, its workers, and evidence rules for its dedicated watcher. */
+function watcherSystem(task: BoardTask, agents: Agent[]): string {
   const criteria = (task.criteria ?? []).map((c, i) => `${i + 1}. ${c}`).join('\n') || '(none set)'
+  const workers = agents.length
+    ? agents.map(a =>
+        `- "${a.name}" · status ${a.status}${a.status === 'running' || a.status === 'needs' ? ' (STILL RUNNING)' : ' (exited)'} · \`${a.cmd || '-'}\`${a.summary ? ` · last summary: ${a.summary}` : ''}`,
+      ).join('\n')
+    : '(none attached — if work is still needed, spawn one with spawn_session)'
   return `You are the dedicated watcher for ONE kanban task inside YAAM (an agent manager) — a mini orchestrator that owns this task end-to-end.
 
 THE TASK
@@ -119,17 +139,20 @@ THE TASK
 - acceptance criteria:
 ${criteria}
 
-THE WORKER
-${agent
-    ? `A one-shot session is handling the work: name "${agent.name}", command \`${agent.cmd || '-'}\`, status ${agent.status}${agent.summary ? `, last summary: ${agent.summary}` : ''}. You receive digests of its output and can steer it with send_to_session.`
-    : 'No session is attached right now. If work is still needed, say so — the user (or Master) starts sessions.'}
+YOUR SESSIONS (you spawned or inherited these; you are their sole monitor — their output digests come straight to you)
+${workers}
+
+GROUND TRUTH RULES
+- A session is FINISHED only when its process has EXITED — you get an explicit "session exited" event. Until then it is still working, no matter how complete a digest sounds. One-shot CLIs print most output only at the very end, so silence ≠ done and a promising digest ≠ done.
+- When you are about to claim completion, move the task, or tell the user anything about a session's state, call check_session first and ground your statement in what it returns.
 
 YOUR DUTIES
-1. Track progress against the acceptance criteria — only against evidence from digests/output, never invented.
-2. Keep the board truthful with move_task: progress while working; review when the work looks complete (criteria appear met) so the user can verify; done only when the user confirms or the evidence is unambiguous; failed when the attempt failed for good.
-3. Keep the card's one-line note current with update_note on every meaningful change.
-4. When the session stalls, errs, or asks something you can answer from the task spec, unblock it with send_to_session.
-5. When YOU are stuck, the outcome is ambiguous, or a decision belongs to the user — ask_user (sparingly; one focused question).
+1. YOU own the workers: spawn_session when the task needs work and nothing is running; respawn with extra_instructions after a fixable failure; spawn a second session only when parallel work genuinely helps (they share no state — split cleanly).
+2. Track progress against the acceptance criteria — only against evidence from digests/output/check_session, never invented.
+3. Keep the board truthful with move_task: progress while working; review when the work looks complete (criteria appear met) so the user can verify; done only when the user confirms or the evidence is unambiguous; failed when the attempt failed for good.
+4. Keep the card's one-line note current with update_note on every meaningful change.
+5. When a session stalls, errs, or asks something you can answer from the task spec, unblock it with send_to_session.
+6. When YOU are stuck, the outcome is ambiguous, or a decision belongs to the user — ask_user (sparingly; one focused question).
 
 You also chat with the user: your final plain-text reply (if any) is posted to the task's chat. Keep replies short and concrete. Use tools first, then reply only if there is something worth saying.`
 }
@@ -141,8 +164,10 @@ function runWatcherTool(name: string, input: Record<string, unknown>, exec: Watc
   switch (name) {
     case 'move_task': return exec.moveTask(str('col'))
     case 'update_note': return exec.updateNote(str('note'))
-    case 'send_to_session': return exec.sendToSession(str('text'))
+    case 'send_to_session': return exec.sendToSession(str('text'), str('session') || undefined)
     case 'ask_user': return exec.askUser(str('question'))
+    case 'check_session': return exec.checkSession()
+    case 'spawn_session': return exec.spawnSession(str('extra_instructions'))
     default: return `unknown tool ${name}`
   }
 }
@@ -155,17 +180,17 @@ function runWatcherTool(name: string, input: Record<string, unknown>, exec: Watc
 export async function runWatcherTurn(
   cfg: LlmConfig,
   getTask: () => BoardTask | undefined,
-  getAgent: () => Agent | undefined,
+  getAgents: () => Agent[],
   note: string,
   history: ApiMessage[],
   exec: WatcherExec,
 ): Promise<string> {
   history.push({ role: 'user', content: note })
   let reply = ''
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 5; i++) {
     const task = getTask()
     if (!task) break
-    const res = await callApi(cfg, watcherSystem(task, getAgent()), history, WATCHER_TOOLS)
+    const res = await callApi(cfg, watcherSystem(task, getAgents()), history, WATCHER_TOOLS)
     if (res.stop_reason !== 'tool_use') {
       reply = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
       history.push({ role: 'assistant', content: reply || '(ok)' })

@@ -12,7 +12,7 @@ const FIELD_STYLE = {
 
 const APPROVALS: Array<{ id: TemplateApproval; label: string; hint: string }> = [
   { id: 'safe', label: 'Safe — ask / read-only', hint: 'claude: default permission prompts · codex: --sandbox read-only' },
-  { id: 'edits', label: 'Auto-approve edits', hint: 'claude: --permission-mode acceptEdits · codex: --full-auto' },
+  { id: 'edits', label: 'Auto-approve edits', hint: 'claude: --permission-mode acceptEdits · codex: --sandbox workspace-write' },
   { id: 'full', label: 'Full access — no approvals', hint: 'claude: --dangerously-skip-permissions · codex: --dangerously-bypass-approvals-and-sandbox' },
 ]
 

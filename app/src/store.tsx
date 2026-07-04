@@ -120,6 +120,8 @@ export interface ConductorActions {
   unarchiveSession: (id: string) => void
   deleteSession: (id: string) => void
   startTask: (taskId: string) => void
+  /** detach a dead session from a task and spawn a fresh one-shot for it */
+  restartTask: (taskId: string) => void
   resume: (id: string) => void
   openPanel: (id: string, tab?: Panel['tab']) => void
   setPanelTab: (tab: Panel['tab']) => void
@@ -435,6 +437,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // Set synchronously when a task launches a session. This closes the small
   // gap before React commits task.agentId, during which a fast one-shot can exit.
   const taskSessionsRef = useRef<Map<string, { taskId: string; workspaceId: string }>>(new Map())
+  // set below once the launch helpers exist; the watcher exec needs it earlier
+  const spawnTaskSessionRef = useRef<(taskId: string, extraInstructions?: string) => string | null>(() => null)
 
   // Resolve fast launch bindings before reducer state has committed agentId.
   const taskForSession = useCallback((sessionId: string): LocatedTask | undefined => {
@@ -469,12 +473,21 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         pending = []
         // Re-read the task after every tool call so watcher decisions see current state.
         const getTask = () => findTaskInState(stateRef.current, taskId)?.task
-        // Resolve the attached worker from committed state or the fast launch binding.
-        const getAgent = () => {
+        // Every session ever attached to this task (committed state + fast launch bindings), spawn order.
+        const getAgents = () => {
           const t = getTask()
-          const boundSession = Array.from(taskSessionsRef.current.entries()).find(([, binding]) => binding.taskId === taskId)?.[0]
-          const sessionId = t?.agentId ?? boundSession
-          return sessionId ? stateRef.current.agents.find(a => a.id === sessionId) : undefined
+          const bound = Array.from(taskSessionsRef.current.entries())
+            .filter(([, binding]) => binding.taskId === taskId)
+            .map(([sid]) => sid)
+          const ids = [...new Set([...(t?.agentIds ?? []), ...(t?.agentId ? [t.agentId] : []), ...bound])]
+          return ids
+            .map(sid => stateRef.current.agents.find(a => a.id === sid))
+            .filter((a): a is Agent => !!a)
+        }
+        // Primary target for steering: the most recent live session, else the most recent.
+        const primaryAgent = () => {
+          const all = getAgents()
+          return all.filter(a => a.status === 'running' || a.status === 'needs').pop() ?? all[all.length - 1]
         }
         if (!getTask()) break
         let history = watcherHistories.current.get(taskId)
@@ -498,14 +511,21 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           },
           updateNote: n => {
             dispatch(s2 => updateLocatedTask(s2, taskId, x => ({ ...x, watcherNote: n.slice(0, 140) })))
+            // mirror onto the live worker's status card — the watcher IS its monitor
+            const a = primaryAgent()
+            const t = getTask()
+            if (a && t && (a.status === 'running' || a.status === 'needs')) applyAgentStatus(a.id, t.title.slice(0, 60), n.slice(0, 140))
             return 'note updated'
           },
-          sendToSession: text => {
-            const a = getAgent()
-            if (!a || a.status === 'idle' || a.status === 'error') return 'no live session attached to this task'
+          sendToSession: (text, session) => {
+            const live = getAgents().filter(a => a.status === 'running' || a.status === 'needs')
+            const a = session
+              ? live.find(x => x.name === session || x.id === session)
+              : live[live.length - 1]
+            if (!a) return session ? `no live session named "${session}"` : 'no live session attached to this task'
             sendLineToSession(a.id, text)
-            pushTaskChat(taskId, 'system', `Watcher → session: ${text.slice(0, 120)}`)
-            return 'sent to the session'
+            pushTaskChat(taskId, 'system', `Watcher → ${a.name}: ${text.slice(0, 120)}`)
+            return `sent to "${a.name}"`
           },
           askUser: q => {
             const t = getTask()
@@ -514,9 +534,35 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             notify('escalate', `Task “${(t?.title ?? '').slice(0, 40)}” needs you`, q.slice(0, 90), t?.agentId ?? null)
             return 'asked — the user will reply in the task chat'
           },
+          checkSession: () => {
+            const all = getAgents().slice(-4)
+            if (!all.length) return 'no session is attached to this task — spawn one with spawn_session if work is needed'
+            return all.map(a => {
+              const alive = a.status === 'running' || a.status === 'needs'
+              const screen = isAltScreen(a.id) ? readScreen(a.id) : (a.log ?? []).slice(-20).map(l => l.x)
+              const tail = screen.filter(l => l.trim()).slice(-12).join('\n')
+              return [
+                `session "${a.name}" · status: ${a.status} — process ${alive ? 'STILL RUNNING (not finished)' : 'exited'}`,
+                a.ephemeral ? 'kind: one-shot — it exits by itself when done; while running it prints little or nothing' : 'kind: interactive',
+                a.launchedAt ? `runtime: ${Math.round((Date.now() - a.launchedAt) / 1000)}s` : '',
+                a.summary ? `last summary: ${a.summary}` : '',
+                `latest output:\n${tail || '(no output yet)'}`,
+              ].filter(Boolean).join('\n')
+            }).join('\n\n---\n\n')
+          },
+          spawnSession: extra => {
+            const t = getTask()
+            if (!t) return 'task no longer exists'
+            const live = getAgents().filter(a => a.status === 'running' || a.status === 'needs')
+            if (live.length >= 3) return 'refused: 3 sessions are already running for this task — steer or stop one instead'
+            const sid = spawnTaskSessionRef.current(taskId, extra || undefined)
+            if (!sid) return 'failed to spawn (no enabled agent type, or the launch was rejected)'
+            const name = stateRef.current.agents.find(a => a.id === sid)?.name ?? sid
+            return `spawned one-shot session "${name}" — its output digests will come to you; it exits by itself when done`
+          },
         }
         try {
-          const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgent, current, history, exec)
+          const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec)
           if (reply) pushTaskChat(taskId, 'watcher', reply)
         } catch (e) {
           logEvent('escalate', null, `Watcher error: ${e instanceof Error ? e.message : String(e)}`)
@@ -527,7 +573,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     } finally {
       watcherBusy.current.delete(taskId)
     }
-  }, [logEvent, notify, pushTaskChat])
+  }, [applyAgentStatus, logEvent, notify, pushTaskChat])
 
   runWatcherRef.current = (taskId, note) => { void runWatcher(taskId, note) }
 
@@ -617,7 +663,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           }))
           notify('done', `${agent.name} finished responding`, lastLine.slice(0, 90), id)
         }
-        if (llm) {
+        // task sessions are watched by their task's watcher (the mini master
+        // assigns itself as monitor) — the generic session monitor skips them
+        if (llm && !taskForSession(id)) {
           void runMonitor(id,
             `The session finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
             'It was given a task by Master or the user, so a completed response IS noteworthy — update the status and report a digest to Master.')
@@ -786,9 +834,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             failed ? `exit code ${e.code} · ${agent.repo}` : `one-shot run finished · ${agent.repo}`,
             e.id,
           )
-          void monitorEventRef.current(e.id, failed
-            ? `This one-shot (ephemeral) agent exited with code ${e.code} before completing. Summarize what went wrong from the output and report to Master.`
-            : 'This one-shot (ephemeral) agent finished its task and exited cleanly, as designed. Summarize what it did from the final output and report a digest to Master.')
+          // task sessions report through their watcher, not the generic monitor
+          if (!taskFor) {
+            void monitorEventRef.current(e.id, failed
+              ? `This one-shot (ephemeral) agent exited with code ${e.code} before completing. Summarize what went wrong from the output and report to Master.`
+              : 'This one-shot (ephemeral) agent finished its task and exited cleanly, as designed. Summarize what it did from the final output and report a digest to Master.')
+          }
           if (!failed && agent.autoArchive) {
             // give the monitor a moment to read the final screen, then tidy up
             window.setTimeout(() => dispatch(s => ({
@@ -806,8 +857,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             failed ? `exit code ${e.code} · ${agent.repo}` : `session ended · ${agent.repo}`,
             e.id,
           )
-          void monitorEventRef.current(e.id,
-            `The session process ${failed ? `exited with code ${e.code}` : 'finished and exited cleanly'}. Update the status and report a digest to Master.`)
+          if (!taskFor) {
+            void monitorEventRef.current(e.id,
+              `The session process ${failed ? `exited with code ${e.code}` : 'finished and exited cleanly'}. Update the status and report a digest to Master.`)
+          }
         }
       }
     })
@@ -1046,7 +1099,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       ephemeral: opts?.ephemeral, autoArchive: opts?.autoArchive, templateId: opts?.templateId,
       terminalShell: opts?.terminalShell,
       memory: mkMemory(), tools: mkTools(),
-      log: [{ t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` }],
+      log: [
+        { t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` },
+        // print-mode CLIs (claude -p) emit nothing until the turn completes —
+        // label the silence so a long run doesn't read as a hang
+        ...(opts?.ephemeral ? [{ t: 'sys' as const, x: 'one-shot run — output appears when the turn completes; this can take a while' }] : []),
+        ...(!dir ? [{ t: 'warn' as const, x: 'no working folder set — running in your home directory' }] : []),
+      ],
       ...defaultDetail(), usageVersion: 1,
     }
     dispatch(s => {
@@ -1093,11 +1152,15 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // started) spawns its template — or the default agent type — with the task
   // as its prompt.
   // Launch a one-shot worker for a board task and bind its dedicated watcher.
-  const spawnSessionForTask = useCallback((taskId: string) => {
+  // Core one-shot launch for a board task. The watcher owns spawning: it calls
+  // this via its spawn_session tool (extraInstructions augment the prompt), and
+  // a task may accumulate several sessions (task.agentIds).
+  const spawnTaskSession = useCallback((taskId: string, extraInstructions?: string, briefWatcher = false): string | null => {
     const st = stateRef.current
     const task = st.tasks.find(t => t.id === taskId)
-    if (!task || task.agentId) return
+    if (!task) return null
     const prompt = taskPrompt(task, true)
+      + (extraInstructions?.trim() ? `\n\nAdditional instructions from the task watcher:\n${extraInstructions.trim()}` : '')
     let id: string | null = null
     // watcher-driven task sessions are ALWAYS one-shot: they run the task and exit
     if (task.templateId && (st.templates ?? []).some(t => t.id === task.templateId)) {
@@ -1107,7 +1170,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         ?? st.agentTypes.find(t => t.enabled)
       if (!type) {
         flash('No enabled agent type to handle the task')
-        return
+        return null
       }
       const oneShot: AgentTemplate = {
         id: '', name: task.title.slice(0, 18), typeId: type.id, mode: 'ephemeral',
@@ -1115,23 +1178,66 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
       id = launchSession(buildTemplateCommand(oneShot, type, prompt), task.cwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, undefined, { ephemeral: true })
     }
-    if (!id) return
+    if (!id) return null
     taskSessionsRef.current.set(id, { taskId, workspaceId: st.activeWorkspace })
     const sessionName = stateRef.current.agents.find(a => a.id === id)?.name ?? id
     dispatch(s2 => ({
       ...s2,
       tasks: s2.tasks.map(t => t.id === taskId
-        ? { ...t, agentId: id, scheduleAt: undefined, col: t.col === 'backlog' || t.col === 'done' || t.col === 'failed' ? 'progress' as const : t.col }
+        ? {
+            ...t, agentId: id, agentIds: [...(t.agentIds ?? []), ...(id ? [id] : [])], scheduleAt: undefined,
+            col: t.col === 'backlog' || t.col === 'done' || t.col === 'failed' ? 'progress' as const : t.col,
+          }
         : t),
     }))
     armResponseWatch(id)
     pushTaskChat(taskId, 'system', `Spawned one-shot session “${sessionName}” for this task`)
-    runWatcherRef.current(taskId,
-      `A one-shot session "${sessionName}" was just spawned to work this task; it received the title, description and criteria as its prompt, with the criteria set as an explicit goal (stop condition) it must self-verify before exiting. ` +
-      'Set your card note, make sure the task sits in the right column, and post one short kickoff message for the user.')
+    if (!task.cwd && !st.settings.defaultCwd && !(task.templateId && (st.templates ?? []).find(t => t.id === task.templateId)?.cwd)) {
+      pushTaskChat(taskId, 'system',
+        '⚠ No working folder set — the session runs in your home directory. If this task targets a repo, set the folder in the task spec and Relaunch.')
+    }
+    if (briefWatcher) {
+      runWatcherRef.current(taskId,
+        `A one-shot session "${sessionName}" was just spawned to work this task; it received the title, description and criteria as its prompt, with the criteria set as an explicit goal (stop condition) it must self-verify before exiting. ` +
+        'Set your card note, make sure the task sits in the right column, and post one short kickoff message for the user.')
+    }
     logEvent('route', id, `Spawned session for task “${task.title.slice(0, 48)}”`)
     flash(`Session spawned for “${task.title.slice(0, 28)}”`)
+    return id
   }, [armResponseWatch, flash, launchFromTemplate, launchSession, logEvent, pushTaskChat])
+
+  spawnTaskSessionRef.current = (taskId, extraInstructions) => spawnTaskSession(taskId, extraInstructions, false)
+
+  // Deterministic start (drag to progress, schedules, no-brain fallback):
+  // spawn directly, then brief the watcher.
+  const spawnSessionForTask = useCallback((taskId: string) => {
+    const task = stateRef.current.tasks.find(t => t.id === taskId)
+    if (!task || task.agentId) return
+    spawnTaskSession(taskId, undefined, true)
+  }, [spawnTaskSession])
+
+  // Watcher-first start (the mini master owns spawning): hand the task to its
+  // watcher, which calls spawn_session; fall back to a direct spawn when there
+  // is no brain or the watcher fails to act.
+  const startTaskViaWatcher = useCallback((taskId: string) => {
+    const st = stateRef.current
+    const task = st.tasks.find(t => t.id === taskId)
+    if (!task || task.agentId) return
+    if (!(st.settings.masterEnabled && hasCreds(st.settings))) {
+      spawnSessionForTask(taskId)
+      return
+    }
+    pushTaskChat(taskId, 'system', 'Start requested — handing to the watcher')
+    void runWatcher(taskId,
+      'The user started this task. You own spawning: call spawn_session now (add extra_instructions only if the spec needs augmenting), set your card note, and post one short kickoff message. If spawning fails, tell the user why.',
+    ).then(() => {
+      const after = stateRef.current.tasks.find(t => t.id === taskId)
+      if (after && !after.agentId && !(after.agentIds ?? []).length) {
+        pushTaskChat(taskId, 'system', 'Watcher did not spawn a session — starting one directly')
+        spawnSessionForTask(taskId)
+      }
+    })
+  }, [pushTaskChat, runWatcher, spawnSessionForTask])
 
   // API surface handed to addon code (tools, hooks, and view RPC) — scoped
   // per addon so storage is namespaced
@@ -1911,7 +2017,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         ...s,
         ...removeFromGroups(s, id),
         agents: s.agents.filter(a => a.id !== id),
-        tasks: s.tasks.map(t => (t.agentId === id ? { ...t, agentId: null } : t)),
+        tasks: s.tasks.map(t => (t.agentId === id || t.agentIds?.includes(id)
+          ? { ...t, agentId: t.agentId === id ? null : t.agentId, agentIds: (t.agentIds ?? []).filter(x => x !== id) }
+          : t)),
         minimizedIds: s.minimizedIds.filter(x => x !== id),
         drawer: s.drawer?.agentId === id ? null : s.drawer,
         panel: s.panel?.agentId === id ? null : s.panel,
@@ -2146,7 +2254,20 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
     },
 
-    startTask: taskId => spawnSessionForTask(taskId),
+    startTask: taskId => startTaskViaWatcher(taskId),
+
+    restartTask: taskId => {
+      const t = stateRef.current.tasks.find(x => x.id === taskId)
+      if (!t) return
+      const prev = t.agentId ? stateRef.current.agents.find(a => a.id === t.agentId) : undefined
+      if (prev && (prev.status === 'running' || prev.status === 'needs')) native.killSession(prev.id).catch(() => {})
+      dispatch(s => ({
+        ...s,
+        tasks: s.tasks.map(x => (x.id === taskId ? { ...x, agentId: null } : x)),
+      }))
+      pushTaskChat(taskId, 'system', `Relaunching — previous session${prev ? ` “${prev.name}”` : ''} detached`)
+      later(50, () => spawnSessionForTask(taskId))
+    },
     createTask: input => {
       const id = mkId('t')
       dispatch(s => ({
@@ -2400,7 +2521,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [armResponseWatch, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, pushTaskChat, runMaster, runWatcher, sendAddonChatImpl, spawnSessionForTask])
+  }), [armResponseWatch, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, pushTaskChat, runMaster, runWatcher, sendAddonChatImpl, spawnSessionForTask, startTaskViaWatcher])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {

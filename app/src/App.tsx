@@ -6,7 +6,6 @@ import { Workspace } from './components/Workspace'
 import { Overview } from './components/Overview'
 import { Board } from './components/Board'
 import { Timeline } from './components/Timeline'
-import { UsageView } from './components/UsageView'
 import { Schedules } from './components/Schedules'
 import { TemplatesView } from './components/TemplatesView'
 import { ToolsView } from './components/ToolsView'
@@ -26,7 +25,6 @@ function MainArea() {
       {s.view === 'overview' && <Overview />}
       {s.view === 'board' && <Board />}
       {s.view === 'timeline' && <Timeline />}
-      {s.view === 'usage' && <UsageView />}
       {s.view === 'crons' && <Schedules />}
       {s.view === 'templates' && <TemplatesView />}
       {s.view === 'tools' && <ToolsView />}

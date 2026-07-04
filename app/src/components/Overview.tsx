@@ -1,5 +1,24 @@
 import { useActions, useConductor } from '../store'
+import { formatEstimatedTokens } from '../usage'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from './ui'
+import { UsageSummary } from './UsageSummary'
+
+/** Compact inline token/cost readout with a slim budget bar for one agent row. */
+function InlineUsage({ agent }: { agent: { used: number; cost: number; budget: number; color: string } }) {
+  const pct = agent.budget > 0 ? Math.min(100, Math.round((agent.cost / agent.budget) * 100)) : 0
+  return (
+    <span
+      title={`$${agent.cost.toFixed(2)} of $${agent.budget.toFixed(2)} budget (${pct}%)`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginLeft: 'auto' }}
+    >
+      <span>{formatEstimatedTokens(agent.used)}</span>
+      <span style={{ color: 'var(--text)' }}>${agent.cost.toFixed(2)}</span>
+      <span style={{ width: 40, height: 5, background: 'var(--panel2)', borderRadius: 3, overflow: 'hidden', flexShrink: 0 }}>
+        <span style={{ display: 'block', height: '100%', width: `${pct}%`, background: agent.color, borderRadius: 3 }} />
+      </span>
+    </span>
+  )
+}
 
 /** Summarize live and archived sessions in the active workspace. */
 export function Overview() {
@@ -18,6 +37,7 @@ export function Overview() {
         </span>
       </ViewHeader>
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+        <UsageSummary />
         <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))' }}>
           {active.map(a => {
             const memOn = a.memory.filter(m => m.on).length
@@ -65,8 +85,9 @@ export function Overview() {
                     <span style={{ color: '#E8C48A' }}>{a.actionNeeded}</span>
                   </div>
                 )}
-                <div className="mono" style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 11, color: 'var(--dim)' }}>
-                  <span>{memOn} mem</span><span>{toolOn} tools</span><span>${a.cost.toFixed(2)}</span>
+                <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, fontSize: 11, color: 'var(--dim)' }}>
+                  <span>{memOn} mem</span><span>{toolOn} tools</span>
+                  <InlineUsage agent={a} />
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 13 }}>
                   <button className="open-btn" onClick={() => focusTab(a.id)}>Open</button>
@@ -99,6 +120,9 @@ export function Overview() {
                     <span style={{ fontSize: 12.5, fontWeight: 600 }}>{a.name}</span>
                     <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', marginLeft: 8 }}>{a.repo}{a.cliSessionId ? ` · ⧉ ${a.cliSessionId.slice(0, 8)}` : ''}</span>
                   </div>
+                  <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', flexShrink: 0 }}>
+                    {formatEstimatedTokens(a.used)} · ${a.cost.toFixed(2)}
+                  </span>
                   <button className="open-btn" style={{ flex: 'none', padding: '5px 12px' }} onClick={() => unarchiveSession(a.id)}>Restore</button>
                   <button className="icon-btn danger" title="Delete permanently" style={{ width: 28, height: 28 }} onClick={() => deleteSession(a.id)}>
                     <Icon paths={IC.close} size={13} stroke={1.8} />
