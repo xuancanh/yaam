@@ -83,6 +83,12 @@ export interface Agent {
   /** Master-maintained: what the user must do, if anything */
   actionNeeded?: string
   summaryAt?: string
+  /** one-shot run (claude -p / codex exec): exits by itself when done */
+  ephemeral?: boolean
+  /** archive automatically after a successful ephemeral run */
+  autoArchive?: boolean
+  /** template this session was launched from */
+  templateId?: string
 }
 
 export interface RouteEntry {
@@ -156,6 +162,10 @@ export interface Cron {
   cmd?: string
   cwd?: string
   lastFiredMinute?: string
+  /** agent template launched on fire (overrides cmd) */
+  templateId?: string
+  /** task text passed to the template */
+  prompt?: string
 }
 
 export interface CatalogTool {
@@ -251,11 +261,41 @@ export interface OrchestrationSettings {
 
 export type BoardCol = 'backlog' | 'routed' | 'progress' | 'review' | 'done'
 
+export type TemplateMode = 'ephemeral' | 'interactive'
+/** safe = read-only / ask for everything · edits = auto-approve file edits · full = no approvals or sandbox */
+export type TemplateApproval = 'safe' | 'edits' | 'full'
+
+export interface AgentTemplate {
+  id: string
+  name: string
+  /** base agent type: binary, env vars, resume behavior */
+  typeId: string
+  /** ephemeral one-shot (claude -p / codex exec, exits by itself) vs long-running interactive */
+  mode: TemplateMode
+  /** default task prompt; {task} is replaced when launched with a task */
+  prompt: string
+  /** appended system prompt (claude --append-system-prompt; prepended to the prompt for CLIs without the flag) */
+  systemPrompt: string
+  /** model flag; empty = CLI default */
+  model: string
+  approval: TemplateApproval
+  /** working directory; empty = session default */
+  cwd: string
+  /** extra CLI flags appended verbatim */
+  extraArgs: string
+  /** archive the session automatically after a successful ephemeral run */
+  autoArchive: boolean
+}
+
 export interface BoardTask {
   id: string
   title: string
   col: BoardCol
   agentId: string | null
+  /** epoch ms — a session is spawned for the task at this time */
+  scheduleAt?: number
+  /** template used when the task spawns its session */
+  templateId?: string
 }
 
 export interface AddonTool {
@@ -325,6 +365,7 @@ export interface PersistedState {
   settings: OrchestrationSettings
   toolsCatalog: CatalogTool[]
   agentTypes: AgentType[]
+  templates?: AgentTemplate[]
   integrations: Integration[]
   workspaces?: Workspace[]
   activeWorkspace?: string
@@ -401,6 +442,7 @@ export interface AppState {
   events: EventItem[]
   notifications: Notification[]
   agentTypes: AgentType[]
+  templates: AgentTemplate[]
   integrations: Integration[]
   settings: OrchestrationSettings
   tasks: BoardTask[]

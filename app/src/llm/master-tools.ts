@@ -16,7 +16,8 @@ export interface MasterExec {
   deleteSchedule: (name: string) => string
   createAddon: (name: string, icon: string, html: string, desc?: string, toolsJson?: string, hooksJson?: string, permissionsJson?: string) => string
   removeAddon: (name: string) => string
-  createSchedule: (name: string, cron: string, command?: string, cwd?: string) => string
+  createSchedule: (name: string, cron: string, command?: string, cwd?: string, templateName?: string, prompt?: string) => string
+  runTemplate: (templateName: string, task?: string) => string
   addTask: (title: string) => string
 }
 
@@ -187,7 +188,7 @@ Style to match the app: dark background #0A0B0F, text #E7E9F0, muted #8B93A1, ac
   },
   {
     name: 'create_schedule',
-    description: 'Create a recurring schedule (5-field cron). If command is set, each run launches it as a live session.',
+    description: 'Create a recurring schedule (5-field cron). If command is set, each run launches it as a live session. Pass template (an agent template name) instead of command to fire that template; prompt is the task text handed to it.',
     input_schema: {
       type: 'object',
       properties: {
@@ -195,8 +196,22 @@ Style to match the app: dark background #0A0B0F, text #E7E9F0, muted #8B93A1, ac
         cron: { type: 'string', description: 'e.g. "0 3 * * *"' },
         command: { type: 'string' },
         cwd: { type: 'string' },
+        template: { type: 'string', description: 'agent template name to launch on fire (instead of command)' },
+        prompt: { type: 'string', description: 'task text for the template' },
       },
       required: ['name', 'cron'],
+    },
+  },
+  {
+    name: 'run_template',
+    description: 'Launch a session from an agent template right now. Ephemeral templates run one task and exit by themselves; interactive ones stay open. task is substituted into the template prompt.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        template: { type: 'string', description: 'template name' },
+        task: { type: 'string', description: 'what it should do (optional if the template has a full prompt)' },
+      },
+      required: ['template'],
     },
   },
   {
@@ -232,7 +247,8 @@ export async function runTool(name: string, input: Record<string, unknown>, exec
       typeof input.summary === 'string' ? input.summary : undefined,
       typeof input.action_needed === 'string' ? input.action_needed : undefined,
     )
-    case 'create_schedule': return exec.createSchedule(str('name'), str('cron'), str('command') || undefined, str('cwd') || undefined)
+    case 'create_schedule': return exec.createSchedule(str('name'), str('cron'), str('command') || undefined, str('cwd') || undefined, str('template') || undefined, str('prompt') || undefined)
+    case 'run_template': return exec.runTemplate(str('template'), str('task') || undefined)
     case 'add_task': return exec.addTask(str('title'))
     default: return `unknown tool ${name}`
   }

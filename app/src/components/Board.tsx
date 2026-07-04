@@ -5,9 +5,63 @@ import { ACCENT } from '../data'
 import type { Agent, BoardCol, BoardTask } from '../types'
 import { IC, Icon, ViewHeader } from './ui'
 
+function toLocalInput(ms: number): string {
+  const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60000)
+  return d.toISOString().slice(0, 16)
+}
+
+function SchedulePopover({ card, onClose }: { card: BoardTask; onClose: () => void }) {
+  const s = useConductor()
+  const { scheduleTask } = useActions()
+  const [when, setWhen] = useState(card.scheduleAt ? toLocalInput(card.scheduleAt) : toLocalInput(Date.now() + 3600_000))
+  const [templateId, setTemplateId] = useState(card.templateId ?? '')
+
+  const field = {
+    width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 7,
+    padding: '6px 9px', color: 'var(--text)', outline: 'none', fontSize: 12,
+    fontFamily: "'JetBrains Mono', monospace", colorScheme: 'dark',
+  } as const
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{
+      position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 4,
+      background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 10,
+      boxShadow: '0 14px 40px rgba(0,0,0,.5)', padding: 10, display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--mut)', letterSpacing: 0.4 }}>SCHEDULE SESSION START</div>
+      <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} style={field} />
+      <select value={templateId} onChange={e => setTemplateId(e.target.value)} className="select-field" style={field}>
+        <option value="">default agent type</option>
+        {s.templates.map(t => <option key={t.id} value={t.id}>template · {t.name} ({t.mode})</option>)}
+      </select>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          className="approve-btn"
+          style={{ flex: 1, padding: '6px 0', fontSize: 11.5 }}
+          onClick={() => {
+            const at = new Date(when).getTime()
+            if (!Number.isNaN(at)) scheduleTask(card.id, at, templateId || null)
+            onClose()
+          }}
+        >
+          Set
+        </button>
+        {card.scheduleAt && (
+          <button className="deny-btn" style={{ flex: 1, padding: '6px 0', fontSize: 11.5 }} onClick={() => { scheduleTask(card.id, null, null); onClose() }}>
+            Clear
+          </button>
+        )}
+        <button className="deny-btn" style={{ flex: 1, padding: '6px 0', fontSize: 11.5 }} onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 function Card({ card, agent }: { card: BoardTask; agent: Agent | null }) {
+  const s = useConductor()
   const { startCardDrag, focusTab, renameTask, deleteTask, startTask } = useActions()
   const [editing, setEditing] = useState(false)
+  const [scheduling, setScheduling] = useState(false)
   const [draft, setDraft] = useState(card.title)
 
   const commit = () => {
@@ -61,6 +115,13 @@ function Card({ card, agent }: { card: BoardTask; agent: Agent | null }) {
       >
         <Icon paths={IC.close} size={11} stroke={2} />
       </button>
+      {card.scheduleAt && !agent && (
+        <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 7, fontSize: 10.5, color: 'var(--accent)' }}>
+          <Icon paths={['M12 12m-9 0a9 9 0 1018 0 9 9 0 10-18 0', 'M12 7v5l3 3']} size={11} stroke={1.8} />
+          {new Date(card.scheduleAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          {card.templateId ? ` · ${s.templates.find(t => t.id === card.templateId)?.name ?? ''}` : ''}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10 }}>
         <span style={{ width: 7, height: 7, borderRadius: '50%', background: agent ? agent.color : 'var(--dim)', flexShrink: 0 }} />
         {agent ? (
@@ -78,10 +139,23 @@ function Card({ card, agent }: { card: BoardTask; agent: Agent | null }) {
             Start session
           </button>
         )}
+        {!agent && (
+          <button
+            title={card.scheduleAt ? 'Change scheduled start' : 'Schedule session start'}
+            onClick={e => { e.stopPropagation(); setScheduling(v => !v) }}
+            style={{
+              display: 'flex', alignItems: 'center', background: 'transparent', border: 'none',
+              color: card.scheduleAt ? 'var(--accent)' : 'var(--dim)', padding: 0,
+            }}
+          >
+            <Icon paths={['M12 12m-9 0a9 9 0 1018 0 9 9 0 10-18 0', 'M12 7v5l3 3']} size={12} stroke={1.8} />
+          </button>
+        )}
         <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 'auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {agent ? agent.repo : '—'}
         </span>
       </div>
+      {scheduling && <SchedulePopover card={card} onClose={() => setScheduling(false)} />}
     </div>
   )
 }

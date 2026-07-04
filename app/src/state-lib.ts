@@ -1,7 +1,7 @@
 // Pure helpers shared by the store: ids, cron parsing, prompt/dialog
 // detection, agent-type utilities, pane focus semantics, and PTY input.
 import * as native from './native'
-import type { AppState, EscOption, WorkspaceData } from './types'
+import type { AgentTemplate, AgentType, AppState, EscOption, WorkspaceData } from './types'
 
 let uid = 0
 export function mkId(prefix: string): string {
@@ -178,4 +178,59 @@ export function switchWorkspaceIn(s: AppState, id: string, greeting: string): Ap
   const rest = { ...stash }
   delete rest[id]
   return applyScoped({ ...s, activeWorkspace: id, workspaceData: rest, view: 'workspace' }, target)
+}
+
+// ---------------------------------------------------------------- agent templates
+
+export function shQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`
+}
+
+/**
+ * Build the CLI command for an agent template. Ephemeral templates use the
+ * CLI's one-shot mode (claude -p / codex exec) so the process exits by itself
+ * when the task is done; interactive templates start a long-running session
+ * seeded with the prompt. `{task}` in the prompt is replaced by the task text;
+ * without the placeholder the task is appended after the prompt.
+ */
+export function buildTemplateCommand(tpl: AgentTemplate, type: AgentType | undefined, task?: string): string {
+  const bin = (type?.model ?? tpl.typeId).trim() || 'claude'
+  const base = tpl.prompt.includes('{task}')
+    ? tpl.prompt.replaceAll('{task}', task ?? '')
+    : [tpl.prompt, task ?? ''].filter(Boolean).join('\n\n')
+  const prompt = base.trim()
+  const kind = type?.probe
+    ?? (/(^|\/)claude$/.test(bin) ? 'claude' : /(^|\/)codex$/.test(bin) ? 'codex' : undefined)
+  const extra = tpl.extraArgs.trim()
+  const parts: string[] = [bin]
+
+  if (kind === 'claude') {
+    if (tpl.mode === 'ephemeral') parts.push('-p')
+    if (tpl.model.trim()) parts.push('--model', shQuote(tpl.model.trim()))
+    if (tpl.systemPrompt.trim()) parts.push('--append-system-prompt', shQuote(tpl.systemPrompt.trim()))
+    if (tpl.approval === 'edits') parts.push('--permission-mode', 'acceptEdits')
+    if (tpl.approval === 'full') parts.push('--dangerously-skip-permissions')
+    if (extra) parts.push(extra)
+    if (prompt) parts.push(shQuote(prompt))
+    return parts.join(' ')
+  }
+
+  if (kind === 'codex') {
+    if (tpl.mode === 'ephemeral') parts.push('exec')
+    if (tpl.model.trim()) parts.push('-m', shQuote(tpl.model.trim()))
+    if (tpl.approval === 'safe') parts.push('--sandbox', 'read-only')
+    if (tpl.approval === 'edits') parts.push('--full-auto')
+    if (tpl.approval === 'full') parts.push('--dangerously-bypass-approvals-and-sandbox')
+    if (extra) parts.push(extra)
+    // codex has no system-prompt flag — fold it into the prompt
+    const full = [tpl.systemPrompt.trim(), prompt].filter(Boolean).join('\n\n')
+    if (full) parts.push(shQuote(full))
+    return parts.join(' ')
+  }
+
+  // generic CLI: flags verbatim, system prompt folded into the prompt
+  if (extra) parts.push(extra)
+  const full = [tpl.systemPrompt.trim(), prompt].filter(Boolean).join('\n\n')
+  if (full) parts.push(shQuote(full))
+  return parts.join(' ')
 }

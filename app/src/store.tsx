@@ -2,7 +2,7 @@
 import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  Addon, AddonPermission, Agent, AppState, BoardCol, Cron, EscOption, EventType, LogLine,
+  Addon, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, Cron, EscOption, EventType, LogLine,
   NotifKind, Notification, Panel, PersistedState, View,
 } from './types'
 import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
@@ -81,6 +81,11 @@ export interface ConductorActions {
   renameTask: (id: string, title: string) => void
   deleteTask: (id: string) => void
   addCron: (cron: Omit<Cron, 'id' | 'on' | 'built' | 'last'>) => void
+  addTemplate: () => void
+  updateTemplate: (id: string, patch: Partial<AgentTemplate>) => void
+  deleteTemplate: (id: string) => void
+  runTemplate: (id: string, task?: string) => void
+  scheduleTask: (taskId: string, at: number | null, templateId?: string | null) => void
   deleteCron: (id: string) => void
   openAddon: (id: string) => void
   removeAddon: (id: string) => void
@@ -106,8 +111,8 @@ export interface ConductorActions {
 
 import {
   KEYMAP, PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
-  cronMatches, envPrefix, extractOptions, focusSessionIn, humanizeCron, mkId,
-  sendLineToSession, spawnAgentProcess, switchWorkspaceIn, typeForCommand, wait,
+  buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, humanizeCron, mkId,
+  sendLineToSession, shQuote, spawnAgentProcess, switchWorkspaceIn, typeForCommand, wait,
 } from './state-lib'
 
 export { cronMatches, humanizeCron } from './state-lib'
@@ -521,15 +526,43 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
       if (agent) {
         fireAddonHookRef.current('onSessionExit', { sessionId: e.id, name: agent.name, code: e.code })
-        logEvent(failed ? 'escalate' : 'done', e.id, `${agent.name} ${failed ? `failed · exit ${e.code}` : 'finished'}`)
-        notify(
-          failed ? 'escalate' : 'done',
-          `${agent.name} ${failed ? 'exited with an error' : 'finished'}`,
-          failed ? `exit code ${e.code} · ${agent.repo}` : `session ended · ${agent.repo}`,
-          e.id,
-        )
-        void monitorEventRef.current(e.id,
-          `The session process ${failed ? `exited with code ${e.code}` : 'finished and exited cleanly'}. Update the status and report a digest to Master.`)
+        if (agent.ephemeral) {
+          // one-shot agents exit by design — a clean exit is task completion
+          logEvent(failed ? 'escalate' : 'done', e.id, `${agent.name} ${failed ? `one-shot run failed · exit ${e.code}` : 'completed its one-shot run'}`)
+          notify(
+            failed ? 'escalate' : 'done',
+            `${agent.name} ${failed ? 'failed' : 'completed its task'}`,
+            failed ? `exit code ${e.code} · ${agent.repo}` : `one-shot run finished · ${agent.repo}`,
+            e.id,
+          )
+          void monitorEventRef.current(e.id, failed
+            ? `This one-shot (ephemeral) agent exited with code ${e.code} before completing. Summarize what went wrong from the output and report to Master.`
+            : 'This one-shot (ephemeral) agent finished its task and exited cleanly, as designed. Summarize what it did from the final output and report a digest to Master.')
+          if (!failed && agent.autoArchive) {
+            // give the monitor a moment to read the final screen, then tidy up
+            window.setTimeout(() => dispatch(s => {
+              const focusedIds = s.focusedIds.filter(x => x !== e.id)
+              return {
+                ...s,
+                agents: s.agents.map(a => a.id === e.id ? { ...a, archived: true, attention: false } : a),
+                focusedIds,
+                minimizedIds: s.minimizedIds.filter(x => x !== e.id),
+                activePane: Math.max(0, Math.min(s.activePane, focusedIds.length - 1)),
+                maximizedPane: null,
+              }
+            }), 12000)
+          }
+        } else {
+          logEvent(failed ? 'escalate' : 'done', e.id, `${agent.name} ${failed ? `failed · exit ${e.code}` : 'finished'}`)
+          notify(
+            failed ? 'escalate' : 'done',
+            `${agent.name} ${failed ? 'exited with an error' : 'finished'}`,
+            failed ? `exit code ${e.code} · ${agent.repo}` : `session ended · ${agent.repo}`,
+            e.id,
+          )
+          void monitorEventRef.current(e.id,
+            `The session process ${failed ? `exited with code ${e.code}` : 'finished and exited cleanly'}. Update the status and report a digest to Master.`)
+        }
       }
     })
     return () => { offExit() }
@@ -576,6 +609,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
                   .map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, resumeFallbackCmd: t.resumeFallbackCmd, probe: t.probe } as typeof t))
                   .concat(p.agentTypes.filter(x => x.custom && !s.agentTypes.some(t => t.id === x.id)))
               : s.agentTypes,
+            templates: p.templates ?? s.templates,
             integrations: p.integrations ?? s.integrations,
             agents: restoredAgents.length ? restoredAgents : s.agents,
             focusedIds: focusedIds.length ? focusedIds : s.focusedIds,
@@ -642,6 +676,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       settings: state.settings,
       toolsCatalog: state.toolsCatalog,
       agentTypes: state.agentTypes,
+      templates: state.templates,
       integrations: state.integrations,
       workspaces: state.workspaces,
       activeWorkspace: state.activeWorkspace,
@@ -661,7 +696,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       native.saveStateFile(JSON.stringify(persisted)).catch(() => {})
     }, 800)
   }, [
-    state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.integrations,
+    state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.templates, state.integrations,
     state.agents, state.focusedIds, state.activePane, state.minimizedIds, state.paneSplits,
     state.addons, state.addonStorage, state.messages, state.events, state.notifications,
     state.workspaces, state.activeWorkspace, state.workspaceData,
@@ -673,7 +708,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const st = stateRef.current
       const persisted: PersistedState = {
         tasks: st.tasks, crons: st.crons, settings: st.settings,
-        toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, integrations: st.integrations,
+        toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, templates: st.templates, integrations: st.integrations,
         workspaces: st.workspaces, activeWorkspace: st.activeWorkspace, workspaceData: st.workspaceData,
         agents: st.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
         focusedIds: st.focusedIds, activePane: st.activePane,
@@ -716,7 +751,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     if (!isResume) later(60000, tryDetect)
   }, [later])
 
-  const launchSession = useCallback((command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string): string | null => {
+  const launchSession = useCallback((command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string }): string | null => {
     const trimmed = command.trim()
     if (!trimmed) return null
     const id = mkId('a')
@@ -730,6 +765,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       status: 'running', model: trimmed, kind: 'real', cmd: trimmed, cwd: dir, launchedAt: Date.now(),
       typeId: typeId ?? typeForCommand(trimmed, stateRef.current.agentTypes)?.id,
       workspaceId: workspaceId ?? stateRef.current.activeWorkspace,
+      ephemeral: opts?.ephemeral, autoArchive: opts?.autoArchive, templateId: opts?.templateId,
       memory: mkMemory(), tools: mkTools(),
       log: [{ t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` }],
       ...defaultDetail(),
@@ -754,30 +790,53 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return id
   }, [appendTail, armResponseWatch, bumpSettle, clearNeeds, probeCliSession])
 
+  // Launch a session from an agent template: the template decides the CLI,
+  // one-shot vs interactive mode, prompt/system prompt, approval, and model.
+  const launchFromTemplate = useCallback((templateId: string, task?: string, workspaceId?: string): string | null => {
+    const st = stateRef.current
+    const tpl = st.templates.find(t => t.id === templateId)
+    if (!tpl) {
+      flash('Template not found')
+      return null
+    }
+    const type = st.agentTypes.find(t => t.id === tpl.typeId)
+    const command = buildTemplateCommand(tpl, type, task)
+    const id = launchSession(command, tpl.cwd || st.settings.defaultCwd || '', tpl.name, type?.id, workspaceId, {
+      ephemeral: tpl.mode === 'ephemeral', autoArchive: tpl.autoArchive, templateId: tpl.id,
+    })
+    if (id) logEvent('route', id, `Launched template “${tpl.name}”${task ? ` · ${task.slice(0, 48)}` : ''}`)
+    return id
+  }, [flash, launchSession, logEvent])
+
   // Board → session: an unassigned task dragged into work (or explicitly
-  // started) spawns the default agent type with the task as its prompt.
+  // started) spawns its template — or the default agent type — with the task
+  // as its prompt.
   const spawnSessionForTask = useCallback((taskId: string) => {
     const st = stateRef.current
     const task = st.tasks.find(t => t.id === taskId)
     if (!task || task.agentId) return
-    const type = st.agentTypes.find(t => t.enabled)
-    if (!type) {
-      flash('No enabled agent type to handle the task')
-      return
+    let id: string | null = null
+    if (task.templateId && st.templates.some(t => t.id === task.templateId)) {
+      id = launchFromTemplate(task.templateId, task.title)
+    } else {
+      const type = st.agentTypes.find(t => t.enabled)
+      if (!type) {
+        flash('No enabled agent type to handle the task')
+        return
+      }
+      id = launchSession(`${type.model} ${shQuote(task.title)}`, st.settings.defaultCwd || '', task.title.slice(0, 18), type.id)
     }
-    const quoted = `'${task.title.replace(/'/g, `'\\''`)}'`
-    const id = launchSession(`${type.model} ${quoted}`, st.settings.defaultCwd || '', task.title.slice(0, 18), type.id)
     if (!id) return
     dispatch(s2 => ({
       ...s2,
       tasks: s2.tasks.map(t => t.id === taskId
-        ? { ...t, agentId: id, col: t.col === 'backlog' || t.col === 'done' ? 'progress' as const : t.col }
+        ? { ...t, agentId: id, scheduleAt: undefined, col: t.col === 'backlog' || t.col === 'done' ? 'progress' as const : t.col }
         : t),
     }))
     armResponseWatch(id)
-    logEvent('route', id, `Spawned ${type.name} for task “${task.title.slice(0, 48)}”`)
+    logEvent('route', id, `Spawned session for task “${task.title.slice(0, 48)}”`)
     flash(`Session spawned for “${task.title.slice(0, 28)}”`)
-  }, [armResponseWatch, flash, launchSession, logEvent])
+  }, [armResponseWatch, flash, launchFromTemplate, launchSession, logEvent])
 
   // API surface handed to addon code (tools, hooks, and view RPC) — scoped
   // per addon so storage is namespaced
@@ -865,14 +924,50 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, crons: mark(d.crons) } } }
         })
         for (const c of due) {
-          const launchedId = c.cmd && native.isTauri ? launchSession(c.cmd, c.cwd || '', c.name, undefined, pool.wid) : null
-          logEvent('cron', launchedId, `${c.name} fired${c.cmd ? ` · launching ${c.cmd}` : ''}`)
-          notify('cron', `${c.name} fired`, c.cmd ? `launched: ${c.cmd}` : 'schedule ran', launchedId)
+          const tpl = c.templateId ? st.templates.find(t => t.id === c.templateId) : undefined
+          const launchedId = !native.isTauri ? null
+            : tpl ? launchFromTemplate(tpl.id, c.prompt, pool.wid)
+            : c.cmd ? launchSession(c.cmd, c.cwd || '', c.name, undefined, pool.wid)
+            : null
+          const what = tpl ? `template “${tpl.name}”` : c.cmd
+          logEvent('cron', launchedId, `${c.name} fired${what ? ` · launching ${what}` : ''}`)
+          notify('cron', `${c.name} fired`, what ? `launched: ${what}` : 'schedule ran', launchedId)
+        }
+      }
+
+      // scheduled tasks: spawn a session when their time arrives (all workspaces)
+      const nowMs = Date.now()
+      const taskPools: Array<{ wid: string; tasks: typeof st.tasks }> = [
+        { wid: st.activeWorkspace, tasks: st.tasks },
+        ...Object.entries(st.workspaceData).map(([wid, d]) => ({ wid, tasks: d.tasks })),
+      ]
+      for (const pool of taskPools) {
+        for (const t of pool.tasks) {
+          if (!t.scheduleAt || t.scheduleAt > nowMs || t.agentId) continue
+          const id = !native.isTauri ? null
+            : t.templateId && st.templates.some(x => x.id === t.templateId)
+              ? launchFromTemplate(t.templateId, t.title, pool.wid)
+              : (() => {
+                  const type = st.agentTypes.find(x => x.enabled)
+                  return type ? launchSession(`${type.model} ${shQuote(t.title)}`, st.settings.defaultCwd || '', t.title.slice(0, 18), type.id, pool.wid) : null
+                })()
+          // clear the schedule even on a failed launch so it doesn't refire every tick
+          dispatch(s => {
+            const patch = (tasks: typeof s.tasks) => tasks.map(x => x.id === t.id
+              ? { ...x, scheduleAt: undefined, agentId: id ?? x.agentId, col: id ? 'progress' as const : x.col }
+              : x)
+            if (pool.wid === s.activeWorkspace) return { ...s, tasks: patch(s.tasks) }
+            const d = s.workspaceData[pool.wid]
+            if (!d) return s
+            return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, tasks: patch(d.tasks) } } }
+          })
+          logEvent('route', id, `Scheduled task “${t.title.slice(0, 48)}” ${id ? 'started' : 'was due but no session could be launched'}`)
+          notify('cron', id ? 'Scheduled task started' : 'Scheduled task could not start', t.title.slice(0, 60), id)
         }
       }
     }, 15000)
     return () => window.clearInterval(timer)
-  }, [launchSession, logEvent, notify])
+  }, [launchFromTemplate, launchSession, logEvent, notify])
 
   // Master brain: run one LLM turn (chat → tools → chat), serializing turns
   const masterBusyRef = useRef(false)
@@ -1088,20 +1183,33 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         }))
         return `stopped ${sid}`
       },
-      createSchedule: (name, cron, command, cwd) => {
+      createSchedule: (name, cron, command, cwd, templateName, prompt) => {
         const gated = catalogGate('create_schedule')
         if (gated) return gated
+        const tpl = templateName
+          ? stateRef.current.templates.find(t => t.name.toLowerCase() === templateName.toLowerCase())
+          : undefined
+        if (templateName && !tpl) return `no template named "${templateName}" — available: ${stateRef.current.templates.map(t => t.name).join(', ') || 'none'}`
         dispatch(s => ({
           ...s,
           crons: s.crons.concat([{
             id: mkId('c'), name, schedule: cron, human: humanizeCron(cron),
             target: cwd ? cwd.split('/').pop() || cwd : 'workspace',
-            agent: command ? command.split(/\s+/)[0] : 'Master',
+            agent: tpl ? tpl.name : command ? command.split(/\s+/)[0] : 'Master',
             color: '#F5C451', on: true, built: true, last: '—', cmd: command, cwd,
+            templateId: tpl?.id, prompt,
           }]),
         }))
         logEvent('cron', null, `Master created schedule ${name}`)
-        return `created schedule ${name} (${cron})`
+        return `created schedule ${name} (${cron})${tpl ? ` firing template ${tpl.name}` : ''}`
+      },
+      runTemplate: (templateName, task) => {
+        const tpl = stateRef.current.templates.find(t => t.name.toLowerCase() === templateName.toLowerCase())
+        if (!tpl) return `no template named "${templateName}" — available: ${stateRef.current.templates.map(t => t.name).join(', ') || 'none'}`
+        const id = launchFromTemplate(tpl.id, task)
+        return id
+          ? `launched ${tpl.mode} session ${id} from template ${tpl.name}${tpl.mode === 'ephemeral' ? ' — it will run the task and exit by itself' : ''}`
+          : 'launch failed'
       },
       addTask: title => {
         const gated = catalogGate('add_task')
@@ -1145,7 +1253,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     masterBusyRef.current = false
     dispatch(s => ({ ...s, masterBusy: false }))
-  }, [applyAgentStatus, armResponseWatch, flash, makeAddonApi, launchSession, logEvent, sessionScreenTail, setNeedsInput])
+  }, [applyAgentStatus, armResponseWatch, flash, makeAddonApi, launchFromTemplate, launchSession, logEvent, sessionScreenTail, setNeedsInput])
 
   masterEventRef.current = (note, agentId) => {
     const s = stateRef.current
@@ -1633,6 +1741,36 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     })),
     deleteTask: id => dispatch(s => ({ ...s, tasks: s.tasks.filter(t => t.id !== id) })),
 
+    addTemplate: () => dispatch(s => ({
+      ...s,
+      templates: s.templates.concat([{
+        id: mkId('tpl'), name: `template-${s.templates.length + 1}`,
+        typeId: s.agentTypes.find(t => t.enabled)?.id ?? 'claude',
+        mode: 'ephemeral', prompt: '{task}', systemPrompt: '', model: '',
+        approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
+      }]),
+    })),
+    updateTemplate: (id, patch) => dispatch(s => ({
+      ...s,
+      templates: s.templates.map(t => t.id === id ? { ...t, ...patch } : t),
+    })),
+    deleteTemplate: id => dispatch(s => ({
+      ...s,
+      templates: s.templates.filter(t => t.id !== id),
+      tasks: s.tasks.map(t => t.templateId === id ? { ...t, templateId: undefined } : t),
+      crons: s.crons.map(c => c.templateId === id ? { ...c, templateId: undefined } : c),
+    })),
+    runTemplate: (id, task) => {
+      const lid = launchFromTemplate(id, task)
+      if (lid) flash('Session launched from template')
+    },
+    scheduleTask: (taskId, at, templateId) => dispatch(s => ({
+      ...s,
+      tasks: s.tasks.map(t => t.id === taskId
+        ? { ...t, scheduleAt: at ?? undefined, ...(templateId !== undefined ? { templateId: templateId ?? undefined } : {}) }
+        : t),
+    })),
+
     addCron: cron => {
       dispatch(s => ({
         ...s,
@@ -1800,7 +1938,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [armResponseWatch, flash, installPackage, later, launchSession, logEvent, makeAddonApi, probeCliSession, runMaster, sendAddonChatImpl, spawnSessionForTask])
+  }), [armResponseWatch, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, runMaster, sendAddonChatImpl, spawnSessionForTask])
 
   // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
   useEffect(() => {

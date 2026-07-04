@@ -15,21 +15,23 @@ function FieldLabel({ children }: { children: string }) {
 
 export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const s = useConductor()
-  const { newRealSession } = useActions()
+  const { newRealSession, runTemplate } = useActions()
   const enabledTypes = useMemo(() => s.agentTypes.filter(t => t.enabled), [s.agentTypes])
   const [typeId, setTypeId] = useState(enabledTypes[0]?.id ?? 'shell')
   const [shell, setShell] = useState(s.settings.shell || 'zsh')
   const [command, setCommand] = useState(enabledTypes[0]?.model ?? '')
   const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
+  const [task, setTask] = useState('')
 
   const isShell = typeId === 'shell'
   const isCustom = typeId === 'custom'
+  const tpl = typeId.startsWith('tpl:') ? s.templates.find(t => t.id === typeId.slice(4)) : undefined
   const effectiveCommand = isShell ? `${shell} -i` : command
 
   const selectType = (id: string) => {
     setTypeId(id)
     if (id === 'custom') setCommand('')
-    else if (id !== 'shell') {
+    else if (id !== 'shell' && !id.startsWith('tpl:')) {
       const t = s.agentTypes.find(x => x.id === id)
       if (t) setCommand(t.model)
     }
@@ -41,6 +43,11 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   }
 
   const launch = () => {
+    if (tpl) {
+      runTemplate(tpl.id, task.trim() || undefined)
+      onClose()
+      return
+    }
     if (!effectiveCommand.trim()) return
     newRealSession(effectiveCommand, cwd)
     onClose()
@@ -68,9 +75,29 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               {enabledTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               <option value="shell">Terminal</option>
               <option value="custom">Custom command…</option>
+              {s.templates.length > 0 && (
+                <optgroup label="Templates">
+                  {s.templates.map(t => <option key={t.id} value={`tpl:${t.id}`}>{t.name} · {t.mode}</option>)}
+                </optgroup>
+              )}
             </select>
           </div>
-          {isShell ? (
+          {tpl ? (
+            <div>
+              <FieldLabel>Task</FieldLabel>
+              <textarea
+                value={task}
+                onChange={e => setTask(e.target.value)}
+                placeholder={tpl.prompt.includes('{task}') ? 'what should it do? (fills {task} in the template prompt)' : 'appended to the template prompt (optional)'}
+                rows={3}
+                style={{ ...FIELD_STYLE, resize: 'vertical' }}
+              />
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 5, lineHeight: 1.5 }}>
+                {tpl.mode === 'ephemeral' ? 'One-shot: runs the task and exits by itself.' : 'Interactive: stays open after the prompt.'}
+                {tpl.cwd ? ` · cwd ${tpl.cwd}` : ''}
+              </div>
+            </div>
+          ) : isShell ? (
             <div>
               <FieldLabel>Shell</FieldLabel>
               <select value={shell} onChange={e => setShell(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
@@ -90,7 +117,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               />
             </div>
           )}
-          <div>
+          {!tpl && <div>
             <FieldLabel>Working directory</FieldLabel>
             <div style={{ display: 'flex', gap: 8 }}>
               <input
@@ -105,16 +132,18 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
                 Browse…
               </button>
             </div>
-          </div>
+          </div>}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button
             className="approve-btn"
-            style={{ flex: 1, padding: 9, opacity: isTauri && effectiveCommand.trim() ? 1 : 0.45 }}
+            style={{ flex: 1, padding: 9, opacity: isTauri && (tpl || effectiveCommand.trim()) ? 1 : 0.45 }}
             onClick={launch}
-            disabled={!isTauri || !effectiveCommand.trim()}
+            disabled={!isTauri || (!tpl && !effectiveCommand.trim())}
           >
-            Launch {effectiveCommand.trim() && <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {effectiveCommand.trim().slice(0, 28)}</span>}
+            Launch {tpl
+              ? <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {tpl.name}</span>
+              : effectiveCommand.trim() && <span className="mono" style={{ fontWeight: 400, opacity: 0.75 }}>· {effectiveCommand.trim().slice(0, 28)}</span>}
           </button>
           <button className="deny-btn" style={{ flex: 1, padding: 9 }} onClick={onClose}>
             Cancel

@@ -27,15 +27,19 @@ function describeState(s: AppState): string {
       : '\n  recent output: (hidden by user)'
     return `- id=${a.id} name=${a.name} status=${a.status}${a.escReason ? ` waiting-on="${a.escReason}"` : ''}${meta}${tracked ? `\n  tracked: ${tracked}` : ''}${perms}${tail}`
   }).join('\n')
-  const crons = s.crons.map(c => `- ${c.name} · ${c.schedule} · ${c.on ? 'on' : 'off'} · cmd=${c.cmd || '-'} · last=${c.last}`).join('\n')
+  const crons = s.crons.map(c => `- ${c.name} · ${c.schedule} · ${c.on ? 'on' : 'off'} · ${c.templateId ? `template=${s.templates.find(t => t.id === c.templateId)?.name ?? c.templateId}` : `cmd=${c.cmd || '-'}`} · last=${c.last}`).join('\n')
   const tasks = s.tasks.map(t => `- [${t.col}] ${t.title}`).join('\n')
   const events = s.events.slice(0, 8).map(e => `- ${e.time} ${e.type}: ${e.text}`).join('\n')
   const toolPerms = s.toolsCatalog.map(t => `- ${t.id}: ${t.perm}`).join('\n')
   const addons = s.addons.map(a => `- ${a.name} (${a.icon})${a.desc ? ` — ${a.desc}` : ''}`).join('\n')
   const types = s.agentTypes.filter(t => t.enabled)
     .map(t => `- ${t.name}: launch with command "${t.model}" — ${t.desc}`).join('\n')
+  const templates = s.templates
+    .map(t => `- "${t.name}": ${t.mode} ${t.typeId}${t.model ? ` (${t.model})` : ''}, approval=${t.approval}${t.cwd ? `, cwd=${t.cwd}` : ''} — use run_template for one-off runs or attach to create_schedule`)
+    .join('\n')
   return [
     `AGENT TYPES you can launch (use the exact command; a plain terminal is "${s.settings.shell || 'zsh'} -i"):\n${types || '(none enabled)'}`,
+    `AGENT TEMPLATES (preconfigured launches; ephemeral ones run a task and exit by themselves — prefer them for one-off jobs and schedules):\n${templates || '(none)'}`,
     `YOUR TOOL PERMISSIONS (Auto = act freely · Ask first = confirm with the user in chat before doing it · Approval/Off = blocked):\n${toolPerms}`,
     `WORKSPACE: "${ws?.name ?? 'Default'}"${s.workspaces.length > 1 ? ` (${s.workspaces.length - 1} other workspace(s) exist — you only see and manage this one)` : ''}`,
     `YOUR SUB-AGENTS — ${live.length} session(s): ${roster}`,

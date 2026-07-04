@@ -4,11 +4,15 @@ import { ACCENT, hexToRgba } from '../data'
 import { IC, Icon, Switch, ViewHeader } from './ui'
 
 function NewScheduleDialog({ onClose }: { onClose: () => void }) {
+  const s = useConductor()
   const { addCron } = useActions()
   const [name, setName] = useState('')
   const [schedule, setSchedule] = useState('0 3 * * *')
+  const [templateId, setTemplateId] = useState('')
+  const [prompt, setPrompt] = useState('')
   const [cmd, setCmd] = useState('')
   const [cwd, setCwd] = useState('')
+  const tpl = s.templates.find(t => t.id === templateId)
 
   const valid = Boolean(name.trim()) && schedule.trim().split(/\s+/).length === 5
 
@@ -19,10 +23,12 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
       schedule: schedule.trim(),
       human: humanizeCron(schedule),
       target: cwd.trim() ? cwd.trim().split('/').pop() || cwd.trim() : 'workspace',
-      agent: cmd.trim() ? cmd.trim().split(/\s+/)[0] : 'Master',
+      agent: tpl ? tpl.name : cmd.trim() ? cmd.trim().split(/\s+/)[0] : 'Master',
       color: ACCENT,
-      cmd: cmd.trim() || undefined,
-      cwd: cwd.trim() || undefined,
+      cmd: tpl ? undefined : cmd.trim() || undefined,
+      cwd: tpl ? undefined : cwd.trim() || undefined,
+      templateId: tpl?.id,
+      prompt: tpl ? prompt.trim() || undefined : undefined,
     })
     onClose()
   }
@@ -52,8 +58,24 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
             <input value={schedule} onChange={e => setSchedule(e.target.value)} placeholder="cron · min hour dom mon dow" style={fieldStyle} />
             <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4, paddingLeft: 2 }}>{humanizeCron(schedule)}</div>
           </div>
-          <input value={cmd} onChange={e => setCmd(e.target.value)} placeholder="command (optional) · e.g. claude -p 'run the tests'" style={fieldStyle} />
-          <input value={cwd} onChange={e => setCwd(e.target.value)} placeholder="working directory (optional)" style={fieldStyle} />
+          <select value={templateId} onChange={e => setTemplateId(e.target.value)} className="select-field" style={fieldStyle}>
+            <option value="">no template — raw command below</option>
+            {s.templates.map(t => <option key={t.id} value={t.id}>template · {t.name} ({t.mode})</option>)}
+          </select>
+          {tpl ? (
+            <textarea
+              value={prompt}
+              onChange={e => setPrompt(e.target.value)}
+              placeholder={tpl.prompt.includes('{task}') ? 'task text · fills {task} in the template prompt' : 'appended to the template prompt (optional)'}
+              rows={3}
+              style={{ ...fieldStyle, resize: 'vertical' }}
+            />
+          ) : (
+            <>
+              <input value={cmd} onChange={e => setCmd(e.target.value)} placeholder="command (optional) · e.g. claude -p 'run the tests'" style={fieldStyle} />
+              <input value={cwd} onChange={e => setCwd(e.target.value)} placeholder="working directory (optional)" style={fieldStyle} />
+            </>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
           <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: valid ? 1 : 0.45 }} onClick={create} disabled={!valid}>
@@ -108,7 +130,9 @@ export function Schedules() {
                 <span className="mono" style={{ color: 'var(--dim)' }}>{c.schedule}</span>
                 <span>{c.human}</span>
                 <span style={{ color: 'var(--faint)' }}>·</span>
-                <span>{c.cmd ? c.cmd : 'no command — logs only'}</span>
+                <span>{c.templateId
+                  ? `template · ${s.templates.find(t => t.id === c.templateId)?.name ?? c.templateId}${c.prompt ? ` — “${c.prompt.slice(0, 40)}”` : ''}`
+                  : c.cmd ? c.cmd : 'no command — logs only'}</span>
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>

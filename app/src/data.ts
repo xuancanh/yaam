@@ -150,6 +150,18 @@ export function seedState(): AppState {
       { id: 'aider', name: 'Aider', color: '#C77DFF', model: 'aider', tools: 6, desc: 'Pair-programming CLI — git-native diffs.', enabled: true, resumeCmd: 'aider --restore-chat-history' },
       { id: 'cursor', name: 'Cursor Agent', color: '#9AA3B2', model: 'cursor-agent', tools: 4, desc: 'Background agent — repo-wide autonomous tasks.', enabled: false },
     ],
+    templates: [
+      {
+        id: 'tpl-claude-oneshot', name: 'claude-one-shot', typeId: 'claude', mode: 'ephemeral' as const,
+        prompt: '{task}', systemPrompt: '', model: '', approval: 'edits' as const,
+        cwd: '', extraArgs: '', autoArchive: false,
+      },
+      {
+        id: 'tpl-codex-oneshot', name: 'codex-one-shot', typeId: 'codex', mode: 'ephemeral' as const,
+        prompt: '{task}', systemPrompt: '', model: '', approval: 'edits' as const,
+        cwd: '', extraArgs: '', autoArchive: false,
+      },
+    ],
     integrations: [
       { id: 'github', name: 'GitHub', cat: 'Source control', detail: 'not connected', connected: false },
       { id: 'linear', name: 'Linear', cat: 'Issue tracking', detail: 'not connected', connected: false },
