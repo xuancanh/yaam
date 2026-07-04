@@ -172,6 +172,10 @@ export function removeFromGroups(s: AppState, id: string): Pick<AppState, 'group
 // A session never appears in two groups (panes would fight over its terminal).
 export function focusSessionIn(s: AppState, id: string): AppState {
   s = { ...s, agents: s.agents.map(a => (a.id === id ? { ...a, archived: false, attention: false } : a)) }
+  // chat sessions live in the Chat view, not in workspace tab groups
+  if (s.agents.find(a => a.id === id)?.kind === 'chat') {
+    return { ...s, activeChatId: id, view: 'chat' }
+  }
   const minimizedIds = s.minimizedIds.filter(x => x !== id)
   const owner = s.groups.find(g => g.slots.includes(id))
   if (owner) {

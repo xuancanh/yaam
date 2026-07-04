@@ -129,6 +129,7 @@ export function seedState(): AppState {
     workspaceData: {},
     groups: [],
     activeGroup: null,
+    activeChatId: null,
     minimizedIds: [],
     composer: '',
     panel: null,

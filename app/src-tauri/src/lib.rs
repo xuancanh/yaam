@@ -1,7 +1,9 @@
 mod bedrock;
+mod chatsearch;
 mod sessions;
 
 use bedrock::BedrockState;
+use chatsearch::ChatSearchState;
 use sessions::SessionManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -12,6 +14,7 @@ pub fn run() {
     .plugin(tauri_plugin_http::init())
     .manage(SessionManager::default())
     .manage(BedrockState::default())
+    .manage(ChatSearchState::default())
     .invoke_handler(tauri::generate_handler![
       bedrock::bedrock_invoke,
       sessions::spawn_session,
@@ -26,6 +29,8 @@ pub fn run() {
       sessions::list_dir,
       sessions::run_credential_command,
       sessions::exec_command,
+      chatsearch::chat_search_reindex,
+      chatsearch::chat_search,
       sessions::read_text_file,
       sessions::write_text_file,
       sessions::save_state,

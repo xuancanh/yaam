@@ -270,7 +270,8 @@ const ORCHESTRATION: Array<{ id: 'autoRoute' | 'approveDestructive' | 'followMod
 const SETTINGS_TABS = [
   ['general', 'General'],
   ['brain', 'Master Brain'],
-  ['types', 'Agent Types'],
+  ['types', 'Terminal Agents'],
+  ['chatagents', 'Chat Agents'],
   ['mcp', 'MCP Servers'],
   ['skills', 'Skills'],
 ] as const
@@ -280,7 +281,6 @@ export function SettingsView() {
   const s = useConductor()
   const { toggleSetting, toggleAgentType, updateSettings, setAgentTypeCmd, updateAgentType, addAgentType, deleteAgentType } = useActions()
   const [tab, setTab] = useState<SettingsTab>('general')
-  const [typesTab, setTypesTab] = useState<'terminal' | 'chat'>('terminal')
 
   // Fill the default working directory from the native folder picker.
   const browseDefaultCwd = async () => {
@@ -535,34 +535,10 @@ export function SettingsView() {
           </>}
 
           {tab === 'types' && <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            <div style={{ display: 'flex', gap: 4, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 9, padding: 3 }}>
-              {([['terminal', 'Terminal agents'], ['chat', 'Chat agents']] as const).map(([id, label]) => (
-                <button
-                  key={id}
-                  onClick={() => setTypesTab(id)}
-                  style={{
-                    border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    background: typesTab === id ? 'rgba(245,196,81,.14)' : 'transparent',
-                    color: typesTab === id ? 'var(--accent)' : 'var(--mut)',
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div style={{ flex: 1 }} />
-            {typesTab === 'terminal'
-              ? <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5 }} onClick={addAgentType}>+ Add terminal agent</button>
-              : <AddChatTypeButton />}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
+            <SectionLabel>TERMINAL AGENTS — external CLIs in PTY sessions</SectionLabel>
+            <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5, marginBottom: 11 }} onClick={addAgentType}>+ Add terminal agent</button>
           </div>
-          <div style={{ fontSize: 11.5, color: 'var(--dim)', marginBottom: 12, lineHeight: 1.5 }}>
-            {typesTab === 'terminal'
-              ? 'Terminal agents are external CLIs launched in PTY sessions (claude, codex, …).'
-              : 'Chat agents are in-app Claude-Desktop-style agents (files, scripts, skills, MCP) — each type picks its own provider, model, and credentials.'}
-          </div>
-          {typesTab === 'chat' && <ChatTypesSection />}
-          {typesTab === 'terminal' && (
           <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', marginBottom: 26 }}>
             {s.agentTypes.map(t => (
               <div key={t.id} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: 15, display: 'flex', gap: 12 }}>
@@ -613,9 +589,17 @@ export function SettingsView() {
               </div>
             ))}
           </div>
+          </>}
 
-
-          )}
+          {tab === 'chatagents' && <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
+            <SectionLabel>CHAT AGENTS — in-app agents for the Chat view</SectionLabel>
+            <AddChatTypeButton />
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--dim)', marginBottom: 12, lineHeight: 1.5 }}>
+            Each chat agent picks a provider, a model list (pickable per chat), credentials, and an optional persona. Empty API key = share the Master Brain credentials when the provider matches.
+          </div>
+          <ChatTypesSection />
           </>}
 
           {tab === 'mcp' && <McpSection />}

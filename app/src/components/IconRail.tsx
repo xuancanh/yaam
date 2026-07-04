@@ -5,6 +5,7 @@ import { IC, Icon, MasterMark } from './ui'
 
 const NAV: Array<{ id: View; label: string; paths: string[] }> = [
   { id: 'workspace', label: 'Work', paths: ['M3 5.5h18v13H3z', 'M9.5 5.5v13'] },
+  { id: 'chat', label: 'Chat', paths: ['M4 5h16v11H9l-5 4z', 'M8 9h8', 'M8 12h5'] },
   { id: 'overview', label: 'Agents', paths: ['M4 4h6.5v6.5H4z', 'M13.5 4H20v6.5h-6.5z', 'M4 13.5h6.5V20H4z', 'M13.5 13.5H20V20h-6.5z'] },
   { id: 'board', label: 'Board', paths: ['M4 5h4v14H4z', 'M10 5h4v9h-4z', 'M16 5h4v12h-4z'] },
   { id: 'timeline', label: 'Activity', paths: ['M3 12h4l2.5 6 5-12 2.5 6h4'] },

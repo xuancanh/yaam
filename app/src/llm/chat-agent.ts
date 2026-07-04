@@ -7,11 +7,13 @@ import * as native from '../native'
 import { mcpCallTool } from '../mcp'
 import type { McpSession } from '../mcp'
 import type { Agent, Skill } from '../types'
-import { callApi } from './client'
+import { callApiStream } from './client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from './client'
 
 export interface ChatTurnEvent {
-  kind: 'tool' | 'text'
+  /** delta = streamed text chunk · round = current stream bubble is complete
+   *  (a tool round follows) · text = final reply · tool = tool trace */
+  kind: 'tool' | 'text' | 'delta' | 'round'
   text: string
 }
 
@@ -154,13 +156,15 @@ export async function runChatTurn(
   for (let i = 0; i < 24; i++) {
     const agent = getAgent()
     if (!agent) return
-    const res = await callApi(cfg, chatSystem(agent, skills, mcp, persona), history, tools)
+    const res = await callApiStream(cfg, chatSystem(agent, skills, mcp, persona), history, tools, d => onEvent({ kind: 'delta', text: d }))
     if (res.stop_reason !== 'tool_use') {
       const text = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
       history.push({ role: 'assistant', content: text || '(ok)' })
       onEvent({ kind: 'text', text: text || '(no reply)' })
       break
     }
+    // interim text streamed before this tool round becomes its own bubble
+    onEvent({ kind: 'round', text: '' })
     const results = await Promise.all(res.content
       .filter((b): b is ApiContentBlock => b.type === 'tool_use')
       .map(async b => {

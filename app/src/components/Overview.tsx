@@ -26,7 +26,7 @@ export function Overview() {
   const { focusTab, resume, openPanel, openAgent, openDiff, renameSession, archiveSession, unarchiveSession, deleteSession } = useActions()
   // Keep legacy sessions without workspaceId in the active workspace.
   const inWs = (a: typeof s.agents[number]) => (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace
-  const active = s.agents.filter(a => !a.archived && inWs(a))
+  const active = s.agents.filter(a => !a.archived && a.kind !== 'chat' && inWs(a))
   const archived = s.agents.filter(a => a.archived && inWs(a))
 
   return (

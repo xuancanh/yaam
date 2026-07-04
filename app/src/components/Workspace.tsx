@@ -108,7 +108,7 @@ function EmptySlot({ index }: { index: number }) {
   // group (assigning pulls them over and dissolves the emptied group) —
   // only sessions already in the ACTIVE group are off the menu
   const available = s.agents.filter(a => {
-    if (a.archived || (a.workspaceId ?? s.activeWorkspace) !== s.activeWorkspace) return false
+    if (a.archived || a.kind === 'chat' || (a.workspaceId ?? s.activeWorkspace) !== s.activeWorkspace) return false
     const g = s.groups.find(x => x.slots.includes(a.id))
     if (!g) return true
     return g.id !== s.activeGroup && g.slots.filter(Boolean).length <= 1
@@ -206,7 +206,7 @@ export function Workspace() {
   const rows = stacked2 ? [[cells[0]], [cells[1]]]
     : cells.length <= 2 ? [cells] : [cells.slice(0, 2), cells.slice(2)]
 
-  const wsAgents = s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
+  const wsAgents = s.agents.filter(a => !a.archived && a.kind !== 'chat' && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
   const minimized = s.minimizedIds.map(id => byId.get(id)).filter((a): a is Agent => !!a)
   const inAnyGroup = new Set(s.groups.flatMap(g => g.slots).filter(Boolean))
   const looseTabs = wsAgents.filter(a => !inAnyGroup.has(a.id))

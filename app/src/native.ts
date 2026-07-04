@@ -121,6 +121,29 @@ export async function execCommand(cmd: string, cwd?: string, timeoutMs?: number)
   return await invoke<ExecResult>('exec_command', { cmd, cwd: cwd || null, timeoutMs: timeoutMs ?? null })
 }
 
+export interface ChatSearchHit {
+  chatId: string
+  msgId: string
+  role: string
+  text: string
+  score: number
+}
+
+/** Rebuild the embedded tantivy index from all chat messages. */
+export async function chatSearchReindex(docs: { chatId: string; msgId: string; role: string; text: string }[]): Promise<number> {
+  if (!isTauri) return 0
+  return await invoke<number>('chat_search_reindex', {
+    docs: docs.map(d => ({ chat_id: d.chatId, msg_id: d.msgId, role: d.role, text: d.text })),
+  })
+}
+
+/** Full-text search across chats via the embedded engine. */
+export async function chatSearch(query: string, limit?: number): Promise<ChatSearchHit[]> {
+  if (!isTauri) return []
+  const hits = await invoke<{ chat_id: string; msg_id: string; role: string; text: string; score: number }[]>('chat_search', { query, limit: limit ?? null })
+  return hits.map(h => ({ chatId: h.chat_id, msgId: h.msg_id, role: h.role, text: h.text, score: h.score }))
+}
+
 /** Open the native single-file picker when available. */
 export async function pickFile(): Promise<string | null> {
   if (!isTauri) return null

@@ -465,6 +465,7 @@ export type View =
   | 'settings'
   | 'addon'
   | 'addons'
+  | 'chat'
 
 export interface Panel {
   agentId: string
@@ -559,6 +560,8 @@ export interface AppState {
   groups: TabGroup[]
   /** id of the group currently displayed in the workspace grid */
   activeGroup: string | null
+  /** chat session selected in the Chat view */
+  activeChatId: string | null
   /** sessions minimized to the dock strip */
   minimizedIds: string[]
   composer: string

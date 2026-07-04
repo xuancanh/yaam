@@ -167,7 +167,9 @@ export interface ConductorActions {
   updateChatAgentType: (id: string, patch: Partial<Omit<ChatAgentType, 'id'>>) => void
   deleteChatAgentType: (id: string) => void
   /** chat-mode sessions */
-  newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string) => void
+  newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string) => string
+  /** open a chat in the Chat view */
+  openChat: (id: string | null) => void
   sendChatMessage: (agentId: string, text: string) => void
   toggleAgentType: (id: string) => void
   toggleSetting: (k: 'autoRoute' | 'approveDestructive' | 'followMode') => void
@@ -953,9 +955,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
                 log,
               }
             })
-          const ids = new Set(restoredAgents.map(a => a.id))
-          // tab groups: invalid/duplicate ids become empty slots (a session may
-          // live in only one group), slots capped at 4, fully-empty groups dropped
+          const ids = new Set(restoredAgents.filter(a => a.kind !== 'chat').map(a => a.id))
+          // tab groups: invalid/duplicate/chat ids become empty slots (a session
+          // may live in only one group; chats live in the Chat view), slots
+          // capped at 4, fully-empty groups dropped
           const seenFocus = new Set<string>()
           const rawGroups = p.groups ?? groupsFromLegacy(p).groups
           const groups = rawGroups
@@ -1505,6 +1508,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const chatBusy = useRef<Set<string>>(new Set())
   const mcpSessionsRef = useRef<Map<string, McpSession>>(new Map())
 
+  // Replace the text of one existing chat message (streaming updates).
+  const updateChatLog = useCallback((agentId: string, msgId: string, text: string) => {
+    dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === agentId
+        ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, text } : m)) }
+        : a),
+    }))
+  }, [])
+
   // Append one visible message to a chat session's persisted transcript.
   const pushChatLog = useCallback((id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => {
     dispatch(s => ({
@@ -1537,6 +1550,20 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       return msg
     }
   }, [])
+
+  // keep the embedded search index in sync with chat transcripts (debounced)
+  const reindexTimer = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (reindexTimer.current) window.clearTimeout(reindexTimer.current)
+    reindexTimer.current = window.setTimeout(() => {
+      const docs = stateRef.current.agents
+        .filter(a => a.kind === 'chat')
+        .flatMap(a => (a.chatLog ?? [])
+          .filter(m => m.role !== 'tool')
+          .map(m => ({ chatId: a.id, msgId: m.id, role: m.role, text: `${a.name}\n${m.text}` })))
+      void native.chatSearchReindex(docs).catch(() => {})
+    }, 1500)
+  }, [state.agents])
 
   // connect enabled MCP servers shortly after launch (post-hydration)
   useEffect(() => {
@@ -1585,6 +1612,19 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         .filter(x => x.enabled)
         .map(x => mcpSessionsRef.current.get(x.id))
         .filter((x): x is McpSession => !!x)
+      // streaming: deltas grow one live assistant bubble; a tool round seals
+      // the current bubble; the final text replaces (or creates) it
+      let streamId: string | null = null
+      let acc = ''
+      const seal = (finalText?: string) => {
+        if (streamId) {
+          if (finalText !== undefined && finalText !== acc) updateChatLog(agentId, streamId, finalText)
+          streamId = null
+          acc = ''
+        } else if (finalText !== undefined) {
+          pushChatLog(agentId, { role: 'assistant', text: finalText })
+        }
+      }
       await runChatTurn(
         buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
         () => stateRef.current.agents.find(a => a.id === agentId),
@@ -1592,16 +1632,38 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         mcp,
         text,
         history,
-        e => pushChatLog(agentId, { role: e.kind === 'tool' ? 'tool' : 'assistant', text: e.text }),
+        e => {
+          if (e.kind === 'delta') {
+            acc += e.text
+            if (!streamId) {
+              streamId = mkId('cm')
+              dispatch(s2 => ({
+                ...s2,
+                agents: s2.agents.map(a => a.id === agentId
+                  ? { ...a, chatLog: [...(a.chatLog ?? []), { id: streamId as string, role: 'assistant' as const, text: acc, at: Date.now() }].slice(-200) }
+                  : a),
+              }))
+            } else {
+              updateChatLog(agentId, streamId, acc)
+            }
+          } else if (e.kind === 'round') {
+            seal()
+          } else if (e.kind === 'text') {
+            seal(e.text)
+          } else {
+            pushChatLog(agentId, { role: 'tool', text: e.text })
+          }
+        },
         chatType.systemPrompt,
       )
+      seal()
     } catch (e) {
       pushChatLog(agentId, { role: 'assistant', text: `Error: ${e instanceof Error ? e.message : String(e)}` })
     } finally {
       chatBusy.current.delete(agentId)
       dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
     }
-  }, [flash, pushChatLog])
+  }, [flash, pushChatLog, updateChatLog])
 
   // Run one lifecycle hook for each enabled addon without blocking the caller;
   // addons whose agent subscribes to the hook get woken with the event too.
@@ -2625,9 +2687,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         }],
         ...defaultDetail(), usageVersion: 1,
       }
-      dispatch(s => ({ ...focusSessionIn({ ...s, agents: s.agents.concat([agent]) }, id), newSessionOpen: false }))
+      dispatch(s => ({ ...s, agents: s.agents.concat([agent]), activeChatId: id, view: 'chat' }))
       logEvent('route', id, `Started chat agent “${agent.name}”`)
+      return id
     },
+
+    openChat: id => dispatch(s => ({ ...s, activeChatId: id, ...(id ? { view: 'chat' as const } : {}) })),
 
     sendChatMessage: (agentId, text) => {
       const msg = text.trim()

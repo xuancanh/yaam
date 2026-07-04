@@ -236,6 +236,174 @@ export function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[], 
   return cfg.provider.protocol === 'anthropic' ? callAnthropic(cfg, system, messages, tools) : callOpenAi(cfg, system, messages, tools)
 }
 
+// ---------------------------------------------------------------- streaming
+
+/** Consume an SSE response — incrementally when the body streams, or from the
+ *  buffered text otherwise (plugin fallback) — invoking onData per event. */
+async function consumeSse(res: Response, onData: (data: string) => void): Promise<void> {
+  const process = (chunk: string, carry: string): string => {
+    const text = carry + chunk
+    const lines = text.split('\n')
+    const rest = lines.pop() ?? ''
+    for (const line of lines) {
+      const t = line.trim()
+      if (t.startsWith('data:')) {
+        const payload = t.slice(5).trim()
+        if (payload && payload !== '[DONE]') onData(payload)
+      }
+    }
+    return rest
+  }
+  if (res.body) {
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let carry = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      carry = process(decoder.decode(value, { stream: true }), carry)
+    }
+    process('\n', carry)
+  } else {
+    process(await res.text() + '\n', '')
+  }
+}
+
+/** Streaming Anthropic Messages call: text deltas flow through onDelta. */
+async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: (text: string) => void): Promise<ApiResponse> {
+  const anthropicBase = (cfg.provider.id === 'anthropic-compat' ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
+  const send = async (key: string) => doFetch(`${anthropicBase}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'text/event-stream',
+      ...anthropicAuthHeaders(key),
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({ model: cfg.model, max_tokens: 2048, temperature: 0.2, system, messages, tools, stream: true }),
+  })
+  let res = await send(await resolveKey(cfg))
+  if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
+    res = await send(await resolveKey(cfg, true))
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => null) as ApiResponse | null
+    throw new Error(data?.error?.message || `API error ${res.status}`)
+  }
+  const blocks: (ApiContentBlock & { partialJson?: string })[] = []
+  let stopReason = 'end_turn'
+  let streamError: string | null = null
+  await consumeSse(res, data => {
+    let ev: Record<string, unknown>
+    try { ev = JSON.parse(data) } catch { return }
+    const index = Number(ev.index ?? 0)
+    if (ev.type === 'content_block_start') {
+      const cb = ev.content_block as { type: string; id?: string; name?: string; text?: string }
+      blocks[index] = cb.type === 'tool_use'
+        ? { type: 'tool_use', id: cb.id, name: cb.name, input: {}, partialJson: '' }
+        : { type: cb.type, text: cb.text ?? '' }
+    } else if (ev.type === 'content_block_delta') {
+      const b = blocks[index]
+      if (!b) return
+      const d = ev.delta as { type: string; text?: string; thinking?: string; partial_json?: string }
+      if (d.type === 'text_delta' && d.text) {
+        b.text = (b.text ?? '') + d.text
+        onDelta(d.text)
+      } else if (d.type === 'thinking_delta' && d.thinking) {
+        b.text = (b.text ?? '') + d.thinking
+      } else if (d.type === 'input_json_delta' && d.partial_json) {
+        b.partialJson = (b.partialJson ?? '') + d.partial_json
+      }
+    } else if (ev.type === 'message_delta') {
+      const d = ev.delta as { stop_reason?: string } | undefined
+      if (d?.stop_reason) stopReason = d.stop_reason
+    } else if (ev.type === 'error') {
+      streamError = (ev.error as { message?: string } | undefined)?.message ?? 'stream error'
+    }
+  })
+  if (streamError) throw new Error(streamError)
+  const content = blocks.filter(Boolean).map(b => {
+    if (b.type !== 'tool_use') return b
+    let input: Record<string, unknown> = {}
+    try { input = JSON.parse(b.partialJson || '{}') } catch { /* malformed tool args */ }
+    return { type: 'tool_use', id: b.id, name: b.name, input }
+  })
+  return { content, stop_reason: stopReason }
+}
+
+/** Streaming OpenAI chat-completions call: content deltas flow through onDelta. */
+async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: (text: string) => void): Promise<ApiResponse> {
+  const base = (cfg.provider.models.length === 0 && cfg.baseUrl ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
+  if (!base) throw new Error('custom provider needs a base URL')
+  const send = async (key: string) => doFetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'text/event-stream',
+      authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model: cfg.model,
+      max_tokens: 2048,
+      temperature: 0.2,
+      stream: true,
+      messages: toOpenAiMessages(system, messages),
+      tools: (tools as Array<{ name: string; description: string; input_schema: unknown }>).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
+    }),
+  })
+  let res = await send(await resolveKey(cfg))
+  if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
+    res = await send(await resolveKey(cfg, true))
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => null) as { error?: { message?: string } } | null
+    throw new Error(data?.error?.message || `API error ${res.status}`)
+  }
+  let text = ''
+  let reasoning = ''
+  const calls: { id: string; name: string; args: string }[] = []
+  let finish = ''
+  await consumeSse(res, data => {
+    let ev: { choices?: Array<{ delta?: { content?: string; reasoning_content?: string; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string }> }
+    try { ev = JSON.parse(data) } catch { return }
+    const c = ev.choices?.[0]
+    if (!c) return
+    if (c.delta?.content) {
+      text += c.delta.content
+      onDelta(c.delta.content)
+    }
+    if (c.delta?.reasoning_content) reasoning += c.delta.reasoning_content
+    for (const tc of c.delta?.tool_calls ?? []) {
+      const idx = tc.index ?? 0
+      calls[idx] = calls[idx] ?? { id: '', name: '', args: '' }
+      if (tc.id) calls[idx].id = tc.id
+      if (tc.function?.name) calls[idx].name += tc.function.name
+      if (tc.function?.arguments) calls[idx].args += tc.function.arguments
+    }
+    if (c.finish_reason) finish = c.finish_reason
+  })
+  const content: ApiContentBlock[] = []
+  if (reasoning) content.push({ type: 'thinking', text: reasoning })
+  if (text) content.push({ type: 'text', text })
+  for (const tc of calls.filter(Boolean)) {
+    let input: Record<string, unknown> = {}
+    try { input = JSON.parse(tc.args || '{}') } catch { /* malformed args */ }
+    content.push({ type: 'tool_use', id: tc.id, name: tc.name, input })
+  }
+  return { content, stop_reason: calls.filter(Boolean).length || finish === 'tool_calls' ? 'tool_use' : 'end_turn' }
+}
+
+/** Streaming variant of callApi: text deltas arrive through onDelta as the
+ *  model produces them. Bedrock's invoke bridge cannot stream — it falls back
+ *  to the buffered call (onDelta simply never fires). */
+export function callApiStream(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: (text: string) => void): Promise<ApiResponse> {
+  if (cfg.provider.id === 'bedrock') return callAnthropic(cfg, system, messages, tools)
+  return cfg.provider.protocol === 'anthropic'
+    ? streamAnthropic(cfg, system, messages, tools, onDelta)
+    : streamOpenAi(cfg, system, messages, tools, onDelta)
+}
+
 /** Whether the settings hold usable credentials for the chosen provider.
  *  Bedrock has no API key — it authenticates via the AWS credential chain. */
 export function hasCreds(settings: AppState['settings']): boolean {
