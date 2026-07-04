@@ -31,24 +31,31 @@ app/                     Tauri app (the whole product)
     highlight.ts         shared regex syntax highlighter (AddonSource + FilesPane)
     addons.ts            addon runtime: package parse/validate, permission model, RPC
     master.ts            barrel re-exporting src/llm/*
+    mcp.ts               streamable-HTTP MCP client (initialize / tools list+call)
     llm/
-      client.ts          provider defs + protocol adapters (Anthropic Messages / OpenAI chat / Bedrock)
+      client.ts          provider defs + protocol adapters (Anthropic Messages / OpenAI chat / Bedrock) + SSE streaming (callApiStream)
       master.ts          runMasterTurn: tool loop + integrity check
       master-tools.ts    Master tool defs (TOOLS) + MasterExec interface + runTool dispatch
       master-prompt.ts   systemPrompt(state) + chat history builder
       monitor.ts         per-session monitor harness
+      watcher.ts         per-task watcher harness (kanban "mini-Master") + task-spec drafting
+      chat-agent.ts      chat-mode session harness (files/exec/skills/MCP tools, streaming)
+      addon-agent.ts     per-addon agent harness (tools = the addon's scoped API)
+      addon-gen.ts       "✦ Generate" addon authoring harness (full context + self-repair)
       addon-editor.ts    per-addon "Customize" chat harness
     components/          views + workspace/ (Pane, TerminalPane, FilesPane, NewSessionDialog, Divider)
   src-tauri/
     src/
-      sessions.rs        PTY spawn/io/kill, CLI session-id detection, git, fs, state file
+      sessions.rs        PTY spawn/io/kill, exec_command, CLI session-id detection, git, fs, state file
+      chatsearch.rs      tantivy full-text index over chat transcripts
       bedrock.rs         AWS Bedrock InvokeModel bridge + credential parsing/caching
       lib.rs             command registration (invoke_handler)
     capabilities/default.json   Tauri ACL permissions
     tauri.conf.json      productName YAAM, identifier dev.yaam.conductor (kept for state compat)
     icons/               app icons, generated from app/app-icon.svg via `tauri icon`
 docs/addons.md           canonical addon architecture + authoring reference
-registry/                seed addon registry (index.json + packages/*.yaam.json)
+registry/                seed addon registry (index.json + packages/*.yaam.json + qa-gate/ folder format)
+scripts/pack-addon.mjs   folder-format addon → single-file .yaam.json
 design/                  original HTML design mockups (historical reference)
 ```
 
@@ -62,7 +69,9 @@ Run everything from `app/`. Cargo must be on PATH (`export PATH="$HOME/.cargo/bi
 
 - `npm run tauri dev` — run the app with hot reload. Frontend edits HMR instantly;
   Rust edits trigger an automatic recompile + relaunch.
-- `npx tsc --noEmit` — typecheck the frontend. **Always run before committing.**
+- `npx tsc --noEmit -p tsconfig.app.json` — typecheck the frontend. **Always run
+  before committing.** (A bare `npx tsc --noEmit` silently checks NOTHING — the
+  root tsconfig is a solution-style config with `files: []`.)
 - `npm run lint` — oxlint. Two pre-existing `only-export-components` warnings in
   `ui.tsx` and files that export both a component and helpers are expected/benign.
 - `npm run build` — production frontend build (`tsc -b && vite build`).
@@ -71,7 +80,7 @@ Run everything from `app/`. Cargo must be on PATH (`export PATH="$HOME/.cargo/bi
 - `npm run tauri build` — release bundle (.app + .dmg). Ad-hoc signed
   (`signingIdentity: "-"`); no notarization.
 
-Whole gate before a commit: `npx tsc --noEmit && npm run lint && (cd src-tauri && cargo check)`.
+Whole gate before a commit: `npx tsc --noEmit -p tsconfig.app.json && npm run lint && (cd src-tauri && cargo check)`.
 
 ## Architecture notes that will bite you
 
@@ -110,9 +119,11 @@ alternate-screen TUI corrupts it) and a `repaintSession` SIGWINCH jiggle instead
 ## LLM layer
 
 Provider-agnostic. `PROVIDERS` in `llm/client.ts`: `anthropic`, `openai`,
-`deepseek`, `kimi`, `bedrock`, `custom`. Two wire protocols: Anthropic Messages
-and OpenAI chat-completions, adapted to a common internal shape. HTTP goes
-through the Tauri http plugin to dodge CORS.
+`deepseek`, `kimi`, `gemini`, `glm`, `bedrock`, `custom` (OpenAI-compatible),
+`anthropic-compat`. Two wire protocols: Anthropic Messages and OpenAI
+chat-completions, adapted to a common internal shape; `callApiStream` adds SSE
+streaming for both (Bedrock falls back to buffered). HTTP goes through the
+Tauri http plugin to dodge CORS.
 
 - **Credentials**: `hasCreds(settings)` is the gate — true if provider is bedrock
   (AWS credential chain), or there's an API key, or a **credential command** is
@@ -127,7 +138,21 @@ through the Tauri http plugin to dodge CORS.
   the `press_keys` / `send_to_session` tools; the no-narration prompt rules and
   the integrity check exist to stop hallucinated "I did X" replies.
 - **Monitors** (`llm/monitor.ts`): one per session, private capped history, only
-  `report_to_master` surfaces a digest to Master.
+  `report_to_master` surfaces a digest to Master. Sessions bound to a board task
+  bypass the generic monitor — their task's **watcher** is the monitor.
+- **Task watchers** (`llm/watcher.ts`): one per kanban task — a mini-Master that
+  owns spawning (always ONE-SHOT sessions; can run several), verifies acceptance
+  criteria against `check_session` ground truth, moves the card, and chats with
+  the user in the card thread. Invariants live in the memory notes: task sessions
+  are always ephemeral; template schedules always create board tasks; templates
+  themselves stay purpose-neutral (the spawn path layers `taskWorkText` into
+  `{task}` and appends the criteria/goal contract after the composed prompt).
+- **Chat agents** (`llm/chat-agent.ts`): Chat-view sessions (`Agent.kind==='chat'`,
+  no PTY) with file/exec/skill/MCP tools and streaming; per-type provider config
+  (`chatAgentTypes`, `buildChatCfg`), per-session model. Excluded from workspace
+  tabs/groups/overview; transcripts feed the tantivy index (`chatsearch.rs`).
+- **Addon agents** (`llm/addon-agent.ts`): optional per-addon harness whose tools
+  are the addon's permission-scoped API; woken by subscribed hooks or `agent.wake`.
 
 ## Settle / detection pipeline (subtle — don't casually change)
 
@@ -161,8 +186,10 @@ screen scan of the xterm buffer (`readScreen`), not by line streaming. Key rules
   args, autoArchive. `buildTemplateCommand()` in `state-lib.ts` maps these to
   real CLI flags — claude: `-p`, `--model`, `--append-system-prompt`,
   `--permission-mode acceptEdits`, `--dangerously-skip-permissions`; codex:
-  `exec`, `-m`, `--sandbox read-only`, `--full-auto`,
-  `--dangerously-bypass-approvals-and-sandbox`. It's shell-quote-safe.
+  `exec --skip-git-repo-check`, `-m`, `--sandbox read-only`,
+  `--sandbox workspace-write`, `--dangerously-bypass-approvals-and-sandbox`.
+  It's shell-quote-safe, and takes an optional `contract` appended after the
+  composed prompt (the board's criteria/goal layer).
 - Templates launch from the Templates view, NewSessionDialog, board tasks, cron
   schedules, and Master (`run_template` tool; `create_schedule` accepts a template).
 - The 15s ticker in `store.tsx` fires cron schedules AND scheduled board tasks
@@ -170,8 +197,11 @@ screen scan of the xterm buffer (`readScreen`), not by line streaming. Key rules
 
 ## Workspaces
 
-Agents are global with a `workspaceId` tag. The **scoped slice**
-(messages/crons/tasks/events/notifications/layout) is swapped between flat state
+Agents are global with a `workspaceId` tag. Pane layout is **tab groups**
+(`TabGroup[]` + `activeGroup`, Chrome-style: each group owns slots/orientation/
+splits; a session lives in at most one group; legacy `focusedIds` migrates via
+`groupsFromLegacy`). The **scoped slice**
+(messages/crons/tasks/events/notifications/groups) is swapped between flat state
 and `workspaceData[id]` on switch (see `switchWorkspaceIn`, `scopedFromState`,
 `applyScoped` in state-lib.ts). Templates and agentTypes are global, not scoped.
 Background workspaces still fire schedules and queue Master notes.
@@ -179,17 +209,22 @@ Background workspaces still fire schedules and queue Master notes.
 ## Addons
 
 A full platform — see `docs/addons.md` for the canonical reference. In short:
-addons are JSON packages (manifest 2) with three capability types — a sandboxed
-iframe **view**, Master **tools** (`new Function('input','api', src)`), and
-lifecycle **hooks**. All three converge on one permission-enforced `AddonApi`
-built by `makeAddonApi(addonId)` and wrapped by `enforcePermissions()`. Scopes:
-`state:read`, `sessions:send`, `sessions:launch`, `tasks`, `ui`, `storage`.
-Views talk to the app over postMessage (`yaam:state` push + `yaam:call` RPC).
-The kanban board is reimplemented as an addon (`registry/`) to prove parity.
+addons are packages (single-file manifest 2 JSON, or the folder format manifest 3:
+`addon.yaml` + real html/js/md files, strict YAML-subset parser in `addons.ts`)
+with four capability types — a sandboxed iframe **view**, Master **tools**
+(`new Function('input','api', src)`), lifecycle **hooks** (`onSessionExit`,
+`onNeedsInput`, `onTaskMoved`, `onCronFired`, `masterPromptAppend`), and an
+**agent** (its own LLM harness). All converge on one permission-enforced
+`AddonApi` built by `makeAddonApi(addonId)` and wrapped by `enforcePermissions()`.
+Scopes: `state:read`, `sessions:send`, `sessions:launch`, `tasks`, `schedules`,
+`agent`, `ui`, `storage`. Views talk to the app over postMessage (`yaam:state`
+push + `yaam:call` RPC, incl. `agent.wake`). Management lives in the Addons
+marketplace view (multi-registry, local folder registries, ✦ Generate).
 
 When extending the addon API surface: add to `AddonApi` → implement in
 `makeAddonApiRaw` → map in `METHOD_PERMISSION`/`ALL_PERMISSIONS` → whitelist in
-`ADDON_RPC_METHODS` → update the LLM-facing docs in `addon-editor.ts`.
+`ADDON_RPC_METHODS` → update the LLM-facing docs in `master-tools.ts`
+(create_addon), `addon-editor.ts`, AND `addon-gen.ts`.
 
 ## Conventions
 
