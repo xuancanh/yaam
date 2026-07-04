@@ -9,7 +9,7 @@ A desktop manager for multiple live coding-agent sessions, built with [Tauri 2](
 - **Left — Master chat**: the orchestrator (here running on `deepseek-chat`) answering "how many agents are active?" from live state, and reporting what each sub-agent is doing — a `claude` session investigating this repo and a "PM for engineer" session cutting a presentation script down to 30 minutes.
 - **Right — a live terminal**: the actual Claude Code TUI in an xterm.js pane (PTY-backed, scrollable, clickable). It has just hit a permission dialog — *"Do you want to create script_v10_30min.md?"* — which YAAM's monitor detected from the rendered screen: the session flips to **Needs action**, a notification fires, and the dialog's numbered options become clickable buttons in Master chat.
 - **Top — session tabs** with status lights (steady green = working, flashing = finished/needs you), split/maximize/minimize controls per pane, and the ⌘K palette.
-- **Rail** — Workspace, Agents overview (per-session task/summary/action cards maintained by monitor LLMs), kanban Board (cards spawn sessions), Activity, Usage, Schedules (real cron that launches sessions), Tools (permission gates for Master), plus any custom addon tabs Master has built.
+- **Rail** — Workspace, Agents overview (per-session task/summary/action cards maintained by monitor LLMs), kanban Board (cards spawn sessions), Activity, Usage, Schedules (real cron that launches sessions), Templates (preconfigured one-shot or interactive launches), Tools (permission gates for Master), plus any custom addon tabs Master has built.
 
 ### Agents overview
 
@@ -32,11 +32,13 @@ Work is organized into **workspaces** (switcher in the title bar): each has its 
 
 Every session is a real OS process in a **PTY**, rendered with **xterm.js** — an iTerm-style terminal in each workspace pane:
 
+![Workspace with persistent split panes — the Master orchestrator beside two stacked live sessions (PM for engineer running, Claude paused); the pane arrangement is saved and restored on restart](docs/split-panes.png)
+
 - **＋ New agent session** → pick an agent type (commands configurable in Settings), a plain terminal (zsh/bash/sh/fish/nu), or a custom command; pick the working directory with a native folder chooser
 - Full terminal emulation: prompts, colors, TUIs, keystrokes straight to the PTY, resize handled
 - Plain terminals start the selected shell directly as an interactive login shell; commands use a login-shell wrapper so PATH entries from nvm, Homebrew, Cargo, and similar tools resolve
 - Stop / resume / exit-code status per pane; double-click the pane title to rename a session
-- **Window organization**: a dynamic terminal grid — new sessions open their own pane (up to a 2×2 grid, 6 panes max), add split panes from the tab bar or ⌘K, maximize/restore any pane, close panes independently; tabs jump to the pane already showing that session
+- **Persistent split-pane layouts** — a Chrome-style split menu picks a 1–4 pane arrangement (single, split vertical/horizontal, three panes, or a 2×2 grid); the layout and its orientation are saved and restored on restart. New sessions fill the next open slot, you can add splits from the tab bar or ⌘K, and maximize/restore or close any pane independently. Tabs jump to the pane already showing that session
 
 ## Master — three-way orchestration
 
@@ -70,13 +72,14 @@ Following the kernel-plugin pattern of modern agent harnesses (OpenClaw, OpenCod
 
 ## The rest
 
-- **Schedules** — a real cron scheduler (5-field expressions); schedules with a command launch live sessions on fire; create/delete in the UI or ask Master
+- **Schedules** — a real cron scheduler (5-field expressions); schedules with a command launch live sessions on fire; create/delete in the UI or ask Master. Cron and task schedules can be seeded from templates
 - **Notifications & activity** — session exits, failures, cron runs, and Master decisions land in the bell popover and the Activity timeline
 - **Diff review** — the drawer runs `git diff` in a session's working directory with Approve / Request changes
-- **Task board** — kanban with drag & drop, inline rename (double-click), delete; cards link to sessions
+- **Task board** — kanban with drag & drop, inline rename (double-click), delete; cards link to sessions. **Each task is driven by its own watcher LLM** (a per-task "mini-Master"): it drafts the card from a rough idea with acceptance criteria (or rejects vague ones), spawns and steers a one-shot session, advances the card across columns (backlog → routed → progress → review → done / failed), and verifies the criteria itself
+- **Templates** — a dedicated view for preconfigured launches: one-shot (ephemeral — run a task and exit, e.g. `claude -p` / `codex exec`) or interactive; templates feed quick launches, schedules, and board tasks
 - **Cost & usage** — per-session usage estimates from output volume
 - **Tools & permissions, memory panels, integrations, orchestration policy** — configurable registries, persisted
-- **Persistence** — board, schedules, settings, tools, agent types, and integrations survive restarts (`~/Library/Application Support/dev.yaam.conductor/conductor-state.json`)
+- **Persistence** — board (with watcher tasks), schedules, templates, split-pane layouts, settings, tools, agent types, and integrations survive restarts (`~/Library/Application Support/dev.yaam.conductor/conductor-state.json`)
 
 ## Structure
 
