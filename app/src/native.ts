@@ -110,6 +110,12 @@ export async function writeTextFile(path: string, contents: string): Promise<voi
   await invoke('write_text_file', { path, contents })
 }
 
+/** Run the configured credential command; returns trimmed stdout. */
+export async function runCredentialCommand(cmd: string): Promise<string> {
+  if (!isTauri) throw new Error('credential commands require the desktop app')
+  return await invoke<string>('run_credential_command', { cmd })
+}
+
 /** Call Claude on AWS Bedrock via the backend (SigV4 + credential chain). */
 export async function bedrockInvoke(region: string, profile: string, refreshCmd: string, model: string, body: string): Promise<string> {
   if (!isTauri) throw new Error('Bedrock requires the desktop app')

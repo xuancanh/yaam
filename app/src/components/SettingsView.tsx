@@ -293,19 +293,38 @@ export function SettingsView() {
               />
             </div>
             {providerFor(s.settings.provider).id !== 'bedrock' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>API key</div>
-                  <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Stored locally in the app data folder.</div>
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>API key</div>
+                    <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Stored locally in the app data folder. Leave empty if you use a credential command below.</div>
+                  </div>
+                  <input
+                    type="password"
+                    value={s.settings.apiKey}
+                    onChange={e => updateSettings({ apiKey: e.target.value })}
+                    placeholder={providerFor(s.settings.provider).keyHint}
+                    style={{ ...FIELD_STYLE, width: 260 }}
+                  />
                 </div>
-                <input
-                  type="password"
-                  value={s.settings.apiKey}
-                  onChange={e => updateSettings({ apiKey: e.target.value })}
-                  placeholder={providerFor(s.settings.provider).keyHint}
-                  style={{ ...FIELD_STYLE, width: 260 }}
-                />
-              </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>Credential command</div>
+                    <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
+                      Optional — overrides the API key. Any shell command that prints the credential (raw key/token or JSON), e.g.{' '}
+                      <span className="mono">claude default-credential-export</span> — edit freely, including the binary path{' '}
+                      (<span className="mono">~/.claude/local/claude …</span>) or flags. Runs in a login shell, is cached until the
+                      credential expires, and re-runs automatically when the API rejects it, so short-lived tokens keep working.
+                    </div>
+                  </div>
+                  <input
+                    value={s.settings.credCmd}
+                    onChange={e => updateSettings({ credCmd: e.target.value })}
+                    placeholder="claude default-credential-export"
+                    style={{ ...FIELD_STYLE, width: 260 }}
+                  />
+                </div>
+              </>
             )}
           </div>
 

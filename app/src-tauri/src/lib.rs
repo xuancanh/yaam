@@ -23,6 +23,7 @@ pub fn run() {
       sessions::git_status,
       sessions::git_file_diff,
       sessions::list_dir,
+      sessions::run_credential_command,
       sessions::read_text_file,
       sessions::write_text_file,
       sessions::save_state,

@@ -339,6 +339,27 @@ pub fn git_file_diff(cwd: String, path: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+/// Run a user-configured credential command through a login shell and return
+/// its stdout (e.g. `claude default-credential-export`, corporate token CLIs).
+#[tauri::command]
+pub async fn run_credential_command(cmd: String) -> Result<String, String> {
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        Command::new("/bin/sh").args(["-lc", &cmd]).output()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("credential command failed to run: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(format!(
+            "credential command exited with {}: {}",
+            out.status.code().unwrap_or(-1),
+            stderr
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
 #[tauri::command]
 pub fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(expand_tilde(&path)).map_err(|e| e.to_string())

@@ -244,6 +244,9 @@ export interface OrchestrationSettings {
   awsProfile: string
   /** shell command run to refresh AWS credentials when Bedrock rejects them */
   awsRefreshCmd: string
+  /** shell command that prints the API credential (raw key or JSON);
+   *  re-run automatically on expiry or when the API rejects it */
+  credCmd: string
 }
 
 export type BoardCol = 'backlog' | 'routed' | 'progress' | 'review' | 'done'

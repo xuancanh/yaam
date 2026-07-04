@@ -1,7 +1,7 @@
 // LLM providers and protocol adapters (Anthropic Messages / OpenAI-compatible
 // chat completions). HTTP goes through the Tauri backend to avoid CORS.
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
-import { bedrockInvoke, isTauri } from '../native'
+import { bedrockInvoke, isTauri, runCredentialCommand } from '../native'
 import type { AppState } from '../types'
 
 const doFetch: typeof fetch = (...args) => (isTauri ? tauriFetch(...args) : fetch(...args))
@@ -52,6 +52,64 @@ export interface LlmConfig {
   awsRegion: string
   awsProfile: string
   awsRefreshCmd: string
+  credCmd: string
+}
+
+// ---------------------------------------------------------------- credential command
+// A configured credential command (e.g. `claude default-credential-export`)
+// prints the API credential — a raw key/token, or JSON. The result is cached
+// until its own expiry (when the JSON declares one) or a short TTL, and the
+// cache is dropped + the command re-run when the API rejects the credential.
+
+const CRED_TTL_MS = 15 * 60 * 1000
+let credCache: { cmd: string; key: string; exp: number } | null = null
+
+/** Dig a credential + optional expiry out of command output. */
+function parseCredOutput(raw: string): { key: string; exp: number } {
+  let exp = Date.now() + CRED_TTL_MS
+  const text = raw.trim()
+  try {
+    const json = JSON.parse(text) as Record<string, unknown>
+    // Claude Code credential file shape: { claudeAiOauth: { accessToken, expiresAt } }
+    const oauth = json.claudeAiOauth as Record<string, unknown> | undefined
+    const nested = oauth ?? json
+    const key = ['accessToken', 'access_token', 'apiKey', 'api_key', 'token', 'key', 'credential', 'value']
+      .map(k => nested[k] ?? json[k])
+      .find((v): v is string => typeof v === 'string' && v.length > 0)
+    if (!key) throw new Error('no credential field')
+    const expiresAt = nested.expiresAt ?? json.expiresAt ?? nested.expires_at ?? json.expires_at
+    if (typeof expiresAt === 'number') exp = Math.min(exp, expiresAt - 60_000)
+    else if (typeof expiresAt === 'string') {
+      const t = Date.parse(expiresAt)
+      if (!Number.isNaN(t)) exp = Math.min(exp, t - 60_000)
+    }
+    return { key, exp }
+  } catch {
+    // not JSON (or no known field) — treat the whole output as the credential
+    const key = text.split('\n').pop()?.trim() ?? ''
+    if (!key) throw new Error('credential command printed nothing')
+    return { key, exp }
+  }
+}
+
+/** The credential to send: from the command (cached) or the static API key. */
+async function resolveKey(cfg: LlmConfig, forceRefresh = false): Promise<string> {
+  const cmd = cfg.credCmd.trim()
+  if (!cmd) return cfg.apiKey
+  if (!forceRefresh && credCache && credCache.cmd === cmd && Date.now() < credCache.exp) {
+    return credCache.key
+  }
+  const parsed = parseCredOutput(await runCredentialCommand(cmd))
+  credCache = { cmd, key: parsed.key, exp: parsed.exp }
+  return parsed.key
+}
+
+/** Claude Code OAuth tokens authenticate as Bearer, not x-api-key. */
+function anthropicAuthHeaders(key: string): Record<string, string> {
+  if (key.startsWith('sk-ant-oat')) {
+    return { authorization: `Bearer ${key}`, 'anthropic-beta': 'oauth-2025-04-20' }
+  }
+  return { 'x-api-key': key }
 }
 
 async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
@@ -61,16 +119,21 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
     const raw = await bedrockInvoke(cfg.awsRegion || 'us-east-1', cfg.awsProfile, cfg.awsRefreshCmd, cfg.model, body)
     return JSON.parse(raw) as ApiResponse
   }
-  const res = await doFetch(`${cfg.provider.base}/v1/messages`, {
+  const send = async (key: string) => doFetch(`${cfg.provider.base}/v1/messages`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': cfg.apiKey,
+      ...anthropicAuthHeaders(key),
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({ model: cfg.model, max_tokens: 2048, temperature: 0.2, system, messages, tools }),
   })
+  let res = await send(await resolveKey(cfg))
+  if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
+    // stale credential — re-run the credential command and retry once
+    res = await send(await resolveKey(cfg, true))
+  }
   const data = await res.json() as ApiResponse
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
   return data
@@ -118,11 +181,11 @@ function toOpenAiMessages(system: string, messages: ApiMessage[]): OaiMessage[] 
 async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
   const base = (cfg.provider.id === 'custom' ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
   if (!base) throw new Error('custom provider needs a base URL (Settings → Master Brain)')
-  const res = await doFetch(`${base}/chat/completions`, {
+  const send = async (key: string) => doFetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${cfg.apiKey}`,
+      authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
       model: cfg.model,
@@ -132,6 +195,11 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
       tools: (tools as Array<{ name: string; description: string; input_schema: unknown }>).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
     }),
   })
+  let res = await send(await resolveKey(cfg))
+  if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
+    // stale credential — re-run the credential command and retry once
+    res = await send(await resolveKey(cfg, true))
+  }
   const data = await res.json() as {
     choices?: Array<{ message: OaiMessage; finish_reason: string }>
     error?: { message: string }
@@ -156,7 +224,7 @@ export function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[], 
 /** Whether the settings hold usable credentials for the chosen provider.
  *  Bedrock has no API key — it authenticates via the AWS credential chain. */
 export function hasCreds(settings: AppState['settings']): boolean {
-  return settings.provider === 'bedrock' || Boolean(settings.apiKey)
+  return settings.provider === 'bedrock' || Boolean(settings.apiKey) || Boolean(settings.credCmd.trim())
 }
 
 export function buildCfg(settings: AppState['settings'], modelOverride?: string): LlmConfig {
@@ -168,6 +236,7 @@ export function buildCfg(settings: AppState['settings'], modelOverride?: string)
     awsRegion: settings.awsRegion,
     awsProfile: settings.awsProfile,
     awsRefreshCmd: settings.awsRefreshCmd,
+    credCmd: settings.credCmd,
   }
 }
 
