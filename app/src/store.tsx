@@ -1599,7 +1599,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       pushChatLog(agentId, { role: 'assistant', text: `Error: ${e instanceof Error ? e.message : String(e)}` })
     } finally {
       chatBusy.current.delete(agentId)
-      dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const } : a)) }))
+      dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
     }
   }, [flash, pushChatLog])
 

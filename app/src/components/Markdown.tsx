@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 // headings, bullet/numbered lists, bold/italic/inline code, and links.
 // Everything is emitted as React elements — no HTML injection surface.
 
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))/g
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s<>)"']+)/g
 
 /** Render inline markdown spans within one line of text. */
 function inline(text: string, keyBase: string): ReactNode[] {
@@ -26,12 +26,19 @@ function inline(text: string, keyBase: string): ReactNode[] {
       out.push(<b key={key} style={{ color: 'var(--text)' }}>{tok.slice(2, -2)}</b>)
     } else if (tok.startsWith('*')) {
       out.push(<em key={key}>{tok.slice(1, -1)}</em>)
-    } else {
+    } else if (tok.startsWith('[')) {
       const label = tok.slice(1, tok.indexOf(']'))
       const href = tok.slice(tok.indexOf('](') + 2, -1)
       out.push(
         <a key={key} href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
           {label}
+        </a>,
+      )
+    } else {
+      // bare URL
+      out.push(
+        <a key={key} href={tok} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline', overflowWrap: 'anywhere' }}>
+          {tok}
         </a>,
       )
     }
@@ -75,6 +82,61 @@ export function Markdown({ text }: { text: string }) {
       continue
     }
 
+    // horizontal rule
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      blocks.push(<div key={`b${k++}`} style={{ borderTop: '1px solid var(--line2)', margin: '8px 0' }} />)
+      i++
+      continue
+    }
+
+    // blockquote
+    if (/^\s*>\s?/.test(line)) {
+      const buf: string[] = []
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ''))
+      blocks.push(
+        <div key={`b${k++}`} style={{ borderLeft: '3px solid var(--line2)', paddingLeft: 10, margin: '4px 0', color: 'var(--mut)' }}>
+          {withBreaks(buf, `q${k}`)}
+        </div>,
+      )
+      continue
+    }
+
+    // table: header | --- | rows
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      const parseRow = (l: string) => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim())
+      const header = parseRow(line)
+      i += 2
+      const rows: string[][] = []
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(parseRow(lines[i++]))
+      blocks.push(
+        <div key={`b${k++}`} style={{ overflowX: 'auto', margin: '6px 0' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: '0.95em' }}>
+            <thead>
+              <tr>
+                {header.map((c, j) => (
+                  <th key={j} style={{ textAlign: 'left', padding: '4px 10px', borderBottom: '1px solid var(--line2)', color: 'var(--text)', fontWeight: 600 }}>
+                    {inline(c, `th${k}-${j}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, ri) => (
+                <tr key={ri}>
+                  {r.map((c, j) => (
+                    <td key={j} style={{ padding: '4px 10px', borderBottom: '1px solid var(--line)', verticalAlign: 'top' }}>
+                      {inline(c, `td${k}-${ri}-${j}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      )
+      continue
+    }
+
     // heading
     const h = line.match(/^(#{1,4})\s+(.*)$/)
     if (h) {
@@ -111,7 +173,7 @@ export function Markdown({ text }: { text: string }) {
     // paragraph: consume until blank line or another block start
     const buf: string[] = [line]
     i++
-    while (i < lines.length && lines[i].trim() && !/^```|^#{1,4}\s|^\s*([-*•]|\d+[.)])\s+/.test(lines[i])) {
+    while (i < lines.length && lines[i].trim() && !/^```|^#{1,4}\s|^\s*([-*•]|\d+[.)])\s+|^\s*>|^\s*\|.*\|\s*$|^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i])) {
       buf.push(lines[i++])
     }
     blocks.push(<div key={`b${k++}`} style={{ margin: '3px 0' }}>{withBreaks(buf, `p${k}`)}</div>)

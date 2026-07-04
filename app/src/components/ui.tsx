@@ -38,7 +38,13 @@ export const IC = {
 
 /** Render an agent lifecycle label using the shared status colors. */
 export function StatusPill({ agent, small }: { agent: Agent; small?: boolean }) {
-  const sm = STATUS_META[agent.status] || STATUS_META.idle
+  // chat agents have no OS process: at rest they are ready (not "paused"),
+  // and while a turn runs they are thinking
+  const sm = agent.kind === 'chat'
+    ? agent.status === 'running'
+      ? { label: 'Thinking', color: STATUS_META.running.color }
+      : { label: 'Ready', color: '#8B93A1' }
+    : STATUS_META[agent.status] || STATUS_META.idle
   // running = calm static light; flashing means "look at me" (needs/attention)
   const anim = agent.status === 'needs' || agent.attention
     ? 'cpulse 1.1s ease-in-out infinite' : 'none'

@@ -9,6 +9,7 @@ import { gitFileDiff, gitStatus, listDir, readTextFile } from '../../native'
 import type { DirEntryInfo } from '../../native'
 import type { Agent } from '../../types'
 import { IC, Icon } from '../ui'
+import { ChatPane } from './ChatPane'
 import { TerminalPane } from './TerminalPane'
 
 export type FilesMode = 'split' | 'replace'
@@ -433,7 +434,9 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
             flex: file ? '0 0 40%' : 1, minHeight: 0, display: 'flex', flexDirection: 'column',
             borderTop: file ? '1px solid var(--line)' : 'none',
           }}>
-            <TerminalPane agent={agent} active={active && !file} />
+            {agent.kind === 'chat'
+              ? <ChatPane agent={agent} active={active && !file} />
+              : <TerminalPane agent={agent} active={active && !file} />}
           </div>
         )}
       </div>
