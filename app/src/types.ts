@@ -262,8 +262,10 @@ export interface OrchestrationSettings {
   apiKey: string
   /** LLM provider: anthropic | openai | deepseek | kimi | custom */
   provider: string
-  /** addon registry index URL (JSON) */
+  /** legacy single addon-registry URL (superseded by `registries`) */
   registryUrl: string
+  /** addon registries: http(s) index URLs or local folder/index.json paths */
+  registries?: { name: string; url: string }[]
   /** base URL for the custom provider (OpenAI-compatible) */
   baseUrl: string
   /** AWS region for the bedrock provider */
@@ -412,6 +414,7 @@ export type View =
   | 'tools'
   | 'settings'
   | 'addon'
+  | 'addons'
 
 export interface Panel {
   agentId: string

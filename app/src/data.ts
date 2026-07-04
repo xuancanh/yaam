@@ -182,6 +182,7 @@ export function seedState(): AppState {
       provider: 'anthropic', baseUrl: '',
       awsRegion: 'us-east-1', awsProfile: '', awsRefreshCmd: '', credCmd: '',
       registryUrl: 'https://raw.githubusercontent.com/xuancanh/yaam/main/registry/index.json',
+      registries: [{ name: 'yaam', url: 'https://raw.githubusercontent.com/xuancanh/yaam/main/registry/index.json' }],
     },
     tasks: [],
     messages: [

@@ -10,6 +10,7 @@ const NAV: Array<{ id: View; label: string; paths: string[] }> = [
   { id: 'timeline', label: 'Activity', paths: ['M3 12h4l2.5 6 5-12 2.5 6h4'] },
   { id: 'crons', label: 'Schedule', paths: ['M12 3.6a8.4 8.4 0 100 16.8 8.4 8.4 0 000-16.8z', 'M12 8v4.3l2.9 1.7'] },
   { id: 'templates', label: 'Templates', paths: ['M4 5h16v4H4z', 'M4 13h9', 'M4 17h9', 'M15 13l4 4', 'M19 13l-4 4'] },
+  { id: 'addons', label: 'Addons', paths: ['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M16.5 13.5v6', 'M13.5 16.5h6'] },
   { id: 'tools', label: 'Tools', paths: ['M6 4v16', 'M12 4v16', 'M18 4v16', 'M6 8.5m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 14m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0'] },
 ]
 

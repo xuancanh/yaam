@@ -425,12 +425,20 @@ Master's tool results.
 
 ## 8. Distribution & the registry
 
-- **Export** — Settings → Addons → Export writes the shareable
+Everything lives in the **Addons view** (icon rail → Addons) — a
+marketplace-style manager: search, installed list with grants, per-registry
+package browsing, and **✦ Generate** (describe an addon in plain language;
+an LLM with the complete authoring context builds, validates, and installs
+it — see `app/src/llm/addon-gen.ts`).
+
+- **Export** — the addon's detail pane writes the shareable
   `<name>.yaam.json` (includes permissions).
-- **Install** — from a file, from a URL (raw JSON), or via the **registry
-  browser**.
-- **Registry** — any URL serving an index of this shape (configure it in
-  Settings → Addons):
+- **Install** — from a registry, a file, a folder (section 2.1), or a pasted
+  URL.
+- **Registries** — configure any number in the Addons view sidebar. Each is
+  an index of the shape below, served over http(s) **or a local folder /
+  index.json path** (package `url`s may then be relative to the index —
+  handy for developing addons against a local checkout):
 
 ```json
 {

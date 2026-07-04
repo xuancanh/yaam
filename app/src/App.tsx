@@ -9,6 +9,7 @@ import { Timeline } from './components/Timeline'
 import { Schedules } from './components/Schedules'
 import { TemplatesView } from './components/TemplatesView'
 import { ToolsView } from './components/ToolsView'
+import { AddonsView } from './components/AddonsView'
 import { SettingsView } from './components/SettingsView'
 import { AddonView } from './components/AddonView'
 import { SlideOver } from './components/SlideOver'
@@ -28,6 +29,7 @@ function MainArea() {
       {s.view === 'crons' && <Schedules />}
       {s.view === 'templates' && <TemplatesView />}
       {s.view === 'tools' && <ToolsView />}
+      {s.view === 'addons' && <AddonsView />}
       {s.view === 'settings' && <SettingsView />}
       {s.view === 'addon' && <AddonView />}
     </div>

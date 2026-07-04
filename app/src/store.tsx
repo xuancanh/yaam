@@ -17,6 +17,7 @@ import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession }
 import { ALL_PERMISSIONS, addonSnapshot, dispatchAddonRpc, enforcePermissions, execAddonHook, execAddonTool, exportAddonPackage, loadAddonFolder, parseAddonPackage } from './addons'
 import { runAddonEditorTurn } from './llm/addon-editor'
 import { runAddonAgentTurn } from './llm/addon-agent'
+import { generateAddonPackage } from './llm/addon-gen'
 import { estimateLogUsage, estimateOutputUsage } from './usage'
 import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
@@ -179,6 +180,8 @@ export interface ConductorActions {
   installAddonFromFile: () => void
   /** install a multi-file addon folder (addon.yaml/json + referenced files) */
   installAddonFromFolder: () => void
+  /** LLM-generate an addon from a description; resolves to '' or an error message */
+  generateAddon: (prompt: string) => Promise<string>
   installAddonFromUrl: (url: string) => void
   exportAddon: (id: string) => void
   sendAddonChat: (id: string, text: string) => void
@@ -2606,12 +2609,25 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     installAddonFromUrl: url => {
       void (async () => {
         try {
-          const json = await native.httpGetText(url)
-          installPackage(json, 'url')
+          // registries can be local: non-http entries are filesystem paths
+          const json = /^https?:\/\//.test(url) ? await native.httpGetText(url) : await native.readTextFile(url)
+          installPackage(json, /^https?:\/\//.test(url) ? 'url' : 'file')
         } catch (e) {
           flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
         }
       })()
+    },
+
+    generateAddon: async prompt => {
+      const st = stateRef.current.settings
+      if (!(st.masterEnabled && hasCreds(st))) return 'No brain configured — enable LLM Master in Settings first.'
+      try {
+        const json = await generateAddonPackage(buildCfg(st), prompt)
+        installPackage(json, 'master')
+        return ''
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e)
+      }
     },
 
     sendAddonChat: (id, text) => { void sendAddonChatImpl(id, text) },
