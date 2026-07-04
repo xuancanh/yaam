@@ -14,6 +14,7 @@ import type { MonitorExec } from './monitor'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './terminals'
 import { ALL_PERMISSIONS, addonSnapshot, dispatchAddonRpc, enforcePermissions, execAddonHook, execAddonTool, exportAddonPackage, parseAddonPackage } from './addons'
 import { runAddonEditorTurn } from './llm/addon-editor'
+import { estimateLogUsage, estimateOutputUsage } from './usage'
 import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
 
@@ -435,15 +436,25 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   bumpSettleRef.current = bumpSettle
 
   // ANSI-stripped tail of each terminal, kept for Master's context, overview
-  // cards, and rough usage accounting (the terminal itself renders raw bytes)
+  // cards, and rough output-volume accounting (provider usage is unavailable).
   const appendTail = useCallback((id: string, line: string) => {
     dispatch(s => ({
       ...s,
       agents: s.agents.map(a => {
         if (a.id !== id) return a
+        // Old releases added a fixed 10 tokens for every line. Rebase those
+        // counters on the retained output tail before using the character estimate.
+        const base = a.usageVersion === 1 ? a : estimateLogUsage(a.log)
+        const delta = estimateOutputUsage(line)
         const log = a.log.concat([{ t: 'out' as const, x: line }])
         if (log.length > 200) log.splice(0, log.length - 200)
-        return { ...a, log, used: a.used + 0.01, cost: a.cost + 0.0004 }
+        return {
+          ...a,
+          log,
+          used: base.used + delta.used,
+          cost: base.cost + delta.cost,
+          usageVersion: 1,
+        }
       }),
     }))
   }, [])
@@ -587,13 +598,19 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             : workspaces[0].id
           const restoredAgents: Agent[] = (p.agents ?? [])
             .filter(a => a.kind === 'real' && a.cmd)
-            .map(a => ({
-              ...a,
-              status: 'idle' as const,
-              escReason: undefined,
-              workspaceId: a.workspaceId && workspaces.some(w => w.id === a.workspaceId) ? a.workspaceId : activeWorkspace,
-              log: (a.log ?? []).slice(-200),
-            }))
+            .map(a => {
+              const log = (a.log ?? []).slice(-200)
+              const usage = a.usageVersion === 1 ? { used: a.used, cost: a.cost } : estimateLogUsage(log)
+              return {
+                ...a,
+                ...usage,
+                usageVersion: 1 as const,
+                status: 'idle' as const,
+                escReason: undefined,
+                workspaceId: a.workspaceId && workspaces.some(w => w.id === a.workspaceId) ? a.workspaceId : activeWorkspace,
+                log,
+              }
+            })
           const ids = new Set(restoredAgents.map(a => a.id))
           const focusedIds = [...new Set((p.focusedIds ?? []).filter(id => ids.has(id)))]
           dispatch(s => ({

@@ -63,6 +63,8 @@ export interface Agent {
   used: number
   cost: number
   budget: number
+  /** Usage counters use printable terminal characters, not the legacy line-count heuristic. */
+  usageVersion?: 1
   snaps: Snapshot[]
   diff: DiffFile[]
   /** the CLI's own session/conversation id, captured after launch for resume */
