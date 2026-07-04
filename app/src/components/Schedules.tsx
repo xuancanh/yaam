@@ -3,33 +3,55 @@ import { useActions, useConductor, humanizeCron } from '../store'
 import { ACCENT, hexToRgba } from '../data'
 import { IC, Icon, Switch, ViewHeader } from './ui'
 
+/** default for the one-time picker: next full hour, in datetime-local format */
+function nextHourLocal(): string {
+  const d = new Date(Date.now() + 60 * 60 * 1000)
+  d.setMinutes(0, 0, 0)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 function NewScheduleDialog({ onClose }: { onClose: () => void }) {
   const s = useConductor()
   const { addCron } = useActions()
+  const [kind, setKind] = useState<'cron' | 'once'>('cron')
   const [name, setName] = useState('')
   const [schedule, setSchedule] = useState('0 3 * * *')
+  const [at, setAt] = useState(nextHourLocal())
+  const [action, setAction] = useState<'command' | 'template' | 'task'>('command')
   const [templateId, setTemplateId] = useState('')
   const [prompt, setPrompt] = useState('')
   const [cmd, setCmd] = useState('')
   const [cwd, setCwd] = useState('')
+  const [taskTitle, setTaskTitle] = useState('')
+  const [taskDesc, setTaskDesc] = useState('')
   const templates = s.templates ?? []
-  const tpl = templates.find(t => t.id === templateId)
+  const tpl = action === 'template' ? templates.find(t => t.id === templateId) : undefined
 
-  const valid = Boolean(name.trim()) && schedule.trim().split(/\s+/).length === 5
+  const atMs = kind === 'once' ? new Date(at).getTime() : 0
+  const valid = Boolean(name.trim())
+    && (kind === 'cron' ? schedule.trim().split(/\s+/).length === 5 : Number.isFinite(atMs) && atMs > Date.now())
+    && (action !== 'task' || Boolean(taskTitle.trim()))
+    && (action !== 'template' || Boolean(tpl))
 
   const create = () => {
     if (!valid) return
+    const once = kind === 'once'
     addCron({
       name: name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      schedule: schedule.trim(),
-      human: humanizeCron(schedule),
+      schedule: once ? '' : schedule.trim(),
+      human: once
+        ? `once · ${new Date(atMs).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+        : humanizeCron(schedule),
+      at: once ? atMs : undefined,
       target: cwd.trim() ? cwd.trim().split('/').pop() || cwd.trim() : 'workspace',
-      agent: tpl ? tpl.name : cmd.trim() ? cmd.trim().split(/\s+/)[0] : 'Master',
+      agent: action === 'task' ? 'Board' : tpl ? tpl.name : cmd.trim() ? cmd.trim().split(/\s+/)[0] : 'Master',
       color: ACCENT,
-      cmd: tpl ? undefined : cmd.trim() || undefined,
-      cwd: tpl ? undefined : cwd.trim() || undefined,
+      cmd: action === 'command' ? cmd.trim() || undefined : undefined,
+      cwd: action === 'command' ? cwd.trim() || undefined : undefined,
       templateId: tpl?.id,
       prompt: tpl ? prompt.trim() || undefined : undefined,
+      boardTask: action === 'task' ? { title: taskTitle.trim(), description: taskDesc.trim() || undefined } : undefined,
     })
     onClose()
   }
@@ -51,30 +73,72 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
       >
         <div className="grotesk" style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>New schedule</div>
         <div style={{ fontSize: 12, color: 'var(--mut)', marginBottom: 14, lineHeight: 1.5 }}>
-          Fires on a cron expression. With a command set, each run launches a live session.
+          Run once at a future time, or recur on a cron expression. With a command set, each run launches a live session.
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="name · e.g. nightly-regression" style={fieldStyle} />
-          <div>
-            <input value={schedule} onChange={e => setSchedule(e.target.value)} placeholder="cron · min hour dom mon dow" style={fieldStyle} />
-            <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4, paddingLeft: 2 }}>{humanizeCron(schedule)}</div>
+          <div style={{ display: 'flex', gap: 6, background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9, padding: 4 }}>
+            {([['cron', 'Recurring · crontab'], ['once', 'One-time · run at']] as const).map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setKind(k)}
+                style={{
+                  flex: 1, padding: '7px 0', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600,
+                  background: kind === k ? hexToRgba(ACCENT, 0.16) : 'transparent',
+                  color: kind === k ? 'var(--accent)' : 'var(--mut)',
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <select value={templateId} onChange={e => setTemplateId(e.target.value)} className="select-field" style={fieldStyle}>
-            <option value="">no template — raw command below</option>
-            {templates.map(t => <option key={t.id} value={t.id}>template · {t.name} ({t.mode})</option>)}
-          </select>
-          {tpl ? (
-            <textarea
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-              placeholder={tpl.prompt.includes('{task}') ? 'task text · fills {task} in the template prompt' : 'appended to the template prompt (optional)'}
-              rows={3}
-              style={{ ...fieldStyle, resize: 'vertical' }}
-            />
+          <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="name · e.g. nightly-regression" style={fieldStyle} />
+          {kind === 'cron' ? (
+            <div>
+              <input value={schedule} onChange={e => setSchedule(e.target.value)} placeholder="cron · min hour dom mon dow" style={fieldStyle} />
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4, paddingLeft: 2 }}>{humanizeCron(schedule)}</div>
+            </div>
           ) : (
+            <div>
+              <input type="datetime-local" value={at} onChange={e => setAt(e.target.value)} style={fieldStyle} />
+              <div style={{ fontSize: 11, color: Number.isFinite(atMs) && atMs > Date.now() ? 'var(--dim)' : 'var(--red-soft)', marginTop: 4, paddingLeft: 2 }}>
+                {Number.isFinite(atMs) && atMs > Date.now()
+                  ? `fires once · ${new Date(atMs).toLocaleString()}`
+                  : 'pick a time in the future'}
+              </div>
+            </div>
+          )}
+          <select value={action} onChange={e => setAction(e.target.value as 'command' | 'template' | 'task')} className="select-field" style={fieldStyle}>
+            <option value="command">action · run a command</option>
+            {templates.length > 0 && <option value="template">action · run a template (as board task)</option>}
+            <option value="task">action · add a task to the board</option>
+          </select>
+          {action === 'template' && (
+            <>
+              <select value={templateId} onChange={e => setTemplateId(e.target.value)} className="select-field" style={fieldStyle}>
+                <option value="">pick a template…</option>
+                {templates.map(t => <option key={t.id} value={t.id}>template · {t.name} ({t.mode})</option>)}
+              </select>
+              {tpl && (
+                <textarea
+                  value={prompt}
+                  onChange={e => setPrompt(e.target.value)}
+                  placeholder={tpl.prompt.includes('{task}') ? 'task text · fills {task} in the template prompt' : 'appended to the template prompt (optional)'}
+                  rows={3}
+                  style={{ ...fieldStyle, resize: 'vertical' }}
+                />
+              )}
+            </>
+          )}
+          {action === 'command' && (
             <>
               <input value={cmd} onChange={e => setCmd(e.target.value)} placeholder="command (optional) · e.g. claude -p 'run the tests'" style={fieldStyle} />
               <input value={cwd} onChange={e => setCwd(e.target.value)} placeholder="working directory (optional)" style={fieldStyle} />
+            </>
+          )}
+          {action === 'task' && (
+            <>
+              <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="task title · lands in Backlog when the schedule fires" style={fieldStyle} />
+              <textarea value={taskDesc} onChange={e => setTaskDesc(e.target.value)} placeholder="task description (optional)" rows={3} style={{ ...fieldStyle, resize: 'vertical' }} />
             </>
           )}
         </div>
@@ -97,7 +161,7 @@ export function Schedules() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <ViewHeader title="Schedules">
-        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Recurring runs — schedules with a command launch live sessions</span>
+        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>One-time or recurring runs — schedules with a command launch live sessions</span>
         <div style={{ flex: 1 }} />
         <button className="open-btn" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px' }} onClick={() => setDialogOpen(true)}>
           <Icon paths={IC.plus} size={14} stroke={1.8} />New schedule
@@ -128,10 +192,14 @@ export function Schedules() {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, fontSize: 11.5, color: 'var(--mut)' }}>
-                <span className="mono" style={{ color: 'var(--dim)' }}>{c.schedule}</span>
-                <span>{c.human}</span>
+                <span className="mono" style={{ color: 'var(--dim)' }}>
+                  {c.at ? new Date(c.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : c.schedule}
+                </span>
+                <span>{c.at ? (c.on ? 'one-time' : 'one-time · done') : c.human}</span>
                 <span style={{ color: 'var(--faint)' }}>·</span>
-                <span>{c.templateId
+                <span>{c.boardTask
+                  ? `adds board task · “${c.boardTask.title.slice(0, 40)}”`
+                  : c.templateId
                   ? `template · ${(s.templates ?? []).find(t => t.id === c.templateId)?.name ?? c.templateId}${c.prompt ? ` — “${c.prompt.slice(0, 40)}”` : ''}`
                   : c.cmd ? c.cmd : 'no command — logs only'}</span>
               </div>

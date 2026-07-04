@@ -18,6 +18,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const { newRealSession, runTemplate } = useActions()
   const enabledTypes = useMemo(() => s.agentTypes.filter(t => t.enabled), [s.agentTypes])
   const [typeId, setTypeId] = useState(enabledTypes[0]?.id ?? 'shell')
+  const [templateId, setTemplateId] = useState('')
   const [shell, setShell] = useState(s.settings.shell || 'zsh')
   const [command, setCommand] = useState(enabledTypes[0]?.model ?? '')
   const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
@@ -26,13 +27,13 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const isShell = typeId === 'shell'
   const isCustom = typeId === 'custom'
   const templates = s.templates ?? []
-  const tpl = typeId.startsWith('tpl:') ? templates.find(t => t.id === typeId.slice(4)) : undefined
+  const tpl = templateId ? templates.find(t => t.id === templateId) : undefined
   const effectiveCommand = isShell ? `${shell} -i` : command
 
   const selectType = (id: string) => {
     setTypeId(id)
     if (id === 'custom') setCommand('')
-    else if (id !== 'shell' && !id.startsWith('tpl:')) {
+    else if (id !== 'shell') {
       const t = s.agentTypes.find(x => x.id === id)
       if (t) setCommand(t.model)
     }
@@ -70,19 +71,25 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
             : 'Sessions need the desktop app — this browser build cannot spawn processes.'}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <FieldLabel>Agent type</FieldLabel>
-            <select value={typeId} onChange={e => selectType(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
-              {enabledTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              <option value="shell">Terminal</option>
-              <option value="custom">Custom command…</option>
-              {templates.length > 0 && (
-                <optgroup label="Templates">
-                  {templates.map(t => <option key={t.id} value={`tpl:${t.id}`}>{t.name} · {t.mode}</option>)}
-                </optgroup>
-              )}
-            </select>
-          </div>
+          {templates.length > 0 && (
+            <div>
+              <FieldLabel>Template (optional)</FieldLabel>
+              <select value={templateId} onChange={e => setTemplateId(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
+                <option value="">none — configure manually</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name} · {t.mode === 'ephemeral' ? 'one-shot' : 'interactive'}</option>)}
+              </select>
+            </div>
+          )}
+          {!tpl && (
+            <div>
+              <FieldLabel>Agent type</FieldLabel>
+              <select value={typeId} onChange={e => selectType(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
+                {enabledTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <option value="shell">Terminal</option>
+                <option value="custom">Custom command…</option>
+              </select>
+            </div>
+          )}
           {tpl ? (
             <div>
               <FieldLabel>Task</FieldLabel>
