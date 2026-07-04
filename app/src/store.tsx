@@ -365,6 +365,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // ref: setNeedsInput is declared before the hook runner
   const fireAddonHookRef = useRef<(hook: AddonHookName, event: Record<string, unknown>) => void>(() => {})
   const runAddonAgentRef = useRef<(addonId: string, note: string) => Promise<string>>(async () => 'agent not ready')
+  /** sessions the user stopped via ■ — their exit is a STOP, not a completion/failure */
+  const userStoppedRef = useRef<Set<string>>(new Set())
 
   const lastFlaggedRef = useRef<Map<string, string>>(new Map())
 
@@ -818,7 +820,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const offExit = native.onSessionExit(e => {
       const agent = stateRef.current.agents.find(a => a.id === e.id)
-      const failed = e.code !== 0 && e.code !== null
+      const userStopped = userStoppedRef.current.delete(e.id)
+      const failed = !userStopped && e.code !== 0 && e.code !== null
       const taskFor = taskForSession(e.id)
       dispatch(s => {
         const withAgent = {
@@ -827,19 +830,21 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           ? {
               ...a,
               status: failed ? 'error' as const : 'idle' as const,
-              attention: true,
-              log: a.log.concat([{ t: 'sys' as const, x: `process exited${e.code !== null ? ` · code ${e.code}` : ''}` }]),
+              attention: !userStopped,
+              log: a.log.concat([{ t: 'sys' as const, x: userStopped ? 'stopped by you' : `process exited${e.code !== null ? ` · code ${e.code}` : ''}` }]),
             }
           : a),
         }
         if (!taskFor) return withAgent
         return updateLocatedTask(withAgent, taskFor.task.id, t => ({
           ...t,
-          col: failed ? 'failed' : t.col === 'done' ? 'done' : 'review',
+          col: userStopped ? t.col : failed ? 'failed' : t.col === 'done' ? 'done' : 'review',
           awaitingUser: false,
-          watcherNote: failed
-            ? `one-shot exited with code ${e.code}`
-            : 'one-shot finished · assessing result',
+          watcherNote: userStopped
+            ? 'session stopped by the user'
+            : failed
+              ? `one-shot exited with code ${e.code}`
+              : 'one-shot finished · assessing result',
         }), taskFor.workspaceId)
       })
       if (agent && !agent.cliSessionId && agent.cmd && agent.launchedAt) {
@@ -859,14 +864,21 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         // if this session was working a kanban task, its watcher assesses the outcome
         if (taskFor) {
           const tail = (agent.log ?? []).slice(-12).map(l => l.x).join('\n')
-          pushTaskChat(taskFor.task.id, 'system', failed
-            ? `One-shot session exited with code ${e.code}`
-            : 'One-shot session exited cleanly')
-          runWatcherRef.current(taskFor.task.id,
-            `The task's session "${agent.name}" exited ${failed ? `with code ${e.code} (failure)` : 'cleanly'}. Final output:\n${tail}\n\n` +
-            'Assess the result against the acceptance criteria: move the task (review when it looks complete, failed if the attempt is dead), update your note, and brief the user in one short message. Ask the user only if the outcome is genuinely ambiguous.')
+          pushTaskChat(taskFor.task.id, 'system', userStopped
+            ? 'Session stopped by the user'
+            : failed
+              ? `One-shot session exited with code ${e.code}`
+              : 'One-shot session exited cleanly')
+          runWatcherRef.current(taskFor.task.id, userStopped
+            ? `The user manually STOPPED the task's session "${agent.name}". This is a pause, not a failure — do not move the task to failed or claim completion. Update your note and wait for instructions.`
+            : `The task's session "${agent.name}" exited ${failed ? `with code ${e.code} (failure)` : 'cleanly'}. Final output:\n${tail}\n\n` +
+              'Assess the result against the acceptance criteria: move the task (review when it looks complete, failed if the attempt is dead), update your note, and brief the user in one short message. Ask the user only if the outcome is genuinely ambiguous.')
         }
-        if (agent.ephemeral) {
+        if (userStopped) {
+          // a user stop is neither completion nor failure — the session stays
+          // visible as stopped; no notifications, no auto-archive
+          logEvent('edit', e.id, `${agent.name} stopped by you`)
+        } else if (agent.ephemeral) {
           // one-shot agents exit by design — a clean exit is task completion
           logEvent(failed ? 'escalate' : 'done', e.id, `${agent.name} ${failed ? `one-shot run failed · exit ${e.code}` : 'completed its one-shot run'}`)
           notify(
@@ -2952,6 +2964,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     },
 
     stopSession: id => {
+      userStoppedRef.current.add(id)
       native.killSession(id).catch(() => {})
       dispatch(s => ({
         ...s,

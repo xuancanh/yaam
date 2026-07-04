@@ -104,9 +104,15 @@ function EmptySlot({ index }: { index: number }) {
   const s = useConductor()
   const { assignPane, openNewSession, setActivePane } = useActions()
   const [picking, setPicking] = useState(false)
-  const inAnyGroup = new Set(s.groups.flatMap(g => g.slots).filter(Boolean))
-  const available = s.agents.filter(a =>
-    !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace && !inAnyGroup.has(a.id))
+  // assignable: loose sessions, plus sessions sitting alone in a single-pane
+  // group (assigning pulls them over and dissolves the emptied group) —
+  // only sessions already in the ACTIVE group are off the menu
+  const available = s.agents.filter(a => {
+    if (a.archived || (a.workspaceId ?? s.activeWorkspace) !== s.activeWorkspace) return false
+    const g = s.groups.find(x => x.slots.includes(a.id))
+    if (!g) return true
+    return g.id !== s.activeGroup && g.slots.filter(Boolean).length <= 1
+  })
 
   return (
     <div

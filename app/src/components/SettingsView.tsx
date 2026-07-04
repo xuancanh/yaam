@@ -178,29 +178,38 @@ function ChatTypesSection() {
                   </button>
                 </div>
                 {t.desc && <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 4, lineHeight: 1.45 }}>{t.desc}</div>}
-                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, minWidth: 0 }}>
                   <select
                     value={t.provider}
                     onChange={e => {
                       const next = providerFor(e.target.value)
-                      updateChatAgentType(t.id, { provider: next.id, model: next.models[0] ?? t.model })
+                      updateChatAgentType(t.id, { provider: next.id, model: next.models[0] ?? '' })
                     }}
                     className="select-field"
-                    style={{ ...FIELD_STYLE, flex: 1, padding: '5px 9px', fontSize: 11.5 }}
+                    style={{ ...FIELD_STYLE, flex: 1, minWidth: 0, padding: '5px 9px', fontSize: 11.5 }}
                   >
                     {PROVIDERS.map(pr => <option key={pr.id} value={pr.id}>{pr.label}</option>)}
                   </select>
+                  {prov.models.length > 0 && (
+                    <select
+                      value={prov.models.includes(t.model) ? t.model : '__custom__'}
+                      onChange={e => updateChatAgentType(t.id, { model: e.target.value === '__custom__' ? '' : e.target.value })}
+                      className="select-field"
+                      style={{ ...FIELD_STYLE, flex: 1, minWidth: 0, padding: '5px 9px', fontSize: 11.5 }}
+                    >
+                      {prov.models.map(m => <option key={m} value={m}>{m}</option>)}
+                      <option value="__custom__">custom model…</option>
+                    </select>
+                  )}
+                </div>
+                {(prov.models.length === 0 || !prov.models.includes(t.model)) && (
                   <input
                     value={t.model}
                     onChange={e => updateChatAgentType(t.id, { model: e.target.value })}
-                    placeholder="model"
-                    list={'models-' + t.id}
-                    style={{ ...FIELD_STYLE, flex: 1, padding: '5px 9px', fontSize: 11.5 }}
+                    placeholder="model id · e.g. claude-sonnet-5"
+                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11.5 }}
                   />
-                  <datalist id={'models-' + t.id}>
-                    {prov.models.map(m => <option key={m} value={m} />)}
-                  </datalist>
-                </div>
+                )}
                 {t.provider !== 'bedrock' && (
                   <input
                     type="password"

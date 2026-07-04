@@ -96,9 +96,9 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         height: 26, flexShrink: 0, background: 'var(--panel)', borderTop: '1px solid var(--line)',
         display: 'flex', alignItems: 'center', gap: 14, padding: '0 12px', fontSize: 10.5, color: 'var(--dim)',
       }}>
-        <span>{agent.model}</span>
-        <span>{memOn.length} memories · {memTotal.toFixed(1)}k</span>
-        <span>{toolCount} tools</span>
+        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{agent.model}</span>
+        <span style={{ flexShrink: 0 }}>{memOn.length} memories · {memTotal.toFixed(1)}k</span>
+        <span style={{ flexShrink: 0 }}>{toolCount} tools</span>
         {agent.cliSessionId && (
           <span title={`CLI session ${agent.cliSessionId} — used for resume`} style={{ marginLeft: 'auto', color: 'var(--faint)' }}>
             ⧉ {agent.cliSessionId.slice(0, 8)}

@@ -123,6 +123,11 @@ export function isAltScreen(id: string): boolean {
 export function fitTerminal(id: string) {
   const entry = entries.get(id)
   if (!entry || !entry.term.element) return
+  // a mid-unmount ResizeObserver tick measures 0 height — fitting then would
+  // clamp the terminal to one row and wreck the viewport (measure the host
+  // container: the xterm element itself sizes from the last fit)
+  const host = entry.term.element.parentElement
+  if (host && !host.clientHeight) return
   try {
     entry.fit.fit()
     resizeSession(id, entry.term.rows, entry.term.cols)

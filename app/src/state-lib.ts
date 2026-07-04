@@ -153,13 +153,14 @@ export function groupsFromLegacy(d: {
   return { groups, activeGroup }
 }
 
-/** Drop a session from every group; prune groups that end up fully empty
- *  (except the active one, whose empty grid the user may be assigning). */
+/** Drop a session from every group; prune groups that end up fully empty.
+ *  A single-pane group always closes with its session; an emptied ACTIVE
+ *  multi-pane grid survives so the user can reassign its sections. */
 export function removeFromGroups(s: AppState, id: string): Pick<AppState, 'groups' | 'activeGroup'> {
   let groups = s.groups.map(g => g.slots.includes(id)
     ? { ...g, slots: g.slots.map(x => (x === id ? null : x)), maximizedPane: null }
     : g)
-  groups = groups.filter(g => g.slots.some(Boolean) || g.id === s.activeGroup)
+  groups = groups.filter(g => g.slots.some(Boolean) || (g.id === s.activeGroup && g.slots.length > 1))
   const activeGroup = groups.some(g => g.id === s.activeGroup) ? s.activeGroup : groups[0]?.id ?? null
   return { groups, activeGroup }
 }
