@@ -77,6 +77,15 @@ export function extractOptions(lines: string[]): { options: EscOption[]; cursorN
   return options.length >= 2 ? { options, cursorNum } : { options: [], cursorNum: 1 }
 }
 
+/** full prompt handed to the one-shot session working a kanban task */
+export function taskPrompt(task: { title: string; description?: string; criteria?: string[] }): string {
+  return [
+    task.title,
+    task.description,
+    task.criteria?.length ? `Acceptance criteria:\n${task.criteria.map(c => `- ${c}`).join('\n')}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
 export function typeForCommand(command: string, types: AppState['agentTypes']) {
   const bin = command.trim().split(/\s+/)[0]
   return types.find(t => t.model.trim().split(/\s+/)[0] === bin)

@@ -163,6 +163,10 @@ export interface Cron {
   /** command to launch as a real session when the schedule fires */
   cmd?: string
   cwd?: string
+  /** one-time run at this epoch ms (instead of a recurring cron expression) */
+  at?: number
+  /** when set, firing adds this task to the kanban board instead of launching */
+  boardTask?: { title: string; description?: string }
   lastFiredMinute?: string
   /** agent template launched on fire (overrides cmd) */
   templateId?: string
@@ -265,7 +269,7 @@ export interface OrchestrationSettings {
   sidebarHidden?: boolean
 }
 
-export type BoardCol = 'backlog' | 'routed' | 'progress' | 'review' | 'done'
+export type BoardCol = 'backlog' | 'routed' | 'progress' | 'review' | 'done' | 'failed'
 
 export type TemplateMode = 'ephemeral' | 'interactive'
 /** safe = read-only / ask for everything · edits = auto-approve file edits · full = no approvals or sandbox */
@@ -293,15 +297,37 @@ export interface AgentTemplate {
   autoArchive: boolean
 }
 
+/** one message in a task's watcher chat */
+export interface TaskChatMsg {
+  id: string
+  role: 'user' | 'watcher' | 'system'
+  text: string
+  at: number
+}
+
 export interface BoardTask {
   id: string
   title: string
   col: BoardCol
   agentId: string | null
+  /** what needs to be done, in enough detail for a one-shot agent */
+  description?: string
+  /** acceptance criteria the watcher verifies before moving to done */
+  criteria?: string[]
+  /** chat with this task's watcher (mini master) */
+  chat?: TaskChatMsg[]
+  /** watcher's one-line status shown on the card */
+  watcherNote?: string
+  /** the watcher flagged a question and is waiting on the user */
+  awaitingUser?: boolean
   /** epoch ms — a session is spawned for the task at this time */
   scheduleAt?: number
   /** template used when the task spawns its session */
   templateId?: string
+  /** agent type used when no template is set; empty = first enabled type */
+  typeId?: string
+  /** working directory for the spawned session (overrides template/default) */
+  cwd?: string
 }
 
 export interface AddonTool {
