@@ -9,6 +9,7 @@ import { gitFileDiff, gitStatus, listDir, readTextFile } from '../../native'
 import type { DirEntryInfo } from '../../native'
 import type { Agent } from '../../types'
 import { IC, Icon } from '../ui'
+import { Markdown } from '../Markdown'
 import { ChatPane } from './ChatPane'
 import { TerminalPane } from './TerminalPane'
 
@@ -159,11 +160,14 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   const [content, setContent] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [marks, setMarks] = useState<{ added: Set<number>; modified: Set<number>; deletedAfter: Set<number> } | null>(null)
+  const [mdView, setMdView] = useState<'rendered' | 'raw'>('rendered')
   const contentRef = useRef<string | null>(null)
 
   const status = git?.byPath.get(path)
   const name = path.slice(path.lastIndexOf('/') + 1)
   const lang = langForFile(name)
+  const isMd = /\.(md|markdown|mdx)$/i.test(name)
+  const rendered = isMd && mdView === 'rendered'
   const rel = git && path.startsWith(git.root + '/') ? path.slice(git.root.length + 1) : null
 
   // Read the selected file and its diff, ignoring stale async completions.
@@ -201,6 +205,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
     setContent(null)
     setErr(null)
     setMarks(null)
+    setMdView('rendered')
     void load()
     const iv = window.setInterval(() => void load(), 4000)
     return () => window.clearInterval(iv)
@@ -241,6 +246,16 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         )}
         <span className="mono" style={{ fontSize: 10, color: 'var(--faint)', flexShrink: 0 }}>{allLines.length} lines</span>
         <div style={{ flex: 1 }} />
+        {isMd && (
+          <button
+            className="icon-btn"
+            title={rendered ? 'Rendered markdown — click for raw source' : 'Raw source — click for rendered markdown'}
+            onClick={() => setMdView(v => (v === 'rendered' ? 'raw' : 'rendered'))}
+            style={{ width: 26, height: 26, borderRadius: 6, color: rendered ? 'var(--accent)' : undefined }}
+          >
+            <span className="mono" style={{ fontSize: 10, fontWeight: 700 }}>M↓</span>
+          </button>
+        )}
         <button
           className="icon-btn"
           title={gutter === 'numbers' ? 'Gutter: line numbers — click for git change markers' : 'Gutter: git change markers — click for line numbers'}
@@ -272,6 +287,15 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         </div>
       ) : content === null ? (
         <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
+      ) : rendered ? (
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <div style={{
+            maxWidth: 760, padding: '18px 24px', fontSize: 13, lineHeight: 1.65, color: '#C7CCD6',
+            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+          }}>
+            <Markdown text={content} />
+          </div>
+        </div>
       ) : (
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <div style={{ display: 'inline-block', minWidth: '100%' }}>
