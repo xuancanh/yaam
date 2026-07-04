@@ -54,12 +54,25 @@ pub fn chat_search_reindex(
     let mut writer = index.writer(15_000_000).map_err(|e| e.to_string())?;
     let count = docs.len();
     for d in docs {
+        // bound a single message's contribution to the in-RAM index
+        let body = if d.text.len() > 20_000 {
+            let cut = d
+                .text
+                .char_indices()
+                .map(|(i, _)| i)
+                .take_while(|&i| i <= 20_000)
+                .last()
+                .unwrap_or(0);
+            d.text[..cut].to_string()
+        } else {
+            d.text
+        };
         writer
             .add_document(doc!(
                 chat_id => d.chat_id,
                 msg_id => d.msg_id,
                 role => d.role,
-                text => d.text,
+                text => body,
             ))
             .map_err(|e| e.to_string())?;
     }

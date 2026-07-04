@@ -76,11 +76,15 @@ struct SessionHandle {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// distinguishes a resumed session reusing the same id from the one whose
+    /// exit thread is still in flight
+    generation: u64,
 }
 
 #[derive(Default)]
 pub struct SessionManager {
     sessions: Mutex<HashMap<String, SessionHandle>>,
+    next_generation: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Clone, Serialize)]
@@ -151,12 +155,16 @@ pub fn spawn_session(
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     let killer = child.clone_killer();
 
+    let generation = state
+        .next_generation
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     state.sessions.lock().unwrap().insert(
         id.clone(),
         SessionHandle {
             master: pair.master,
             writer,
             killer,
+            generation,
         },
     );
 
@@ -182,8 +190,20 @@ pub fn spawn_session(
     std::thread::spawn(move || {
         let code = child.wait().ok().map(|s| s.exit_code() as i32);
         let mgr = app_exit.state::<SessionManager>();
-        mgr.sessions.lock().unwrap().remove(&id_exit);
-        let _ = app_exit.emit("session-exit", ExitEvent { id: id_exit, code });
+        let mut sessions = mgr.sessions.lock().unwrap();
+        // a stop + relaunch can reuse this id before we get here — never
+        // remove (or report exit for) a newer session's handle
+        let stale = sessions
+            .get(&id_exit)
+            .map(|h| h.generation != generation)
+            .unwrap_or(false);
+        if !stale {
+            sessions.remove(&id_exit);
+        }
+        drop(sessions);
+        if !stale {
+            let _ = app_exit.emit("session-exit", ExitEvent { id: id_exit, code });
+        }
     });
 
     Ok(())
@@ -456,52 +476,90 @@ pub async fn exec_command(
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        #[cfg(unix)]
+        {
+            // own process group: a timeout kill reaches grandchildren too
+            use std::os::unix::process::CommandExt;
+            c.process_group(0);
+        }
         if let Some(dir) = cwd.filter(|d| !d.trim().is_empty()) {
             c.current_dir(expand_tilde(&dir));
         }
         let mut child = c.spawn().map_err(|e| format!("failed to run: {e}"))?;
+        let pid = child.id() as i32;
+        // drain both pipes on their own threads — a child that writes more
+        // than the pipe buffer would otherwise block forever before exiting
+        let mut stdout_pipe = child.stdout.take();
+        let mut stderr_pipe = child.stderr.take();
+        let out_thread = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(p) = stdout_pipe.as_mut() {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        });
+        let err_thread = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(p) = stderr_pipe.as_mut() {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        });
+        let kill_tree = |child: &mut std::process::Child| {
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+        };
         let start = std::time::Instant::now();
-        loop {
+        let (status, timed_out) = loop {
             match child.try_wait().map_err(|e| e.to_string())? {
-                Some(status) => {
-                    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-                    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
-                    let err = String::from_utf8_lossy(&out.stderr);
-                    if !err.trim().is_empty() {
-                        if !text.trim().is_empty() {
-                            text.push('\n');
-                        }
-                        text.push_str(&err);
-                    }
-                    // cap what travels back to the LLM
-                    const CAP: usize = 40_000;
-                    if text.len() > CAP {
-                        let tail_at = text.len() - CAP;
-                        let cut = text
-                            .char_indices()
-                            .map(|(i, _)| i)
-                            .find(|&i| i >= tail_at)
-                            .unwrap_or(0);
-                        text = format!("… (output truncated)\n{}", &text[cut..]);
-                    }
-                    return Ok(ExecResult {
-                        code: status.code().unwrap_or(-1),
-                        output: text,
-                    });
-                }
+                Some(status) => break (Some(status), false),
                 None => {
                     if start.elapsed() > timeout {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Ok(ExecResult {
-                            code: -1,
-                            output: format!("command timed out after {}s and was killed", timeout.as_secs()),
-                        });
+                        kill_tree(&mut child);
+                        break (None, true);
                     }
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
             }
+        };
+        let stdout_buf = out_thread.join().unwrap_or_default();
+        let stderr_buf = err_thread.join().unwrap_or_default();
+        let mut text = String::from_utf8_lossy(&stdout_buf).to_string();
+        let err = String::from_utf8_lossy(&stderr_buf);
+        if !err.trim().is_empty() {
+            if !text.trim().is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&err);
         }
+        if timed_out {
+            if !text.trim().is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&format!(
+                "command timed out after {}s and was killed",
+                timeout.as_secs()
+            ));
+        }
+        // cap what travels back to the LLM
+        const CAP: usize = 40_000;
+        if text.len() > CAP {
+            let tail_at = text.len() - CAP;
+            let cut = text
+                .char_indices()
+                .map(|(i, _)| i)
+                .find(|&i| i >= tail_at)
+                .unwrap_or(0);
+            text = format!("… (output truncated)\n{}", &text[cut..]);
+        }
+        Ok(ExecResult {
+            code: status.map(|st| st.code().unwrap_or(-1)).unwrap_or(-1),
+            output: text,
+        })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -524,7 +582,24 @@ pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
 pub fn save_state(app: AppHandle, json: String) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join("conductor-state.json"), json).map_err(|e| e.to_string())
+    let path = dir.join("conductor-state.json");
+    let tmp = dir.join("conductor-state.json.tmp");
+    {
+        // temp file + fsync + rename: a crash mid-write can never truncate
+        // the only copy of the state
+        let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
+        f.sync_all().map_err(|e| e.to_string())?;
+    }
+    if path.exists() {
+        let _ = std::fs::rename(&path, dir.join("conductor-state.json.bak"));
+    }
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

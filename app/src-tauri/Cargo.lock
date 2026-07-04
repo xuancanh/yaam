@@ -89,6 +89,7 @@ dependencies = [
  "aws-sdk-bedrockruntime",
  "aws-smithy-types",
  "base64 0.22.1",
+ "libc",
  "log",
  "objc2",
  "objc2-app-kit",
