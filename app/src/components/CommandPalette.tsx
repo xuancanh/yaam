@@ -21,7 +21,6 @@ const NAV_COMMANDS: Array<[View, string]> = [
   ['board', 'Go to Board'],
   ['timeline', 'Go to Activity'],
   ['crons', 'Go to Schedules'],
-  ['tools', 'Go to Tools'],
   ['addons', 'Go to Addons'],
   ['settings', 'Go to Settings'],
 ]

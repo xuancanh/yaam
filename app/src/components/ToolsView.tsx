@@ -2,17 +2,12 @@ import { useActions, useConductor } from '../store'
 import { ACCENT, PERM_COLORS, hexToRgba } from '../data'
 import { ViewHeader } from './ui'
 
-/** Render and edit the Master tool permission catalog. */
-export function ToolsView() {
+/** The Master tool permission grid — embedded in Settings → Tools. */
+export function ToolsSection() {
   const s = useConductor()
   const { cycleCatalogPerm } = useActions()
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <ViewHeader title="Tools & permissions">
-        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>What Master may do — click a permission to change it (enforced on Master's tools)</span>
-      </ViewHeader>
-      <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
         <div style={{ display: 'grid', gap: 13, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
           {s.toolsCatalog.map(t => {
             const permColor = PERM_COLORS[t.perm] || 'var(--mut)'
@@ -43,6 +38,18 @@ export function ToolsView() {
             )
           })}
         </div>
+  )
+}
+
+/** Standalone view wrapper (legacy route). */
+export function ToolsView() {
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <ViewHeader title="Tools & permissions">
+        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>What Master may do — click a permission to change it (enforced on Master's tools)</span>
+      </ViewHeader>
+      <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+        <ToolsSection />
       </div>
     </div>
   )

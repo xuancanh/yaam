@@ -5,6 +5,7 @@ import { pickFolder } from '../native'
 import { PROVIDERS, providerFor } from '../master'
 import { SHELLS } from '../data'
 import { EditableName, IC, Icon, Switch, ViewHeader } from './ui'
+import { ToolsSection } from './ToolsView'
 
 const FIELD_STYLE = {
   background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 8,
@@ -274,6 +275,7 @@ const SETTINGS_TABS = [
   ['chatagents', 'Chat Agents'],
   ['mcp', 'MCP Servers'],
   ['skills', 'Skills'],
+  ['tools', 'Tools & Permissions'],
 ] as const
 type SettingsTab = (typeof SETTINGS_TABS)[number][0]
 
@@ -604,6 +606,11 @@ export function SettingsView() {
 
           {tab === 'mcp' && <McpSection />}
           {tab === 'skills' && <SkillsSection />}
+
+          {tab === 'tools' && <>
+          <SectionLabel>MASTER TOOLS — what Master may do; click a permission to cycle it</SectionLabel>
+          <ToolsSection />
+          </>}
 
         </div>
       </div>
