@@ -497,7 +497,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         }
         const exec: WatcherExec = {
           moveTask: col => {
-            const valid: BoardCol[] = ['backlog', 'routed', 'progress', 'review', 'done', 'failed']
+            const valid: BoardCol[] = ['backlog', 'progress', 'review', 'done', 'failed']
             if (!valid.includes(col as BoardCol)) return `invalid column "${col}"`
             const t = getTask()
             if (!t) return 'task no longer exists'
@@ -938,9 +938,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           const activeGroup = p.activeGroup && groups.some(g => g.id === p.activeGroup)
             ? p.activeGroup
             : groups[0]?.id ?? null
+          // the Routed column was removed — tasks parked there go back to Backlog
+          const migrateCols = (tasks: BoardTask[]) =>
+            tasks.map(t => ((t.col as string) === 'routed' ? { ...t, col: 'backlog' as const } : t))
+          const workspaceData = Object.fromEntries(Object.entries(p.workspaceData ?? {}).map(([wid, d]) =>
+            [wid, { ...d, tasks: migrateCols(d.tasks ?? []) }]))
           dispatch(s => ({
             ...s,
-            tasks: p.tasks ?? s.tasks,
+            tasks: migrateCols(p.tasks ?? s.tasks),
             crons: p.crons ?? s.crons,
             settings: { ...s.settings, ...(p.settings || {}) },
             toolsCatalog: p.toolsCatalog?.some(t => t.id === 'launch_session')
@@ -959,7 +964,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             minimizedIds: (p.minimizedIds ?? []).filter(id => ids.has(id)),
             workspaces,
             activeWorkspace,
-            workspaceData: p.workspaceData ?? {},
+            workspaceData,
             addonStorage: p.addonStorage ?? {},
             addons: (p.addons ?? s.addons).map(a => {
               const partial = a as Partial<Addon>
@@ -1272,7 +1277,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     tasks: {
       add: (title, col) => {
         const id = mkId('t')
-        const validCols = ['backlog', 'routed', 'progress', 'review', 'done']
+        const validCols = ['backlog', 'progress', 'review', 'done', 'failed']
         const column = validCols.includes(String(col)) ? String(col) as BoardCol : 'backlog'
         dispatch(s2 => ({
           ...s2,
@@ -1285,7 +1290,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         tasks: s2.tasks.map(t => (t.id === id ? { ...t, title: String(title).slice(0, 120) || t.title } : t)),
       })),
       move: (id, col) => {
-        const validCols = ['backlog', 'routed', 'progress', 'review', 'done']
+        const validCols = ['backlog', 'progress', 'review', 'done', 'failed']
         if (!validCols.includes(String(col))) return
         dispatch(s2 => ({
           ...s2,
@@ -2280,7 +2285,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       dispatch(s => id
         ? { ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, col } : t)), dragOverCol: null }
         : { ...s, dragOverCol: null })
-      if (id && (col === 'routed' || col === 'progress')) {
+      if (id && col === 'progress') {
         const task = stateRef.current.tasks.find(t => t.id === id)
         if (task && !task.agentId) later(50, () => spawnSessionForTask(id))
       }

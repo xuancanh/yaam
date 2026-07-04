@@ -167,7 +167,7 @@ Pushed on iframe load and every ~3 s. Shape:
   sessions: { id, name, status,            // running | idle | needs | error
               task, summary, actionNeeded, // monitor-maintained (or null)
               cwd, cost, used }[],
-  tasks:    { id, title, col, agentId }[], // col: backlog|routed|progress|review|done
+  tasks:    { id, title, col, agentId }[], // col: backlog|progress|review|done|failed
   crons:    { name, schedule, on, last }[],
   events:   { time, type, text }[],        // latest 10
   totals:   { cost, used, running }

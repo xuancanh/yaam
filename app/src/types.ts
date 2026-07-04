@@ -281,7 +281,7 @@ export interface OrchestrationSettings {
   sidebarHidden?: boolean
 }
 
-export type BoardCol = 'backlog' | 'routed' | 'progress' | 'review' | 'done' | 'failed'
+export type BoardCol = 'backlog' | 'progress' | 'review' | 'done' | 'failed'
 
 export type TemplateMode = 'ephemeral' | 'interactive'
 /** safe = read-only / ask for everything · edits = auto-approve file edits · full = no approvals or sandbox */

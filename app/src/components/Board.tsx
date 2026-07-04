@@ -424,7 +424,6 @@ function Card({ card, agent, onOpen }: { card: BoardTask; agent: Agent | null; o
 
 const COLS: Array<{ id: BoardCol; label: string; dot: string }> = [
   { id: 'backlog', label: 'Backlog', dot: '#6B7280' },
-  { id: 'routed', label: 'Routed', dot: '#6C8EF5' },
   { id: 'progress', label: 'In progress', dot: '#3DDC97' },
   { id: 'review', label: 'Needs review', dot: '#FFB020' },
   { id: 'done', label: 'Done', dot: '#4a5262' },

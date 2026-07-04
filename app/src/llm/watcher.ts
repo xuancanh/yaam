@@ -76,7 +76,7 @@ const WATCHER_TOOLS = [
     description: 'Move this task to a board column. progress = being worked on; review = work looks complete, awaiting user verification; done = criteria verified met; failed = the attempt failed and retrying as-is is pointless; backlog = paused/reset.',
     input_schema: {
       type: 'object',
-      properties: { col: { type: 'string', enum: ['backlog', 'routed', 'progress', 'review', 'done', 'failed'] } },
+      properties: { col: { type: 'string', enum: ['backlog', 'progress', 'review', 'done', 'failed'] } },
       required: ['col'],
     },
   },
