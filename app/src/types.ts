@@ -167,8 +167,18 @@ export interface Cron {
   cwd?: string
   /** one-time run at this epoch ms (instead of a recurring cron expression) */
   at?: number
-  /** when set, firing adds this task to the kanban board instead of launching */
-  boardTask?: { title: string; description?: string }
+  /** when set, firing adds this task to the kanban board instead of launching.
+   *  Carries the full task spec (same shape the board's New-task dialog produces);
+   *  startNow spawns its watcher-driven session immediately on fire. */
+  boardTask?: {
+    title: string
+    description?: string
+    criteria?: string[]
+    templateId?: string
+    typeId?: string
+    cwd?: string
+    startNow?: boolean
+  }
   lastFiredMinute?: string
   /** agent template launched on fire (overrides cmd) */
   templateId?: string

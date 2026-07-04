@@ -82,20 +82,25 @@ export function extractOptions(lines: string[]): { options: EscOption[]; cursorN
   return options.length >= 2 ? { options, cursorNum } : { options: [], cursorNum: 1 }
 }
 
-/** full prompt handed to the one-shot session working a kanban task.
- *  `withGoal` appends /goal-style stop-condition semantics (neither claude -p
- *  nor codex exec exposes a goal flag, so the criteria become an explicit
- *  self-verified stop condition in the prompt). */
-export function taskPrompt(task: { title: string; description?: string; criteria?: string[] }, withGoal?: boolean): string {
+// A task's prompt has two layers that must not be mixed into one blob:
+// the WORK TEXT (what to do — this is what fills a template's {task} slot)
+// and the CONTRACT (criteria + goal stop-condition — appended after the
+// fully composed prompt, so template framing never swallows or contradicts
+// the verification rules).
+
+/** the work item itself: title + description — fills a template's {task} slot */
+export function taskWorkText(task: { title: string; description?: string }): string {
+  return [task.title, task.description].filter(Boolean).join('\n\n')
+}
+
+/** verification contract appended after any template framing: acceptance
+ *  criteria plus /goal-style stop-condition semantics (neither claude -p nor
+ *  codex exec exposes a goal flag, so it lives in the prompt). */
+export function taskContract(task: { criteria?: string[] }): string {
   const criteria = task.criteria ?? []
-  return [
-    task.title,
-    task.description,
-    criteria.length ? `Acceptance criteria:\n${criteria.map(c => `- ${c}`).join('\n')}` : '',
-    withGoal && criteria.length
-      ? 'GOAL — treat the acceptance criteria above as your stop condition. Before finishing, re-verify each criterion against your actual changes and outputs; if any is unmet, keep working until it is. If something genuinely blocks you, stop and state precisely what is blocking and what you completed.'
-      : '',
-  ].filter(Boolean).join('\n\n')
+  if (!criteria.length) return ''
+  return `Acceptance criteria:\n${criteria.map(c => `- ${c}`).join('\n')}\n\n` +
+    'GOAL — treat the acceptance criteria above as your stop condition. They override any earlier instruction about when to stop. Before finishing, re-verify each criterion against your actual changes and outputs; if any is unmet, keep working until it is. If something genuinely blocks you, stop and state precisely what is blocking and what you completed.'
 }
 
 /** Resolve a configured agent type from the executable at the start of a command. */
@@ -291,12 +296,14 @@ export function shQuote(s: string): string {
  * without the placeholder the task is appended after the prompt.
  */
 /** Translate a template into the real CLI invocation for its configured agent type. */
-export function buildTemplateCommand(tpl: AgentTemplate, type: AgentType | undefined, task?: string): string {
+export function buildTemplateCommand(tpl: AgentTemplate, type: AgentType | undefined, task?: string, contract?: string): string {
   const bin = (type?.model ?? tpl.typeId).trim() || 'claude'
   const base = tpl.prompt.includes('{task}')
     ? tpl.prompt.replaceAll('{task}', task ?? '')
     : [tpl.prompt, task ?? ''].filter(Boolean).join('\n\n')
-  const prompt = base.trim()
+  // the verification contract (criteria + goal) rides AFTER the composed
+  // prompt so template framing never swallows or contradicts it
+  const prompt = [base.trim(), (contract ?? '').trim()].filter(Boolean).join('\n\n')
   const kind = type?.probe
     ?? (/(^|\/)claude$/.test(bin) ? 'claude' : /(^|\/)codex$/.test(bin) ? 'codex' : undefined)
   const extra = tpl.extraArgs.trim()

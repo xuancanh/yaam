@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DragEvent, KeyboardEvent } from 'react'
 import { useActions, useConductor } from '../store'
-import { isTauri, pickFolder } from '../native'
 import { ACCENT, hexToRgba } from '../data'
 import type { Agent, BoardCol, BoardTask, TaskChatMsg } from '../types'
 import { IC, Icon, ViewHeader } from './ui'
 import { Markdown } from './Markdown'
+import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from './TaskSpecForm'
 
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
@@ -34,87 +34,14 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
 /** Draft, validate, and create a watcher-ready board task. */
 function NewTaskDialog({ onClose }: { onClose: () => void }) {
   const s = useConductor()
-  const { createTask, draftTask } = useActions()
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [criteria, setCriteria] = useState('')
-  const [runWith, setRunWith] = useState('')
-  const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
-  const [busy, setBusy] = useState<'draft' | 'create' | null>(null)
-  const [questions, setQuestions] = useState<string[]>([])
-  const [error, setError] = useState('')
-  const llmOn = s.settings.masterEnabled
-  const enabledTypes = s.agentTypes.filter(t => t.enabled)
-  const templates = s.templates ?? []
+  const { createTask } = useActions()
+  const [spec, setSpec] = useState(() => emptyTaskSpec(s.settings.defaultCwd || ''))
+  const { busy, questions, error, llmOn, draft, resolveForCreate } = useTaskSpecAssist(spec, setSpec)
 
-  // Fill the task working directory from the native folder picker.
-  const browse = async () => {
-    const dir = await pickFolder(cwd || undefined)
-    if (dir) setCwd(dir)
-  }
-
-  // Translate the combined run selector into mutually exclusive task fields.
-  const runConfig = () => runWith.startsWith('tpl:')
-    ? { templateId: runWith.slice(4) }
-    : { typeId: runWith || undefined }
-
-  // Normalize the criteria textarea into a non-empty string list.
-  const parsedCriteria = () => criteria.split('\n').map(c => c.replace(/^[-•]\s*/, '').trim()).filter(Boolean)
-
-  // Ask the task-spec assistant to complete the current draft in place.
-  const draft = async () => {
-    if (!title.trim() || busy) return
-    setBusy('draft')
-    setError('')
-    setQuestions([])
-    try {
-      const res = await draftTask({ title: title.trim(), description: description.trim(), criteria: parsedCriteria() })
-      if (!res) { setError('No brain configured — enable LLM Master in Settings to draft with AI.'); return }
-      if (!res.ok) { setQuestions(res.questions.length ? res.questions : ['Add more detail — the assistant could not write a concrete spec.']); return }
-      setDescription(res.description)
-      setCriteria(res.criteria.join('\n'))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  // Validate the form, optionally improve it with the LLM, and add the task.
   const create = async () => {
-    if (!title.trim() || busy) return
-    setError('')
-    setQuestions([])
-    const crit = parsedCriteria()
-    if (llmOn) {
-      // the LLM completes the spec — or rejects the task and asks for more info
-      setBusy('create')
-      try {
-        const res = await draftTask({ title: title.trim(), description: description.trim(), criteria: crit })
-        if (res && !res.ok) {
-          setQuestions(res.questions.length ? res.questions : ['This task is too vague — describe what should happen and how to verify it.'])
-          return
-        }
-        createTask({
-          title: title.trim(),
-          description: res?.description ?? description.trim(),
-          criteria: res?.criteria ?? crit,
-          cwd: cwd.trim() || undefined,
-          ...runConfig(),
-        })
-        onClose()
-        return
-      } catch {
-        // brain unreachable — fall through to manual validation
-      } finally {
-        setBusy(null)
-      }
-    }
-    if (!description.trim() || !crit.length) {
-      setQuestions(['No brain is available to fill in the gaps — write a clear description and at least one acceptance criterion.'])
-      return
-    }
-    createTask({ title: title.trim(), description: description.trim(), criteria: crit, cwd: cwd.trim() || undefined, ...runConfig() })
+    const patch = await resolveForCreate()
+    if (!patch) return
+    createTask(patch)
     onClose()
   }
 
@@ -132,57 +59,14 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
           A good task has a clear description and verifiable criteria — its watcher uses them to drive a one-shot agent and judge the result.
           {llmOn ? ' The assistant fills in gaps, or asks questions when the idea is too vague.' : ''}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <FieldLabel>Title</FieldLabel>
-            <input autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Fix flaky login e2e test" style={FIELD} />
-          </div>
-          <div>
-            <FieldLabel hint="what needs to be done — concrete enough for a one-shot agent">Description</FieldLabel>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={4} placeholder="What, where, and any context the agent needs…" style={{ ...FIELD, resize: 'vertical', lineHeight: 1.5 }} />
-          </div>
-          <div>
-            <FieldLabel hint="one per line — the watcher verifies these before done">Acceptance criteria</FieldLabel>
-            <textarea value={criteria} onChange={e => setCriteria(e.target.value)} rows={3} placeholder={'tests pass locally\nno console errors on login page'} style={{ ...FIELD, resize: 'vertical', lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div>
-              <FieldLabel hint="agent type or template">Run with</FieldLabel>
-              <select value={runWith} onChange={e => setRunWith(e.target.value)} className="select-field" style={FIELD}>
-                <option value="">default · {enabledTypes[0]?.name ?? 'first enabled type'}</option>
-                {enabledTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                {templates.length > 0 && (
-                  <optgroup label="Templates">
-                    {templates.map(t => <option key={t.id} value={`tpl:${t.id}`}>{t.name} · {t.mode === 'ephemeral' ? 'one-shot' : 'interactive'}</option>)}
-                  </optgroup>
-                )}
-              </select>
-            </div>
-            <div>
-              <FieldLabel>Working folder</FieldLabel>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input value={cwd} onChange={e => setCwd(e.target.value)} placeholder="default" style={{ ...FIELD, fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5 }} />
-                <button className="open-btn" style={{ flex: 'none', padding: '0 11px', fontSize: 11.5 }} onClick={browse} disabled={!isTauri}>…</button>
-              </div>
-            </div>
-          </div>
-          {questions.length > 0 && (
-            <div style={{ border: '1px solid rgba(255,176,32,.4)', background: 'rgba(255,176,32,.07)', borderRadius: 10, padding: '10px 13px' }}>
-              <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--amber)', marginBottom: 6 }}>Needs more info before it can be created</div>
-              {questions.map((q, i) => (
-                <div key={i} style={{ fontSize: 12, color: '#C7CCD6', lineHeight: 1.5, marginBottom: 3 }}>• {q}</div>
-              ))}
-            </div>
-          )}
-          {error && <div style={{ fontSize: 11.5, color: 'var(--red-soft)' }}>{error}</div>}
-        </div>
+        <TaskSpecFields v={spec} set={setSpec} questions={questions} error={error} autoFocus />
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           {llmOn && (
-            <button className="open-btn" style={{ flex: 'none', padding: '9px 14px', opacity: title.trim() && !busy ? 1 : 0.45 }} onClick={draft} disabled={!title.trim() || !!busy}>
+            <button className="open-btn" style={{ flex: 'none', padding: '9px 14px', opacity: spec.title.trim() && !busy ? 1 : 0.45 }} onClick={draft} disabled={!spec.title.trim() || !!busy}>
               {busy === 'draft' ? 'Drafting…' : '✦ Draft with AI'}
             </button>
           )}
-          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: title.trim() && !busy ? 1 : 0.45 }} onClick={create} disabled={!title.trim() || !!busy}>
+          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: spec.title.trim() && !busy ? 1 : 0.45 }} onClick={create} disabled={!spec.title.trim() || !!busy}>
             {busy === 'create' ? 'Checking…' : 'Create task'}
           </button>
           <button className="deny-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={onClose}>Cancel</button>

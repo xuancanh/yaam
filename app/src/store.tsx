@@ -197,7 +197,7 @@ import {
   KEYMAP, PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
   activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, groupsFromLegacy,
   humanizeCron, mkGroup, mkId, removeFromGroups,
-  sendLineToSession, shQuote, spawnAgentProcess, switchWorkspaceIn, taskPrompt, typeForCommand, wait,
+  sendLineToSession, spawnAgentProcess, switchWorkspaceIn, taskContract, taskWorkText, typeForCommand, wait,
 } from './state-lib'
 
 export { cronMatches, humanizeCron } from './state-lib'
@@ -1144,7 +1144,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // Launch a session from an agent template: the template decides the CLI,
   // one-shot vs interactive mode, prompt/system prompt, approval, and model.
   // Resolve a persisted template into a command and launch it in the target workspace.
-  const launchFromTemplate = useCallback((templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean): string | null => {
+  const launchFromTemplate = useCallback((templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string): string | null => {
     const st = stateRef.current
     const stored = (st.templates ?? []).find(t => t.id === templateId)
     if (!stored) {
@@ -1153,7 +1153,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }
     const tpl = forceEphemeral && stored.mode !== 'ephemeral' ? { ...stored, mode: 'ephemeral' as const } : stored
     const type = st.agentTypes.find(t => t.id === tpl.typeId)
-    const command = buildTemplateCommand(tpl, type, task)
+    const command = buildTemplateCommand(tpl, type, task, contract)
     const id = launchSession(command, cwdOverride || tpl.cwd || st.settings.defaultCwd || '', tpl.name, type?.id, workspaceId, {
       ephemeral: tpl.mode === 'ephemeral', autoArchive: tpl.autoArchive, templateId: tpl.id,
     })
@@ -1172,12 +1172,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const st = stateRef.current
     const task = st.tasks.find(t => t.id === taskId)
     if (!task) return null
-    const prompt = taskPrompt(task, true)
+    // layered prompt: work text fills the template's {task} slot; the
+    // verification contract (criteria + goal) is appended after the composed
+    // prompt so template framing can't swallow or contradict it
+    const work = taskWorkText(task)
       + (extraInstructions?.trim() ? `\n\nAdditional instructions from the task watcher:\n${extraInstructions.trim()}` : '')
+    const contract = taskContract(task)
     let id: string | null = null
     // watcher-driven task sessions are ALWAYS one-shot: they run the task and exit
     if (task.templateId && (st.templates ?? []).some(t => t.id === task.templateId)) {
-      id = launchFromTemplate(task.templateId, prompt, undefined, task.cwd, true)
+      id = launchFromTemplate(task.templateId, work, undefined, task.cwd, true, contract)
     } else {
       const type = (task.typeId ? st.agentTypes.find(t => t.id === task.typeId) : undefined)
         ?? st.agentTypes.find(t => t.enabled)
@@ -1189,7 +1193,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         id: '', name: task.title.slice(0, 18), typeId: type.id, mode: 'ephemeral',
         prompt: '{task}', systemPrompt: '', model: '', approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
       }
-      id = launchSession(buildTemplateCommand(oneShot, type, prompt), task.cwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, undefined, { ephemeral: true })
+      id = launchSession(buildTemplateCommand(oneShot, type, work, contract), task.cwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, undefined, { ephemeral: true })
     }
     if (!id) return null
     taskSessionsRef.current.set(id, { taskId, workspaceId: st.activeWorkspace })
@@ -1345,11 +1349,18 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         })
         for (const c of due) {
           if (c.boardTask) {
-            // schedule adds a task to the kanban board instead of launching
+            // schedule adds a task to the kanban board instead of launching;
+            // it carries the full task spec, and startNow spawns its watcher-
+            // driven one-shot on the next scheduler tick
             const bt = c.boardTask
             const newTask: BoardTask = {
               id: mkId('t'), title: bt.title.slice(0, 120), col: 'backlog', agentId: null,
               description: bt.description,
+              criteria: bt.criteria,
+              templateId: bt.templateId,
+              typeId: bt.typeId,
+              cwd: bt.cwd,
+              scheduleAt: bt.startNow ? now.getTime() : undefined,
               chat: [{ id: mkId('tc'), role: 'system', text: `Added by schedule “${c.name}”`, at: Date.now() }],
             }
             dispatch(s => {
@@ -1411,10 +1422,18 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           }
           const id = !native.isTauri ? null
             : t.templateId && (st.templates ?? []).some(x => x.id === t.templateId)
-              ? launchFromTemplate(t.templateId, taskPrompt(t, true), pool.wid, t.cwd, true)
+              ? launchFromTemplate(t.templateId, taskWorkText(t), pool.wid, t.cwd, true, taskContract(t))
               : (() => {
-                  const type = st.agentTypes.find(x => x.enabled)
-                  return type ? launchSession(`${type.model} ${shQuote(taskPrompt(t, true))}`, t.cwd || st.settings.defaultCwd || '', t.title.slice(0, 18), type.id, pool.wid) : null
+                  // mirror spawnTaskSession exactly: honor the task's agent type
+                  // and force a one-shot run
+                  const type = (t.typeId ? st.agentTypes.find(x => x.id === t.typeId) : undefined)
+                    ?? st.agentTypes.find(x => x.enabled)
+                  if (!type) return null
+                  const oneShot: AgentTemplate = {
+                    id: '', name: t.title.slice(0, 18), typeId: type.id, mode: 'ephemeral',
+                    prompt: '{task}', systemPrompt: '', model: '', approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
+                  }
+                  return launchSession(buildTemplateCommand(oneShot, type, taskWorkText(t), taskContract(t)), t.cwd || st.settings.defaultCwd || '', t.title.slice(0, 18), type.id, pool.wid, { ephemeral: true })
                 })()
           if (id) {
             taskSessionsRef.current.set(id, { taskId: t.id, workspaceId: pool.wid })

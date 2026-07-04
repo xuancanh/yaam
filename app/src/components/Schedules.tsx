@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useActions, useConductor, humanizeCron } from '../store'
 import { ACCENT, hexToRgba } from '../data'
+import type { Cron } from '../types'
 import { IC, Icon, Switch, ViewHeader } from './ui'
+import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from './TaskSpecForm'
 
 /** default for the one-time picker: next full hour, in datetime-local format */
 /** Return the next local clock hour in datetime-local input format. */
@@ -21,25 +23,30 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('')
   const [schedule, setSchedule] = useState('0 3 * * *')
   const [at, setAt] = useState(nextHourLocal())
-  const [action, setAction] = useState<'command' | 'template' | 'task'>('command')
-  const [templateId, setTemplateId] = useState('')
-  const [prompt, setPrompt] = useState('')
+  const [action, setAction] = useState<'command' | 'task'>('command')
   const [cmd, setCmd] = useState('')
   const [cwd, setCwd] = useState('')
-  const [taskTitle, setTaskTitle] = useState('')
-  const [taskDesc, setTaskDesc] = useState('')
-  const templates = s.templates ?? []
-  const tpl = action === 'template' ? templates.find(t => t.id === templateId) : undefined
+  // the task action uses the exact same spec form + AI gate as the board's
+  // New-task dialog — templates are picked there as "Run with"
+  const [spec, setSpec] = useState(() => emptyTaskSpec(s.settings.defaultCwd || ''))
+  const [startNow, setStartNow] = useState(true)
+  const { busy, questions, error, llmOn, draft, resolveForCreate } = useTaskSpecAssist(spec, setSpec)
 
   const atMs = kind === 'once' ? new Date(at).getTime() : 0
   const valid = Boolean(name.trim())
     && (kind === 'cron' ? schedule.trim().split(/\s+/).length === 5 : Number.isFinite(atMs) && atMs > Date.now())
-    && (action !== 'task' || Boolean(taskTitle.trim()))
-    && (action !== 'template' || Boolean(tpl))
+    && (action !== 'task' || Boolean(spec.title.trim()))
 
   // Validate the selected mode and persist its normalized Cron record.
-  const create = () => {
-    if (!valid) return
+  const create = async () => {
+    if (!valid || busy) return
+    let boardTask: Cron['boardTask']
+    if (action === 'task') {
+      // same LLM completion / reject-with-questions gate as the task tab
+      const patch = await resolveForCreate()
+      if (!patch) return
+      boardTask = { ...patch, startNow }
+    }
     const once = kind === 'once'
     addCron({
       name: name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -49,13 +56,11 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
         : humanizeCron(schedule),
       at: once ? atMs : undefined,
       target: cwd.trim() ? cwd.trim().split('/').pop() || cwd.trim() : 'workspace',
-      agent: action === 'task' ? 'Board' : tpl ? tpl.name : cmd.trim() ? cmd.trim().split(/\s+/)[0] : 'Master',
+      agent: action === 'task' ? 'Board' : cmd.trim() ? cmd.trim().split(/\s+/)[0] : 'Master',
       color: ACCENT,
       cmd: action === 'command' ? cmd.trim() || undefined : undefined,
       cwd: action === 'command' ? cwd.trim() || undefined : undefined,
-      templateId: tpl?.id,
-      prompt: tpl ? prompt.trim() || undefined : undefined,
-      boardTask: action === 'task' ? { title: taskTitle.trim(), description: taskDesc.trim() || undefined } : undefined,
+      boardTask,
     })
     onClose()
   }
@@ -73,7 +78,7 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ width: 480, maxWidth: '92vw', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 15, boxShadow: '0 26px 70px rgba(0,0,0,.6)', padding: 18 }}
+        style={{ width: 540, maxWidth: '92vw', maxHeight: '84vh', overflowY: 'auto', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 15, boxShadow: '0 26px 70px rgba(0,0,0,.6)', padding: 18 }}
       >
         <div className="grotesk" style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>New schedule</div>
         <div style={{ fontSize: 12, color: 'var(--mut)', marginBottom: 14, lineHeight: 1.5 }}>
@@ -111,28 +116,10 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           )}
-          <select value={action} onChange={e => setAction(e.target.value as 'command' | 'template' | 'task')} className="select-field" style={fieldStyle}>
+          <select value={action} onChange={e => setAction(e.target.value as 'command' | 'task')} className="select-field" style={fieldStyle}>
             <option value="command">action · run a command</option>
-            {templates.length > 0 && <option value="template">action · run a template (as board task)</option>}
-            <option value="task">action · add a task to the board</option>
+            <option value="task">action · add a task to the board (template via “Run with”)</option>
           </select>
-          {action === 'template' && (
-            <>
-              <select value={templateId} onChange={e => setTemplateId(e.target.value)} className="select-field" style={fieldStyle}>
-                <option value="">pick a template…</option>
-                {templates.map(t => <option key={t.id} value={t.id}>template · {t.name} ({t.mode})</option>)}
-              </select>
-              {tpl && (
-                <textarea
-                  value={prompt}
-                  onChange={e => setPrompt(e.target.value)}
-                  placeholder={tpl.prompt.includes('{task}') ? 'task text · fills {task} in the template prompt' : 'appended to the template prompt (optional)'}
-                  rows={3}
-                  style={{ ...fieldStyle, resize: 'vertical' }}
-                />
-              )}
-            </>
-          )}
           {action === 'command' && (
             <>
               <input value={cmd} onChange={e => setCmd(e.target.value)} placeholder="command (optional) · e.g. claude -p 'run the tests'" style={fieldStyle} />
@@ -141,14 +128,24 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
           )}
           {action === 'task' && (
             <>
-              <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="task title · lands in Backlog when the schedule fires" style={fieldStyle} />
-              <textarea value={taskDesc} onChange={e => setTaskDesc(e.target.value)} placeholder="task description (optional)" rows={3} style={{ ...fieldStyle, resize: 'vertical' }} />
+              <TaskSpecFields v={spec} set={setSpec} questions={questions} error={error} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '2px 2px 0' }}>
+                <div style={{ flex: 1, fontSize: 11.5, color: 'var(--mut)' }}>
+                  Start when it fires <span style={{ color: 'var(--dim)' }}>— the watcher spawns its one-shot immediately; off = lands in Backlog</span>
+                </div>
+                <Switch on={startNow} onToggle={() => setStartNow(v => !v)} />
+              </div>
+              {llmOn && (
+                <button className="open-btn" style={{ alignSelf: 'flex-start', padding: '7px 14px', fontSize: 11.5, opacity: spec.title.trim() && !busy ? 1 : 0.45 }} onClick={draft} disabled={!spec.title.trim() || !!busy}>
+                  {busy === 'draft' ? 'Drafting…' : '✦ Draft with AI'}
+                </button>
+              )}
             </>
           )}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: valid ? 1 : 0.45 }} onClick={create} disabled={!valid}>
-            Create schedule
+          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: valid && !busy ? 1 : 0.45 }} onClick={create} disabled={!valid || !!busy}>
+            {busy === 'create' ? 'Checking…' : 'Create schedule'}
           </button>
           <button className="deny-btn" style={{ flex: 1, padding: 9 }} onClick={onClose}>Cancel</button>
         </div>
@@ -203,7 +200,7 @@ export function Schedules() {
                 <span>{c.at ? (c.on ? 'one-time' : 'one-time · done') : c.human}</span>
                 <span style={{ color: 'var(--faint)' }}>·</span>
                 <span>{c.boardTask
-                  ? `adds board task · “${c.boardTask.title.slice(0, 40)}”`
+                  ? `adds board task · “${c.boardTask.title.slice(0, 40)}”${c.boardTask.startNow ? ' · starts immediately' : ' · to backlog'}`
                   : c.templateId
                   ? `template · ${(s.templates ?? []).find(t => t.id === c.templateId)?.name ?? c.templateId}${c.prompt ? ` — “${c.prompt.slice(0, 40)}”` : ''}`
                   : c.cmd ? c.cmd : 'no command — logs only'}</span>

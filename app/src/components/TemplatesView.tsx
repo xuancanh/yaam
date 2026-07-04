@@ -227,9 +227,10 @@ export function TemplatesView() {
       <div style={{ flex: 1, overflowY: 'auto', padding: 22 }}>
         <div style={{ maxWidth: 980 }}>
           <div style={{ fontSize: 12.5, color: 'var(--mut)', marginBottom: 16, lineHeight: 1.55, maxWidth: 720 }}>
-            A template is a reusable launch config. <b style={{ color: 'var(--text)' }}>One-shot</b> templates (claude -p, codex exec)
-            spawn a session, run the task, and exit by themselves — ideal for scheduled and automated jobs.
-            <b style={{ color: 'var(--text)' }}> Interactive</b> templates stay open. Click a template to edit it.
+            A template is a reusable launch config: CLI, model, approvals, prompts, and working folder.
+            <b style={{ color: 'var(--text)' }}> One-shot</b> templates (claude -p, codex exec) run their task and exit by
+            themselves; <b style={{ color: 'var(--text)' }}>interactive</b> ones stay open. Launch them anywhere a session
+            starts — the new-session dialog, board tasks, schedules, or by asking Master. Click a template to edit it.
           </div>
           <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))' }}>
             {templates.map(t => <TemplateCard key={t.id} tpl={t} onEdit={() => setEditingId(t.id)} />)}
