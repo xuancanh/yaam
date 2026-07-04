@@ -32,7 +32,7 @@ function SchedulePopover({ card, onClose }: { card: BoardTask; onClose: () => vo
       <input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} style={field} />
       <select value={templateId} onChange={e => setTemplateId(e.target.value)} className="select-field" style={field}>
         <option value="">default agent type</option>
-        {s.templates.map(t => <option key={t.id} value={t.id}>template · {t.name} ({t.mode})</option>)}
+        {(s.templates ?? []).map(t => <option key={t.id} value={t.id}>template · {t.name} ({t.mode})</option>)}
       </select>
       <div style={{ display: 'flex', gap: 6 }}>
         <button
@@ -119,7 +119,7 @@ function Card({ card, agent }: { card: BoardTask; agent: Agent | null }) {
         <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 7, fontSize: 10.5, color: 'var(--accent)' }}>
           <Icon paths={['M12 12m-9 0a9 9 0 1018 0 9 9 0 10-18 0', 'M12 7v5l3 3']} size={11} stroke={1.8} />
           {new Date(card.scheduleAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-          {card.templateId ? ` · ${s.templates.find(t => t.id === card.templateId)?.name ?? ''}` : ''}
+          {card.templateId ? ` · ${(s.templates ?? []).find(t => t.id === card.templateId)?.name ?? ''}` : ''}
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10 }}>

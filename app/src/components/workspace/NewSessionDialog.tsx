@@ -25,7 +25,8 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
 
   const isShell = typeId === 'shell'
   const isCustom = typeId === 'custom'
-  const tpl = typeId.startsWith('tpl:') ? s.templates.find(t => t.id === typeId.slice(4)) : undefined
+  const templates = s.templates ?? []
+  const tpl = typeId.startsWith('tpl:') ? templates.find(t => t.id === typeId.slice(4)) : undefined
   const effectiveCommand = isShell ? `${shell} -i` : command
 
   const selectType = (id: string) => {
@@ -75,9 +76,9 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               {enabledTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               <option value="shell">Terminal</option>
               <option value="custom">Custom command…</option>
-              {s.templates.length > 0 && (
+              {templates.length > 0 && (
                 <optgroup label="Templates">
-                  {s.templates.map(t => <option key={t.id} value={`tpl:${t.id}`}>{t.name} · {t.mode}</option>)}
+                  {templates.map(t => <option key={t.id} value={`tpl:${t.id}`}>{t.name} · {t.mode}</option>)}
                 </optgroup>
               )}
             </select>

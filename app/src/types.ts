@@ -345,6 +345,7 @@ export type View =
   | 'timeline'
   | 'usage'
   | 'crons'
+  | 'templates'
   | 'tools'
   | 'settings'
   | 'addon'

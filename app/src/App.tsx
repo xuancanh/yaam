@@ -8,6 +8,7 @@ import { Board } from './components/Board'
 import { Timeline } from './components/Timeline'
 import { UsageView } from './components/UsageView'
 import { Schedules } from './components/Schedules'
+import { TemplatesView } from './components/TemplatesView'
 import { ToolsView } from './components/ToolsView'
 import { SettingsView } from './components/SettingsView'
 import { AddonView } from './components/AddonView'
@@ -26,6 +27,7 @@ function MainArea() {
       {s.view === 'timeline' && <Timeline />}
       {s.view === 'usage' && <UsageView />}
       {s.view === 'crons' && <Schedules />}
+      {s.view === 'templates' && <TemplatesView />}
       {s.view === 'tools' && <ToolsView />}
       {s.view === 'settings' && <SettingsView />}
       {s.view === 'addon' && <AddonView />}

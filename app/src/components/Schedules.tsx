@@ -12,7 +12,8 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
   const [prompt, setPrompt] = useState('')
   const [cmd, setCmd] = useState('')
   const [cwd, setCwd] = useState('')
-  const tpl = s.templates.find(t => t.id === templateId)
+  const templates = s.templates ?? []
+  const tpl = templates.find(t => t.id === templateId)
 
   const valid = Boolean(name.trim()) && schedule.trim().split(/\s+/).length === 5
 
@@ -60,7 +61,7 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
           </div>
           <select value={templateId} onChange={e => setTemplateId(e.target.value)} className="select-field" style={fieldStyle}>
             <option value="">no template — raw command below</option>
-            {s.templates.map(t => <option key={t.id} value={t.id}>template · {t.name} ({t.mode})</option>)}
+            {templates.map(t => <option key={t.id} value={t.id}>template · {t.name} ({t.mode})</option>)}
           </select>
           {tpl ? (
             <textarea
@@ -131,7 +132,7 @@ export function Schedules() {
                 <span>{c.human}</span>
                 <span style={{ color: 'var(--faint)' }}>·</span>
                 <span>{c.templateId
-                  ? `template · ${s.templates.find(t => t.id === c.templateId)?.name ?? c.templateId}${c.prompt ? ` — “${c.prompt.slice(0, 40)}”` : ''}`
+                  ? `template · ${(s.templates ?? []).find(t => t.id === c.templateId)?.name ?? c.templateId}${c.prompt ? ` — “${c.prompt.slice(0, 40)}”` : ''}`
                   : c.cmd ? c.cmd : 'no command — logs only'}</span>
               </div>
             </div>

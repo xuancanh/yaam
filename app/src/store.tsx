@@ -609,7 +609,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
                   .map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, resumeFallbackCmd: t.resumeFallbackCmd, probe: t.probe } as typeof t))
                   .concat(p.agentTypes.filter(x => x.custom && !s.agentTypes.some(t => t.id === x.id)))
               : s.agentTypes,
-            templates: p.templates ?? s.templates,
+            templates: p.templates ?? s.templates ?? [],
             integrations: p.integrations ?? s.integrations,
             agents: restoredAgents.length ? restoredAgents : s.agents,
             focusedIds: focusedIds.length ? focusedIds : s.focusedIds,
@@ -794,7 +794,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // one-shot vs interactive mode, prompt/system prompt, approval, and model.
   const launchFromTemplate = useCallback((templateId: string, task?: string, workspaceId?: string): string | null => {
     const st = stateRef.current
-    const tpl = st.templates.find(t => t.id === templateId)
+    const tpl = (st.templates ?? []).find(t => t.id === templateId)
     if (!tpl) {
       flash('Template not found')
       return null
@@ -816,7 +816,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const task = st.tasks.find(t => t.id === taskId)
     if (!task || task.agentId) return
     let id: string | null = null
-    if (task.templateId && st.templates.some(t => t.id === task.templateId)) {
+    if (task.templateId && (st.templates ?? []).some(t => t.id === task.templateId)) {
       id = launchFromTemplate(task.templateId, task.title)
     } else {
       const type = st.agentTypes.find(t => t.enabled)
@@ -924,7 +924,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, crons: mark(d.crons) } } }
         })
         for (const c of due) {
-          const tpl = c.templateId ? st.templates.find(t => t.id === c.templateId) : undefined
+          const tpl = c.templateId ? (st.templates ?? []).find(t => t.id === c.templateId) : undefined
           const launchedId = !native.isTauri ? null
             : tpl ? launchFromTemplate(tpl.id, c.prompt, pool.wid)
             : c.cmd ? launchSession(c.cmd, c.cwd || '', c.name, undefined, pool.wid)
@@ -945,7 +945,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         for (const t of pool.tasks) {
           if (!t.scheduleAt || t.scheduleAt > nowMs || t.agentId) continue
           const id = !native.isTauri ? null
-            : t.templateId && st.templates.some(x => x.id === t.templateId)
+            : t.templateId && (st.templates ?? []).some(x => x.id === t.templateId)
               ? launchFromTemplate(t.templateId, t.title, pool.wid)
               : (() => {
                   const type = st.agentTypes.find(x => x.enabled)
@@ -1187,9 +1187,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         const gated = catalogGate('create_schedule')
         if (gated) return gated
         const tpl = templateName
-          ? stateRef.current.templates.find(t => t.name.toLowerCase() === templateName.toLowerCase())
+          ? (stateRef.current.templates ?? []).find(t => t.name.toLowerCase() === templateName.toLowerCase())
           : undefined
-        if (templateName && !tpl) return `no template named "${templateName}" — available: ${stateRef.current.templates.map(t => t.name).join(', ') || 'none'}`
+        if (templateName && !tpl) return `no template named "${templateName}" — available: ${(stateRef.current.templates ?? []).map(t => t.name).join(', ') || 'none'}`
         dispatch(s => ({
           ...s,
           crons: s.crons.concat([{
@@ -1204,8 +1204,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return `created schedule ${name} (${cron})${tpl ? ` firing template ${tpl.name}` : ''}`
       },
       runTemplate: (templateName, task) => {
-        const tpl = stateRef.current.templates.find(t => t.name.toLowerCase() === templateName.toLowerCase())
-        if (!tpl) return `no template named "${templateName}" — available: ${stateRef.current.templates.map(t => t.name).join(', ') || 'none'}`
+        const tpl = (stateRef.current.templates ?? []).find(t => t.name.toLowerCase() === templateName.toLowerCase())
+        if (!tpl) return `no template named "${templateName}" — available: ${(stateRef.current.templates ?? []).map(t => t.name).join(', ') || 'none'}`
         const id = launchFromTemplate(tpl.id, task)
         return id
           ? `launched ${tpl.mode} session ${id} from template ${tpl.name}${tpl.mode === 'ephemeral' ? ' — it will run the task and exit by itself' : ''}`
@@ -1743,8 +1743,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
     addTemplate: () => dispatch(s => ({
       ...s,
-      templates: s.templates.concat([{
-        id: mkId('tpl'), name: `template-${s.templates.length + 1}`,
+      templates: (s.templates ?? []).concat([{
+        id: mkId('tpl'), name: `template-${(s.templates ?? []).length + 1}`,
         typeId: s.agentTypes.find(t => t.enabled)?.id ?? 'claude',
         mode: 'ephemeral', prompt: '{task}', systemPrompt: '', model: '',
         approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
@@ -1752,11 +1752,11 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     })),
     updateTemplate: (id, patch) => dispatch(s => ({
       ...s,
-      templates: s.templates.map(t => t.id === id ? { ...t, ...patch } : t),
+      templates: (s.templates ?? []).map(t => t.id === id ? { ...t, ...patch } : t),
     })),
     deleteTemplate: id => dispatch(s => ({
       ...s,
-      templates: s.templates.filter(t => t.id !== id),
+      templates: (s.templates ?? []).filter(t => t.id !== id),
       tasks: s.tasks.map(t => t.templateId === id ? { ...t, templateId: undefined } : t),
       crons: s.crons.map(c => c.templateId === id ? { ...c, templateId: undefined } : c),
     })),
