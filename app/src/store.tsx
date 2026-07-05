@@ -9,8 +9,6 @@ import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedStat
 import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
-import { draftTaskSpec } from './domains/board/watcher'
-import type { TaskSpecDraft } from './domains/board/watcher'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './core/terminals'
 import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS, dispatchAddonRpc, enforcePermissions, execAddonHook, exportAddonPackage, loadAddonFolder, parseAddonPackage } from './core/addons'
 import { runAddonEditorTurn } from './domains/addons/addon-editor'
@@ -29,6 +27,8 @@ import { runWatcherLoop } from './domains/board/watcher-runner'
 import { runChatMessageTurn } from './domains/chat/runner'
 import { runMasterLoop } from './domains/master/runner'
 import { useSettingsActions } from './domains/settings/actions'
+import { useBoardActions } from './domains/board/actions'
+import type { TaskSpecDraft } from './domains/board/watcher'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
 import { reducer, withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
@@ -1709,10 +1709,18 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     dispatch, later, connectMcp, refreshSkillCatalog,
     mcpSessions: mcpSessionsRef, skillCatalogs: skillCatalogsRef,
   })
+  const boardActions = useBoardActions({
+    dispatch, stateRef, dragId, later, flash,
+    fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
+    spawnSessionForTask, startTaskViaWatcher, runWatcher, pushTaskChat,
+    markUserStopped: id => userStoppedRef.current.add(id),
+    watcherHistories, watcherQueue, taskSessions: taskSessionsRef,
+  })
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
     ...settingsActions,
+    ...boardActions,
     setView: v => dispatch(s => ({ ...s, view: v })),
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
@@ -2146,89 +2154,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     },
 
 
-    startCardDrag: id => { dragId.current = id },
-    enterCol: col => dispatch(s => (s.dragOverCol === col ? s : { ...s, dragOverCol: col })),
-    dropTo: col => {
-      const id = dragId.current
-      dragId.current = null
-      const prev = id ? stateRef.current.tasks.find(t => t.id === id) : undefined
-      dispatch(s => id
-        ? { ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, col } : t)), dragOverCol: null }
-        : { ...s, dragOverCol: null })
-      if (prev && prev.col !== col) fireAddonHookRef.current('onTaskMoved', { taskId: prev.id, title: prev.title, col, from: prev.col })
-      if (id && col === 'progress') {
-        const task = stateRef.current.tasks.find(t => t.id === id)
-        if (task && !task.agentId) later(50, () => spawnSessionForTask(id))
-      }
-    },
-
-    startTask: taskId => startTaskViaWatcher(taskId),
-
-    restartTask: taskId => {
-      const t = stateRef.current.tasks.find(x => x.id === taskId)
-      if (!t) return
-      const prev = t.agentId ? stateRef.current.agents.find(a => a.id === t.agentId) : undefined
-      if (prev && (prev.status === 'running' || prev.status === 'needs')) {
-        userStoppedRef.current.add(prev.id)
-        native.killSession(prev.id).catch(() => {})
-      }
-      dispatch(s => ({
-        ...s,
-        tasks: s.tasks.map(x => (x.id === taskId ? { ...x, agentId: null } : x)),
-      }))
-      pushTaskChat(taskId, 'system', `Relaunching — previous session${prev ? ` “${prev.name}”` : ''} detached`)
-      later(50, () => spawnSessionForTask(taskId))
-    },
-    createTask: input => {
-      const id = mkId('t')
-      dispatch(s => ({
-        ...s,
-        tasks: s.tasks.concat([{
-          id,
-          title: input.title.trim().slice(0, 120),
-          col: 'backlog',
-          agentId: null,
-          description: input.description.trim(),
-          criteria: input.criteria.map(c => c.trim()).filter(Boolean),
-          templateId: input.templateId || undefined,
-          typeId: input.typeId || undefined,
-          cwd: input.cwd?.trim() || undefined,
-          chat: [{ id: mkId('tc'), role: 'system', text: 'Task created', at: Date.now() }],
-        }]),
-      }))
-      flash(`Task “${input.title.trim().slice(0, 32)}” created`)
-    },
-    updateTask: (id, patch) => dispatch(s => ({
-      ...s,
-      tasks: s.tasks.map(t => (t.id === id ? { ...t, ...patch, title: (patch.title ?? t.title).trim() || t.title } : t)),
-    })),
-    sendTaskChat: (taskId, text) => {
-      const msg = text.trim()
-      if (!msg) return
-      pushTaskChat(taskId, 'user', msg)
-      dispatch(s => ({
-        ...s,
-        tasks: s.tasks.map(t => (t.id === taskId ? { ...t, awaitingUser: false } : t)),
-      }))
-      void runWatcher(taskId, `[user message] ${msg}`)
-    },
-    draftTask: async input => {
-      const st = stateRef.current.settings
-      if (!(st.masterEnabled && hasCreds(st))) return null
-      return draftTaskSpec(buildCfg(st, st.monitorModel || undefined), input.title, input.description, input.criteria)
-    },
-    renameTask: (id, title) => dispatch(s => ({
-      ...s,
-      tasks: s.tasks.map(t => (t.id === id ? { ...t, title: title.trim() || t.title } : t)),
-    })),
-    deleteTask: id => {
-      watcherHistories.current.delete(id)
-      watcherQueue.current.delete(id)
-      for (const [sessionId, binding] of taskSessionsRef.current) {
-        if (binding.taskId === id) taskSessionsRef.current.delete(sessionId)
-      }
-      dispatch(s => ({ ...s, tasks: s.tasks.filter(t => t.id !== id) }))
-    },
 
     addTemplate: () => {
       const id = mkId('tpl')
@@ -2257,12 +2182,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const lid = launchFromTemplate(id, task)
       if (lid) flash('Session launched from template')
     },
-    scheduleTask: (taskId, at, templateId) => dispatch(s => ({
-      ...s,
-      tasks: s.tasks.map(t => t.id === taskId
-        ? { ...t, scheduleAt: at ?? undefined, ...(templateId !== undefined ? { templateId: templateId ?? undefined } : {}) }
-        : t),
-    })),
 
     addCron: cron => {
       dispatch(s => ({
@@ -2490,7 +2409,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, pushTaskChat, runChatMessage, runMaster, runWatcher, sendAddonChatImpl, spawnSessionForTask, startTaskViaWatcher])
+  }), [settingsActions, boardActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, runChatMessage, runMaster, sendAddonChatImpl])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)
