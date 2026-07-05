@@ -155,16 +155,19 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
   return cls
 }
 
-export function useSessionExitHandler(ctx: SessionExitCtx): void {
-  useEffect(() => {
-    const offExit = native.onSessionExit(e => {
-      coordinateSessionExit(e, {
-        ...ctx,
-        dispatch,
-        detectCliSession: (probe, cwd, launchedAt) => realSessionProcessPort.detectCliSession(probe, cwd, launchedAt),
-        scheduleArchive: (fn, ms) => { window.setTimeout(fn, ms) },
-      })
+/** Subscribe to native session exits and fan each out through the coordinator
+ *  over the real ports. Returns an unsubscribe fn. Plain (no React). */
+export function subscribeSessionExits(ctx: SessionExitCtx): () => void {
+  return native.onSessionExit(e => {
+    coordinateSessionExit(e, {
+      ...ctx,
+      dispatch,
+      detectCliSession: (probe, cwd, launchedAt) => realSessionProcessPort.detectCliSession(probe, cwd, launchedAt),
+      scheduleArchive: (fn, ms) => { window.setTimeout(fn, ms) },
     })
-    return () => { offExit() }
-  }, [ctx])
+  })
+}
+
+export function useSessionExitHandler(ctx: SessionExitCtx): void {
+  useEffect(() => subscribeSessionExits(ctx), [ctx])
 }

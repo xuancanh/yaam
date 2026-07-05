@@ -3,21 +3,21 @@
 // and the process-exit handler. Grouped together because they are mutually
 // wired (settle → monitor, launch → watcher, exit → watcher/monitor). Sets the
 // monitor/watcher/spawn cycle-refs; returns the handles the rest of the runtime
-// (addon/master/chat/coordinator) needs.
-import { useCallback, useMemo, useRef } from 'react'
+// needs. A plain factory with a start/dispose lifecycle (settle TUI scan + the
+// native exit subscription); useSessionRuntime is a thin create-once adapter.
+import { useEffect, useRef } from 'react'
 import type { EscOption, TaskChatMsg } from '../../core/types'
 import { dispatch } from '../../core/store'
+import { browserClock, type StatePort } from '../../core/ports'
 import { mkId } from '../../shared/id'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from '../../domains/board/task-state'
 import type { LocatedTask } from '../../domains/board/task-state'
-import { useSessionAttention } from '../../domains/session/attention'
-import { useSessionSettle } from '../../domains/session/use-settle'
-import { useSessionExitHandler } from '../../domains/session/exit-handler'
-import { useLaunchRuntime } from '../../domains/session/launch-runtime'
+import { createSessionAttention } from '../../domains/session/attention'
+import { createSessionSettle } from '../../domains/session/use-settle'
+import { subscribeSessionExits } from '../../domains/session/exit-handler'
+import { createLaunchRuntime } from '../../domains/session/launch-runtime'
 import { createMonitorRuntime } from '../../domains/master/monitor-runtime'
-import type { MonitorRuntime } from '../../domains/master/monitor-runtime'
 import { createWatcherRuntime } from '../../domains/board/watcher-runtime'
-import type { WatcherRuntime } from '../../domains/board/watcher-runtime'
 import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
 
@@ -43,57 +43,57 @@ export interface SessionRuntime {
   spawnSessionForTask: (taskId: string, workspaceId?: string) => void
   startTaskViaWatcher: (taskId: string) => void
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
+  /** arm the settle TUI-scan + native exit subscription */
+  start: () => void
+  /** tear down the scan, timers, and exit subscription */
+  dispose: () => void
 }
 
-export function useSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): SessionRuntime {
+export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): SessionRuntime {
   const { stateRef, later, flash, logEvent, notify } = k
   const { fireAddonHookRef, monitorEventRef, masterEventRef, runWatcherRef, spawnTaskSessionRef, userStoppedRef, taskSessionsRef } = refs
 
-  const { sessionScreenTail, setNeedsInput, applyAgentStatus, appendTail } = useSessionAttention(useMemo(() => ({
+  const { sessionScreenTail, setNeedsInput, applyAgentStatus, appendTail } = createSessionAttention({
     stateRef, widOf: k.widOf, logEvent, notify,
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
-  }), [stateRef, k.widOf, logEvent, notify, fireAddonHookRef]))
+  })
 
-  const monitorRef = useRef<MonitorRuntime>(undefined)
-  if (!monitorRef.current) {
-    monitorRef.current = createMonitorRuntime({
-      stateRef, dispatch, applyAgentStatus, setNeedsInput, logEvent, notify,
-      masterEvent: (n, a) => masterEventRef.current(n, a),
-    })
-  }
-  const runMonitor = monitorRef.current.run
+  const monitor = createMonitorRuntime({
+    stateRef, dispatch, applyAgentStatus, setNeedsInput, logEvent, notify,
+    masterEvent: (n, a) => masterEventRef.current(n, a),
+  })
+  const runMonitor = monitor.run
   monitorEventRef.current = (id, note) => runMonitor(id, note)
 
-  const taskForSession = useCallback((sessionId: string): LocatedTask | undefined => {
+  const taskForSession = (sessionId: string): LocatedTask | undefined => {
     const binding = taskSessionsRef.current.get(sessionId)
     return binding
       ? findTaskInState(stateRef.current, binding.taskId, binding.workspaceId)
       : findTaskForAgentInState(stateRef.current, sessionId)
-  }, [stateRef, taskSessionsRef])
+  }
 
-  const pushTaskChat = useCallback((taskId: string, role: TaskChatMsg['role'], text: string) => {
+  const pushTaskChat = (taskId: string, role: TaskChatMsg['role'], text: string) => {
     dispatch(s => updateLocatedTask(s, taskId, t => ({
       ...t,
       chat: (t.chat ?? []).concat([{ id: mkId('tc'), role, text, at: Date.now() }]).slice(-80),
     })))
-  }, [])
-
-  const watcherRef = useRef<WatcherRuntime>(undefined)
-  if (!watcherRef.current) {
-    watcherRef.current = createWatcherRuntime({
-      stateRef, dispatch, taskSessions: taskSessionsRef, applyAgentStatus, pushTaskChat, logEvent, notify,
-      fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
-      spawnTaskSession: (id, extra) => spawnTaskSessionRef.current(id, extra),
-    })
   }
-  const runWatcher = watcherRef.current.run
+
+  const watcher = createWatcherRuntime({
+    stateRef, dispatch, taskSessions: taskSessionsRef, applyAgentStatus, pushTaskChat, logEvent, notify,
+    fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
+    spawnTaskSession: (id, extra) => spawnTaskSessionRef.current(id, extra),
+  })
+  const runWatcher = watcher.run
   runWatcherRef.current = (taskId, note) => { void runWatcher(taskId, note) }
 
-  const { armResponseWatch, bumpSettle, clearFlagged, disposeSettle } = useSessionSettle({
-    stateRef, later, notify, setNeedsInput, runMonitor, taskForSession,
+  const state: StatePort = { get: () => stateRef.current, update: dispatch, subscribe: () => () => {} }
+  const settle = createSessionSettle({
+    state, clock: browserClock, notify, setNeedsInput, runMonitor, taskForSession,
     masterEventRef, monitorEventRef, runWatcherRef,
   })
-  const clearNeeds = useCallback((id: string) => {
+  const { armResponseWatch, bumpSettle, clearFlagged, disposeSettle } = settle
+  const clearNeeds = (id: string) => {
     clearFlagged(id)
     dispatch(s => ({
       ...s,
@@ -104,29 +104,41 @@ export function useSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Sessio
         ? { ...m, esc: { ...m.esc, resolved: true, choice: 'handled in the terminal' } }
         : m)),
     }))
-  }, [clearFlagged])
+  }
 
-  useSessionExitHandler(useMemo(() => ({
+  const exitCtx = {
     stateRef,
     takeUserStopped: (id: string) => userStoppedRef.current.delete(id),
     taskForSession, pushTaskChat, logEvent, notify,
-    fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
+    fireAddonHook: (hook: 'onSessionExit', event: Record<string, unknown>) => fireAddonHookRef.current(hook, event),
     runWatcher: (taskId: string, note: string) => runWatcherRef.current(taskId, note),
     monitorEvent: (id: string, note: string) => monitorEventRef.current(id, note),
-  }), [stateRef, taskForSession, pushTaskChat, logEvent, notify, userStoppedRef, fireAddonHookRef, runWatcherRef, monitorEventRef]))
+  }
 
-  const { probeCliSession, launchSession, launchFromTemplate, spawnTaskSession, spawnSessionForTask, startTaskViaWatcher } = useLaunchRuntime(useMemo(() => ({
+  const { probeCliSession, launchSession, launchFromTemplate, spawnTaskSession, spawnSessionForTask, startTaskViaWatcher } = createLaunchRuntime({
     stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch,
     pushTaskChat, runWatcher, taskSessions: taskSessionsRef,
-  }), [stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch, pushTaskChat, runWatcher, taskSessionsRef]))
+  })
   spawnTaskSessionRef.current = (taskId, extraInstructions) => spawnTaskSession(taskId, { extraInstructions })
 
+  let offExit: (() => void) | undefined
   return {
     sessionScreenTail, setNeedsInput, applyAgentStatus, appendTail,
-    runMonitor, disposeMonitor: (id: string) => monitorRef.current!.dispose(id),
+    runMonitor, disposeMonitor: (id: string) => monitor.dispose(id),
     taskForSession, pushTaskChat,
-    runWatcher, disposeWatcher: (tid: string) => watcherRef.current!.dispose(tid),
+    runWatcher, disposeWatcher: (tid: string) => watcher.dispose(tid),
     armResponseWatch, bumpSettle, clearFlagged, disposeSettle, clearNeeds,
     launchSession, launchFromTemplate, spawnTaskSession, spawnSessionForTask, startTaskViaWatcher, probeCliSession,
+    start() { settle.start(); offExit ??= subscribeSessionExits(exitCtx) },
+    dispose() { settle.dispose(); offExit?.(); offExit = undefined },
   }
+}
+
+/** React adapter: build the session runtime once; bind scan + exit subscription to the effect. */
+export function useSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): SessionRuntime {
+  const ref = useRef<SessionRuntime>(undefined)
+  if (!ref.current) ref.current = createSessionRuntime(k, refs)
+  const rt = ref.current
+  useEffect(() => { rt.start(); return () => rt.dispose() }, [rt])
+  return rt
 }
