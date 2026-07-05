@@ -8,3 +8,4 @@ pub mod search;
 pub mod secrets;
 pub mod session;
 pub mod state;
+pub mod watch;

@@ -8,6 +8,7 @@ use domains::bedrock::BedrockState;
 use domains::mcp::McpManager;
 use domains::search::ChatSearchState;
 use domains::session::SessionManager;
+use domains::watch::WatchManager;
 use tauri::{Emitter, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -29,6 +30,7 @@ pub fn run() {
         .manage(BedrockState::default())
         .manage(ChatSearchState::default())
         .manage(McpManager::default())
+        .manage(WatchManager::default())
         .invoke_handler(tauri::generate_handler![
             domains::session::spawn_session,
             domains::session::write_session,
@@ -66,6 +68,8 @@ pub fn run() {
             domains::secrets::secret_set,
             domains::secrets::secret_get,
             domains::secrets::secret_delete,
+            domains::watch::watch_dir,
+            domains::watch::unwatch_dir,
         ])
         .setup(|app| setup::init(app))
         .run(tauri::generate_context!())

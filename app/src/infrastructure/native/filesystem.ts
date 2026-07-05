@@ -3,6 +3,7 @@
 // listing for the file tree, the credential-export command, and one-shot shell
 // execution. Browser build: pickers/list return empty, exec/credential throw.
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
 import { isTauri } from './base'
 import { expectObject, expectObjectArray } from './validate'
@@ -102,4 +103,36 @@ export async function listDir(path: string): Promise<DirEntryInfo[]> {
   const raw = await invoke('list_dir', { path })
   const entries = expectObjectArray(raw, ['name', 'path', 'is_dir'], 'listDir')
   return entries.map(e => ({ name: e.name as string, path: e.path as string, isDir: e.is_dir as boolean }))
+}
+
+/** A coalesced batch of filesystem changes under a watched root. */
+export interface FsChange {
+  root: string
+  paths: string[]
+}
+
+/** Start (or replace) a recursive native watch on a workspace root. No-op in the
+ *  browser build, where the file pane keeps its polling fallback instead. */
+export async function watchDir(root: string): Promise<void> {
+  if (!isTauri) return
+  await invoke('watch_dir', { root })
+}
+
+/** Stop watching a workspace root. No-op outside Tauri. */
+export async function unwatchDir(root: string): Promise<void> {
+  if (!isTauri) return
+  await invoke('unwatch_dir', { root })
+}
+
+/** Subscribe to coalesced filesystem-change batches and return an unsubscribe
+ *  function. No-op (never fires) outside Tauri. */
+export function onFsChange(cb: (e: FsChange) => void): () => void {
+  if (!isTauri) return () => {}
+  let alive = true
+  let unlisten = () => {}
+  listen<FsChange>('fs-change', e => cb(e.payload)).then(fn => {
+    if (alive) unlisten = fn
+    else fn()
+  })
+  return () => { alive = false; unlisten() }
 }

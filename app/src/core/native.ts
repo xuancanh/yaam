@@ -5,6 +5,7 @@
 // import the specific capability adapter directly. Browser fallbacks are
 // deliberate no-ops/localStorage in each adapter, not a mix scattered here.
 export { isTauri } from '../infrastructure/native/base'
+export * from '../infrastructure/native/base'
 export * from '../infrastructure/native/session'
 export * from '../infrastructure/native/http'
 export * from '../infrastructure/native/filesystem'

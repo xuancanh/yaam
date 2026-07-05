@@ -5,7 +5,7 @@
 // numbers to change markers (green = new, amber = modified, red = deletion).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { highlight, langForFile } from '../../core/highlight'
-import { gitFileDiff, gitStatus, listDir, readFileB64, readTextFile } from '../../core/native'
+import { gitFileDiff, gitStatus, isTauri, listDir, onFsChange, readFileB64, readTextFile, unwatchDir, watchDir } from '../../core/native'
 import type { DirEntryInfo } from '../../core/native'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import { parseDiffLines } from './diff-marks'
@@ -216,8 +216,13 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
     }
   }, [path, git, rel, kind, name])
 
-  // load on open, then poll — the agent edits files while you watch.
-  // Images/PDFs load once (no cheap change detection over base64 payloads).
+  // load on open, then keep it fresh — the agent edits files while you watch.
+  // Desktop app: a native fs watch drives reloads (event-driven, no timer). We
+  // reload on any change under the workspace rather than string-matching the
+  // path, because the watcher reports canonicalized paths that may not equal the
+  // tree's — and re-reading one open file is cheap. Browser build: poll, since
+  // watch events never fire there. Images/PDFs load once (no cheap change
+  // detection over base64 payloads).
   useEffect(() => {
     contentRef.current = null
     setContent(null)
@@ -227,6 +232,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
     setMdView('rendered')
     void load()
     if (kind === 'image' || kind === 'pdf') return
+    if (isTauri) return onFsChange(() => void load())
     const iv = window.setInterval(() => void load(), 4000)
     return () => window.clearInterval(iv)
   }, [load, kind])
@@ -418,11 +424,19 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
       .catch(() => setGit(null))
   }, [root])
 
+  // Desktop app: a native recursive watch on the workspace root drives tree +
+  // git refresh (Rust coalesces bursts), so no fixed-interval polling. Browser
+  // build: fall back to a periodic refresh since watch events never fire there.
   useEffect(() => {
     refreshGit()
+    if (isTauri) {
+      void watchDir(root)
+      const off = onFsChange(() => { setTreeKey(k => k + 1); refreshGit() })
+      return () => { off(); void unwatchDir(root) }
+    }
     const iv = window.setInterval(refreshGit, 6000)
     return () => window.clearInterval(iv)
-  }, [refreshGit])
+  }, [refreshGit, root])
 
   // Expand a cached directory or lazily request its children before expanding.
   const toggleDir = (path: string) => {
