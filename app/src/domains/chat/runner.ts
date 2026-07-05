@@ -7,6 +7,7 @@ import type { ApiMessage } from '../../master'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import { buildChatCfg, callApi, chatTypeHasCreds } from '../../llm/client'
+import type { ApiContentBlock } from '../../llm/client'
 import { runChatTurn } from './agent'
 import type { ChatAppPort } from './agent'
 import { mkId } from '../../shared/id'
@@ -26,6 +27,18 @@ export interface ChatCtx {
   updateChatLog: (agentId: string, msgId: string, text: string) => void
   flash: (t: string) => void
   refreshSkillCatalog: (id: string) => Promise<string>
+}
+
+/** One file attached to an outgoing chat message. Text-ish files (and
+ *  extracted PDF/office text) inline into the prompt; images become vision
+ *  blocks. `path` lets the agent reach the original file with its tools. */
+export interface ChatAttachment {
+  name: string
+  kind: 'text' | 'image'
+  text?: string
+  mediaType?: string
+  dataB64?: string
+  path?: string
 }
 
 /** App-level tools (board/schedules/skills) backed by the store — the chat
@@ -83,7 +96,7 @@ function makeAppPort(ctx: ChatCtx): ChatAppPort {
 }
 
 /** Run one chat-agent turn, streaming deltas/reasoning/tool traces into the UI. */
-export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: string) {
+export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: string, atts?: ChatAttachment[]) {
   const st = ctx.stateRef.current.settings
   const agent = ctx.stateRef.current.agents.find(a => a.id === agentId)
   if (!agent || agent.kind !== 'chat') return
@@ -105,7 +118,9 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     return
   }
   ctx.busy.add(agentId)
-  ctx.pushChatLog(agentId, { role: 'user', text })
+  // the visible bubble carries attachment markers; payloads go only to the API
+  const visible = atts?.length ? `${text}\n\n${atts.map(a => `📎 ${a.name}`).join(' · ')}` : text
+  ctx.pushChatLog(agentId, { role: 'user', text: visible })
   ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'running' as const } : a)) }))
   try {
     let history = ctx.histories.get(agentId)
@@ -146,6 +161,21 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       const rest = slash[2].trim()
       apiText = `The user invoked the skill "${skill.name}" with a slash command — follow it now.\n\n<skill name="${skill.name}">\n${skill.body}\n</skill>${rest ? `\n\nUser input: ${rest}` : ''}`
     }
+    // attachments: text extracts inline into the prompt; images become vision blocks
+    let apiContent: string | ApiContentBlock[] = apiText
+    if (atts?.length) {
+      const textAtts = atts.filter(a => a.kind === 'text')
+      const imgAtts = atts.filter(a => a.kind === 'image' && a.dataB64)
+      const inlined = textAtts.map(a =>
+        `\n\n<attachment name="${a.name}"${a.path ? ` path="${a.path}"` : ''}>\n${(a.text ?? '').slice(0, 60_000)}\n</attachment>`).join('')
+      const full = apiText + inlined
+      apiContent = imgAtts.length
+        ? [
+            { type: 'text', text: full },
+            ...imgAtts.map(a => ({ type: 'image', source: { type: 'base64' as const, media_type: a.mediaType ?? 'image/png', data: a.dataB64! } })),
+          ]
+        : full
+    }
     const personaBody = ctx.stateRef.current.personas.find(pp => pp.id === agent.personaId)?.body
     const persona = [chatType.systemPrompt, personaBody].filter(Boolean).join('\n\n')
     // streaming: deltas grow one live assistant bubble; a tool round seals
@@ -176,7 +206,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       () => ctx.stateRef.current.agents.find(a => a.id === agentId),
       skills,
       mcp,
-      apiText,
+      apiContent,
       history,
       e => {
         if (e.kind === 'delta') {

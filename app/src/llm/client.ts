@@ -41,6 +41,8 @@ export interface ApiContentBlock {
   input?: Record<string, unknown>
   /** tool_use args failed to parse — usually truncated by the token limit */
   incompleteArgs?: boolean
+  /** image block (vision): base64 payload in the Anthropic shape */
+  source?: { type: 'base64'; media_type: string; data: string }
 }
 
 export interface ApiResponse {
@@ -165,7 +167,8 @@ interface OaiToolCall {
 
 interface OaiMessage {
   role: string
-  content: string | null
+  /** string, null, or multimodal part array (text + image_url) */
+  content: string | null | unknown[]
   reasoning_content?: string
   tool_calls?: OaiToolCall[]
   tool_call_id?: string
@@ -187,11 +190,20 @@ function toOpenAiMessages(system: string, messages: ApiMessage[]): OaiMessage[] 
         function: { name: b.name || '', arguments: JSON.stringify(b.input || {}) },
       }))
       out.push({ role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) })
-    } else {
-      // tool results
+    } else if (blocks.some(b => b.type === 'tool_result')) {
       for (const b of blocks as Array<{ type: string; tool_use_id?: string; content?: string }>) {
         if (b.type === 'tool_result') out.push({ role: 'tool', tool_call_id: b.tool_use_id, content: b.content ?? '' })
       }
+    } else {
+      // multimodal user message: text + base64 images → OpenAI part array
+      const parts = blocks.map(b => {
+        if (b.type === 'text') return { type: 'text', text: b.text ?? '' }
+        if (b.type === 'image' && b.source) {
+          return { type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } }
+        }
+        return null
+      }).filter((p): p is NonNullable<typeof p> => p !== null)
+      out.push({ role: 'user', content: parts })
     }
   }
   return out
@@ -229,7 +241,8 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
   const msg = data.choices?.[0]?.message
   const content: ApiContentBlock[] = []
-  let bodyText = msg?.content ?? ''
+  // responses are always plain text; the array form exists only for requests
+  let bodyText = typeof msg?.content === 'string' ? msg.content : ''
   let thinking = msg?.reasoning_content ?? ''
   const inlineThink = bodyText.match(/^\s*<think>([\s\S]*?)<\/think>\s*/)
   if (inlineThink) {

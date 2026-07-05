@@ -453,7 +453,7 @@ export async function runChatTurn(
   getAgent: () => Agent | undefined,
   skills: CatalogSkill[],
   mcp: McpSession[],
-  userText: string,
+  userText: string | ApiContentBlock[],
   history: ApiMessage[],
   onEvent: (e: ChatTurnEvent) => void,
   persona?: string,
@@ -461,8 +461,12 @@ export async function runChatTurn(
   app?: ChatAppPort,
 ): Promise<void> {
   // a stopped/aborted turn can leave the history mid-tool-round (assistant
-  // tool_use without its tool_result) — providers reject that; drop the debris
-  while (history.length && typeof history[history.length - 1].content !== 'string') history.pop()
+  // tool_use without its tool_result) — providers reject that; drop the debris.
+  // Attachment messages (text+image block arrays) are NOT debris — only
+  // tool_use/tool_result carriers are.
+  const isDangling = (m: ApiMessage) => Array.isArray(m.content)
+    && (m.content as ApiContentBlock[]).some(b => b.type === 'tool_use' || b.type === 'tool_result')
+  while (history.length && isDangling(history[history.length - 1])) history.pop()
   history.push({ role: 'user', content: userText })
   const tools = [...builtinTools(skills), ...mcpToolDefs(mcp)]
   for (let i = 0; i < 24; i++) {

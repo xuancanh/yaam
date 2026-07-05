@@ -192,6 +192,20 @@ export async function pickSavePath(defaultName: string, extensions: string[] = [
   return await saveDialog({ defaultPath: defaultName, filters: [{ name: label, extensions }] })
 }
 
+/** Open the native multi-file picker (any file type). */
+export async function pickFiles(): Promise<string[]> {
+  if (!isTauri) return []
+  const picked = await openDialog({ multiple: true })
+  if (Array.isArray(picked)) return picked.filter((p): p is string => typeof p === 'string')
+  return typeof picked === 'string' ? [picked] : []
+}
+
+/** Read any file as base64 through the native backend (size-capped there).
+ *  The viewer/import path for binary formats — PDFs, office docs, images. */
+export async function readFileB64(path: string, root?: string, maxBytes?: number): Promise<string> {
+  return await invoke<string>('read_file_b64', { path, root, maxBytes })
+}
+
 /** Read a UTF-8 file through the native backend. When `root` is given, the
  *  backend authorizes the path against that workspace root (symlink-safe). */
 export async function readTextFile(path: string, root?: string): Promise<string> {

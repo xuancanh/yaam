@@ -116,6 +116,24 @@ fn read_text_impl(root: Option<&str>, path: &str) -> Result<String, String> {
     std::fs::read_to_string(scoped_path(root, path)?).map_err(|e| e.to_string())
 }
 
+/// Read one file as base64 — the viewer/import path for binary formats (PDF,
+/// office docs, images). Size-capped so a stray multi-GB file cannot be
+/// marshalled through the IPC bridge.
+fn read_file_b64_impl(root: Option<&str>, path: &str, max_bytes: u64) -> Result<String, String> {
+    use base64::Engine;
+    let full = scoped_path(root, path)?;
+    let meta = std::fs::metadata(&full).map_err(|e| e.to_string())?;
+    if meta.len() > max_bytes {
+        return Err(format!(
+            "file is {} bytes — over the {} byte limit",
+            meta.len(),
+            max_bytes
+        ));
+    }
+    let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 /// Create or replace one file with UTF-8 text, creating parent directories,
 /// authorized against an optional workspace root.
 fn write_text_impl(root: Option<&str>, path: &str, contents: &str) -> Result<(), String> {
@@ -259,6 +277,15 @@ pub fn list_dir(path: String, root: Option<String>) -> Result<Vec<DirEntryInfo>,
 #[tauri::command]
 pub fn read_text_file(path: String, root: Option<String>) -> Result<String, String> {
     read_text_impl(root.as_deref(), &path)
+}
+
+#[tauri::command]
+pub fn read_file_b64(
+    path: String,
+    root: Option<String>,
+    max_bytes: Option<u64>,
+) -> Result<String, String> {
+    read_file_b64_impl(root.as_deref(), &path, max_bytes.unwrap_or(25 * 1024 * 1024))
 }
 
 #[tauri::command]

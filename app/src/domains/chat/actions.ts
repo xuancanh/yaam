@@ -6,6 +6,7 @@ import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { Agent, AppState, EventType } from '../../core/types'
 import type { CatalogSkill } from '../../core/skills'
+import type { ChatAttachment } from './runner'
 import { mkId } from '../../shared/id'
 import { defaultDetail, mkMemory, mkTools } from '../../core/data'
 
@@ -13,7 +14,7 @@ export interface ChatActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
   stateRef: MutableRefObject<AppState>
   logEvent: (type: EventType, agentId: string | null, text: string) => void
-  runChatMessage: (agentId: string, text: string) => void
+  runChatMessage: (agentId: string, text: string, atts?: ChatAttachment[]) => void
   stopChatMessage: (agentId: string) => void
   retryChatMessage: (agentId: string) => void
   resetChatRuntime: (agentId: string) => void
@@ -23,7 +24,7 @@ export interface ChatActionsCtx {
 export interface ChatActions {
   newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string, personaId?: string, skillSourceIds?: string[]) => string
   openChat: (id: string | null) => void
-  sendChatMessage: (agentId: string, text: string) => void
+  sendChatMessage: (agentId: string, text: string, atts?: ChatAttachment[]) => void
   stopChat: (agentId: string) => void
   retryChat: (agentId: string) => void
   clearChat: (agentId: string) => void
@@ -70,9 +71,9 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
 
     openChat: id => dispatch(s => ({ ...s, activeChatId: id, ...(id ? { view: 'chat' as const } : {}) })),
 
-    sendChatMessage: (agentId, text) => {
+    sendChatMessage: (agentId, text, atts) => {
       const msg = text.trim()
-      if (msg) void ctx.runChatMessage(agentId, msg)
+      if (msg || atts?.length) void ctx.runChatMessage(agentId, msg || '(see attachments)', atts)
     },
 
     stopChat: agentId => ctx.stopChatMessage(agentId),

@@ -44,7 +44,7 @@ export interface ConductorActionsDeps {
   disposeWatcher: (taskId: string) => void
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
   launchFromTemplate: (templateId: string, task?: string) => string | null
-  runChatMessage: (agentId: string, text: string) => void
+  runChatMessage: (agentId: string, text: string, atts?: import('../domains/chat/runner').ChatAttachment[]) => void
   stopChatMessage: (agentId: string) => void
   retryChatMessage: (agentId: string) => void
   resetChatRuntime: (agentId: string) => void

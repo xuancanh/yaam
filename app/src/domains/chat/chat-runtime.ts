@@ -9,6 +9,7 @@ import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import { AbortRegistry } from '../../core/abort-registry'
 import { runChatMessageTurn } from './runner'
+import type { ChatAttachment } from './runner'
 
 export interface ChatPorts {
   stateRef: MutableRefObject<AppState>
@@ -22,7 +23,7 @@ export interface ChatPorts {
 }
 
 export interface ChatRuntime {
-  run: (agentId: string, text: string) => void
+  run: (agentId: string, text: string, atts?: ChatAttachment[]) => void
   /** cancel the in-flight reply; the runner's abort path settles status/busy */
   stop: (agentId: string) => void
   /** re-run the last user message: drop everything after it and send it again */
@@ -34,8 +35,8 @@ export function createChatRuntime(ports: ChatPorts): ChatRuntime {
   const histories = new Map<string, ApiMessage[]>()
   const busy = new Set<string>()
   const aborts = new AbortRegistry()
-  const run = (agentId: string, text: string) => {
-    void runChatMessageTurn({ ...ports, histories, busy, aborts }, agentId, text)
+  const run = (agentId: string, text: string, atts?: ChatAttachment[]) => {
+    void runChatMessageTurn({ ...ports, histories, busy, aborts }, agentId, text, atts)
   }
   return {
     run,

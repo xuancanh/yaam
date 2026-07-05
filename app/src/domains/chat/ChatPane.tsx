@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useActions } from '../../store'
 import { ACCENT, hexToRgba } from '../../core/data'
-import { pickSavePath, writeTextFile } from '../../core/native'
+import { isTauri, pickFiles, pickSavePath, readFileB64, writeTextFile } from '../../core/native'
+import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import type { CatalogSkill } from '../../core/skills'
 import type { Agent, ChatMsg } from '../../core/types'
+import type { ChatAttachment } from './runner'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
 
@@ -15,6 +18,21 @@ import { Markdown } from '../../components/Markdown'
 
 const COPY_IC = ['M9 9h11v11H9z', 'M5 15H4V4h11v1']
 const RETRY_IC = ['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']
+const CLIP_IC = ['M21 11l-8.5 8.5a5 5 0 01-7-7L14 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-3-3L16 6']
+
+/** Load one dropped/picked file into an attachment: images stay base64 for
+ *  vision; documents go through best-effort text extraction; binaries attach
+ *  as a pointer the agent can reach with its file tools. */
+async function loadAttachment(path: string): Promise<ChatAttachment> {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const b64 = await readFileB64(path)
+  const extracted = await extractFileText(name, b64ToBytes(b64))
+  if (extracted.kind === 'image') return { name, kind: 'image', mediaType: extracted.mediaType, dataB64: b64, path }
+  if (extracted.kind === 'binary') {
+    return { name, kind: 'text', text: `(binary file — not inlined; the agent can access it at ${path})`, path }
+  }
+  return { name, kind: 'text', text: (extracted.text ?? '').slice(0, 60_000), path }
+}
 
 /** built-in slash commands shown alongside skills */
 const BUILTINS = [
@@ -153,7 +171,10 @@ function SlashMenu({ items, sel, onPick }: {
 export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   const { sendChatMessage, stopChat, retryChat, clearChat, chatSkills } = useActions()
   const [draft, setDraft] = useState('')
-  const [queue, setQueue] = useState<string[]>([])
+  const [queue, setQueue] = useState<{ text: string; atts?: ChatAttachment[] }[]>([])
+  const [atts, setAtts] = useState<ChatAttachment[]>([])
+  const [loadingAtts, setLoadingAtts] = useState(0)
+  const [dragOver, setDragOver] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [menuSel, setMenuSel] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -194,13 +215,43 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
     dequeuedRef.current = true
     const [next, ...rest] = queue
     setQueue(rest)
-    sendChatMessage(agent.id, next)
+    sendChatMessage(agent.id, next.text, next.atts)
   }, [busy, queue, agent.id, sendChatMessage])
 
   const flashNote = (t: string) => {
     setNote(t)
     window.setTimeout(() => setNote(null), 3000)
   }
+
+  const addPaths = async (paths: string[]) => {
+    const take = paths.slice(0, Math.max(0, 10 - atts.length))
+    if (!take.length) return
+    setLoadingAtts(n => n + take.length)
+    for (const p of take) {
+      try {
+        const att = await loadAttachment(p)
+        setAtts(cur => (cur.some(a => a.path === att.path) ? cur : [...cur, att]))
+      } catch (e) {
+        flashNote(`couldn't attach ${p.slice(p.lastIndexOf('/') + 1)}: ${e instanceof Error ? e.message : e}`)
+      } finally {
+        setLoadingAtts(n => n - 1)
+      }
+    }
+  }
+
+  // native drag & drop: Tauri reports OS file drops with real paths
+  useEffect(() => {
+    if (!active || !isTauri) return
+    let unlisten: (() => void) | null = null
+    let alive = true
+    void getCurrentWebview().onDragDropEvent(e => {
+      if (e.payload.type === 'over') setDragOver(true)
+      else if (e.payload.type === 'drop') { setDragOver(false); void addPaths(e.payload.paths) }
+      else setDragOver(false)
+    }).then(fn => { if (alive) unlisten = fn; else fn() })
+    return () => { alive = false; unlisten?.() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, agent.id, atts.length])
 
   const exportChat = async () => {
     const md = log
@@ -213,22 +264,24 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
     flashNote(`exported → ${path}`)
   }
 
-  const submit = (text: string) => {
+  const submit = (text: string, attachments?: ChatAttachment[]) => {
     const msg = text.trim()
-    if (!msg) return
-    if (msg === '/clear') { clearChat(agent.id); setQueue([]); return }
+    if (!msg && !attachments?.length) return
+    if (msg === '/clear') { clearChat(agent.id); setQueue([]); setAtts([]); return }
     if (msg === '/export') { void exportChat().catch(e => flashNote(`export failed: ${e instanceof Error ? e.message : e}`)); return }
     if (busy) {
-      setQueue(q => [...q, msg])
+      setQueue(q => [...q, { text: msg, atts: attachments }])
       return
     }
-    sendChatMessage(agent.id, msg)
+    sendChatMessage(agent.id, msg, attachments)
   }
 
   const send = () => {
-    if (!draft.trim()) return
-    submit(draft)
+    if (loadingAtts > 0) { flashNote('still reading attachments…'); return }
+    if (!draft.trim() && !atts.length) return
+    submit(draft, atts.length ? atts : undefined)
     setDraft('')
+    setAtts([])
   }
 
   const pickSlash = (name: string) => {
@@ -282,7 +335,9 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                 display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--mut)',
                 background: 'var(--panel2)', border: '1px dashed var(--line2)', borderRadius: 7, padding: '3px 8px', maxWidth: 320,
               }}>
-                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>queued: {q}</span>
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  queued: {q.text}{q.atts?.length ? ` (+${q.atts.length} file${q.atts.length > 1 ? 's' : ''})` : ''}
+                </span>
                 <button
                   className="icon-btn"
                   title="Remove from queue"
@@ -295,7 +350,40 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
             ))}
           </div>
         )}
-        <div style={{ position: 'relative', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 11, padding: '8px 11px' }}>
+        {(atts.length > 0 || loadingAtts > 0) && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 7 }}>
+            {atts.map((a, i) => (
+              <span key={a.path ?? i} className="mono" title={a.path} style={{
+                display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5,
+                color: a.kind === 'image' ? 'var(--accent)' : 'var(--mut)',
+                background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 7, padding: '3px 8px', maxWidth: 260,
+              }}>
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {a.kind === 'image' ? '🖼' : '📎'} {a.name}
+                </span>
+                <button
+                  className="icon-btn"
+                  title="Remove attachment"
+                  onClick={() => setAtts(cur => cur.filter((_, j) => j !== i))}
+                  style={{ width: 14, height: 14, borderRadius: 4, flexShrink: 0 }}
+                >
+                  <Icon paths={IC.close} size={8} stroke={2} />
+                </button>
+              </span>
+            ))}
+            {loadingAtts > 0 && <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', padding: '3px 4px' }}>reading {loadingAtts} file{loadingAtts > 1 ? 's' : ''}…</span>}
+          </div>
+        )}
+        <div style={{ position: 'relative', background: 'var(--panel2)', border: `1px solid ${dragOver ? 'var(--accent)' : 'var(--line2)'}`, borderRadius: 11, padding: '8px 11px' }}>
+          {dragOver && (
+            <div style={{
+              position: 'absolute', inset: 0, zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(245,196,81,.08)', border: '1px dashed var(--accent)', borderRadius: 11,
+              fontSize: 12, color: 'var(--accent)', pointerEvents: 'none',
+            }}>
+              drop files to attach
+            </div>
+          )}
           {menuOpen && <SlashMenu items={menuItems} sel={menuSel} onPick={pickSlash} />}
           <textarea
             ref={inputRef}
@@ -311,8 +399,17 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span className="mono" style={{ fontSize: 10, color: note ? 'var(--green)' : 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {note ?? `${agent.cwd || 'no working folder'} · ↩ send · / commands`}
+              {note ?? `${agent.cwd || 'no working folder'} · ↩ send · / commands · drop files to attach`}
             </span>
+            <button
+              className="icon-btn"
+              title="Attach files (PDF, office docs, images, text…)"
+              onClick={() => { void pickFiles().then(ps => addPaths(ps)) }}
+              disabled={!isTauri}
+              style={{ width: 26, height: 26, borderRadius: 7, marginLeft: 'auto', marginRight: 6, flexShrink: 0 }}
+            >
+              <Icon paths={CLIP_IC} size={14} stroke={1.7} />
+            </button>
             {busy ? (
               <button
                 className="send-btn"
