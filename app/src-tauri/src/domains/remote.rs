@@ -382,7 +382,7 @@ pub fn remote_start(state: tauri::State<'_, RemoteManager>, port: Option<u16>, t
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let shared = state.shared.clone();
         std::thread::spawn(move || {
-            let rt = match tokio::runtime::Builder::new_current_thread().enable_io().build() {
+            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
                 Ok(rt) => rt,
                 Err(e) => {
                     log::error!("remote server runtime failed: {e}");

@@ -36,7 +36,7 @@ keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sy
 notify = "8.2.0"
 tauri-plugin-notification = "2.3.3"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
-tokio = { version = "1", features = ["macros", "rt", "sync"] }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 if-addrs = "0.14"
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 
