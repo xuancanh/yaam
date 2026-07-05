@@ -183,7 +183,7 @@ function TaskReviewFooter({ task, onClose }: { task: BoardTask; onClose: () => v
 }
 
 function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | null; onClose: () => void }) {
-  const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes, agents: x.agents }), shallowEqual)
+  const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes, agents: x.agents, stream: x.taskStreams?.[task.id] ?? '' }), shallowEqual)
   const { updateTask, sendTaskChat, focusTab, startTask, restartTask, archiveTask } = useActions()
   const [view, setView] = useState<'chat' | 'review'>('chat')
   // the task's worktree, if any of its sessions ran isolated
@@ -204,7 +204,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [chat.length])
+  }, [chat.length, s.stream])
 
   // Post the current draft to the task watcher and clear the composer.
   const send = () => {
@@ -366,6 +366,18 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
             </div>
           )}
           {chat.map(m => <ChatBubble key={m.id} m={m} />)}
+          {s.stream && (
+            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+              <div style={{
+                maxWidth: '85%', minWidth: 0, borderRadius: 11, padding: '8px 11px', fontSize: 12.5, lineHeight: 1.5,
+                background: 'var(--panel2)', border: '1px solid var(--line2)', color: 'var(--text)',
+              }}>
+                <div className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--accent)', marginBottom: 3 }}>WATCHER</div>
+                <Markdown text={s.stream} />
+                <span className="stream-caret" />
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ borderTop: '1px solid var(--line)', padding: '11px 13px' }}>

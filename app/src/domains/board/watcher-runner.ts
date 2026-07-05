@@ -6,6 +6,8 @@ import type { MutableRefObject } from 'react'
 import type { Agent, AppState, BoardCol, EventType, NotifKind, TaskChatMsg } from '../../core/types'
 import type { ApiMessage } from '../../master'
 import { buildCfg, hasCreds } from '../../master'
+import { callApiStream } from '../../llm/client'
+import type { ApiResponse, LlmConfig } from '../../llm/client'
 import { runWatcherTurn } from './watcher'
 import type { WatcherExec } from './watcher'
 import { isAltScreen, readScreen } from '../../core/terminals'
@@ -29,6 +31,37 @@ export interface WatcherCtx {
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
   fireAddonHook: (hook: 'onTaskMoved', event: Record<string, unknown>) => void
   spawnTaskSession: (taskId: string, extra?: string) => string | null
+}
+
+/** Stream the watcher's in-flight reply into `taskStreams[taskId]` so the task
+ *  chat shows text as it is generated (like the main chat pane), throttled so
+ *  token-rate deltas don't flood the store. Returns the transport for
+ *  runWatcherTurn plus a `clear` for when the turn settles. */
+export function makeStreamingCall(ctx: Pick<WatcherCtx, 'dispatch'>, taskId: string) {
+  let buf = ''
+  let lastPush = 0
+  let trailer: ReturnType<typeof setTimeout> | null = null
+  const set = (text: string | null) =>
+    ctx.dispatch(s => {
+      const cur = s.taskStreams ?? {}
+      if (text === null) {
+        if (!(taskId in cur)) return s
+        const { [taskId]: _drop, ...rest } = cur
+        return { ...s, taskStreams: rest }
+      }
+      return { ...s, taskStreams: { ...cur, [taskId]: text } }
+    })
+  const flush = () => { lastPush = Date.now(); set(buf) }
+  const call = (cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], signal?: AbortSignal): Promise<ApiResponse> => {
+    buf = '' // each round streams a fresh assistant turn
+    return callApiStream(cfg, system, messages, tools, (text, channel) => {
+      if (channel === 'thinking') return
+      buf += text
+      if (Date.now() - lastPush >= 80) flush()
+      else if (!trailer) trailer = setTimeout(() => { trailer = null; flush() }, 90)
+    }, signal)
+  }
+  return { call, clear: () => { if (trailer) clearTimeout(trailer); set(null) } }
 }
 
 /** Serialize watcher turns per task; each turn re-reads task/session state. */
@@ -145,13 +178,16 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           return `spawned one-shot session "${name}" — its output digests will come to you; it exits by itself when done`
         },
       }
+      const stream = makeStreamingCall(ctx, taskId)
       try {
-        const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec, ctx.aborts.signal(taskId))
+        const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec, ctx.aborts.signal(taskId), stream.call)
+        stream.clear()
         if (reply) ctx.pushTaskChat(taskId, 'watcher', reply)
         else if (isUserMessage) {
           ctx.pushTaskChat(taskId, 'system', 'The watcher acted with tools but wrote no reply — ask again if you need details.')
         }
       } catch (e) {
+        stream.clear()
         // the task was deleted mid-turn — stop quietly, don't report an error
         if (isAbortError(e) || ctx.aborts.signal(taskId).aborted) { pending = []; break }
         const msg = e instanceof Error ? e.message : String(e)

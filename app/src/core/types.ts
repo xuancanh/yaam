@@ -665,6 +665,9 @@ export interface AppState {
   masterBusy: boolean
   /** phone remote companion server, when running (transient — not persisted) */
   remoteInfo?: { url: string; token: string } | null
+  /** in-flight watcher reply text per task, streamed into the task chat
+   *  (transient — cleared when the turn completes) */
+  taskStreams?: Record<string, string>
   dragOverCol: BoardCol | null
   addons: Addon[]
   activeAddon: string | null
