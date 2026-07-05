@@ -1,16 +1,30 @@
-// Capability ports for the session domain. The launch/exit runtimes drive the
-// native PTY and the xterm terminal registry only through this narrow interface,
-// so they never import core/native or core/terminals wholesale and can be tested
-// with fakes. The real implementation wires the interface to the actual IPC and
-// terminal registry; tests pass their own.
+// Capability ports for the session domain. The launch/exit runtimes and the
+// session lifecycle actions drive the native PTY and the xterm terminal registry
+// only through this narrow interface, so they never import core/native or
+// core/terminals wholesale and can be tested with fakes. The real implementation
+// wires the interface to the actual IPC and terminal registry; tests pass their own.
 import * as native from '../../core/native'
-import { getTerminal } from '../../core/terminals'
+import { getTerminal, disposeTerminal } from '../../core/terminals'
+import { sendLineToSession } from './command'
+
+/** A minimal handle to a session's terminal — just what callers need to write. */
+export interface TerminalHandle {
+  writeln: (text: string) => void
+}
 
 export interface SessionProcessPort {
   /** true when running inside the Tauri shell (CLI probing is a no-op otherwise) */
   readonly isTauri: boolean
   /** spawn the backend PTY for a session */
   spawnSession: (id: string, command: string, cwd?: string, rows?: number, cols?: number, terminalShell?: string) => Promise<void>
+  /** kill a session's live PTY process */
+  killSession: (id: string) => Promise<void>
+  /** drop a session's persisted file */
+  removeSession: (id: string) => Promise<void>
+  /** write raw data to a session's PTY */
+  writeSession: (id: string, data: string) => Promise<void>
+  /** write a line + carriage return to a session (with the usual submit timing) */
+  sendLine: (id: string, text: string) => void
   /** discover a CLI's resume id from its session files (best-effort) */
   detectCliSession: (kind: string, cwd: string | undefined, sinceMs: number, exclude?: string[]) => Promise<string | null>
   /** create (or reuse) the xterm terminal for a session and wire its callbacks */
@@ -20,14 +34,22 @@ export interface SessionProcessPort {
     onUserInput: () => void,
     onActivity: () => void,
     onUserSubmit: () => void,
-  ) => void
+  ) => TerminalHandle
+  /** free a session's xterm buffer */
+  disposeTerminal: (id: string) => void
 }
 
 export const realSessionProcessPort: SessionProcessPort = {
   isTauri: native.isTauri,
   spawnSession: (id, command, cwd, rows, cols, terminalShell) => native.spawnSession(id, command, cwd, rows, cols, terminalShell),
+  killSession: id => native.killSession(id),
+  removeSession: id => native.removeSession(id),
+  writeSession: (id, data) => native.writeSession(id, data),
+  sendLine: (id, text) => sendLineToSession(id, text),
   detectCliSession: (kind, cwd, sinceMs, exclude) => native.detectCliSession(kind, cwd, sinceMs, exclude),
   attachTerminal: (id, onPlainLine, onUserInput, onActivity, onUserSubmit) => {
-    getTerminal(id, onPlainLine, onUserInput, onActivity, onUserSubmit)
+    const { term } = getTerminal(id, onPlainLine, onUserInput, onActivity, onUserSubmit)
+    return { writeln: text => term.writeln(text) }
   },
+  disposeTerminal: id => disposeTerminal(id),
 }

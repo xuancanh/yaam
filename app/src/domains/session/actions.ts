@@ -7,10 +7,10 @@ import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AppState, EventType } from '../../core/types'
 import { dispatch } from '../../core/store'
-import * as native from '../../core/native'
-import { disposeTerminal, getTerminal } from '../../core/terminals'
 import { focusSessionIn, removeFromGroups } from './layout-state'
-import { envPrefix, sendLineToSession, spawnAgentProcess, typeForCommand } from './command'
+import { envPrefix, typeForCommand } from './command'
+import { realSessionProcessPort } from './ports'
+import type { SessionProcessPort } from './ports'
 import { inferLegacyTerminalShell } from '../../store/state-helpers'
 
 export interface SessionActionsCtx {
@@ -25,6 +25,8 @@ export interface SessionActionsCtx {
   appendTail: (id: string, line: string) => void
   clearNeeds: (id: string) => void
   bumpSettle: (id: string) => void
+  /** native PTY + terminal capability; defaults to the real IPC-backed port */
+  port?: SessionProcessPort
 }
 
 export interface SessionActions {
@@ -38,13 +40,21 @@ export interface SessionActions {
 }
 
 export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createSessionActions(ctx), [ctx.stateRef, ctx.flash, ctx.logEvent, ctx.markUserStopped, ctx.disposeSessionRuntime, ctx.launchSession, ctx.probeCliSession, ctx.armResponseWatch, ctx.appendTail, ctx.clearNeeds, ctx.bumpSettle, ctx.port])
+}
+
+/** The session lifecycle actions as a plain factory (no React), so they can be
+ *  unit-tested with a fake SessionProcessPort and the real store. */
+export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
   const { stateRef, flash, logEvent, markUserStopped, disposeSessionRuntime, launchSession, probeCliSession, armResponseWatch, appendTail, clearNeeds, bumpSettle } = ctx
-  return useMemo(() => ({
+  const port = ctx.port ?? realSessionProcessPort
+  return {
     archiveSession: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
       if (agent?.status === 'running' || agent?.status === 'needs') {
         markUserStopped(id)
-        native.killSession(id).catch(() => {})
+        port.killSession(id).catch(() => {})
       }
       // free the xterm buffer + runtime registries; the agent (with its log
       // tail) stays persisted and the terminal is rebuilt on unarchive
@@ -65,8 +75,8 @@ export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
       // (dimmed) tail, mirroring how restore rebuilds a paused session
       const agent = stateRef.current.agents.find(a => a.id === id)
       if (agent && agent.kind !== 'chat') {
-        disposeTerminal(id)
-        const { term } = getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
+        port.disposeTerminal(id)
+        const term = port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
         for (const l of agent.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
         term.writeln('\x1b[33m── unarchived · press ▶ to relaunch ──\x1b[0m')
       }
@@ -76,9 +86,9 @@ export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
     deleteSession: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
       markUserStopped(id)
-      native.killSession(id).catch(() => {})
+      port.killSession(id).catch(() => {})
       disposeSessionRuntime(id)
-      native.removeSession(id).catch(() => {}) // drop its persisted file too
+      port.removeSession(id).catch(() => {}) // drop its persisted file too
       dispatch(s => ({
         ...s,
         ...removeFromGroups(s, id),
@@ -118,7 +128,7 @@ export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
             resumeNote = `resuming via · ${cmd}`
           }
         }
-        spawnAgentProcess(id, `${envPrefix(type?.env)}${cmd}`, agent.cwd, terminalShell).catch(() => {})
+        port.spawnSession(id, `${envPrefix(type?.env)}${cmd}`.trim(), agent.cwd || undefined, undefined, undefined, terminalShell).catch(() => {})
         probeCliSession(id, cmd, agent.cwd || '', true)
       }
       dispatch(s => focusSessionIn({
@@ -145,12 +155,12 @@ export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
           ? { ...a, log: a.log.concat([{ t: 'you', x: text }]) }
           : a),
       }))
-      sendLineToSession(id, text)
+      port.sendLine(id, text)
     },
 
     stopSession: id => {
       markUserStopped(id)
-      native.killSession(id).catch(() => {})
+      port.killSession(id).catch(() => {})
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
@@ -159,5 +169,5 @@ export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
       }))
       flash('Session stopped')
     },
-  }), [stateRef, flash, logEvent, markUserStopped, disposeSessionRuntime, launchSession, probeCliSession, armResponseWatch, appendTail, clearNeeds, bumpSettle])
+  }
 }

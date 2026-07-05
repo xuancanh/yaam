@@ -23,11 +23,6 @@ export function envPrefix(env?: string): string {
   return parts.length ? `${parts.join(' ')} ` : ''
 }
 
-/** Launch a command or persisted direct terminal shell through the native bridge. */
-export function spawnAgentProcess(id: string, command: string, cwd?: string, terminalShell?: string): Promise<void> {
-  return native.spawnSession(id, command.trim(), cwd || undefined, undefined, undefined, terminalShell)
-}
-
 /** Resolve after a browser timer delay. */
 export const wait = (ms: number) => new Promise<void>(r => window.setTimeout(r, ms))
 
