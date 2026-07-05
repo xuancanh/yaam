@@ -88,12 +88,19 @@ Whole gate before a commit: `npx tsc --noEmit -p tsconfig.app.json && npm run li
 
 ## Architecture notes that will bite you
 
-**One giant store.** `store.tsx` holds the entire app in a single `useReducer` +
-a `ConductorActions` object. `stateRef.current` mirrors state for use inside
-closures/effects. Several callbacks are wired through **refs** (`masterEventRef`,
+**One store, domain-sliced actions.** `store.tsx` owns the single `useReducer`
+state, the runtime refs/effects, and composes the action surface. Feature-domain
+actions live in `domains/<x>/actions.ts` as `useXActions(ctx)` hooks (settings,
+board, schedules, chat, addons, workspace) that take a context of stable
+refs/callbacks and are spread into the provider's `ConductorActions` memo. The
+remaining app-shell + session-runtime actions (pane layout, session lifecycle,
+resume, master send) stay in `store.tsx` because they're bound to the terminal
+registry and runtime refs there. `stateRef.current` mirrors state for closures/
+effects. Several callbacks are wired through **refs** (`masterEventRef`,
 `bumpSettleRef`, `fireAddonHookRef`, `onSettleRef`, `monitorEventRef`,
 `launchFromTemplate`) to break declaration-order/TDZ cycles — respect that
-pattern when adding cross-referencing callbacks.
+pattern when adding cross-referencing callbacks. Consumers read state via
+`useConductor()` (full) or `useConductorSelector(sel)` (narrow slice).
 
 **StrictMode double-invokes reducers.** Never put side effects (launching,
 scheduling, network) inside a dispatch updater — they'll fire twice. Do the
