@@ -50,6 +50,18 @@ export interface ToolLoopResult {
 const proseOf = (content: ApiContentBlock[]) =>
   content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
 
+/** Make a tool-loop history safe to send again. Two invariants providers
+ *  enforce: no dangling tool round at the tail (a tool_use without its
+ *  tool_result, or vice versa), and the conversation must OPEN with a plain
+ *  user message — a history capped with naive shift() can otherwise start
+ *  with an orphaned tool_result and poison every subsequent call. */
+export function sanitizeToolHistory(history: ApiMessage[]): void {
+  const carriesToolBlocks = (m: ApiMessage) => Array.isArray(m.content)
+    && (m.content as ApiContentBlock[]).some(b => b.type === 'tool_use' || b.type === 'tool_result')
+  while (history.length && carriesToolBlocks(history[history.length - 1])) history.pop()
+  while (history.length && !(history[0].role === 'user' && typeof history[0].content === 'string')) history.shift()
+}
+
 export async function runToolLoop(p: ToolLoopParams): Promise<ToolLoopResult> {
   const call = p.callApi ?? realCallApi
   const sys = () => (typeof p.system === 'function' ? p.system() : p.system)

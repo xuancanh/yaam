@@ -34,7 +34,15 @@ export interface WatcherCtx {
 /** Serialize watcher turns per task; each turn re-reads task/session state. */
 export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: string) {
   const st = ctx.stateRef.current.settings
-  if (!(st.masterEnabled && hasCreds(st))) return
+  const isUserMessage = note.startsWith('[user message]') || note.startsWith('[review]')
+  if (!(st.masterEnabled && hasCreds(st))) {
+    // never go silent on a human: say WHY there is no reply
+    if (isUserMessage && findTaskInState(ctx.stateRef.current, taskId)) {
+      ctx.pushTaskChat(taskId, 'system',
+        'The watcher cannot reply — enable the Master Brain and set credentials in Settings → Master Brain.')
+    }
+    return
+  }
   if (!findTaskInState(ctx.stateRef.current, taskId)) return
   if (ctx.busy.has(taskId)) {
     ctx.queue.set(taskId, (ctx.queue.get(taskId) ?? []).concat([note]))
@@ -140,10 +148,17 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
       try {
         const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec, ctx.aborts.signal(taskId))
         if (reply) ctx.pushTaskChat(taskId, 'watcher', reply)
+        else if (isUserMessage) {
+          ctx.pushTaskChat(taskId, 'system', 'The watcher acted with tools but wrote no reply — ask again if you need details.')
+        }
       } catch (e) {
         // the task was deleted mid-turn — stop quietly, don't report an error
         if (isAbortError(e) || ctx.aborts.signal(taskId).aborted) { pending = []; break }
-        ctx.logEvent('escalate', null, `Watcher error: ${e instanceof Error ? e.message : String(e)}`)
+        const msg = e instanceof Error ? e.message : String(e)
+        ctx.logEvent('escalate', null, `Watcher error: ${msg}`)
+        // surface the failure where the user is looking — a silent watcher
+        // reads as "the chat is broken"
+        ctx.pushTaskChat(taskId, 'system', `Watcher error: ${msg.slice(0, 300)}`)
       }
       pending = ctx.queue.get(taskId) ?? []
       ctx.queue.delete(taskId)

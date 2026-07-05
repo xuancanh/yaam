@@ -115,7 +115,10 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
       runWatcher(taskFor.task.id, userStopped
         ? `The user manually STOPPED the task's session "${agent.name}". This is a pause, not a failure — do not move the task to failed or claim completion. Update your note and wait for instructions.`
         : `The task's session "${agent.name}" exited ${failed ? `with code ${e.code} (failure)` : 'cleanly'}. Final output:\n${tail}\n\n` +
-          'Assess the result against the acceptance criteria: move the task (review when it looks complete, failed if the attempt is dead), update your note, and brief the user in one short message. Ask the user only if the outcome is genuinely ambiguous.')
+          'Assess the result against the acceptance criteria and move the task (review when it looks complete, failed if the attempt is dead), then update your note. ' +
+          'Post ONE message to the user in the task chat that (1) summarizes concretely what was accomplished — files changed, checks run, criteria met or missed — and ' +
+          '(2) when the task moved to review, explicitly asks them to review and approve the changes (the Review button on the card shows the diff). ' +
+          'Ask a question only if the outcome is genuinely ambiguous.')
     }
     if (userStopped) {
       // a user stop is neither completion nor failure — the session stays

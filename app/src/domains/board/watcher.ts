@@ -6,7 +6,7 @@
 import type { Agent, BoardTask } from '../../core/types'
 import { callApi } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
-import { runToolLoop } from '../../llm/tool-loop'
+import { runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
 
 // ---------- task creation assist ----------
 
@@ -186,18 +186,24 @@ export async function runWatcherTurn(
   history: ApiMessage[],
   exec: WatcherExec,
   signal?: AbortSignal,
+  callApi?: Parameters<typeof runToolLoop>[0]['callApi'],
 ): Promise<string> {
+  // a previous failed/aborted turn can leave dangling tool rounds — providers
+  // reject those, which would silence the watcher on every later turn
+  sanitizeToolHistory(history)
   history.push({ role: 'user', content: note })
   const { text: reply } = await runToolLoop({
-    cfg, history, tools: WATCHER_TOOLS, maxRounds: 5, signal,
+    cfg, history, tools: WATCHER_TOOLS, maxRounds: 5, signal, callApi,
     terminalAssistant: 'text', sequential: true,
     // re-read live task/agents each round; stop if the task was deleted mid-loop
     shouldContinue: () => !!getTask(),
     system: () => { const t = getTask(); return t ? watcherSystem(t, getAgents()) : '' },
     execute: async (name, input) => runWatcherTool(name, input, exec),
   })
-  // cap the private history so long tasks stay cheap
+  // cap the private history so long tasks stay cheap — then re-establish the
+  // invariants, because a blind shift() can split a tool_use/tool_result pair
+  // (the exact corruption that permanently muted watchers before)
   while (history.length > 20) history.shift()
-  if (history.length && history[0].role !== 'user') history.shift()
+  sanitizeToolHistory(history)
   return reply
 }
