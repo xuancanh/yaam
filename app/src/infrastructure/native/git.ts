@@ -6,7 +6,16 @@ import { expectArray, expectObject } from './validate'
 
 export interface GitStatusResult {
   root: string
-  files: { path: string; status: string }[]
+  /** current branch ('' when detached/unknown) */
+  branch: string
+  files: {
+    path: string
+    status: string
+    /** porcelain X column — staged (index) state, ' ' when unstaged */
+    index: string
+    /** porcelain Y column — worktree state, ' ' when fully staged */
+    work: string
+  }[]
 }
 
 /** Read porcelain git status plus the repository root for a session directory. */
@@ -28,4 +37,28 @@ export async function gitFileDiff(cwd: string, path: string): Promise<string> {
 export async function gitDiff(cwd: string): Promise<string> {
   if (!isTauri) throw new Error('git diff requires the desktop app')
   return await invoke<string>('git_diff', { cwd })
+}
+
+/** One file's full-context diff: staged (index vs HEAD) or unstaged (worktree vs index). */
+export async function gitFileDiffSide(cwd: string, path: string, staged: boolean): Promise<string> {
+  if (!isTauri) throw new Error('git requires the desktop app')
+  return await invoke<string>('git_file_diff_side', { cwd, path, staged })
+}
+
+/** Stage files (git add). */
+export async function gitStage(cwd: string, paths: string[]): Promise<void> {
+  if (!isTauri) throw new Error('git requires the desktop app')
+  await invoke('git_stage', { cwd, paths })
+}
+
+/** Unstage files (git restore --staged). */
+export async function gitUnstage(cwd: string, paths: string[]): Promise<void> {
+  if (!isTauri) throw new Error('git requires the desktop app')
+  await invoke('git_unstage', { cwd, paths })
+}
+
+/** Commit the staged changes; resolves to git's summary line. */
+export async function gitCommit(cwd: string, message: string): Promise<string> {
+  if (!isTauri) throw new Error('git requires the desktop app')
+  return await invoke<string>('git_commit', { cwd, message })
 }

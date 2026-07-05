@@ -5,6 +5,7 @@ import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
 import { ChatPane } from '../chat/ChatPane'
 import { FilesPane } from './FilesPane'
+import { GitPanel } from './GitPanel'
 import { TerminalPane } from './TerminalPane'
 
 // explorer visibility survives tab switches (panes remount freely)
@@ -12,8 +13,9 @@ const filesOpenCache = new Map<string, boolean>()
 
 /** Render one terminal pane with session controls and optional file explorer. */
 export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
-  const { setActivePane, closePane, openPanel, openDiff, resume, stopSession, toggleMaximize, minimizePane, renameSession } = useActions()
+  const { setActivePane, closePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession } = useActions()
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
+  const [gitOpen, setGitOpen] = useState(false)
   // Toggle the pane-local file explorer and repaint the terminal after resizing.
   const toggleFiles = () => {
     setFilesOpen(v => {
@@ -60,9 +62,9 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         {agent.kind !== 'chat' && agent.cwd && (
           <button
             className="icon-btn"
-            title={agent.worktree ? 'Review & merge worktree changes' : 'Review working-tree diff'}
+            title={agent.worktree ? 'Git — stage, commit, review & merge the worktree' : 'Git — stage, commit, review changes'}
             style={{ width: 27, height: 27, borderRadius: 7, color: agent.worktree ? 'var(--amber)' : undefined }}
-            onClick={e => { e.stopPropagation(); openDiff(agent.id) }}
+            onClick={e => { e.stopPropagation(); setGitOpen(true) }}
           >
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={15} stroke={1.7} />
           </button>
@@ -101,6 +103,8 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         : agent.kind === 'chat'
           ? <ChatPane agent={agent} active={active} />
           : <TerminalPane agent={agent} active={active} />}
+
+      {gitOpen && <GitPanel agent={agent} onClose={() => setGitOpen(false)} />}
 
       <div className="mono" style={{
         height: 26, flexShrink: 0, background: 'var(--panel)', borderTop: '1px solid var(--line)',

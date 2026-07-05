@@ -8,15 +8,20 @@ use std::process::Command;
 pub struct GitFileStatus {
     path: String,
     status: String,
+    /// porcelain X column — the staged (index) state, ' ' when unstaged
+    index: String,
+    /// porcelain Y column — the worktree state, ' ' when fully staged
+    work: String,
 }
 
 #[derive(Serialize)]
 pub struct GitStatusResult {
     root: String,
+    branch: String,
     files: Vec<GitFileStatus>,
 }
 
-fn parse_porcelain_status(root: String, output: &[u8]) -> GitStatusResult {
+fn parse_porcelain_status(root: String, branch: String, output: &[u8]) -> GitStatusResult {
     let mut files = Vec::new();
     for line in String::from_utf8_lossy(output).lines() {
         if line.len() < 4 || line.as_bytes().get(2) != Some(&b' ') {
@@ -30,9 +35,30 @@ fn parse_porcelain_status(root: String, output: &[u8]) -> GitStatusResult {
         files.push(GitFileStatus {
             path: path.trim_matches('"').to_string(),
             status,
+            index: line[..1].to_string(),
+            work: line[1..2].to_string(),
         });
     }
-    GitStatusResult { root, files }
+    GitStatusResult {
+        root,
+        branch,
+        files,
+    }
+}
+
+/// Run one git command in `cwd`, mapping failures to trimmed stderr.
+fn run_git(cwd: &str, args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(expand_tilde(cwd))
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        return Err(if err.is_empty() { stdout } else { err });
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// Complete working-tree diff against HEAD for a session directory.
@@ -60,6 +86,7 @@ pub fn status(cwd: &str) -> Result<GitStatusResult, String> {
         return Err("not a git repository".to_string());
     }
     let root = String::from_utf8_lossy(&root_out.stdout).trim().to_string();
+    let branch = run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
     let out = Command::new("git")
         .args(["status", "--porcelain"])
         .current_dir(&dir)
@@ -68,7 +95,7 @@ pub fn status(cwd: &str) -> Result<GitStatusResult, String> {
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
-    Ok(parse_porcelain_status(root, &out.stdout))
+    Ok(parse_porcelain_status(root, branch, &out.stdout))
 }
 
 /// Zero-context diff of one file vs HEAD — the frontend parses hunk headers
@@ -100,6 +127,40 @@ pub fn git_file_diff(cwd: String, path: String) -> Result<String, String> {
     file_diff(&cwd, &path)
 }
 
+/// Full-context diff of one file for the staging UI: staged (index vs HEAD)
+/// or unstaged (worktree vs index).
+#[tauri::command]
+pub fn git_file_diff_side(cwd: String, path: String, staged: bool) -> Result<String, String> {
+    if staged {
+        run_git(&cwd, &["diff", "--no-color", "--cached", "--", &path])
+    } else {
+        run_git(&cwd, &["diff", "--no-color", "--", &path])
+    }
+}
+
+#[tauri::command]
+pub fn git_stage(cwd: String, paths: Vec<String>) -> Result<(), String> {
+    let mut args = vec!["add", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    run_git(&cwd, &args).map(|_| ())
+}
+
+#[tauri::command]
+pub fn git_unstage(cwd: String, paths: Vec<String>) -> Result<(), String> {
+    let mut args = vec!["restore", "--staged", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    run_git(&cwd, &args).map(|_| ())
+}
+
+/// Commit the staged changes; returns git's one-line summary.
+#[tauri::command]
+pub fn git_commit(cwd: String, message: String) -> Result<String, String> {
+    if message.trim().is_empty() {
+        return Err("commit message is empty".into());
+    }
+    run_git(&cwd, &["commit", "-m", &message])
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_porcelain_status;
@@ -108,6 +169,7 @@ mod tests {
     fn parses_modified_staged_and_untracked_statuses() {
         let result = parse_porcelain_status(
             "/repo".to_string(),
+            "main".to_string(),
             b" M src/main.rs\nA  src/new.rs\n?? notes.txt\ninvalid\n",
         );
 
@@ -130,7 +192,7 @@ mod tests {
     #[test]
     fn reports_the_destination_of_a_rename() {
         let result =
-            parse_porcelain_status("/repo".to_string(), b"R  old-name.rs -> new-name.rs\n");
+            parse_porcelain_status("/repo".to_string(), "main".to_string(), b"R  old-name.rs -> new-name.rs\n");
 
         assert_eq!(result.files.len(), 1);
         assert_eq!(result.files[0].status, "R");
@@ -139,7 +201,7 @@ mod tests {
 
     #[test]
     fn strips_porcelain_quotes_from_paths() {
-        let result = parse_porcelain_status("/repo".to_string(), b"?? \"file with spaces.txt\"\n");
+        let result = parse_porcelain_status("/repo".to_string(), "main".to_string(), b"?? \"file with spaces.txt\"\n");
 
         assert_eq!(result.files[0].path, "file with spaces.txt");
     }
