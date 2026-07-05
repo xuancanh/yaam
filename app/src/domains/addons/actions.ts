@@ -20,6 +20,8 @@ export interface AddonsActionsCtx {
   makeAddonApi: (addonId: string) => AddonApi
   addonAgentHistories: MutableRefObject<Map<string, ApiMessage[]>>
   addonEditorHistories: MutableRefObject<Map<string, ApiMessage[]>>
+  /** cancel an addon's in-flight agent turn (on removal) */
+  abortAgent: (addonId: string) => void
 }
 
 export interface AddonsActions {
@@ -136,6 +138,7 @@ export function useAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
       })()
     },
     removeAddon: id => {
+      ctx.abortAgent(id) // cancel any in-flight addon-agent turn
       ctx.addonAgentHistories.current.delete(id)
       ctx.addonEditorHistories.current.delete(id)
       dispatch(s => {

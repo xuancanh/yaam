@@ -34,7 +34,7 @@ import { useWorkspaceActions } from './domains/workspace/actions'
 import { useShellActions } from './domains/shell/actions'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
-import { AbortRegistry } from './core/abort-registry'
+import { AbortRegistry, isAbortError } from './core/abort-registry'
 import { buildLaunch } from './domains/session/launch'
 import { useSessionSettle } from './domains/session/use-settle'
 import { buildHydration } from './infrastructure/persistence/hydrate'
@@ -730,6 +730,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // ---- per-addon LLM agents: an addon's own mini-Master, tools = its API ----
   const addonAgentHistories = useRef<Map<string, ApiMessage[]>>(new Map())
   const addonAgentBusy = useRef<Set<string>>(new Set())
+  // per-addon cancellation for in-flight agent turns (aborted when the addon is removed)
+  const addonAborts = useRef(new AbortRegistry())
 
   const runAddonAgent = useCallback(async (addonId: string, note: string): Promise<string> => {
     const st = stateRef.current.settings
@@ -745,14 +747,17 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         history = []
         addonAgentHistories.current.set(addonId, history)
       }
-      const reply = await runAddonAgentTurn(buildCfg(st, st.monitorModel || undefined), addon, note, history, makeAddonApi(addonId))
+      const reply = await runAddonAgentTurn(buildCfg(st, st.monitorModel || undefined), addon, note, history, makeAddonApi(addonId), addonAborts.current.signal(addonId))
       return reply || '(acted without a reply)'
     } catch (e) {
+      // the addon was removed mid-turn — stop quietly
+      if (isAbortError(e) || addonAborts.current.signal(addonId).aborted) return 'agent cancelled'
       const msg = e instanceof Error ? e.message : String(e)
       logEvent('escalate', null, `Addon agent "${addon.name}" error: ${msg}`)
       return `agent error: ${msg}`
     } finally {
       addonAgentBusy.current.delete(addonId)
+      addonAborts.current.clear(addonId)
     }
   }, [logEvent, makeAddonApi])
 
@@ -1133,6 +1138,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     dispatch, stateRef, flash, installPackage,
     sendAddonChat: (id: string, text: string) => { void sendAddonChatImpl(id, text) },
     makeAddonApi, addonAgentHistories, addonEditorHistories,
+    abortAgent: (aid: string) => addonAborts.current.abort(aid),
   }), [flash, installPackage, sendAddonChatImpl, makeAddonApi]))
   const workspaceActions = useWorkspaceActions(useMemo(() => ({
     dispatch, stateRef, later, flash, runMaster,

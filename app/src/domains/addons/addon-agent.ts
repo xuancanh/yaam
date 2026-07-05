@@ -125,12 +125,13 @@ export async function runAddonAgentTurn(
   note: string,
   history: ApiMessage[],
   api: AddonApi,
+  signal?: AbortSignal,
 ): Promise<string> {
   history.push({ role: 'user', content: note })
   const defs = AGENT_TOOLS.map(({ name, description, input_schema }) => ({ name, description, input_schema }))
   let reply = ''
   for (let i = 0; i < 6; i++) {
-    const res = await callApi(cfg, agentSystem(addon), history, defs)
+    const res = await callApi(cfg, agentSystem(addon), history, defs, signal)
     if (res.stop_reason !== 'tool_use') {
       reply = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
       history.push({ role: 'assistant', content: reply || '(ok)' })
