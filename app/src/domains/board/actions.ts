@@ -65,12 +65,17 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
     dropTo: col => {
       const id = dragId.current
       dragId.current = null
-      const prev = id ? stateRef.current.tasks.find(t => t.id === id) : undefined
-      dispatch(s => id
-        ? { ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, col } : t)), dragOverCol: null }
-        : { ...s, dragOverCol: null })
-      if (prev && prev.col !== col) ctx.fireAddonHook('onTaskMoved', { taskId: prev.id, title: prev.title, col, from: prev.col })
-      if (id && col === 'progress') {
+      dispatch(s => ({ ...s, dragOverCol: null }))
+      if (!id) return
+      // the column change + onTaskMoved hook go through the shared move_task command
+      if (ctx.execCommand) {
+        void ctx.execCommand('move_task', { id, col }, { actor: { kind: 'user' } })
+      } else {
+        const prev = stateRef.current.tasks.find(t => t.id === id)
+        dispatch(s => ({ ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, col } : t)) }))
+        if (prev && prev.col !== col) ctx.fireAddonHook('onTaskMoved', { taskId: prev.id, title: prev.title, col, from: prev.col })
+      }
+      if (col === 'progress') {
         const task = stateRef.current.tasks.find(t => t.id === id)
         if (task && !task.agentId) later(50, () => ctx.spawnSessionForTask(id))
       }

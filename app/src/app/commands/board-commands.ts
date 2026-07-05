@@ -23,10 +23,15 @@ export interface AddTaskInput {
 }
 
 export interface RemoveTaskInput { id: string }
+export interface MoveTaskInput { id: string; col: string }
 
 const COLS: BoardCol[] = ['backlog', 'progress', 'review', 'done', 'failed']
 
-export function registerBoardCommands(registry: CommandRegistry, state: StatePort): void {
+export function registerBoardCommands(
+  registry: CommandRegistry,
+  state: StatePort,
+  fireAddonHook: (hook: 'onTaskMoved', event: Record<string, unknown>) => void,
+): void {
   registry.register<AddTaskInput, string>({
     name: 'add_task',
     capability: 'tasks',
@@ -58,5 +63,19 @@ export function registerBoardCommands(registry: CommandRegistry, state: StatePor
     capability: 'tasks',
     validate: i => { if (!i.id) throw new Error('remove_task: id is required') },
     handler: i => state.update(s => ({ ...s, tasks: s.tasks.filter(t => t.id !== i.id) })),
+  })
+
+  registry.register<MoveTaskInput, void>({
+    name: 'move_task',
+    capability: 'tasks',
+    validate: i => { if (!i.id) throw new Error('move_task: id is required') },
+    handler: i => {
+      // invalid column / missing task / same column are no-ops (as the callers were)
+      if (!(COLS as string[]).includes(i.col)) return
+      const prev = state.get().tasks.find(t => t.id === i.id)
+      if (!prev || prev.col === i.col) return
+      state.update(s => ({ ...s, tasks: s.tasks.map(t => (t.id === i.id ? { ...t, col: i.col as BoardCol } : t)) }))
+      fireAddonHook('onTaskMoved', { taskId: i.id, title: prev.title, col: i.col, from: prev.col })
+    },
   })
 }

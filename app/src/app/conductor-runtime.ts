@@ -126,7 +126,7 @@ export function createAppRuntime(): AppRuntime {
     }),
   })
   registerSessionCommands(registry, { stateRef, markUserStopped: id => refs.userStoppedRef.current.add(id) })
-  registerBoardCommands(registry, statePort)
+  registerBoardCommands(registry, statePort, (hook, event) => refs.fireAddonHookRef.current(hook, event))
   const addonExec = (name: string, input: unknown, addonId: string) =>
     void registry.execute(name, input, { actor: { kind: 'addon', addonId } }).catch(() => {})
   const masterSendLine = (sid: string, text: string) =>

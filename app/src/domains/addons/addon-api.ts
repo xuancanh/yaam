@@ -115,6 +115,7 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
         tasks: s2.tasks.map(t => (t.id === id ? { ...t, title: String(title).slice(0, 120) || t.title } : t)),
       })),
       move: (id, col) => {
+        if (ctx.execCommand) { ctx.execCommand('move_task', { id: String(id), col: String(col) }, addonId); return }
         const validCols = ['backlog', 'progress', 'review', 'done', 'failed']
         if (!validCols.includes(String(col))) return
         const prev = stateRef.current.tasks.find(t => t.id === id)
