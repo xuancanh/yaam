@@ -3,7 +3,7 @@ import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 
 import type { ReactNode } from 'react'
 import type {
   Addon, AddonHookName, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
-  ChatAgentType, ChatMsg, McpServer, NotifKind, Notification, Panel, Persona, PersistedState, Skill, SkillRegistry, TabGroup, TaskChatMsg, View,
+  ChatAgentType, ChatMsg, McpServer, NotifKind, Notification, Panel, Persona, PersistedState, Skill, SkillRegistry, TaskChatMsg, View,
 } from './types'
 import { ACCENT, defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState, SHELLS } from './data'
 import * as native from './native'
@@ -27,82 +27,9 @@ import type { McpSession } from './mcp'
 import { estimateLogUsage, estimateOutputUsage } from './usage'
 import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
-
-type Updater = (s: AppState) => AppState
-
-/** Apply a pure state updater; side effects must remain outside this reducer. */
-function reducer(s: AppState, f: Updater): AppState {
-  return f(s)
-}
-
-/** Apply a change to the active tab group (no-op when none is active). */
-function withActiveGroup(s: AppState, f: (g: TabGroup) => TabGroup): AppState {
-  if (!s.activeGroup || !s.groups.some(g => g.id === s.activeGroup)) return s
-  return { ...s, groups: s.groups.map(g => (g.id === s.activeGroup ? f(g) : g)) }
-}
-
-interface LocatedTask {
-  task: BoardTask
-  workspaceId: string
-}
-
-/** Find a task across active and background workspace slices. */
-function findTaskInState(s: AppState, taskId: string, workspaceHint?: string): LocatedTask | undefined {
-  if (!workspaceHint || workspaceHint === s.activeWorkspace) {
-    const task = s.tasks.find(t => t.id === taskId)
-    if (task) return { task, workspaceId: s.activeWorkspace }
-  }
-  if (workspaceHint && workspaceHint !== s.activeWorkspace) {
-    const task = s.workspaceData[workspaceHint]?.tasks.find(t => t.id === taskId)
-    if (task) return { task, workspaceId: workspaceHint }
-  }
-  for (const [workspaceId, data] of Object.entries(s.workspaceData)) {
-    const task = data.tasks.find(t => t.id === taskId)
-    if (task) return { task, workspaceId }
-  }
-  return undefined
-}
-
-/** Find the board task currently bound to a session in any workspace. */
-function findTaskForAgentInState(s: AppState, agentId: string): LocatedTask | undefined {
-  const active = s.tasks.find(t => t.agentId === agentId)
-  if (active) return { task: active, workspaceId: s.activeWorkspace }
-  for (const [workspaceId, data] of Object.entries(s.workspaceData)) {
-    const task = data.tasks.find(t => t.agentId === agentId)
-    if (task) return { task, workspaceId }
-  }
-  return undefined
-}
-
-/** Immutably update a task in either the flat active slice or workspaceData. */
-function updateLocatedTask(
-  s: AppState,
-  taskId: string,
-  update: (task: BoardTask) => BoardTask,
-  workspaceHint?: string,
-): AppState {
-  const located = findTaskInState(s, taskId, workspaceHint)
-  if (!located) return s
-  if (located.workspaceId === s.activeWorkspace) {
-    return { ...s, tasks: s.tasks.map(t => (t.id === taskId ? update(t) : t)) }
-  }
-  const data = s.workspaceData[located.workspaceId]
-  if (!data) return s
-  return {
-    ...s,
-    workspaceData: {
-      ...s.workspaceData,
-      [located.workspaceId]: { ...data, tasks: data.tasks.map(t => (t.id === taskId ? update(t) : t)) },
-    },
-  }
-}
-
-/** Recognize the exact plain-terminal commands written by releases before terminalShell persisted. */
-function inferLegacyTerminalShell(command?: string): string | undefined {
-  const parts = command?.trim().split(/\s+/) ?? []
-  const shell = SHELLS.find(candidate => candidate === parts[0])
-  return shell && parts.slice(1).every(arg => /^-[il]+$/.test(arg)) ? shell : undefined
-}
+import { reducer, withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
+import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './store/task-state'
+import type { LocatedTask } from './store/task-state'
 
 export interface ConductorActions {
   setView: (v: View) => void
