@@ -38,6 +38,9 @@ export interface MasterCtx {
   /** write a line to a session's PTY (routes through the shared command as the
    *  master actor); defaults to the direct PTY line when unwired */
   sendLine?: (sid: string, text: string) => void
+  /** flag + kill a session (routes through the shared stop_session command);
+   *  defaults to the direct stop-flag + kill when unwired */
+  stopLine?: (sid: string) => void
   /** current cancellation signal for the Master turn (aborted on workspace delete) */
   signal?: () => AbortSignal | undefined
 }
@@ -271,8 +274,8 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
     stopSession: sid => {
       const gated = catalogGate('stop_session') || sessionGate(sid, 'stop')
       if (gated) return gated
-      ctx.userStoppedRef.current.add(sid)
-      native.killSession(sid).catch(() => {})
+      if (ctx.stopLine) ctx.stopLine(sid)
+      else { ctx.userStoppedRef.current.add(sid); native.killSession(sid).catch(() => {}) }
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === sid ? { ...a, status: 'idle' as const } : a),

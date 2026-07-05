@@ -128,11 +128,13 @@ export function createAppRuntime(): AppRuntime {
     void registry.execute(name, input, { actor: { kind: 'addon', addonId } }).catch(() => {})
   const masterSendLine = (sid: string, text: string) =>
     void registry.execute('send_to_session', { sessionId: sid, text }, { actor: { kind: 'master' } }).catch(() => {})
+  const masterStopLine = (sid: string) =>
+    void registry.execute('stop_session', { sessionId: sid }, { actor: { kind: 'master' } }).catch(() => {})
 
   const session = createSessionRuntime(kernel, refs)
   const addon = createAddonSubsystem(kernel, refs, session, addonExec)
   const chat = createChatBoot(kernel, refs, session)
-  const master = createMasterSubsystem(kernel, refs, session, addon, masterSendLine)
+  const master = createMasterSubsystem(kernel, refs, session, addon, masterSendLine, masterStopLine)
 
   const actions = createConductorActions({
     ...kernel,
