@@ -36,10 +36,12 @@ export async function resizeSession(id: string, rows: number, cols: number): Pro
   await invoke('resize_session', { id, rows, cols }).catch(() => {})
 }
 
-/** Discover the CLI conversation id created after a YAAM session launched. */
-export async function detectCliSession(kind: string, cwd: string | undefined, sinceMs: number): Promise<string | null> {
+/** Discover the CLI conversation id created after a YAAM session launched.
+ *  `exclude` holds ids already claimed by other live sessions so concurrent
+ *  sessions (esp. codex/opencode, whose stores aren't cwd-scoped) don't collide. */
+export async function detectCliSession(kind: string, cwd: string | undefined, sinceMs: number, exclude: string[] = []): Promise<string | null> {
   if (!isTauri) return null
-  return await invoke<string | null>('detect_cli_session', { kind, cwd: cwd || null, sinceMs })
+  return await invoke<string | null>('detect_cli_session', { kind, cwd: cwd || null, sinceMs, exclude })
 }
 
 /** Return native PTY ids that are still owned by the backend. */
@@ -269,4 +271,29 @@ export function savePartition(name: string, json: string): Promise<void> {
 export async function loadPartition(name: string): Promise<string | null> {
   if (!isTauri) return localStorage.getItem(`conductor-${name}`)
   return await invoke<string | null>('load_partition', { name })
+}
+
+/** Persist one session (agent) to its own file, serialized per session id.
+ *  One file per session keeps a terminal line / chat token from rewriting a
+ *  monolithic all-sessions blob. */
+export function saveSession(id: string, json: string): Promise<void> {
+  if (!isTauri) { localStorage.setItem(`conductor-session-${id}`, json); return Promise.resolve() }
+  return savePartitionSerialized(`session:${id}`, 'save_session', j => ({ id, json: j }), json)
+}
+
+/** Delete one session's file. */
+export async function removeSession(id: string): Promise<void> {
+  if (!isTauri) { localStorage.removeItem(`conductor-session-${id}`); return }
+  await invoke('remove_session', { id })
+}
+
+/** Load every persisted session file (each element is one session's JSON). */
+export async function loadSessions(): Promise<string[]> {
+  if (!isTauri) {
+    return Object.keys(localStorage)
+      .filter(k => k.startsWith('conductor-session-'))
+      .map(k => localStorage.getItem(k))
+      .filter((s): s is string => s !== null)
+  }
+  return await invoke<string[]>('load_sessions')
 }

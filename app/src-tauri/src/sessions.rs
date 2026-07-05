@@ -252,71 +252,122 @@ pub fn kill_session(state: State<'_, SessionManager>, id: String) -> Result<(), 
 }
 
 /// Find the newest JSONL file born after a launch timestamp, optionally recursively.
-fn newest_file_since(dir: &std::path::Path, since_ms: u64, recurse: bool) -> Option<(u64, std::path::PathBuf)> {
-    let mut best: Option<(u64, std::path::PathBuf)> = None;
-    let entries = std::fs::read_dir(dir).ok()?;
+/// Collect candidate session files whose creation time falls in [since, until].
+/// Creation time (not mtime) is used so a session another conversation keeps
+/// appending to can't shadow the file our child just created.
+fn files_in_window(
+    dir: &std::path::Path,
+    since_ms: u64,
+    until_ms: u64,
+    recurse: bool,
+    matches: &dyn Fn(&std::path::Path) -> bool,
+    out: &mut Vec<(u64, std::path::PathBuf)>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             if recurse {
-                if let Some(cand) = newest_file_since(&path, since_ms, true) {
-                    if best.as_ref().map(|b| cand.0 > b.0).unwrap_or(true) {
-                        best = Some(cand);
-                    }
-                }
+                files_in_window(&path, since_ms, until_ms, true, matches, out);
             }
             continue;
         }
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+        if !matches(&path) {
             continue;
         }
-        // creation time, so a concurrent conversation that keeps appending to an
-        // older file can't shadow the session our child process just created
-        let meta = entry.metadata().ok()?;
+        let Ok(meta) = entry.metadata() else { continue };
         let created = meta
             .created()
             .or_else(|_| meta.modified())
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as u64)?;
-        if created < since_ms {
-            continue;
-        }
-        if best.as_ref().map(|b| created > b.0).unwrap_or(true) {
-            best = Some((created, path));
+            .map(|d| d.as_millis() as u64);
+        if let Some(created) = created {
+            if created >= since_ms && created <= until_ms {
+                out.push((created, path));
+            }
         }
     }
-    best
 }
 
-/// Detect the session id a CLI created after `since_ms`, so it can be resumed
-/// later (claude --resume <id>, codex resume <id>).
-#[tauri::command]
-pub fn detect_cli_session(kind: String, cwd: Option<String>, since_ms: f64) -> Option<String> {
-    let home = std::env::var("HOME").ok()?;
-    let since = since_ms as u64;
-    match kind.as_str() {
-        "claude" => {
-            // sessions live in ~/.claude/projects/<cwd with / and . as ->/<id>.jsonl
-            let dir = expand_tilde(&cwd.filter(|c| !c.is_empty()).unwrap_or_else(|| home.clone()));
-            let encoded = dir.replace(['/', '.'], "-");
-            let project = std::path::PathBuf::from(&home).join(".claude/projects").join(encoded);
-            let (_, path) = newest_file_since(&project, since, false)?;
-            path.file_stem().map(|s| s.to_string_lossy().to_string())
-        }
+/// Turn a session file path into the CLI's resume id for the given kind.
+fn derive_session_id(kind: &str, path: &std::path::Path) -> Option<String> {
+    let stem = path.file_stem()?.to_string_lossy().to_string();
+    match kind {
+        // ~/.codex/sessions/.../rollout-<ts>-<uuid>.jsonl → trailing 36-char UUID
         "codex" => {
-            // ~/.codex/sessions/YYYY/MM/DD/rollout-...-<uuid>.jsonl
-            let dir = std::path::PathBuf::from(&home).join(".codex/sessions");
-            let (_, path) = newest_file_since(&dir, since, true)?;
-            let stem = path.file_stem()?.to_string_lossy().to_string();
             if stem.len() >= 36 {
                 Some(stem[stem.len() - 36..].to_string())
             } else {
                 Some(stem)
             }
         }
-        _ => None,
+        // claude: <id>.jsonl ; opencode: ses_<id>.json — the stem is the id
+        _ => Some(stem),
     }
+}
+
+/// Detect the session id a CLI created after `since_ms`, so it can be resumed
+/// later. Fix for shared/non-cwd-scoped stores (codex, opencode) and multiple
+/// concurrent sessions: pick the EARLIEST file in the window whose id isn't
+/// already claimed by another live session, rather than the newest in the dir.
+#[tauri::command]
+pub fn detect_cli_session(
+    kind: String,
+    cwd: Option<String>,
+    since_ms: f64,
+    exclude: Vec<String>,
+) -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let since = since_ms as u64;
+    // window upper bound: the file appears within seconds of spawn; a generous
+    // cap keeps a much-later sibling's file from being adopted by a late probe
+    let until = since.saturating_add(180_000);
+
+    let (dir, recurse, matcher): (std::path::PathBuf, bool, Box<dyn Fn(&std::path::Path) -> bool>) =
+        match kind.as_str() {
+            "claude" => {
+                // ~/.claude/projects/<cwd with / and . as ->/<id>.jsonl (cwd-scoped)
+                let base = expand_tilde(&cwd.filter(|c| !c.is_empty()).unwrap_or_else(|| home.clone()));
+                let encoded = base.replace(['/', '.'], "-");
+                let project = std::path::PathBuf::from(&home).join(".claude/projects").join(encoded);
+                (project, false, Box::new(|p: &std::path::Path| p.extension().and_then(|e| e.to_str()) == Some("jsonl")))
+            }
+            "codex" => {
+                // ~/.codex/sessions/YYYY/MM/DD/rollout-...-<uuid>.jsonl (NOT cwd-scoped)
+                let dir = std::path::PathBuf::from(&home).join(".codex/sessions");
+                (dir, true, Box::new(|p: &std::path::Path| p.extension().and_then(|e| e.to_str()) == Some("jsonl")))
+            }
+            "opencode" => {
+                // ~/.local/share/opencode/storage/**/ses_<id>.json (NOT cwd-scoped;
+                // sessions live in SQLite + these per-session json fragments)
+                let dir = std::path::PathBuf::from(&home).join(".local/share/opencode/storage");
+                (dir, true, Box::new(|p: &std::path::Path| {
+                    p.extension().and_then(|e| e.to_str()) == Some("json")
+                        && p.file_stem().and_then(|s| s.to_str()).map(|s| s.starts_with("ses_")).unwrap_or(false)
+                }))
+            }
+            _ => return None,
+        };
+
+    let mut candidates: Vec<(u64, std::path::PathBuf)> = Vec::new();
+    files_in_window(&dir, since, until, recurse, &matcher, &mut candidates);
+    // earliest first: the first file to appear after we spawned is most likely ours
+    candidates.sort_by_key(|(created, _)| *created);
+
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (_, path) in candidates {
+        let Some(id) = derive_session_id(&kind, &path) else { continue };
+        // one id can map to several files (opencode writes several fragments);
+        // consider each id once, in earliest-creation order
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        if !exclude.contains(&id) {
+            return Some(id);
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -591,19 +642,19 @@ fn partition_file(name: &str) -> Result<String, String> {
     Ok(format!("{name}.json"))
 }
 
-/// Atomic write of one state partition: unique temp file + fsync + rename,
-/// rotating the previous copy to `<file>.bak`. Temp-file + rename means a crash
-/// mid-write can never truncate the only good copy, and a unique temp name
-/// keeps concurrent writers from sharing one scratch path.
-fn write_partition(app: &AppHandle, file: &str, json: &str) -> Result<(), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(file);
+/// Atomic write to an absolute path: unique temp file + fsync + rename, rotating
+/// the previous copy to `<path>.bak`. Temp-file + rename means a crash mid-write
+/// can never truncate the only good copy, and a unique temp name keeps
+/// concurrent writers from sharing one scratch path.
+fn atomic_write(path: &std::path::Path, json: &str) -> Result<(), String> {
+    let parent = path.parent().ok_or("path has no parent directory")?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let name = path.file_name().and_then(|n| n.to_str()).ok_or("bad file name")?;
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let tmp = dir.join(format!("{file}.{nonce}.tmp"));
+    let tmp = parent.join(format!("{name}.{nonce}.tmp"));
     {
         let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
         #[cfg(unix)]
@@ -614,20 +665,22 @@ fn write_partition(app: &AppHandle, file: &str, json: &str) -> Result<(), String
         f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
         f.sync_all().map_err(|e| e.to_string())?;
     }
+    let bak = parent.join(format!("{name}.bak"));
     if path.exists() {
-        let _ = std::fs::rename(&path, dir.join(format!("{file}.bak")));
+        let _ = std::fs::rename(path, &bak);
     }
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
-/// Read a partition file, optionally falling back to its `.bak`.
-fn read_partition(app: &AppHandle, file: &str, with_backup: bool) -> Result<Option<String>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    match std::fs::read_to_string(dir.join(file)) {
+/// Read a file, optionally falling back to its sibling `.bak`.
+fn read_with_backup(path: &std::path::Path, with_backup: bool) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(path) {
         Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if with_backup {
-                match std::fs::read_to_string(dir.join(format!("{file}.bak"))) {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                let bak = path.with_file_name(format!("{name}.bak"));
+                match std::fs::read_to_string(bak) {
                     Ok(s) => Ok(Some(s)),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
                     Err(e) => Err(e.to_string()),
@@ -638,6 +691,16 @@ fn read_partition(app: &AppHandle, file: &str, with_backup: bool) -> Result<Opti
         }
         Err(e) => Err(e.to_string()),
     }
+}
+
+fn write_partition(app: &AppHandle, file: &str, json: &str) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    atomic_write(&dir.join(file), json)
+}
+
+fn read_partition(app: &AppHandle, file: &str, with_backup: bool) -> Result<Option<String>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    read_with_backup(&dir.join(file), with_backup)
 }
 
 #[tauri::command]
@@ -661,22 +724,107 @@ pub fn load_state_backup(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-/// Persist a named state partition (e.g. `sessions`) as `<name>.json`.
+/// Persist a named state partition (e.g. legacy `sessions`) as `<name>.json`.
 pub fn save_partition(app: AppHandle, name: String, json: String) -> Result<(), String> {
-    let file = partition_file(&name)?;
-    write_partition(&app, &file, &json)
+    write_partition(&app, &partition_file(&name)?, &json)
 }
 
 #[tauri::command]
 /// Load a named state partition, falling back to its `.bak`.
 pub fn load_partition(app: AppHandle, name: String) -> Result<Option<String>, String> {
-    let file = partition_file(&name)?;
-    read_partition(&app, &file, true)
+    read_partition(&app, &partition_file(&name)?, true)
+}
+
+/// Directory holding one JSON file per session (keeps a chat/terminal update
+/// from rewriting a single monolithic sessions blob).
+fn sessions_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("sessions"))
+}
+
+#[tauri::command]
+/// Persist one session (agent) to its own file, `sessions/<id>.json`.
+pub fn save_session(app: AppHandle, id: String, json: String) -> Result<(), String> {
+    let file = partition_file(&id)?; // reuse the safe-name guard (no separators/traversal)
+    atomic_write(&sessions_dir(&app)?.join(file), &json)
+}
+
+#[tauri::command]
+/// Delete one session's file (and its backup).
+pub fn remove_session(app: AppHandle, id: String) -> Result<(), String> {
+    let file = partition_file(&id)?;
+    let dir = sessions_dir(&app)?;
+    let _ = std::fs::remove_file(dir.join(&file));
+    let _ = std::fs::remove_file(dir.join(format!("{file}.bak")));
+    Ok(())
+}
+
+#[tauri::command]
+/// Load every persisted session file. Returns each file's JSON; a `.bak` is
+/// used only when the primary is missing. Unreadable files are skipped.
+pub fn load_sessions(app: AppHandle) -> Result<Vec<String>, String> {
+    let dir = sessions_dir(&app)?;
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(e) => return Err(e.to_string()),
+    };
+    let mut out = Vec::new();
+    let mut seen_stems = std::collections::HashSet::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        // primary files only: <id>.json (skip <id>.json.bak and *.tmp)
+        if !name.ends_with(".json") || name.ends_with(".tmp") {
+            continue;
+        }
+        if let Ok(Some(s)) = read_with_backup(&path, false) {
+            seen_stems.insert(name.trim_end_matches(".json").to_string());
+            out.push(s);
+        }
+    }
+    // recover any session whose primary is missing but a .bak survives
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            if let Some(stem) = name.strip_suffix(".json.bak") {
+                if !seen_stems.contains(stem) {
+                    if let Ok(s) = std::fs::read_to_string(&path) {
+                        out.push(s);
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_login_executable, session_launch_spec};
+    use super::{derive_session_id, resolve_login_executable, session_launch_spec};
+    use std::path::Path;
+
+    #[test]
+    /// Codex ids are the trailing 36-char UUID of the rollout filename; claude
+    /// and opencode ids are the whole file stem.
+    fn derives_session_ids_per_cli() {
+        assert_eq!(
+            derive_session_id("codex", Path::new(
+                "/x/rollout-2026-03-29T22-06-43-019d3d23-176a-7663-baaa-fdc8cef1e988.jsonl")),
+            Some("019d3d23-176a-7663-baaa-fdc8cef1e988".to_string()),
+        );
+        assert_eq!(
+            derive_session_id("claude", Path::new("/x/abc-123-def.jsonl")),
+            Some("abc-123-def".to_string()),
+        );
+        assert_eq!(
+            derive_session_id("opencode", Path::new("/x/ses_1a8d3093dffeV2rBjv.json")),
+            Some("ses_1a8d3093dffeV2rBjv".to_string()),
+        );
+    }
 
     #[test]
     /// Resolve a guaranteed system shell through an explicit path.

@@ -238,7 +238,7 @@ export interface ConductorActions {
 import {
   KEYMAP, PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
   activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, groupsFromLegacy,
-  humanizeCron, mkGroup, mkId, removeFromGroups, selectMainState, selectSessionsState,
+  humanizeCron, mkGroup, mkId, removeFromGroups, selectMainState, selectSession,
   sendLineToSession, spawnAgentProcess, switchWorkspaceIn, taskContract, taskWorkText, typeForCommand, wait,
 } from './state-lib'
 
@@ -1109,17 +1109,34 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         return parsed
       }
     }
-    // Parse the sessions partition; a bad/absent one just means no restored
-    // sessions (agents also fall back to the legacy embedded field below).
+    // Load sessions: prefer one-file-per-session, then the legacy single
+    // sessions.json partition, then the even older agents embedded in main.
+    // A bad/absent source just means fewer restored sessions.
     const parseSessionAgents = async (): Promise<Agent[] | undefined> => {
-      const raw = await native.loadPartition('sessions')
-      if (!raw) return undefined
       try {
-        return (JSON.parse(raw) as Partial<PersistedState>).agents
+        const files = await native.loadSessions()
+        if (files.length) {
+          const agents: Agent[] = []
+          for (const raw of files) {
+            try {
+              const parsed = JSON.parse(raw) as { agent?: Agent }
+              if (parsed.agent) agents.push(parsed.agent)
+            } catch (e) {
+              console.error('[yaam] a session file was unreadable — skipping:', e)
+            }
+          }
+          if (agents.length) return agents
+        }
       } catch (e) {
-        console.error('[yaam] sessions partition unreadable — ignoring:', e)
-        return undefined
+        console.error('[yaam] loading session files failed:', e)
       }
+      try {
+        const raw = await native.loadPartition('sessions')
+        if (raw) return (JSON.parse(raw) as Partial<PersistedState>).agents
+      } catch (e) {
+        console.error('[yaam] legacy sessions partition unreadable — ignoring:', e)
+      }
+      return undefined
     }
     void (async () => {
       try {
@@ -1165,15 +1182,29 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     state.workspaces, state.activeWorkspace, state.workspaceData,
   ])
 
-  // Sessions (high-churn) partition: agent definitions + capped output tails.
-  // Terminal I/O and chat streaming fire here constantly, so it writes to its
-  // own file instead of dragging the whole main blob to disk each time.
+  // Sessions: one file per session. Terminal I/O and chat streaming fire
+  // constantly, so we diff against the last-saved set and write ONLY the agents
+  // whose object identity changed (agents are immutably updated, so a changed
+  // reference == changed content), and delete files for removed agents. A
+  // streaming session therefore rewrites just its own small file.
+  const savedAgentsRef = useRef<Map<string, Agent>>(new Map())
   useEffect(() => {
     if (!hydrated.current) return
     if (sessionSaveTimer.current) window.clearTimeout(sessionSaveTimer.current)
-    const sessions = selectSessionsState(state)
+    const agents = state.agents
     sessionSaveTimer.current = window.setTimeout(() => {
-      native.savePartition('sessions', JSON.stringify(sessions)).then(() => { saveFailedRef.current = false }).catch(e => onSaveError('sessions', e))
+      const prev = savedAgentsRef.current
+      const next = new Map<string, Agent>()
+      for (const a of agents) {
+        next.set(a.id, a)
+        if (prev.get(a.id) !== a) {
+          native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { saveFailedRef.current = false }).catch(e => onSaveError('session', e))
+        }
+      }
+      for (const id of prev.keys()) {
+        if (!next.has(id)) native.removeSession(id).catch(() => {})
+      }
+      savedAgentsRef.current = next
     }, 800)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.agents])
@@ -1185,7 +1216,11 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const flush = () => {
       const st = stateRef.current
       native.saveStateFile(JSON.stringify(selectMainState(st))).catch(() => {})
-      native.savePartition('sessions', JSON.stringify(selectSessionsState(st))).catch(() => {})
+      // write only sessions changed since the last debounced save
+      const prev = savedAgentsRef.current
+      for (const a of st.agents) {
+        if (prev.get(a.id) !== a) native.saveSession(a.id, JSON.stringify(selectSession(a))).catch(() => {})
+      }
     }
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)
@@ -1207,7 +1242,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const current = stateRef.current.agents.find(a => a.id === id)
       if (!current) return
       if (!isResume && current.cliSessionId) return
-      native.detectCliSession(probeType.probe!, cwd || undefined, spawnedAt).then(sid => {
+      // ids already claimed by other live sessions — so concurrent sessions
+      // (codex/opencode stores aren't cwd-scoped) can't resolve to the same file
+      const exclude = stateRef.current.agents
+        .filter(a => a.id !== id && a.cliSessionId)
+        .map(a => a.cliSessionId!)
+      native.detectCliSession(probeType.probe!, cwd || undefined, spawnedAt, exclude).then(sid => {
         if (!sid || sid === stateRef.current.agents.find(a => a.id === id)?.cliSessionId) return
         dispatch(s2 => ({
           ...s2,

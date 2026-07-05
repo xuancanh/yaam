@@ -1,21 +1,17 @@
 // Pure helpers shared by the store: ids, cron parsing, prompt/dialog
 // detection, agent-type utilities, pane focus semantics, and PTY input.
 import * as native from './native'
-import type { AgentTemplate, AgentType, AppState, EscOption, MainPartition, SessionsPartition, TabGroup, WorkspaceData } from './types'
+import type { AgentTemplate, AgentType, AppState, EscOption, MainPartition, TabGroup, WorkspaceData } from './types'
 
 /** Bumped when the persisted shape changes in a way hydration must know about.
  *  Hydration stays defensive per-field, so most additions don't require a bump. */
 export const SCHEMA_VERSION = 1
 
-/** The high-churn `sessions` partition: agent definitions and their capped
- *  output tails. Terminal I/O and chat streaming mutate this constantly, so it
- *  is written to its own file to keep those writes off the much larger, mostly
- *  static main partition. Logs are capped here, not at each call site. */
-export function selectSessionsState(s: AppState): SessionsPartition {
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    agents: s.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
-  }
+/** One session's persisted form: the agent with its output tail capped. Each
+ *  session is written to its own file (`sessions/<id>.json`) so a terminal line
+ *  or chat token rewrites only that session, not one monolithic sessions blob. */
+export function selectSession(a: AppState['agents'][number]) {
+  return { schemaVersion: SCHEMA_VERSION, agent: { ...a, log: a.log.slice(-200) } }
 }
 
 /** The low-churn main partition: everything durable except `agents`. Config
