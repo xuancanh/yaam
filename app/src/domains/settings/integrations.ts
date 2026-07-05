@@ -2,7 +2,7 @@
 // Owns the two caches (keyed by server / registry id) and the connect/refresh
 // calls that populate them and mirror status onto the store. Shared by the
 // settings actions (connect/refresh buttons) and the chat runner (tools/skills).
-import { useCallback, useRef } from 'react'
+import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AppState } from '../../core/types'
 import type { McpSession } from '../../core/mcp'
@@ -10,6 +10,7 @@ import type { CatalogSkill } from '../../core/skills'
 import { mcpConnect } from '../../core/mcp'
 import { fetchSkillRegistry } from '../../core/skills'
 import { dispatch } from '../../core/store'
+import type { StatePort } from '../../core/ports'
 
 export interface IntegrationRuntime {
   /** live MCP sessions by server id (chat agents call their tools) */
@@ -22,17 +23,19 @@ export interface IntegrationRuntime {
   refreshSkillCatalog: (id: string) => Promise<string>
 }
 
-export function useIntegrationRuntime(stateRef: MutableRefObject<AppState>): IntegrationRuntime {
-  const mcpSessions = useRef<Map<string, McpSession>>(new Map())
-  const skillCatalogs = useRef<Map<string, CatalogSkill[]>>(new Map())
+/** Plain (non-React) factory: owns the two live caches and the connect/refresh
+ *  calls that populate them + mirror status onto the store via the StatePort. */
+export function createIntegrationRuntime(state: StatePort): IntegrationRuntime {
+  const mcpSessions: MutableRefObject<Map<string, McpSession>> = { current: new Map() }
+  const skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>> = { current: new Map() }
 
-  const connectMcp = useCallback(async (id: string): Promise<string> => {
-    const server = stateRef.current.mcpServers.find(x => x.id === id)
+  const connectMcp = async (id: string): Promise<string> => {
+    const server = state.get().mcpServers.find(x => x.id === id)
     if (!server) return 'server not found'
     try {
       const session = await mcpConnect(server.name, server.url, server.headers)
       mcpSessions.current.set(id, session)
-      dispatch(s => ({
+      state.update(s => ({
         ...s,
         mcpServers: s.mcpServers.map(x => x.id === id ? { ...x, toolCount: session.tools.length, lastError: undefined } : x),
       }))
@@ -40,34 +43,39 @@ export function useIntegrationRuntime(stateRef: MutableRefObject<AppState>): Int
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       mcpSessions.current.delete(id)
-      dispatch(s => ({
+      state.update(s => ({
         ...s,
         mcpServers: s.mcpServers.map(x => x.id === id ? { ...x, toolCount: undefined, lastError: msg } : x),
       }))
       return msg
     }
-  }, [stateRef])
+  }
 
-  const refreshSkillCatalog = useCallback(async (id: string): Promise<string> => {
-    const reg = stateRef.current.skillRegistries.find(r => r.id === id)
+  const refreshSkillCatalog = async (id: string): Promise<string> => {
+    const reg = state.get().skillRegistries.find(r => r.id === id)
     if (!reg) return 'registry not found'
     try {
       const catalog = await fetchSkillRegistry(reg.name, reg.url)
       skillCatalogs.current.set(id, catalog)
-      dispatch(s2 => ({
+      state.update(s2 => ({
         ...s2,
         skillRegistries: s2.skillRegistries.map(r => (r.id === id ? { ...r, skillCount: catalog.length, lastError: undefined } : r)),
       }))
       return ''
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      dispatch(s2 => ({
+      state.update(s2 => ({
         ...s2,
         skillRegistries: s2.skillRegistries.map(r => (r.id === id ? { ...r, skillCount: undefined, lastError: msg } : r)),
       }))
       return msg
     }
-  }, [stateRef])
+  }
 
   return { mcpSessions, skillCatalogs, connectMcp, refreshSkillCatalog }
+}
+
+/** React adapter over the real store. */
+export function useIntegrationRuntime(stateRef: MutableRefObject<AppState>): IntegrationRuntime {
+  return useMemo(() => createIntegrationRuntime({ get: () => stateRef.current, update: dispatch, subscribe: () => () => {} }), [stateRef])
 }

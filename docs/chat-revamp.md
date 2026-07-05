@@ -99,6 +99,19 @@ model falls back to `rm`/`mv` in run_command which bypasses the write sandbox):
 - `set_status(text)` — one-line "what I'm doing now" surfaced in the chat header
   during long turns (Cowork-style visibility, cut 7).
 
+**Task management** (bridges chat → YAAM's existing kanban board + schedules —
+the agent becomes a way to *drive* the orchestrator, not just the filesystem):
+- `list_board_tasks()`, `add_board_task(title, description?, criteria?, startNow?)`,
+  `move_board_task(id, column)` — the watcher runner takes over from there.
+- `add_schedule(name, cron | at, prompt/template)` — recurring or one-time;
+  `list_schedules()`. Reuses the schedules domain actions.
+
+**Skill creation & optimization** (self-improving workflows):
+- `save_skill(name, description, body)` — create or update a local skill; the
+  agent can capture a workflow it just did well ("save this as a skill") or
+  rewrite an existing one to fix its weak spots. Saved skills appear in the
+  slash menu immediately.
+
 Deliberately *not* tools: git (run_command is fine and terminal sessions own git
 UX), browser automation (out of scope), sub-agents (Master already orchestrates).
 
