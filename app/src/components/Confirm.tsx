@@ -10,31 +10,44 @@ export interface ConfirmOptions {
   /** what exactly is about to happen (and whether it can be undone) */
   detail?: string
   confirmLabel?: string
+  /** red confirm button (default true) — set false for reversible actions like archive */
+  danger?: boolean
 }
 
 interface ConfirmRequest extends ConfirmOptions {
   resolve: (ok: boolean) => void
 }
 
-let host: ((req: ConfirmRequest) => void) | null = null
+// The host lives on globalThis, NOT in module scope: under Vite HMR a module
+// edit gives call sites and the host component different copies of this file,
+// and a module-local variable would silently split them apart.
+const HOST_KEY = '__yaamConfirmHost'
+type HostFn = (req: ConfirmRequest) => void
+const getHost = (): HostFn | null => (globalThis as Record<string, unknown>)[HOST_KEY] as HostFn | null ?? null
+const setHost = (fn: HostFn | null): void => { (globalThis as Record<string, unknown>)[HOST_KEY] = fn }
 
-/** Ask the user to confirm a destructive action. Resolves false when the
- *  dialog is dismissed (backdrop, Escape via Cancel) or no host is mounted
- *  headlessly (tests) — deletion never proceeds silently. */
+/** Ask the user to confirm a destructive action. FAILS CLOSED: with a DOM but
+ *  no mounted host (a bug), it resolves false and logs — deletion never
+ *  proceeds without a dialog. Headless (node tests) it resolves true. */
 export function confirmAction(opts: ConfirmOptions): Promise<boolean> {
-  if (!host) return Promise.resolve(true) // headless (tests, addon iframes)
-  return new Promise<boolean>(resolve => host!({ ...opts, resolve }))
+  const host = getHost()
+  if (!host) {
+    if (typeof document === 'undefined') return Promise.resolve(true) // headless tests
+    console.error('[yaam] confirmAction called with no ConfirmHost mounted — refusing:', opts.title)
+    return Promise.resolve(false)
+  }
+  return new Promise<boolean>(resolve => host({ ...opts, resolve }))
 }
 
 export function ConfirmHost() {
   const [req, setReq] = useState<ConfirmRequest | null>(null)
   useEffect(() => {
-    host = r => setReq(prev => {
+    setHost(r => setReq(prev => {
       // a second request while one is open cancels the first (never stack)
       prev?.resolve(false)
       return r
-    })
-    return () => { host = null }
+    }))
+    return () => setHost(null)
   }, [])
 
   if (!req) return null
@@ -42,9 +55,11 @@ export function ConfirmHost() {
     req.resolve(ok)
     setReq(null)
   }
+  const danger = req.danger !== false
   return (
     <div
       onClick={() => done(false)}
+      onKeyDown={e => { if (e.key === 'Escape') done(false) }}
       style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.6)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
     >
       <div
@@ -64,7 +79,7 @@ export function ConfirmHost() {
           </button>
           <button
             className="approve-btn"
-            style={{ flex: 1, padding: 9, fontSize: 12.5, background: 'var(--red)', color: '#fff' }}
+            style={{ flex: 1, padding: 9, fontSize: 12.5, ...(danger ? { background: 'var(--red)', color: '#fff' } : {}) }}
             onClick={() => done(true)}
           >
             {req.confirmLabel ?? 'Delete'}

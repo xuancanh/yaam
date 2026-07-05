@@ -268,7 +268,18 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
           >
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={13} stroke={1.7} />
           </button>
-          <button className="icon-btn danger" title="Archive task (recoverable — delete lives in the Archived viewer)" style={{ width: 26, height: 26, borderRadius: 7 }} onClick={() => { archiveTask(task.id); onClose() }}>
+          <button
+            className="icon-btn danger"
+            title="Archive task (recoverable — delete lives in the Archived viewer)"
+            style={{ width: 26, height: 26, borderRadius: 7 }}
+            onClick={() => {
+              void confirmAction({
+                title: `Archive “${task.title.slice(0, 48)}”?`,
+                detail: 'The task leaves the board and its watcher stops. Restore it anytime from Archived on the board header.',
+                confirmLabel: 'Archive', danger: false,
+              }).then(ok => { if (ok) { archiveTask(task.id); onClose() } })
+            }}
+          >
             <Icon paths={IC.close} size={12} stroke={1.8} />
           </button>
           <button className="icon-btn" title="Close" style={{ width: 26, height: 26, borderRadius: 7 }} onClick={onClose}>
@@ -510,7 +521,14 @@ function Card({ card, agent, onOpen, onReview }: { card: BoardTask; agent: Agent
       <button
         className="card-delete"
         title="Archive task (recoverable)"
-        onClick={e => { e.stopPropagation(); archiveTask(card.id) }}
+        onClick={e => {
+          e.stopPropagation()
+          void confirmAction({
+            title: `Archive “${card.title.slice(0, 48)}”?`,
+            detail: 'The task leaves the board and its watcher stops. Restore it anytime from Archived on the board header.',
+            confirmLabel: 'Archive', danger: false,
+          }).then(ok => { if (ok) archiveTask(card.id) })
+        }}
         style={{
           position: 'absolute', top: 6, right: 6, width: 20, height: 20, border: 'none',
           background: 'transparent', color: 'var(--dim)', borderRadius: 5,
