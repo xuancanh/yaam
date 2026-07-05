@@ -32,6 +32,7 @@ import { useChatActions } from './domains/chat/actions'
 import { useAddonsActions } from './domains/addons/actions'
 import { useWorkspaceActions } from './domains/workspace/actions'
 import { useShellActions } from './domains/shell/actions'
+import { useSessionLayoutActions } from './domains/session/layout-actions'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
@@ -40,7 +41,7 @@ import { classifyExit } from './domains/session/exit'
 import { useSessionSettle } from './domains/session/use-settle'
 import { buildHydration } from './infrastructure/persistence/hydrate'
 import { loadSnapshot } from './infrastructure/persistence/loaders'
-import { withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
+import { inferLegacyTerminalShell } from './store/state-helpers'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './domains/board/task-state'
 import type { LocatedTask } from './domains/board/task-state'
 import type { ConductorActions } from './app/actions'
@@ -53,7 +54,7 @@ import { createPersistenceRuntime } from './infrastructure/persistence/runtime'
 import type { PersistenceRuntime } from './infrastructure/persistence/runtime'
 import { collectDueSchedules, collectDueTasks } from './domains/schedules/due'
 import { buildTemplateCommand } from './domains/schedules/template-command'
-import { activeGroupOf, focusSessionIn, mkGroup, removeFromGroups } from './domains/session/layout-state'
+import { focusSessionIn, removeFromGroups } from './domains/session/layout-state'
 import { envPrefix, sendLineToSession, spawnAgentProcess, typeForCommand } from './domains/session/command'
 import { taskContract, taskWorkText } from './domains/board/task-prompt'
 
@@ -1154,6 +1155,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     abortMaster: () => masterAborts.current.abort('master'),
   }), [later, flash, runMaster, disposeSessionRuntime]))
   const shellActions = useShellActions()
+  const sessionLayoutActions = useSessionLayoutActions()
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
@@ -1164,6 +1166,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     ...addonsActions,
     ...workspaceActions,
     ...shellActions,
+    ...sessionLayoutActions,
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
     send: () => {
@@ -1197,135 +1200,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const el = document.querySelector<HTMLTextAreaElement>('[data-composer]')
       el?.focus()
     },
-
-    setActivePane: i => dispatch(s => {
-      const ag = activeGroupOf(s)
-      if (!ag || i < 0 || i >= ag.slots.length) return s
-      const id = ag.slots[i]
-      return {
-        ...withActiveGroup(s, g => ({ ...g, activePane: i })),
-        agents: id ? s.agents.map(a => (a.id === id ? { ...a, attention: false } : a)) : s.agents,
-      }
-    }),
-
-    focusTab: id => dispatch(s => focusSessionIn(s, id)),
-
-    activateGroup: gid => dispatch(s => (s.groups.some(g => g.id === gid)
-      ? { ...s, activeGroup: gid, view: 'workspace' }
-      : s)),
-
-    closeGroup: gid => dispatch(s => {
-      const groups = s.groups.filter(g => g.id !== gid)
-      return {
-        ...s,
-        groups,
-        activeGroup: s.activeGroup === gid ? groups[0]?.id ?? null : s.activeGroup,
-      }
-    }),
-
-    // layout changes apply to the ACTIVE group only — other tab groups keep
-    // their own pane arrangement (each group remembers its layout, Chrome-style)
-    setPaneLayout: (n, stacked) => dispatch(s => {
-      const count = Math.max(1, Math.min(4, Math.round(n)))
-      if (!activeGroupOf(s)) {
-        const g = mkGroup(Array(count).fill(null), !!stacked)
-        return { ...s, groups: s.groups.concat([g]), activeGroup: g.id, view: 'workspace' }
-      }
-      return {
-        ...withActiveGroup(s, g => {
-          // keep visible sessions in order, then pad with empty slots
-          const kept = g.slots.filter((id): id is string => id !== null).slice(0, count)
-          const slots: (string | null)[] = kept.concat(Array(count - kept.length).fill(null))
-          return {
-            ...g, slots,
-            stacked: !!stacked,
-            activePane: Math.min(g.activePane, count - 1),
-            maximizedPane: null,
-          }
-        }),
-        view: 'workspace',
-      }
-    }),
-
-    assignPane: (i, id) => dispatch(s => {
-      const ag = activeGroupOf(s)
-      if (!ag) {
-        // empty grid with no group yet — assigning creates one
-        const g = mkGroup([id])
-        return {
-          ...s,
-          groups: s.groups.concat([g]),
-          activeGroup: g.id,
-          agents: s.agents.map(a => (a.id === id ? { ...a, archived: false, attention: false } : a)),
-          minimizedIds: s.minimizedIds.filter(x => x !== id),
-          view: 'workspace',
-        }
-      }
-      if (i < 0 || i >= ag.slots.length) return s
-      // a session lives in at most one group — pull it out of any other slot
-      const cleared = s.groups.map(g => (g.slots.includes(id)
-        ? { ...g, slots: g.slots.map(x => (x === id ? null : x)), maximizedPane: null }
-        : g))
-      const groups = cleared
-        .map(g => (g.id === ag.id
-          ? { ...g, slots: g.slots.map((x, k) => (k === i ? id : x)), activePane: i, maximizedPane: null }
-          : g))
-        .filter(g => g.slots.some(Boolean) || g.id === s.activeGroup)
-      return {
-        ...s, groups,
-        agents: s.agents.map(a => (a.id === id ? { ...a, archived: false, attention: false } : a)),
-        minimizedIds: s.minimizedIds.filter(x => x !== id),
-        view: 'workspace',
-      }
-    }),
-
-    closePane: i => dispatch(s => {
-      const ag = activeGroupOf(s)
-      if (!ag || i < 0 || i >= ag.slots.length) return s
-      if (ag.slots.length <= 1) {
-        // last pane: dissolve the group; its session returns to a loose tab
-        const groups = s.groups.filter(g => g.id !== ag.id)
-        return { ...s, groups, activeGroup: groups[0]?.id ?? null }
-      }
-      return withActiveGroup(s, g => {
-        const slots = g.slots.slice()
-        slots.splice(i, 1)
-        return { ...g, slots, activePane: Math.min(g.activePane, slots.length - 1), maximizedPane: null }
-      })
-    }),
-
-    toggleMaximize: i => dispatch(s => withActiveGroup(s, g => (i < 0 || i >= g.slots.length ? g : {
-      ...g,
-      maximizedPane: g.maximizedPane === i ? null : i,
-      activePane: i,
-    }))),
-
-    minimizePane: i => dispatch(s => {
-      const ag = activeGroupOf(s)
-      const id = ag?.slots[i]
-      if (!ag || !id) return s
-      // keep the layout — the slot goes empty, ready for reassignment
-      const next = withActiveGroup(s, g => ({
-        ...g,
-        slots: g.slots.map((x, k) => (k === i ? null : x)),
-        maximizedPane: null,
-      }))
-      return {
-        ...next,
-        minimizedIds: s.minimizedIds.includes(id) ? s.minimizedIds : s.minimizedIds.concat([id]),
-      }
-    }),
-
-    // restoring from the dock: focusSessionIn already prefers an empty slot of
-    // the active group and otherwise opens the session as its own tab
-    restoreSession: id => dispatch(s => focusSessionIn(s, id)),
-
-    setRowSplit: v => dispatch(s => withActiveGroup(s, g => ({ ...g, splits: { ...g.splits, row: v } }))),
-    setColSplit: (row, v) => dispatch(s => withActiveGroup(s, g => {
-      const cols = g.splits.cols.slice()
-      cols[row] = v
-      return { ...g, splits: { ...g.splits, cols } }
-    })),
 
     renameSession: (id, name) => dispatch(s => ({
       ...s,
@@ -1574,7 +1448,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, appendTail, armResponseWatch, bumpSettle, clearFlagged, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
+  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, appendTail, armResponseWatch, bumpSettle, clearFlagged, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)

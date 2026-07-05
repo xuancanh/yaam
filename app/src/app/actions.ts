@@ -10,6 +10,7 @@ import type { SchedulesActions } from '../domains/schedules/actions'
 import type { ChatActions } from '../domains/chat/actions'
 import type { AddonsActions } from '../domains/addons/actions'
 import type { WorkspaceActions } from '../domains/workspace/actions'
+import type { SessionLayoutActions } from '../domains/session/layout-actions'
 
 /** Actions still owned by the provider (session lifecycle/layout/config, prompt
  *  answering, Master composer/send, diff review, tool-approval). Not yet a
@@ -20,19 +21,6 @@ export interface ProviderActions {
   send: () => void
   focusComposer: () => void
   resolveToolApproval: (id: string, approve: boolean) => void
-  // session layout: panes and tab groups
-  setActivePane: (i: number) => void
-  focusTab: (id: string) => void
-  setPaneLayout: (n: number, stacked?: boolean) => void
-  assignPane: (i: number, id: string) => void
-  closePane: (i: number) => void
-  toggleMaximize: (i: number) => void
-  minimizePane: (i: number) => void
-  restoreSession: (id: string) => void
-  setRowSplit: (v: number) => void
-  setColSplit: (row: number, v: number) => void
-  activateGroup: (id: string) => void
-  closeGroup: (id: string) => void
   // session lifecycle
   renameSession: (id: string, name: string) => void
   archiveSession: (id: string) => void
@@ -58,11 +46,11 @@ export interface ProviderActions {
 
 export type ConductorActions =
   ShellActions & SettingsActions & BoardActions & SchedulesActions &
-  ChatActions & AddonsActions & WorkspaceActions & ProviderActions
+  ChatActions & AddonsActions & WorkspaceActions & SessionLayoutActions & ProviderActions
 
 // Re-export the domain action interfaces so the composition and consumers can
 // name individual slices without reaching into each domain module.
 export type {
   ShellActions, SettingsActions, BoardActions, SchedulesActions,
-  ChatActions, AddonsActions, WorkspaceActions,
+  ChatActions, AddonsActions, WorkspaceActions, SessionLayoutActions,
 }
