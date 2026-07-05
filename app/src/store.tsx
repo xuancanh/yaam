@@ -47,6 +47,7 @@ import type { ConductorActions } from './app/actions'
 
 import { mkId } from './shared/id'
 import { selectMainState, selectSession } from './infrastructure/persistence/schema'
+import { chatTranscriptsChanged, mainPartitionChanged, secretsChanged, sessionsChanged } from './infrastructure/persistence/subscribe'
 import { cronMatches } from './domains/schedules/cron'
 import { buildTemplateCommand } from './domains/schedules/template-command'
 import { activeGroupOf, focusSessionIn, mkGroup, removeFromGroups } from './domains/session/layout-state'
@@ -61,12 +62,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // state (so its state-dep effects re-run and stateRef stays fresh) and drives
   // updates through `dispatch`. Selector consumers (useConductorSelector) get
   // Zustand's per-slice subscriptions instead.
-  const state = useAppStore()
+  // The provider is a pure composition root: it renders only <ActionsCtx> and
+  // reads state through stateRef in callbacks/effects, so it must NOT subscribe
+  // to the whole store (that would re-render it on every terminal line and chat
+  // delta). stateRef is mirrored from the store via a direct subscription; UI
+  // reads reactive state through useConductorSelector in the components.
   const toastTimer = useRef<number | undefined>(undefined)
   const pending = useRef<number[]>([])
   const dragId = useRef<string | null>(null)
-  const stateRef = useRef(state)
-  stateRef.current = state
+  const stateRef = useRef(useAppStore.getState())
+  useEffect(() => useAppStore.subscribe(next => { stateRef.current = next }), [])
 
   // set by the Master/monitor runners below; refs avoid declaration cycles
   const masterEventRef = useRef<(note: string, agentId?: string) => void>(() => {})
@@ -499,24 +504,22 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Main (low-churn) partition: everything durable except the agents. Its deps
-  // are the curated durable slices only — depending on all of `state` would
-  // re-run on every transient UI change (toast/composer) and thrash the debounce.
-  useEffect(() => {
+  // Main (low-churn) partition: everything durable except the agents. Driven by
+  // a direct store subscription that arms the debounce only when a durable slice
+  // changes reference — transient UI churn (toast/composer) and per-line
+  // terminal/agent updates never touch it. Saves the latest state at fire time.
+  const armMainSave = useCallback(() => {
     if (!hydrated.current) return
     if (mainSaveTimer.current) window.clearTimeout(mainSaveTimer.current)
-    // redact secrets already safe in the keychain so the file holds no plaintext
-    const main = redactSecrets(selectMainState(state), keychainReadyRef.current)
     mainSaveTimer.current = window.setTimeout(() => {
+      // redact secrets already safe in the keychain so the file holds no plaintext
+      const main = redactSecrets(selectMainState(stateRef.current), keychainReadyRef.current)
       native.saveStateFile(JSON.stringify(main)).then(() => { saveFailedRef.current = false }).catch(e => onSaveError('main', e))
     }, 800)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.templates, state.mcpServers, state.skills, state.personas, state.skillRegistries, state.chatAgentTypes,
-    state.groups, state.activeGroup, state.minimizedIds,
-    state.addons, state.addonStorage, state.messages, state.events, state.notifications,
-    state.workspaces, state.activeWorkspace, state.workspaceData,
-  ])
+  }, [onSaveError])
+  useEffect(() => useAppStore.subscribe((s, prev) => {
+    if (mainPartitionChanged(s, prev)) armMainSave()
+  }), [armMainSave])
 
   // Sessions: one file per session. Terminal I/O and chat streaming fire
   // constantly, so we diff against the last-saved set and write ONLY the agents
@@ -524,14 +527,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // reference == changed content), and delete files for removed agents. A
   // streaming session therefore rewrites just its own small file.
   const savedAgentsRef = useRef<Map<string, Agent>>(new Map())
-  useEffect(() => {
+  const armSessionSave = useCallback(() => {
     if (!hydrated.current) return
     if (sessionSaveTimer.current) window.clearTimeout(sessionSaveTimer.current)
-    const agents = state.agents
     sessionSaveTimer.current = window.setTimeout(() => {
       const prev = savedAgentsRef.current
       const next = new Map<string, Agent>()
-      for (const a of agents) {
+      for (const a of stateRef.current.agents) {
         next.set(a.id, a)
         if (prev.get(a.id) !== a) {
           native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { saveFailedRef.current = false }).catch(e => onSaveError('session', e))
@@ -542,14 +544,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }
       savedAgentsRef.current = next
     }, 800)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.agents])
+  }, [onSaveError])
+  useEffect(() => useAppStore.subscribe((s, prev) => {
+    if (sessionsChanged(s, prev)) armSessionSave()
+  }), [armSessionSave])
 
   // Mirror credential fields into the OS keychain (debounced). Once a secret is
   // confirmed stored, mark it keychain-ready so the main writer redacts it from
   // the plaintext file; a keychain failure leaves it plaintext (no data loss).
   const secretSyncTimer = useRef<number | undefined>(undefined)
-  useEffect(() => {
+  const armSecretSync = useCallback(() => {
     if (!hydrated.current) return
     if (secretSyncTimer.current) window.clearTimeout(secretSyncTimer.current)
     secretSyncTimer.current = window.setTimeout(() => {
@@ -571,7 +575,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         if (changed) native.saveStateFile(JSON.stringify(redactSecrets(selectMainState(stateRef.current), keychainReadyRef.current))).catch(() => {})
       })()
     }, 900)
-  }, [state.settings.apiKey, state.chatAgentTypes, state.mcpServers])
+  }, [])
+  useEffect(() => useAppStore.subscribe((s, prev) => {
+    if (secretsChanged(s, prev)) armSecretSync()
+  }), [armSecretSync])
 
   // flush the latest state on quit/reload so nothing inside the debounce window is lost
   useEffect(() => {
@@ -909,9 +916,11 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // keep the embedded search index in sync with chat transcripts (debounced)
+  // keep the embedded search index in sync with chat transcripts (debounced).
+  // Subscribes to the store but only re-arms when a chat transcript actually
+  // changes — unrelated PTY output no longer schedules a full reindex.
   const reindexTimer = useRef<number | undefined>(undefined)
-  useEffect(() => {
+  const armReindex = useCallback(() => {
     if (reindexTimer.current) window.clearTimeout(reindexTimer.current)
     reindexTimer.current = window.setTimeout(() => {
       const docs = stateRef.current.agents
@@ -921,7 +930,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           .map(m => ({ chatId: a.id, msgId: m.id, role: m.role, text: `${a.name}\n${m.text}` })))
       void native.chatSearchReindex(docs).catch(() => {})
     }, 1500)
-  }, [state.agents])
+  }, [])
+  useEffect(() => useAppStore.subscribe((s, prev) => {
+    if (chatTranscriptsChanged(s, prev)) armReindex()
+  }), [armReindex])
 
   // connect enabled MCP servers shortly after launch (post-hydration)
   useEffect(() => {
