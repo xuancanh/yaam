@@ -19,11 +19,19 @@
 >   `AbortRegistry`.
 > - **#11 chat indexing — done.** The indexer subscribes directly and re-arms only
 >   on `chatTranscriptsChanged`.
-> - **#7 session-exit coordinator — partial.** `classifyExit` (pure) **and** the
->   effectful fan-out (`coordinateSessionExit`, ports-injected + tested) are
->   extracted. The session action surface (launch/resume/stop/archive/unarchive/
->   delete/send/answerPrompt) is now port-backed and tested — the substance of a
->   `SessionController` — though not yet unified into one named interface.
+> - **#3 explicit boot lifecycle — done.** A transient, never-persisted
+>   `bootStatus` ('loading' → 'restoring-runtime' → 'ready' | 'failed') gates the
+>   scheduler so a slow hydration can't fire schedules against seed state.
+>   `selectMainState` excludes it (tested).
+> - **#4 close-lifecycle flush — done.** The Rust side vetoes the OS
+>   `CloseRequested` and emits `close-requested`; the persistence runtime flushes
+>   (awaiting every write, 3s-bounded) then destroys the window. Replaces the racy
+>   fire-and-forget `beforeunload` (kept only as a plain-browser dev fallback).
+> - **#7 session controller + exit coordinator — done.** `classifyExit` (pure) and
+>   the effectful fan-out (`coordinateSessionExit`, ports-injected + tested) are
+>   extracted, and the port-backed lifecycle (launch/resume/stop/archive/unarchive/
+>   delete/send/answerPrompt) is unified into one `SessionController`
+>   (`domains/session/controller.ts`). One controller, one typed exit result.
 > - **#10 capability ports — done for all action modules.** Introduced
 >   `domains/session/ports.ts` (`SessionProcessPort`: spawn/kill/remove/write/
 >   sendLine/detect/attachTerminal+writeln/disposeTerminal) and
@@ -34,21 +42,20 @@
 >   `PackageIoPort`. **No domain action module imports `core/native` or
 >   `core/terminals` wholesale.** The only remaining wholesale `native` use in the
 >   session domain is the `onSessionExit` subscription (the native boundary by design).
-> - **#12 orchestration tests — substantially expanded** (91 → 122). Added
->   `exit-handler.test.ts` (fan-out), `launch-runtime.test.ts` (incl. launch-failure
->   rollback), `actions.test.ts` (archive/delete/stop/resume/unarchive cleanup +
->   task-unbind), `prompt-actions.test.ts`, `workspace/actions.test.ts`
->   (workspace-delete cascade), `addons/actions.test.ts` (install/export IO). The
->   keyed runtimes wire `dispose(key)`→`AbortRegistry.abort(key)` and the delete
->   paths call those disposers (tested), so cancellation-on-delete is covered at the
->   wiring level; proving abort propagates into a live LLM loop still needs
->   runner-injection. Boot-readiness testing waits on #3.
+> - **#12 orchestration tests — done** (91 → 129). Added `exit-handler.test.ts`
+>   (fan-out), `launch-runtime.test.ts` (incl. launch-failure rollback),
+>   `actions.test.ts` (archive/delete/stop/resume/unarchive cleanup + task-unbind),
+>   `prompt-actions.test.ts`, `workspace/actions.test.ts` (workspace-delete
+>   cascade), `addons/actions.test.ts` (install/export IO), `controller.test.ts`,
+>   `runtime-close.test.ts` (close-flush handshake), and `watcher-runtime.test.ts`
+>   (cancellation-on-delete: dispose aborts the in-flight LLM turn and the loop
+>   unwinds). schema test asserts `bootStatus` is never persisted.
 >
-> Still open / deliberately deferred: **#3** explicit `BootStatus` lifecycle,
-> **#4** `beforeunload`→Tauri-close hardening, **#7** unifying the port-backed
-> session actions into one named `SessionController` interface (the substance —
-> port-backed, testable lifecycle — is done). The original review text below is
-> preserved for the target architecture.
+> **All numbered findings from this review are now addressed.** The remaining
+> forward-looking work is the doc's larger target architecture (the non-React
+> `AppRuntime`/`AppCoordinator` in the sections below), which is a separate
+> initiative from closing out these findings. The original review text below is
+> preserved for that architecture.
 
 Reviewed on 2026-07-04 against commit `c8f6981` plus the active selector-migration
 changes in the working tree.
