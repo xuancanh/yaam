@@ -2,7 +2,6 @@
 // mutually recursive (Master ↔ monitor ↔ watcher ↔ addon agent), so each sub-hook
 // sets its own `*Ref.current` and reads the others through these refs — which lets
 // the sub-hooks be built in a plain top-to-bottom order without a cycle.
-import { useRef } from 'react'
 import type { MutableRefObject } from 'react'
 
 export interface RuntimeRefs {
@@ -36,10 +35,4 @@ export function createRuntimeRefs(): RuntimeRefs {
     toolApprovalsRef: { current: new Set() },
     taskSessionsRef: { current: new Map() },
   }
-}
-
-export function useRuntimeRefs(): RuntimeRefs {
-  const ref = useRef<RuntimeRefs>(undefined)
-  if (!ref.current) ref.current = createRuntimeRefs()
-  return ref.current
 }

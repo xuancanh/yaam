@@ -3,8 +3,7 @@
 // per-session teardown that fans out to terminal/settle/monitor/chat. Sets
 // startIntegrationsRef. A plain factory with a start/dispose lifecycle (persistence
 // subscriptions, search indexing, and the one-shot hydration boot);
-// useChatBoot is a thin create-once React adapter.
-import { useEffect, useRef } from 'react'
+// Plain factory — composed by createAppRuntime.
 import { dispatch, useAppStore } from '../../core/store'
 import { type StatePort } from '../../core/ports'
 import { disposeTerminal } from '../../core/terminals'
@@ -88,13 +87,4 @@ export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: S
     },
     dispose() { persistence.dispose(); searchIndexer.dispose() },
   }
-}
-
-/** React adapter: build the chat/boot runtime once; bind its lifecycle to the effect. */
-export function useChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime): ChatBoot {
-  const ref = useRef<ChatBoot>(undefined)
-  if (!ref.current) ref.current = createChatBoot(k, refs, session)
-  const boot = ref.current
-  useEffect(() => { boot.start(); return () => boot.dispose() }, [boot])
-  return boot
 }

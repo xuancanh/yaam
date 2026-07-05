@@ -3,7 +3,6 @@
 // referentially stable across state-driven re-renders) and merge them into the
 // single ConductorActions surface. Pulled out of the provider so the composition
 // root just wires runtimes → these deps → actions.
-import { useRef } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AppState, EventType, NotifKind } from '../core/types'
 import type { McpSession } from '../core/mcp'
@@ -110,10 +109,4 @@ export function createConductorActions(d: ConductorActionsDeps): ConductorAction
       clearFlagged: d.clearFlagged,
     }),
   }
-}
-
-export function useConductorActions(d: ConductorActionsDeps): ConductorActions {
-  const ref = useRef<ConductorActions>(undefined)
-  if (!ref.current) ref.current = createConductorActions(d)
-  return ref.current
 }

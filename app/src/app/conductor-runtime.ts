@@ -11,15 +11,15 @@ import type { AppState, EventType, NotifKind } from './../core/types'
 import { useAppStore, dispatch } from '../core/store'
 import { browserClock, createStorePort, type Disposable } from '../core/ports'
 import { createActivityService } from '../domains/activity/service'
-import { createRuntimeRefs, useRuntimeRefs } from './runtime/refs'
+import { createRuntimeRefs } from './runtime/refs'
 import type { RuntimeRefs } from './runtime/refs'
-import { createSessionRuntime, useSessionRuntime } from './runtime/session'
+import { createSessionRuntime } from './runtime/session'
 import type { SessionRuntime } from './runtime/session'
-import { createAddonSubsystem, useAddonSubsystem } from './runtime/addon'
+import { createAddonSubsystem } from './runtime/addon'
 import type { AddonSubsystem } from './runtime/addon'
-import { createChatBoot, useChatBoot } from './runtime/chat'
+import { createChatBoot } from './runtime/chat'
 import type { ChatBoot } from './runtime/chat'
-import { createMasterSubsystem, useMasterSubsystem } from './runtime/master'
+import { createMasterSubsystem } from './runtime/master'
 import type { MasterSubsystem } from './runtime/master'
 import { createConductorActions } from './conductor-actions'
 import type { ConductorActionsDeps } from './conductor-actions'
@@ -63,15 +63,6 @@ function assembleRuntimeDeps(
     launchSession: session.launchSession, probeCliSession: session.probeCliSession,
     appendTail: session.appendTail, clearNeeds: session.clearNeeds, bumpSettle: session.bumpSettle,
   }
-}
-
-export function useConductorRuntime(k: ConductorKernel): ConductorRuntimeDeps {
-  const refs = useRuntimeRefs()
-  const session = useSessionRuntime(k, refs)
-  const addon = useAddonSubsystem(k, refs, session)
-  const chat = useChatBoot(k, refs, session)
-  const master = useMasterSubsystem(k, refs, session, addon)
-  return assembleRuntimeDeps(refs, session, addon, chat, master)
 }
 
 /** The non-React application runtime: owns state mirroring, timers, every domain

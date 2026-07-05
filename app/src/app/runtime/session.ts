@@ -4,8 +4,7 @@
 // wired (settle → monitor, launch → watcher, exit → watcher/monitor). Sets the
 // monitor/watcher/spawn cycle-refs; returns the handles the rest of the runtime
 // needs. A plain factory with a start/dispose lifecycle (settle TUI scan + the
-// native exit subscription); useSessionRuntime is a thin create-once adapter.
-import { useEffect, useRef } from 'react'
+// native exit subscription) — composed by createAppRuntime.
 import type { EscOption, TaskChatMsg } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { browserClock, type StatePort } from '../../core/ports'
@@ -132,13 +131,4 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
     start() { settle.start(); offExit ??= subscribeSessionExits(exitCtx) },
     dispose() { settle.dispose(); offExit?.(); offExit = undefined },
   }
-}
-
-/** React adapter: build the session runtime once; bind scan + exit subscription to the effect. */
-export function useSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): SessionRuntime {
-  const ref = useRef<SessionRuntime>(undefined)
-  if (!ref.current) ref.current = createSessionRuntime(k, refs)
-  const rt = ref.current
-  useEffect(() => { rt.start(); return () => rt.dispose() }, [rt])
-  return rt
 }

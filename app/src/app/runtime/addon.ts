@@ -2,8 +2,7 @@
 // the customization-chat editor + package install runtime, and the lifecycle-hook
 // fan-out. Sets fireAddonHookRef + runAddonAgentRef. Depends on the session
 // runtime for launch/spawn (an addon's API can launch sessions/tasks). A plain
-// factory (no effects); useAddonSubsystem is a thin create-once React adapter.
-import { useRef } from 'react'
+// factory (no effects) — composed by createAppRuntime.
 import type { MutableRefObject } from 'react'
 import type { AddonHookName, Addon } from '../../core/types'
 import type { ApiMessage } from '../../master'
@@ -70,11 +69,4 @@ export function createAddonSubsystem(k: ConductorKernel, refs: RuntimeRefs, sess
   fireAddonHookRef.current = fireAddonHook
 
   return { makeAddonApi, disposeAddon, installPackage: addonRuntime.installPackage, sendAddonChat: (id, text) => { void addonRuntime.sendAddonChat(id, text) } }
-}
-
-/** React adapter: build the subsystem once. */
-export function useAddonSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime): AddonSubsystem {
-  const ref = useRef<AddonSubsystem>(undefined)
-  if (!ref.current) ref.current = createAddonSubsystem(k, refs, session)
-  return ref.current
 }

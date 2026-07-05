@@ -3,8 +3,7 @@
 // background workspace, and the cron/scheduled-task ticker. Sets masterEventRef.
 // Depends on the session runtime (launch/attention) and the addon subsystem
 // (Master can drive addons). A plain factory with a start/dispose lifecycle;
-// useMasterSubsystem is a thin create-once React adapter.
-import { useEffect, useRef } from 'react'
+// Plain factory (no React) — composed by createAppRuntime.
 import { dispatch } from '../../core/store'
 import { browserClock, type StatePort } from '../../core/ports'
 import * as native from '../../core/native'
@@ -62,13 +61,4 @@ export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, ses
     start: () => scheduler.start(),
     dispose: () => { scheduler.dispose(); master.abort() },
   }
-}
-
-/** React adapter: build the subsystem once, bind the scheduler lifecycle to the effect. */
-export function useMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem): MasterSubsystem {
-  const ref = useRef<MasterSubsystem>(undefined)
-  if (!ref.current) ref.current = createMasterSubsystem(k, refs, session, addon)
-  const sub = ref.current
-  useEffect(() => { sub.start(); return () => sub.dispose() }, [sub])
-  return sub
 }
