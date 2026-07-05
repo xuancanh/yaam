@@ -5,7 +5,8 @@ import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { Addon, AddonPermission, AppState } from '../../core/types'
 import { buildCfg, hasCreds } from '../../master'
-import * as native from '../../core/native'
+import { realPackageIoPort } from './ports'
+import type { PackageIoPort } from './ports'
 import { dispatchAddonRpc, exportAddonPackage, loadAddonFolder } from '../../core/addons'
 import type { AddonApi } from '../../core/addons'
 import { generateAddonPackage } from './addon-gen'
@@ -19,6 +20,8 @@ export interface AddonsActionsCtx {
   makeAddonApi: (addonId: string) => AddonApi
   /** tear down an addon's runtime state (agent registries + editor history) on removal */
   disposeAddon: (addonId: string) => void
+  /** file/dialog/http capability for package install/export; defaults to real IPC */
+  io?: PackageIoPort
 }
 
 export interface AddonsActions {
@@ -37,8 +40,15 @@ export interface AddonsActions {
 }
 
 export function useAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createAddonsActions(ctx), [ctx.dispatch, ctx.stateRef, ctx.flash, ctx.installPackage, ctx.io, ctx])
+}
+
+/** The addon actions as a plain factory (no React), for unit testing. */
+export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
   const { dispatch, stateRef, flash, installPackage } = ctx
-  return useMemo(() => ({
+  const io = ctx.io ?? realPackageIoPort
+  return {
     openAddon: id => dispatch(s => ({ ...s, view: 'addon', activeAddon: id })),
 
     toggleAddon: id => dispatch(s => ({
@@ -56,9 +66,9 @@ export function useAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
     installAddonFromFile: () => {
       void (async () => {
         try {
-          const path = await native.pickFile()
+          const path = await io.pickFile()
           if (!path) return
-          const json = await native.readTextFile(path)
+          const json = await io.readTextFile(path)
           installPackage(json, 'file')
         } catch (e) {
           flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
@@ -69,17 +79,17 @@ export function useAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
     installAddonFromFolder: () => {
       void (async () => {
         try {
-          const dir = await native.pickFolder()
+          const dir = await io.pickFolder()
           if (!dir) return
           let manifest: string | null = null
           for (const cand of ['addon.yaml', 'addon.yml', 'addon.json']) {
             try {
-              manifest = await native.readTextFile(`${dir}/${cand}`)
+              manifest = await io.readTextFile(`${dir}/${cand}`)
               break
             } catch { /* try the next manifest name */ }
           }
           if (!manifest) throw new Error('no addon.yaml / addon.yml / addon.json in that folder')
-          const json = await loadAddonFolder(manifest, rel => native.readTextFile(`${dir}/${rel}`))
+          const json = await loadAddonFolder(manifest, rel => io.readTextFile(`${dir}/${rel}`))
           installPackage(json, 'file')
         } catch (e) {
           flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
@@ -91,7 +101,7 @@ export function useAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
       void (async () => {
         try {
           // registries can be local: non-http entries are filesystem paths
-          const json = /^https?:\/\//.test(url) ? await native.httpGetText(url) : await native.readTextFile(url)
+          const json = /^https?:\/\//.test(url) ? await io.httpGetText(url) : await io.readTextFile(url)
           installPackage(json, /^https?:\/\//.test(url) ? 'url' : 'file')
         } catch (e) {
           flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
@@ -125,9 +135,9 @@ export function useAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
         const addon = stateRef.current.addons.find(a => a.id === id)
         if (!addon) return
         try {
-          const path = await native.pickSavePath(`${addon.name.replace(/[^a-z0-9-]/gi, '-')}.yaam.json`)
+          const path = await io.pickSavePath(`${addon.name.replace(/[^a-z0-9-]/gi, '-')}.yaam.json`)
           if (!path) return
-          await native.writeTextFile(path, exportAddonPackage(addon))
+          await io.writeTextFile(path, exportAddonPackage(addon))
           flash(`Exported ${addon.name}`)
         } catch (e) {
           flash(`Export failed: ${e instanceof Error ? e.message : String(e)}`)
@@ -150,5 +160,5 @@ export function useAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
         }
       })
     },
-  }), [dispatch, stateRef, flash, installPackage, ctx])
+  }
 }
