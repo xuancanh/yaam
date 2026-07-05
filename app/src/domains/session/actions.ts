@@ -9,6 +9,7 @@ import type { AppState, EventType } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { focusSessionIn, removeFromGroups } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
+import { worktreeMerge, worktreeRemove } from '../../core/native'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
 import { inferLegacyTerminalShell } from '../../store/state-helpers'
@@ -32,6 +33,9 @@ export interface SessionActionsCtx {
 }
 
 export interface SessionActions {
+  /** merge a worktree-isolated session's changes back into the original
+   *  checkout and drop the mirror. '' on success, else a failure summary. */
+  mergeSessionWorktree: (id: string) => Promise<string>
   archiveSession: (id: string) => void
   unarchiveSession: (id: string) => void
   deleteSession: (id: string) => void
@@ -52,6 +56,26 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
   const { stateRef, flash, logEvent, markUserStopped, disposeSessionRuntime, launchSession, probeCliSession, armResponseWatch, appendTail, clearNeeds, bumpSettle } = ctx
   const port = ctx.port ?? realSessionProcessPort
   return {
+    mergeSessionWorktree: async id => {
+      const agent = ctx.stateRef.current.agents.find(a => a.id === id)
+      if (!agent?.worktree) return 'this session has no worktree'
+      const results = await worktreeMerge(agent.worktree.root, `yaam: ${agent.name.slice(0, 60)}`).catch(e => [
+        { name: 'worktree', status: 'error', detail: e instanceof Error ? e.message : String(e) },
+      ])
+      const summary = results.map(r => `${r.name}: ${r.status}${r.detail ? ` — ${r.detail}` : ''}`).join('\n')
+      if (results.some(r => r.status === 'error')) return summary
+      await worktreeRemove(agent.worktree.root).catch(() => {})
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === id
+          ? { ...a, worktree: undefined, log: a.log.concat([{ t: 'sys' as const, x: `worktree merged back:\n${summary}` }]) }
+          : a),
+      }))
+      ctx.logEvent('done', id, `Merged worktree changes from “${agent.name}”`)
+      ctx.flash('Worktree merged back')
+      return ''
+    },
+
     archiveSession: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
       if (agent?.status === 'running' || agent?.status === 'needs') {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { DIFF_BG, DIFF_COLORS, LOG_COLORS } from '../../core/data'
-import { gitDiff, isTauri } from '../../core/native'
+import { gitDiff, isTauri, worktreeDiff } from '../../core/native'
 import type { Agent, DiffFile } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon } from '../../components/ui'
 
@@ -28,26 +28,46 @@ function parseUnifiedDiff(raw: string): DiffFile[] {
   return files
 }
 
-/** Load and render the selected session's working-tree diff. */
+/** Load and render the selected session's diff: worktree sessions diff every
+ *  mirrored repo against its fork point; plain sessions show the working tree. */
 function DiffBody({ agent }: { agent: Agent }) {
-  const { approveDiff, requestChanges } = useActions()
-  const canFetch = isTauri && agent.kind === 'real' && !!agent.cwd
+  const { approveDiff, requestChanges, mergeSessionWorktree, closeDrawer } = useActions()
+  const canFetch = isTauri && !!agent.cwd && (agent.kind === 'real' || !!agent.worktree)
   const [files, setFiles] = useState<DiffFile[]>(agent.diff)
   const [status, setStatus] = useState(canFetch ? 'loading…' : '')
+  const [merging, setMerging] = useState(false)
+  const [mergeErr, setMergeErr] = useState('')
 
   useEffect(() => {
     if (!canFetch) return
     let alive = true
-    gitDiff(agent.cwd!).then(raw => {
+    const load = async (): Promise<DiffFile[]> => {
+      if (agent.worktree) {
+        const repos = await worktreeDiff(agent.worktree.root)
+        return repos.flatMap(r => parseUnifiedDiff(r.diff).map(f =>
+          repos.length > 1 ? { ...f, file: `${r.name}/${f.file}` } : f))
+      }
+      return parseUnifiedDiff(await gitDiff(agent.cwd!))
+    }
+    load().then(parsed => {
       if (!alive) return
-      const parsed = parseUnifiedDiff(raw)
       setFiles(parsed)
-      setStatus(parsed.length ? '' : 'working tree clean — no uncommitted changes')
+      setStatus(parsed.length ? '' : agent.worktree ? 'worktree matches its fork point — no changes yet' : 'working tree clean — no uncommitted changes')
     }).catch(e => {
       if (alive) setStatus(String(e))
     })
     return () => { alive = false }
-  }, [agent.cwd, agent.id, canFetch])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.cwd, agent.id, agent.worktree?.root, canFetch])
+
+  const mergeWorktree = async () => {
+    setMerging(true)
+    setMergeErr('')
+    const err = await mergeSessionWorktree(agent.id)
+    setMerging(false)
+    if (err) setMergeErr(err)
+    else closeDrawer()
+  }
 
   const totalAdd = files.reduce((n, f) => n + f.add, 0)
   const totalDel = files.reduce((n, f) => n + f.del, 0)
@@ -81,10 +101,27 @@ function DiffBody({ agent }: { agent: Agent }) {
           </div>
         ))}
       </div>
+      {mergeErr && (
+        <div className="mono" style={{ borderTop: '1px solid var(--line)', padding: '9px 18px', fontSize: 11, color: 'var(--red-soft)', whiteSpace: 'pre-wrap', maxHeight: 110, overflowY: 'auto' }}>
+          {mergeErr}
+        </div>
+      )}
       <div style={{ borderTop: '1px solid var(--line)', padding: '13px 18px', display: 'flex', gap: 10 }}>
-        <button className="approve-btn" style={{ flex: 1, padding: 10, fontSize: 13, borderRadius: 9 }} onClick={() => approveDiff(agent.id)}>
-          Approve &amp; merge
-        </button>
+        {agent.worktree ? (
+          <button
+            className="approve-btn"
+            style={{ flex: 1, padding: 10, fontSize: 13, borderRadius: 9, opacity: merging ? 0.6 : 1 }}
+            disabled={merging}
+            title={`Commit + merge each repo's yaam branch back into ${agent.worktree.base}, then remove the mirror`}
+            onClick={() => { void mergeWorktree() }}
+          >
+            {merging ? 'Merging…' : 'Approve & merge worktree'}
+          </button>
+        ) : (
+          <button className="approve-btn" style={{ flex: 1, padding: 10, fontSize: 13, borderRadius: 9 }} onClick={() => approveDiff(agent.id)}>
+            Approve &amp; merge
+          </button>
+        )}
         <button className="deny-btn" style={{ flex: 1, padding: 10, fontSize: 13, borderRadius: 9 }} onClick={() => requestChanges(agent.id)}>
           Request changes
         </button>
