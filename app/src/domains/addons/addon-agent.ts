@@ -4,8 +4,8 @@
 // chat with it over the RPC bridge (agent.wake returns the reply).
 import type { Addon } from '../../core/types'
 import type { AddonApi } from '../../core/addons'
-import { callApi } from '../../llm/client'
-import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
+import type { ApiMessage, LlmConfig } from '../../llm/client'
+import { runToolLoop } from '../../llm/tool-loop'
 
 // The API surface projected as LLM tools. Each entry maps a tool call onto
 // the (permission-enforced) AddonApi — denied scopes surface as tool errors.
@@ -129,30 +129,16 @@ export async function runAddonAgentTurn(
 ): Promise<string> {
   history.push({ role: 'user', content: note })
   const defs = AGENT_TOOLS.map(({ name, description, input_schema }) => ({ name, description, input_schema }))
-  let reply = ''
-  for (let i = 0; i < 6; i++) {
-    const res = await callApi(cfg, agentSystem(addon), history, defs, signal)
-    if (res.stop_reason !== 'tool_use') {
-      reply = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
-      history.push({ role: 'assistant', content: reply || '(ok)' })
-      break
-    }
-    const results = await Promise.all(res.content
-      .filter((b): b is ApiContentBlock => b.type === 'tool_use')
-      .map(async b => {
-        const tool = AGENT_TOOLS.find(t => t.name === b.name)
-        let content: string
-        try {
-          const out = tool ? await tool.run(api, b.input ?? {}) : `unknown tool ${b.name}`
-          content = typeof out === 'string' ? out : JSON.stringify(out ?? 'ok')
-        } catch (e) {
-          content = `error: ${e instanceof Error ? e.message : String(e)}`
-        }
-        return { type: 'tool_result', tool_use_id: b.id, content }
-      }))
-    history.push({ role: 'assistant', content: res.content })
-    history.push({ role: 'user', content: results })
-  }
+  const { text: reply } = await runToolLoop({
+    cfg, system: agentSystem(addon), history, tools: defs, maxRounds: 6, signal,
+    terminalAssistant: 'text', // the addon agent stores just its final prose
+    execute: async (name, input) => {
+      const tool = AGENT_TOOLS.find(t => t.name === name)
+      if (!tool) return `unknown tool ${name}`
+      const out = await tool.run(api, input ?? {})
+      return typeof out === 'string' ? out : JSON.stringify(out ?? 'ok')
+    },
+  })
   while (history.length > 24) history.shift()
   if (history.length && history[0].role !== 'user') history.shift()
   return reply
