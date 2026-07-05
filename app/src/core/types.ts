@@ -344,7 +344,7 @@ export interface Skill {
 /** Settings → Appearance: theme, scale, density, and typography. All optional —
  *  absent fields fall back to APPEARANCE_DEFAULTS (dark / 100% / normal). */
 export interface AppearanceSettings {
-  theme?: 'dark' | 'light' | 'midnight' | 'system'
+  theme?: 'dark' | 'light' | 'paper' | 'midnight' | 'system'
   /** whole-UI scale in percent (80–140) */
   uiScale?: number
   density?: 'compact' | 'normal' | 'comfortable'

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { applyAppearance, resolveTheme } from './appearance'
+import { termThemeFor } from '../core/terminals'
 
 describe('applyAppearance', () => {
   it('stamps defaults when no settings are stored', () => {
@@ -22,6 +23,14 @@ describe('applyAppearance', () => {
     expect(root.style.getPropertyValue('--font-mono')).toContain('Menlo')
     expect(root.style.getPropertyValue('--table-font-size')).toBe('15px')
     expect(root.style.getPropertyValue('--table-font')).toBe('var(--font-mono)')
+  })
+
+  it('paper theme stamps its attribute and terminals get a light palette', () => {
+    applyAppearance({ theme: 'paper' })
+    expect(document.documentElement.getAttribute('data-theme')).toBe('paper')
+    expect(termThemeFor('paper').background).toBe('#F4EFE4')
+    expect(termThemeFor('light').foreground).toBe('#24292F')
+    expect(termThemeFor('midnight')).toEqual(termThemeFor('dark')) // dark palette shared
   })
 
   it('resolves the system theme from the OS scheme', () => {

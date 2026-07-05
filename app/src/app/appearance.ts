@@ -1,6 +1,7 @@
 // Appearance: stamps the user's theme/typography/density choices onto <html>
 // so index.css palettes and variables take effect. Pure DOM — no React.
 import type { AppearanceSettings } from '../core/types'
+import { applyTerminalTheme } from '../core/terminals'
 
 export const FONT_STACKS = {
   sans: {
@@ -35,7 +36,9 @@ export function applyAppearance(a?: AppearanceSettings): void {
   if (typeof document === 'undefined') return
   const cfg = { ...APPEARANCE_DEFAULTS, ...a }
   const root = document.documentElement
-  root.setAttribute('data-theme', resolveTheme(cfg.theme))
+  const theme = resolveTheme(cfg.theme)
+  root.setAttribute('data-theme', theme)
+  applyTerminalTheme(theme) // xterm canvases can't read CSS variables
   root.setAttribute('data-density', cfg.density)
   const style = root.style as CSSStyleDeclaration & { zoom?: string }
   // zoom scales the whole UI (fonts + spacing) — the pragmatic scale knob for

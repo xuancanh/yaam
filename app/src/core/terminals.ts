@@ -21,6 +21,58 @@ interface Entry {
 }
 
 const entries = new Map<string, Entry>()
+
+// ── theme-aware terminal palettes ────────────────────────────────────────────
+// xterm paints to canvas, so CSS variables don't resolve — each app theme
+// carries a literal ANSI palette. Dark/midnight share the dark palette; light
+// and paper get legible-on-light colors.
+
+const DARK_TERM = {
+  background: '#0A0B0F', foreground: '#C7CCD6', cursor: '#F5C451',
+  selectionBackground: 'rgba(245,196,81,.28)',
+  black: '#1a1e26', red: '#FF7A7A', green: '#3DDC97', yellow: '#F5C451',
+  blue: '#7FD1FF', magenta: '#C77DFF', cyan: '#7FE3B0', white: '#E7E9F0',
+  brightBlack: '#4a5262', brightRed: '#FF9B9B', brightGreen: '#7FE3B0',
+  brightYellow: '#FFD98A', brightBlue: '#A8DFFF', brightMagenta: '#DCA9FF',
+  brightCyan: '#A5F0CC', brightWhite: '#FFFFFF',
+}
+
+const LIGHT_TERM = {
+  background: '#FAFBFC', foreground: '#24292F', cursor: '#B07D10',
+  selectionBackground: 'rgba(176,125,16,.25)',
+  black: '#24292F', red: '#C62828', green: '#1A7F37', yellow: '#9A6700',
+  blue: '#0550AE', magenta: '#8250DF', cyan: '#1B7C83', white: '#8C959F',
+  brightBlack: '#57606A', brightRed: '#A40E26', brightGreen: '#2DA44E',
+  brightYellow: '#7D4E00', brightBlue: '#218BFF', brightMagenta: '#A475F9',
+  brightCyan: '#3192AA', brightWhite: '#6E7781',
+}
+
+const PAPER_TERM = {
+  ...LIGHT_TERM,
+  background: '#F4EFE4', foreground: '#3A342A', cursor: '#8A6D1F',
+  selectionBackground: 'rgba(138,109,31,.22)',
+  black: '#3A342A', white: '#8A8069', brightWhite: '#6E6553',
+}
+
+/** Literal xterm palette for one app theme (pure — unit-testable). */
+export function termThemeFor(theme: string): typeof DARK_TERM {
+  if (theme === 'light') return LIGHT_TERM
+  if (theme === 'paper') return PAPER_TERM
+  return DARK_TERM // dark + midnight
+}
+
+/** The theme currently stamped on <html> by the appearance system. */
+function currentAppTheme(): string {
+  return typeof document !== 'undefined'
+    ? document.documentElement.getAttribute('data-theme') ?? 'dark'
+    : 'dark'
+}
+
+/** Repaint every open terminal for a theme change (xterm ignores CSS vars). */
+export function applyTerminalTheme(theme: string) {
+  const palette = termThemeFor(theme)
+  for (const entry of entries.values()) entry.term.options.theme = palette
+}
 let listenerStarted = false
 
 // eslint-disable-next-line no-control-regex
@@ -65,17 +117,7 @@ export function getTerminal(
       lineHeight: 1.25,
       cursorBlink: true,
       scrollback: 5000,
-      theme: {
-        background: '#0A0B0F',
-        foreground: '#C7CCD6',
-        cursor: '#F5C451',
-        selectionBackground: 'rgba(245,196,81,.28)',
-        black: '#1a1e26', red: '#FF7A7A', green: '#3DDC97', yellow: '#F5C451',
-        blue: '#7FD1FF', magenta: '#C77DFF', cyan: '#7FE3B0', white: '#E7E9F0',
-        brightBlack: '#4a5262', brightRed: '#FF9B9B', brightGreen: '#7FE3B0',
-        brightYellow: '#FFD98A', brightBlue: '#A8DFFF', brightMagenta: '#DCA9FF',
-        brightCyan: '#A5F0CC', brightWhite: '#FFFFFF',
-      },
+      theme: termThemeFor(currentAppTheme()),
     })
     const fit = new FitAddon()
     term.loadAddon(fit)

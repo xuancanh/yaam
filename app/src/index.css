@@ -70,6 +70,34 @@
   --selection: rgba(176, 125, 16, 0.25);
 }
 
+:root[data-theme='paper'] {
+  /* reader-warm: light without the glare — unbleached paper tones */
+  --bg: #ece6d8;
+  --bg2: #f4efe4;
+  --bg3: #f8f4ea;
+  --panel: #f7f2e6;
+  --panel2: #efe9da;
+  --panel3: #e5decc;
+  --line: #d9d1bc;
+  --line2: #cbc2a9;
+  --line3: #b3a98d;
+  --line-soft: #e2dbc8;
+  --hover: #e8e1cf;
+  --text: #322c22;
+  --text2: #453e30;
+  --mut: #6e6553;
+  --mut2: #5e5645;
+  --dim: #857b66;
+  --faint: #a2987f;
+  --accent: #8a6d1f;
+  --green: #2e7d4f;
+  --amber: #9c6b00;
+  --red: #c0442c;
+  --red-soft: #b85c4a;
+  --code-bg: rgba(60, 45, 10, 0.06);
+  --selection: rgba(138, 109, 31, 0.22);
+}
+
 :root[data-theme='midnight'] {
   --bg: #060a14;
   --bg2: #081020;
