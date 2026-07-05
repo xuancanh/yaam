@@ -68,9 +68,40 @@ struct SessionHandle {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// child pid, for graceful (SIGTERM→SIGKILL) shutdown of the process tree
+    pid: Option<i32>,
     /// distinguishes a resumed session reusing the same id from the one whose
     /// exit thread is still in flight
     generation: u64,
+}
+
+/// Grace period between the polite SIGTERM and the forced SIGKILL. CLIs use it to
+/// flush their session/resume files instead of dying mid-write.
+const SHUTDOWN_GRACE_MS: u64 = 2000;
+
+/// Shut a session's process down gracefully: ask its process group to terminate
+/// (SIGTERM), then force-kill after a grace period. On non-unix (or without a
+/// pid) fall back to the immediate forced kill. Runs the force step on its own
+/// thread so callers (kill / id-reuse replace) never block.
+fn shutdown_process(pid: Option<i32>, mut killer: Box<dyn ChildKiller + Send + Sync>) {
+    #[cfg(unix)]
+    if let Some(pid) = pid {
+        unsafe {
+            // signal the child and its process group; ESRCH (already gone) is harmless
+            libc::kill(pid, libc::SIGTERM);
+            libc::kill(-pid, libc::SIGTERM);
+        }
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(SHUTDOWN_GRACE_MS));
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+                libc::kill(-pid, libc::SIGKILL);
+            }
+            let _ = killer.kill(); // drop the pty child handle / reap
+        });
+        return;
+    }
+    let _ = killer.kill();
 }
 
 #[derive(Default)]
@@ -147,6 +178,7 @@ impl SessionManager {
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
         let killer = child.clone_killer();
+        let pid = child.process_id().map(|p| p as i32);
 
         let generation = self
             .next_generation
@@ -157,8 +189,8 @@ impl SessionManager {
             // Merely dropping the replaced handle leaks the child (dropping the
             // killer does not terminate it). The exit reaper for the old
             // generation then sees the newer handle and stays quiet.
-            if let Some(mut old) = sessions.remove(&id) {
-                let _ = old.killer.kill();
+            if let Some(old) = sessions.remove(&id) {
+                shutdown_process(old.pid, old.killer);
             }
             sessions.insert(
                 id.clone(),
@@ -166,6 +198,7 @@ impl SessionManager {
                     master: pair.master,
                     writer,
                     killer,
+                    pid,
                     generation,
                 },
             );
@@ -244,10 +277,11 @@ impl SessionManager {
             .map_err(|e| e.to_string())
     }
 
-    /// Remove a managed session and ask its child process to terminate.
+    /// Remove a managed session and shut its child down gracefully (SIGTERM,
+    /// then SIGKILL after a grace period) so CLIs can flush session files.
     pub fn kill(&self, id: &str) {
-        if let Some(mut handle) = self.sessions.lock().unwrap().remove(id) {
-            let _ = handle.killer.kill();
+        if let Some(handle) = self.sessions.lock().unwrap().remove(id) {
+            shutdown_process(handle.pid, handle.killer);
         }
     }
 
