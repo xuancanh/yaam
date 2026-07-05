@@ -31,6 +31,7 @@ import { useSchedulesActions } from './domains/schedules/actions'
 import { useChatActions } from './domains/chat/actions'
 import { useAddonsActions } from './domains/addons/actions'
 import { useWorkspaceActions } from './domains/workspace/actions'
+import { useShellActions } from './domains/shell/actions'
 import type { TaskSpecDraft } from './domains/board/watcher'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
@@ -1724,6 +1725,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     dispatch, stateRef, later, flash, runMaster,
     markUserStopped: id => userStoppedRef.current.add(id), disposeSessionRuntime,
   })
+  const shellActions = useShellActions()
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
@@ -1733,7 +1735,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     ...chatActions,
     ...addonsActions,
     ...workspaceActions,
-    setView: v => dispatch(s => ({ ...s, view: v })),
+    ...shellActions,
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
     send: () => {
@@ -1993,10 +1995,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }, id))
     },
 
-    openPanel: (id, tab) => dispatch(s => ({ ...s, panel: { agentId: id, tab: tab || 'memory' } })),
-    setPanelTab: tab => dispatch(s => (s.panel ? { ...s, panel: { ...s.panel, tab } } : s)),
-    closePanel: () => dispatch(s => ({ ...s, panel: null })),
-
     toggleMem: (aid, mid) => dispatch(s => ({
       ...s,
       agents: s.agents.map(a => a.id === aid
@@ -2085,34 +2083,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       logEvent('escalate', aid, 'Denied · prompt cancelled')
     },
 
-    gotoNeeds: () => dispatch(s => {
-      const needsAgent = s.agents.find(a => ((a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace) && (a.status === 'needs' || a.status === 'error'))
-      return needsAgent ? focusSessionIn(s, needsAgent.id) : s
-    }),
-
-    openPalette: () => dispatch(s => ({ ...s, paletteOpen: true, paletteQuery: '' })),
-    closePalette: () => dispatch(s => ({ ...s, paletteOpen: false, paletteQuery: '' })),
-    setPaletteQuery: q => dispatch(s => ({ ...s, paletteQuery: q })),
-
-    toggleNotif: () => dispatch(s => ({ ...s, notifOpen: !s.notifOpen })),
-    readAllNotif: () => dispatch(s => ({ ...s, notifications: s.notifications.map(n => ({ ...n, read: true })) })),
-    clickNotif: n => dispatch(s => {
-      const next = {
-        ...s,
-        notifications: s.notifications.map(x => (x.id === n.id ? { ...x, read: true } : x)),
-        notifOpen: false,
-      }
-      if (n.agentId && s.agents.some(a => a.id === n.agentId)) {
-        return focusSessionIn(next, n.agentId)
-      }
-      if (n.kind === 'cron') return { ...next, view: 'crons' }
-      return next
-    }),
-
-    openAgent: id => dispatch(s => ({ ...s, drawer: { kind: 'agent', agentId: id } })),
-    openDiff: id => dispatch(s => ({ ...s, drawer: { kind: 'diff', agentId: id } })),
-    closeDrawer: () => dispatch(s => ({ ...s, drawer: null })),
-
     approveDiff: id => {
       dispatch(s => ({
         ...s,
@@ -2133,9 +2103,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
 
 
-
-    openNewSession: () => dispatch(s => ({ ...s, newSessionOpen: true })),
-    closeNewSession: () => dispatch(s => ({ ...s, newSessionOpen: false })),
 
     newRealSession: (command, cwd, terminalShell) => {
       const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell })
@@ -2179,7 +2146,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
+  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)
