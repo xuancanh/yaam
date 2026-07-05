@@ -17,7 +17,6 @@ import { SlideOver } from './domains/shell/SlideOver'
 import { Drawer } from './domains/shell/Drawer'
 import { CommandPalette } from './domains/shell/CommandPalette'
 import { Toast } from './domains/shell/Toast'
-import { ConfirmHost } from './components/Confirm'
 
 /** Select the active top-level view from the centralized navigation state. */
 function MainArea() {
@@ -53,7 +52,6 @@ function Shell() {
       <Drawer />
       <CommandPalette />
       <Toast />
-      <ConfirmHost />
     </div>
   )
 }

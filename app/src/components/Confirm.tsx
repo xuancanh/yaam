@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
-
-// Global confirmation dialog: any code calls confirmAction() and awaits the
-// user's verdict; ConfirmHost (mounted once in the shell) renders the modal.
-// Destructive actions across the app funnel through this so nothing is
-// deleted on a single mis-click.
+// Global confirmation dialog for destructive actions. confirmAction() builds
+// its overlay imperatively on document.body — no host component to mount, no
+// React tree or HMR state to depend on — so a delete can never bypass the
+// dialog because "the host wasn't there". Styling rides the app's CSS
+// variables and button classes, so it follows the active theme.
 
 export interface ConfirmOptions {
   title: string
@@ -14,78 +13,72 @@ export interface ConfirmOptions {
   danger?: boolean
 }
 
-interface ConfirmRequest extends ConfirmOptions {
-  resolve: (ok: boolean) => void
-}
+let openOverlay: HTMLElement | null = null
 
-// The host lives on globalThis, NOT in module scope: under Vite HMR a module
-// edit gives call sites and the host component different copies of this file,
-// and a module-local variable would silently split them apart.
-const HOST_KEY = '__yaamConfirmHost'
-type HostFn = (req: ConfirmRequest) => void
-const getHost = (): HostFn | null => (globalThis as Record<string, unknown>)[HOST_KEY] as HostFn | null ?? null
-const setHost = (fn: HostFn | null): void => { (globalThis as Record<string, unknown>)[HOST_KEY] = fn }
-
-/** Ask the user to confirm a destructive action. FAILS CLOSED: with a DOM but
- *  no mounted host (a bug), it resolves false and logs — deletion never
- *  proceeds without a dialog. Headless (node tests) it resolves true. */
+/** Ask the user to confirm a destructive action. Resolves false on Cancel,
+ *  backdrop click, or Escape. Headless (no DOM — node tests) resolves true. */
 export function confirmAction(opts: ConfirmOptions): Promise<boolean> {
-  const host = getHost()
-  if (!host) {
-    if (typeof document === 'undefined') return Promise.resolve(true) // headless tests
-    console.error('[yaam] confirmAction called with no ConfirmHost mounted — refusing:', opts.title)
-    return Promise.resolve(false)
-  }
-  return new Promise<boolean>(resolve => host({ ...opts, resolve }))
-}
+  if (typeof document === 'undefined') return Promise.resolve(true)
+  // a second request while one is open replaces it (never stack)
+  openOverlay?.remove()
 
-export function ConfirmHost() {
-  const [req, setReq] = useState<ConfirmRequest | null>(null)
-  useEffect(() => {
-    setHost(r => setReq(prev => {
-      // a second request while one is open cancels the first (never stack)
-      prev?.resolve(false)
-      return r
-    }))
-    return () => setHost(null)
-  }, [])
+  return new Promise<boolean>(resolve => {
+    const overlay = document.createElement('div')
+    openOverlay = overlay
+    overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(4,5,8,.6);z-index:9999;display:flex;align-items:center;justify-content:center;'
 
-  if (!req) return null
-  const done = (ok: boolean) => {
-    req.resolve(ok)
-    setReq(null)
-  }
-  const danger = req.danger !== false
-  return (
-    <div
-      onClick={() => done(false)}
-      onKeyDown={e => { if (e.key === 'Escape') done(false) }}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.6)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          width: 420, maxWidth: '90vw', background: 'var(--panel2)', border: '1px solid var(--line2)',
-          borderRadius: 14, padding: 18, boxShadow: '0 26px 70px rgba(0,0,0,.6)', animation: 'cfade .14s ease-out both',
-        }}
-      >
-        <div className="grotesk" style={{ fontSize: 14.5, fontWeight: 600 }}>{req.title}</div>
-        {req.detail && (
-          <div style={{ fontSize: 12.5, color: 'var(--mut)', marginTop: 6, lineHeight: 1.55 }}>{req.detail}</div>
-        )}
-        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-          <button className="deny-btn" style={{ flex: 1, padding: 9, fontSize: 12.5 }} onClick={() => done(false)} autoFocus>
-            Cancel
-          </button>
-          <button
-            className="approve-btn"
-            style={{ flex: 1, padding: 9, fontSize: 12.5, ...(danger ? { background: 'var(--red)', color: '#fff' } : {}) }}
-            onClick={() => done(true)}
-          >
-            {req.confirmLabel ?? 'Delete'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
+    const done = (ok: boolean) => {
+      overlay.remove()
+      if (openOverlay === overlay) openOverlay = null
+      document.removeEventListener('keydown', onKey, true)
+      resolve(ok)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); done(false) }
+    }
+    document.addEventListener('keydown', onKey, true)
+    overlay.addEventListener('click', e => { if (e.target === overlay) done(false) })
+
+    const box = document.createElement('div')
+    box.style.cssText =
+      'width:420px;max-width:90vw;background:var(--panel2);border:1px solid var(--line2);' +
+      'border-radius:14px;padding:18px;box-shadow:0 26px 70px rgba(0,0,0,.6);animation:cfade .14s ease-out both;'
+
+    const title = document.createElement('div')
+    title.className = 'grotesk'
+    title.style.cssText = 'font-size:14.5px;font-weight:600;color:var(--text);'
+    title.textContent = opts.title
+    box.appendChild(title)
+
+    if (opts.detail) {
+      const detail = document.createElement('div')
+      detail.style.cssText = 'font-size:12.5px;color:var(--mut);margin-top:6px;line-height:1.55;'
+      detail.textContent = opts.detail
+      box.appendChild(detail)
+    }
+
+    const row = document.createElement('div')
+    row.style.cssText = 'display:flex;gap:8px;margin-top:16px;'
+
+    const cancel = document.createElement('button')
+    cancel.className = 'deny-btn'
+    cancel.style.cssText = 'flex:1;padding:9px;font-size:12.5px;'
+    cancel.textContent = 'Cancel'
+    cancel.addEventListener('click', () => done(false))
+
+    const ok = document.createElement('button')
+    ok.className = 'approve-btn'
+    ok.style.cssText = 'flex:1;padding:9px;font-size:12.5px;'
+    if (opts.danger !== false) ok.style.cssText += 'background:var(--red);color:#fff;'
+    ok.textContent = opts.confirmLabel ?? 'Delete'
+    ok.addEventListener('click', () => done(true))
+
+    row.appendChild(cancel)
+    row.appendChild(ok)
+    box.appendChild(row)
+    overlay.appendChild(box)
+    document.body.appendChild(overlay)
+    cancel.focus()
+  })
 }
