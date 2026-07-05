@@ -196,6 +196,24 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     let acc = ''
     let thinkId: string | null = null
     let thinkAcc = ''
+    // Coalesce streamed delta writes to at most one store dispatch per animation
+    // frame (a fast token stream otherwise dispatches per token, churning global
+    // state). The latest text per bubble is force-flushed synchronously at every
+    // seal/round/text and at turn end, so the committed content is always exact.
+    const pendingText = new Map<string, string>()
+    let rafId: number | null = null
+    const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn: () => void) => window.setTimeout(fn, 16) as unknown as number
+    const cancelRaf = typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : (id: number) => window.clearTimeout(id)
+    const flushFrame = () => {
+      rafId = null
+      for (const [id, t] of pendingText) ctx.updateChatLog(agentId, id, t)
+      pendingText.clear()
+    }
+    const flushNow = () => { if (rafId !== null) { cancelRaf(rafId); rafId = null } flushFrame() }
+    const batchUpdate = (id: string, t: string) => {
+      pendingText.set(id, t)
+      if (rafId === null) rafId = raf(flushFrame)
+    }
     const appendBubble = (id: string, role: 'assistant' | 'thinking', bubbleText: string) => {
       ctx.dispatch(s2 => ({
         ...s2,
@@ -205,6 +223,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       }))
     }
     const seal = (finalText?: string) => {
+      flushNow() // commit any buffered delta text before sealing the bubble
       if (streamId) {
         if (finalText !== undefined && finalText !== acc) ctx.updateChatLog(agentId, streamId, finalText)
         streamId = null
@@ -227,7 +246,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
             streamId = mkId('cm')
             appendBubble(streamId, 'assistant', acc)
           } else {
-            ctx.updateChatLog(agentId, streamId, acc)
+            batchUpdate(streamId, acc)
           }
         } else if (e.kind === 'thinking') {
           thinkAcc += e.text
@@ -235,7 +254,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
             thinkId = mkId('ct')
             appendBubble(thinkId, 'thinking', thinkAcc)
           } else {
-            ctx.updateChatLog(agentId, thinkId, thinkAcc)
+            batchUpdate(thinkId, thinkAcc)
           }
         } else if (e.kind === 'round') {
           seal()
@@ -246,6 +265,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
           thinkId = null
           thinkAcc = ''
         } else {
+          flushNow() // commit buffered deltas before inserting the tool trace
           ctx.pushChatLog(agentId, { role: 'tool', text: e.text })
         }
       },
@@ -280,7 +300,9 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       })()
     }
   } catch (e) {
-    // the chat was deleted mid-reply — stop quietly, don't push an error bubble
+    // the chat was deleted mid-reply — stop quietly, don't push an error bubble.
+    // (any buffered delta frame still pending is a harmless no-op if the chat is
+    // gone; the final seal on the success path already flushed it.)
     if (isAbortError(e) || ctx.aborts.signal(agentId).aborted) return
     console.error('[yaam] chat turn failed:', e) // reaches the dev/webview log for debugging
     ctx.pushChatLog(agentId, { role: 'assistant', text: `Error: ${e instanceof Error ? e.message : String(e)}` })
