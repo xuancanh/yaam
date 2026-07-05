@@ -23,7 +23,12 @@ export interface SessionLayoutActions {
 }
 
 export function useSessionLayoutActions(): SessionLayoutActions {
-  return useMemo(() => ({
+  return useMemo(() => createSessionLayoutActions(), [])
+}
+
+/** Plain (non-React) factory for the session layout actions. */
+export function createSessionLayoutActions(): SessionLayoutActions {
+  return {
     setActivePane: i => dispatch(s => {
       const ag = activeGroupOf(s)
       if (!ag || i < 0 || i >= ag.slots.length) return s
@@ -152,5 +157,5 @@ export function useSessionLayoutActions(): SessionLayoutActions {
       cols[row] = v
       return { ...g, splits: { ...g.splits, cols } }
     })),
-  }), [])
+  }
 }

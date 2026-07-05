@@ -13,7 +13,12 @@ export interface SessionConfigActions {
 }
 
 export function useSessionConfigActions(): SessionConfigActions {
-  return useMemo(() => ({
+  return useMemo(() => createSessionConfigActions(), [])
+}
+
+/** Plain (non-React) factory for the per-session configuration actions. */
+export function createSessionConfigActions(): SessionConfigActions {
+  return {
     renameSession: (id, name) => dispatch(s => ({
       ...s,
       agents: s.agents.map(a => a.id === id
@@ -46,5 +51,5 @@ export function useSessionConfigActions(): SessionConfigActions {
           }
         : a),
     })),
-  }), [])
+  }
 }

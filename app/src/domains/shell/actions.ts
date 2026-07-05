@@ -27,7 +27,12 @@ export interface ShellActions {
 }
 
 export function useShellActions(): ShellActions {
-  return useMemo(() => ({
+  return useMemo(() => createShellActions(), [])
+}
+
+/** Plain (non-React) factory for the app-shell actions. */
+export function createShellActions(): ShellActions {
+  return {
     setView: v => dispatch(s => ({ ...s, view: v })),
 
     openPalette: () => dispatch(s => ({ ...s, paletteOpen: true, paletteQuery: '' })),
@@ -64,5 +69,5 @@ export function useShellActions(): ShellActions {
       const needsAgent = s.agents.find(a => ((a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace) && (a.status === 'needs' || a.status === 'error'))
       return needsAgent ? focusSessionIn(s, needsAgent.id) : s
     }),
-  }), [])
+  }
 }
