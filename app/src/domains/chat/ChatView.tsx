@@ -15,7 +15,7 @@ import { FilesPane } from '../session/FilesPane'
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 8,
   padding: '7px 10px', color: 'var(--text)', outline: 'none', fontSize: 12,
-  fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+  fontFamily: 'var(--font-sans)',
 } as const
 
 /** last non-tool message of a chat, for the sidebar snippet */
@@ -189,7 +189,7 @@ export function ChatView() {
                 className="palette-item"
                 onClick={() => openChat(g.agent.id)}
                 style={{
-                  width: '100%', display: 'flex', flexDirection: 'column', gap: 3, padding: '9px 10px', borderRadius: 9,
+                  width: '100%', display: 'flex', flexDirection: 'column', gap: 3, padding: 'var(--row-pad)', borderRadius: 9,
                   background: s.activeChatId === g.agent.id ? 'rgba(245,196,81,.08)' : 'transparent',
                   border: 'none', textAlign: 'left',
                 }}
@@ -208,7 +208,7 @@ export function ChatView() {
               className="palette-item"
               onClick={() => openChat(a.id)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 9, padding: '9px 10px', borderRadius: 9, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 9, padding: 'var(--row-pad)', borderRadius: 9, cursor: 'pointer',
                 background: s.activeChatId === a.id ? 'rgba(245,196,81,.08)' : 'transparent',
               }}
             >
@@ -240,7 +240,7 @@ export function ChatView() {
         </div>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#0A0B0F' }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg2)' }}>
         {selected ? (
           <>
             <div style={{

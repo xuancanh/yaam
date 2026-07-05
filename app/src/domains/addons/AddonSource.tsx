@@ -21,7 +21,7 @@ function CodeBlock({ title, lang, code }: { title: string; lang: 'js' | 'html' |
   }
 
   return (
-    <div style={{ border: '1px solid var(--line)', borderRadius: 11, overflow: 'hidden', background: '#07080B' }}>
+    <div style={{ border: '1px solid var(--line)', borderRadius: 11, overflow: 'hidden', background: 'var(--bg3)' }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 9, padding: '7px 12px',
         background: 'var(--panel)', borderBottom: '1px solid var(--line)',
@@ -43,7 +43,7 @@ function CodeBlock({ title, lang, code }: { title: string; lang: 'js' | 'html' |
         <div className="mono" aria-hidden style={{
           padding: '10px 0', textAlign: 'right', userSelect: 'none', flexShrink: 0,
           color: 'var(--faint)', fontSize: 11.5, lineHeight: 1.65, minWidth: 44,
-          borderRight: '1px solid #14171d', paddingRight: 10, background: '#0A0B0F',
+          borderRight: '1px solid var(--line-soft)', paddingRight: 10, background: 'var(--bg2)',
         }}>
           {shown.map((_, i) => <div key={i}>{i + 1}</div>)}
         </div>
@@ -51,7 +51,7 @@ function CodeBlock({ title, lang, code }: { title: string; lang: 'js' | 'html' |
           className="mono"
           style={{
             margin: 0, padding: '10px 16px', fontSize: 11.5, lineHeight: 1.65,
-            color: '#C7CCD6', userSelect: 'text', cursor: 'text', whiteSpace: 'pre', flex: 1,
+            color: 'var(--text2)', userSelect: 'text', cursor: 'text', whiteSpace: 'pre', flex: 1,
           }}
           dangerouslySetInnerHTML={{ __html: highlight(shown.join('\n'), lang) }}
         />
@@ -104,7 +104,7 @@ export function AddonSource({ addon }: { addon: Addon }) {
   )
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', background: '#0A0B0F', padding: '20px 24px' }}>
+    <div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg2)', padding: '20px 24px' }}>
       <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 22 }}>
 
         <Section label="MANIFEST">

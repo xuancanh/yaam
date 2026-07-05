@@ -1,0 +1,31 @@
+// @vitest-environment jsdom
+import { describe, expect, it } from 'vitest'
+import { applyAppearance, resolveTheme } from './appearance'
+
+describe('applyAppearance', () => {
+  it('stamps defaults when no settings are stored', () => {
+    applyAppearance(undefined)
+    const root = document.documentElement
+    expect(root.getAttribute('data-theme')).toBe('dark')
+    expect(root.getAttribute('data-density')).toBe('normal')
+    expect(root.style.getPropertyValue('--table-font-size')).toBe('13px')
+    expect((root.style as CSSStyleDeclaration & { zoom?: string }).zoom).toBe('')
+  })
+
+  it('applies explicit choices', () => {
+    applyAppearance({ theme: 'light', density: 'compact', uiScale: 120, uiFont: 'system', monoFont: 'system', tableFontSize: 15, tableFont: 'mono' })
+    const root = document.documentElement
+    expect(root.getAttribute('data-theme')).toBe('light')
+    expect(root.getAttribute('data-density')).toBe('compact')
+    expect((root.style as CSSStyleDeclaration & { zoom?: string }).zoom).toBe('1.2')
+    expect(root.style.getPropertyValue('--font-sans')).toContain('system-ui')
+    expect(root.style.getPropertyValue('--font-mono')).toContain('Menlo')
+    expect(root.style.getPropertyValue('--table-font-size')).toBe('15px')
+    expect(root.style.getPropertyValue('--table-font')).toBe('var(--font-mono)')
+  })
+
+  it('resolves the system theme from the OS scheme', () => {
+    expect(['light', 'dark']).toContain(resolveTheme('system'))
+    expect(resolveTheme('midnight')).toBe('midnight')
+  })
+})

@@ -11,7 +11,7 @@ import { Markdown } from '../../components/Markdown'
 function RouteCard({ msg }: { msg: Message }) {
   return (
     <>
-      <div style={{ fontSize: 13, lineHeight: 1.5, color: '#C7CCD6', marginBottom: 9 }}>{msg.text}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--text2)', marginBottom: 9 }}>{msg.text}</div>
       <div style={{ background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: 12, overflow: 'hidden' }}>
         <div className="mono" style={{
           display: 'flex', alignItems: 'center', gap: 7, padding: '8px 12px',
@@ -62,7 +62,7 @@ function EscalateCard({ msg }: { msg: Message }) {
         <span style={{ fontSize: 13, fontWeight: 600 }}>{esc.name}</span>
         <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{esc.repo}</span>
       </div>
-      <div style={{ fontSize: 12.5, lineHeight: 1.5, color: '#C7CCD6', marginBottom: 11 }}>{esc.reason}</div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text2)', marginBottom: 11 }}>{esc.reason}</div>
       {!esc.resolved ? (
         hasOptions ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -130,9 +130,9 @@ function BuildUICard({ msg }: { msg: Message }) {
         {BUILD_STEPS.map((label, i) => {
           const done = b.stage > i + 1 || b.done
           const active = b.stage === i + 1 && !b.done
-          const color = done ? 'var(--green)' : active ? ACCENT : '#3a4150'
+          const color = done ? 'var(--green)' : active ? ACCENT : 'var(--line3)'
           return (
-            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: '#C7CCD6' }}>
+            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: 'var(--text2)' }}>
               <span style={{
                 width: 15, height: 15, borderRadius: '50%', border: `1.5px solid ${color}`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color,
@@ -150,7 +150,7 @@ function BuildUICard({ msg }: { msg: Message }) {
         })}
       </div>
       {b.done && (
-        <div style={{ marginTop: 12, background: '#0A0B0F', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>
+        <div style={{ marginTop: 12, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>
           <div className="mono" style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--mut)', marginBottom: 9 }}>{b.title}</div>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 56 }}>
             {b.bars.map((v, i) => (
@@ -185,7 +185,7 @@ function ThinkingBlock({ content }: { content: string }) {
       </button>
       {open && (
         <div className="mono" style={{
-          marginTop: 5, background: 'var(--bg)', border: '1px solid #1a1e26', borderRadius: 9,
+          marginTop: 5, background: 'var(--bg)', border: '1px solid var(--line-soft)', borderRadius: 9,
           padding: '9px 11px', fontSize: 11, lineHeight: 1.55, color: 'var(--dim)',
           whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 260, overflowY: 'auto',
         }}>
@@ -217,7 +217,7 @@ function MessageRow({ msg }: { msg: Message }) {
         {msg.kind === 'text' && (
           <div style={{ paddingTop: 3 }}>
             {msg.thinking && <ThinkingBlock content={msg.thinking} />}
-            <div style={{ fontSize: 13, lineHeight: 1.55, color: '#C7CCD6' }}><Markdown text={msg.text ?? ''} /></div>
+            <div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--text2)' }}><Markdown text={msg.text ?? ''} /></div>
           </div>
         )}
         {msg.kind === 'route' && <RouteCard msg={msg} />}
@@ -374,7 +374,7 @@ export function Sidebar() {
             rows={2}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none',
-              color: 'var(--text)', fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: 13.5, lineHeight: 1.5,
+              color: 'var(--text)', fontFamily: 'var(--font-sans)', fontSize: 13.5, lineHeight: 1.5,
             }}
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>

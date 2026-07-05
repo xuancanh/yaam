@@ -266,7 +266,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   }
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: '#07080B' }}>
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg3)' }}>
       <div style={{
         height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px',
         background: 'var(--panel)', borderBottom: '1px solid var(--line)',
@@ -339,8 +339,8 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
       ) : rendered ? (
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <div style={{
-            maxWidth: 760, padding: '18px 24px', fontSize: 13, lineHeight: 1.65, color: '#C7CCD6',
-            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+            maxWidth: 760, padding: '18px 24px', fontSize: 13, lineHeight: 1.65, color: 'var(--text2)',
+            fontFamily: 'var(--font-sans)',
           }}>
             <Markdown text={content} />
           </div>
@@ -358,8 +358,8 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
                     title={gutter === 'git' ? g.label : undefined}
                     style={{
                       width: 50, flexShrink: 0, textAlign: 'right', paddingRight: 8, userSelect: 'none',
-                      fontSize: 11, lineHeight: 1.6, background: '#0A0B0F',
-                      borderRight: `2px solid ${gutter === 'git' && g.color ? g.color : '#14171d'}`,
+                      fontSize: 11, lineHeight: 1.6, background: 'var(--bg2)',
+                      borderRight: `2px solid ${gutter === 'git' && g.color ? g.color : 'var(--line-soft)'}`,
                       color: gutter === 'git' ? (g.color ?? 'var(--faint)') : 'var(--faint)',
                       fontWeight: gutter === 'git' && g.color ? 700 : 400,
                     }}
@@ -368,7 +368,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
                   </span>
                   <span
                     className="mono"
-                    style={{ padding: '0 14px', fontSize: 11.5, lineHeight: 1.6, whiteSpace: 'pre', color: '#C7CCD6', userSelect: 'text' }}
+                    style={{ padding: '0 14px', fontSize: 11.5, lineHeight: 1.6, whiteSpace: 'pre', color: 'var(--text2)', userSelect: 'text' }}
                     dangerouslySetInnerHTML={{ __html: highlight(line, lang) || '&nbsp;' }}
                   />
                 </div>
@@ -457,7 +457,7 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{
         width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0,
-        background: '#0C0D12', borderRight: '1px solid var(--line)',
+        background: 'var(--bg2)', borderRight: '1px solid var(--line)',
       }}>
         <div style={{
           height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 7, padding: '0 10px',

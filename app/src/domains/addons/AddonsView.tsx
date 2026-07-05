@@ -21,7 +21,7 @@ interface RegistryEntry {
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 8,
   padding: '7px 10px', color: 'var(--text)', outline: 'none', fontSize: 12,
-  fontFamily: "'JetBrains Mono', monospace",
+  fontFamily: 'var(--font-mono)',
 } as const
 
 const isHttp = (u: string) => /^https?:\/\//.test(u)
@@ -72,7 +72,7 @@ function GenerateDialog({ onClose }: { onClose: () => void }) {
           onChange={e => setPrompt(e.target.value)}
           rows={5}
           placeholder={'e.g. A "standup" tab summarizing what every session did today, with a button that files follow-up tasks for anything that failed…'}
-          style={{ ...FIELD, fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: 12.5, resize: 'vertical', lineHeight: 1.5 }}
+          style={{ ...FIELD, fontFamily: 'var(--font-sans)', fontSize: 12.5, resize: 'vertical', lineHeight: 1.5 }}
         />
         {error && <div style={{ fontSize: 11.5, color: 'var(--red-soft)', marginTop: 8 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
@@ -105,7 +105,7 @@ function InstalledDetail({ a }: { a: Addon }) {
         </div>
         <Switch on={a.enabled} onToggle={() => toggleAddon(a.id)} />
       </div>
-      <div style={{ fontSize: 13, color: '#C7CCD6', lineHeight: 1.6, marginTop: 14 }}>{a.desc || 'No description.'}</div>
+      <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6, marginTop: 14 }}>{a.desc || 'No description.'}</div>
       <div className="mono" style={{ fontSize: 11, color: 'var(--mut)', marginTop: 8 }}>ships: {parts.join(' · ') || 'nothing?'}</div>
 
       <div className="mono" style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)', margin: '20px 0 8px' }}>PERMISSIONS — click to grant / revoke</div>
@@ -159,7 +159,7 @@ function MarketDetail({ e, installed }: { e: RegistryEntry; installed?: Addon })
           </div>
         </div>
       </div>
-      <div style={{ fontSize: 13, color: '#C7CCD6', lineHeight: 1.6, marginTop: 14 }}>{e.description || 'No description.'}</div>
+      <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6, marginTop: 14 }}>{e.description || 'No description.'}</div>
       <div className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 10, wordBreak: 'break-all' }}>{e.url}</div>
       <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
         <button className="approve-btn" style={{ padding: '8px 20px' }} onClick={() => installAddonFromUrl(e.url)}>
@@ -327,7 +327,7 @@ export function AddonsView() {
             </div>
           </div>
         </div>
-        <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', background: '#0A0B0F' }}>
+        <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', background: 'var(--bg2)' }}>
           {sel && selected?.kind === 'installed'
             ? <InstalledDetail a={sel as Addon} />
             : sel && selected?.kind === 'market'

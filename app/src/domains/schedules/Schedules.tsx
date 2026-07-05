@@ -68,7 +68,7 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
   const fieldStyle = {
     width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
     padding: '9px 12px', color: 'var(--text)', outline: 'none', fontSize: 13,
-    fontFamily: "'JetBrains Mono', monospace",
+    fontFamily: 'var(--font-mono)',
   } as const
 
   return (
@@ -208,7 +208,7 @@ export function Schedules() {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: c.color }} />
-              <span style={{ fontSize: 12, color: '#C7CCD6' }}>{c.agent}</span>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>{c.agent}</span>
             </div>
             <div className="mono" style={{ width: 120, textAlign: 'right', fontSize: 11, color: 'var(--dim)', flexShrink: 0 }}>{c.last}</div>
             <button className="icon-btn danger" title="Delete schedule" style={{ width: 27, height: 27, borderRadius: 7, flexShrink: 0 }} onClick={() => deleteCron(c.id)}>

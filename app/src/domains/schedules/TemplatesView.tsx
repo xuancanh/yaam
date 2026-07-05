@@ -7,7 +7,7 @@ import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
 const FIELD_STYLE = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
   padding: '9px 12px', color: 'var(--text)', outline: 'none', fontSize: 12.5,
-  fontFamily: "'JetBrains Mono', monospace",
+  fontFamily: 'var(--font-mono)',
 } as const
 
 const APPROVALS: Array<{ id: TemplateApproval; label: string; hint: string }> = [
@@ -139,7 +139,7 @@ function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => v
 
           <Field label="COMMAND PREVIEW" hint="what this template launches">
             <div className="mono" style={{
-              fontSize: 11, color: 'var(--dim)', background: '#07080B', border: '1px solid var(--line)',
+              fontSize: 11, color: 'var(--dim)', background: 'var(--bg3)', border: '1px solid var(--line)',
               borderRadius: 9, padding: '10px 12px', whiteSpace: 'nowrap', overflowX: 'auto',
             }}>
               $ {preview}

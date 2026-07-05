@@ -33,7 +33,7 @@ function AddonChat({ addon }: { addon: Addon }) {
   }
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: '#0A0B0F' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg2)' }}>
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 760, width: '100%', margin: '0 auto' }}>
         {msgs.length === 0 && (
           <div style={{ color: 'var(--dim)', fontSize: 12.5, lineHeight: 1.6, padding: '20px 0' }}>
@@ -48,7 +48,7 @@ function AddonChat({ addon }: { addon: Addon }) {
         ) : (
           <div key={i} style={{ display: 'flex', gap: 10, maxWidth: '85%' }}>
             <div style={{ marginTop: 2 }}><MasterMark size={20} glow={false} /></div>
-            <div style={{ fontSize: 13, lineHeight: 1.55, color: '#C7CCD6' }}>{m.text}</div>
+            <div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--text2)' }}>{m.text}</div>
           </div>
         ))}
         {busy && (
@@ -67,7 +67,7 @@ function AddonChat({ addon }: { addon: Addon }) {
             placeholder={`Customize ${addon.name}…`}
             rows={2}
             disabled={busy}
-            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', resize: 'none', color: 'var(--text)', fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: 13, lineHeight: 1.5 }}
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', resize: 'none', color: 'var(--text)', fontFamily: 'var(--font-sans)', fontSize: 13, lineHeight: 1.5 }}
           />
           <button className="send-btn" onClick={send} style={{ opacity: busy || !draft.trim() ? 0.5 : 1 }}>
             <Icon paths={IC.send} size={16} stroke={2.2} />
@@ -182,7 +182,7 @@ export function AddonView() {
           sandbox="allow-scripts"
           srcDoc={withViewCsp(addon.html)}
           onLoad={push}
-          style={{ flex: 1, border: 'none', background: '#0A0B0F' }}
+          style={{ flex: 1, border: 'none', background: 'var(--bg2)' }}
         />
       )}
       {effectiveMode === 'source' && <AddonSource addon={addon} />}

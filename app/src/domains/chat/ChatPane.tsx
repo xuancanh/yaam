@@ -147,7 +147,7 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove }: { m: ChatMsg; l
     >
       {user && hover && <HoverBtn title="Copy message" paths={COPY_IC} onClick={copy} />}
       <div style={{
-        maxWidth: '88%', minWidth: 0, borderRadius: 11, padding: '8px 12px', fontSize: 13, lineHeight: 1.55,
+        maxWidth: '88%', minWidth: 0, borderRadius: 11, padding: 'var(--bubble-pad)', fontSize: 'var(--chat-font)', lineHeight: 1.55,
         background: user ? hexToRgba(ACCENT, 0.13) : 'var(--panel2)',
         border: `1px solid ${user ? hexToRgba(ACCENT, 0.28) : 'var(--line2)'}`,
         color: 'var(--text)', overflowWrap: 'break-word',
@@ -338,8 +338,8 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   const hasUserMsg = log.some(m => m.role === 'user')
 
   return (
-    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: '#0A0B0F' }}>
-      <div ref={scrollRef} style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '14px 10px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg2)' }}>
+      <div ref={scrollRef} style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '14px 10px', display: 'flex', flexDirection: 'column', gap: 'var(--chat-gap)' }}>
         {log.map((m, i) => (
           <Bubble
             key={m.id}
@@ -425,7 +425,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
             rows={2}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none',
-              color: 'var(--text)', fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: 13, lineHeight: 1.5,
+              color: 'var(--text)', fontFamily: 'var(--font-sans)', fontSize: 13, lineHeight: 1.5,
             }}
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

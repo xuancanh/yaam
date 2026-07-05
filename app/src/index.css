@@ -1,12 +1,23 @@
+/* Theme system: every surface reads CSS variables; [data-theme] on <html>
+   swaps palettes. Fonts, density, and table typography are variables too —
+   app/appearance.ts stamps them from Settings → Appearance. */
 :root {
+  /* dark (default) */
   --bg: #08090c;
+  --bg2: #0a0b0f; /* chat / explorer canvas */
+  --bg3: #07080b; /* code blocks, file viewer */
   --panel: #0d0f14;
   --panel2: #12151c;
   --panel3: #171b23;
   --line: #23272f;
   --line2: #2c313b;
+  --line3: #3a4150;
+  --line-soft: #1a1e26; /* settings-row separators, source gutters */
+  --hover: #1b1f27;
   --text: #e7e9f0;
+  --text2: #c7ccd6; /* code / long-form reading */
   --mut: #8b93a1;
+  --mut2: #9aa3b2;
   --dim: #626b79;
   --faint: #4a5262;
   --accent: #f5c451;
@@ -14,7 +25,90 @@
   --amber: #ffb020;
   --red: #ff5c5c;
   --red-soft: #ff7a7a;
-  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  --code-bg: rgba(255, 255, 255, 0.07);
+  --selection: rgba(245, 196, 81, 0.28);
+
+  /* typography (Settings → Appearance) */
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --table-font: var(--font-sans);
+  --table-font-size: 0.95em;
+
+  /* density (data-density on <html>) */
+  --chat-font: 13px;
+  --chat-gap: 9px;
+  --bubble-pad: 8px 12px;
+  --row-pad: 9px 10px;
+
+  font-family: var(--font-sans);
+}
+
+:root[data-theme='light'] {
+  --bg: #eef0f4;
+  --bg2: #f7f8fa;
+  --bg3: #fbfbfd;
+  --panel: #ffffff;
+  --panel2: #f2f3f7;
+  --panel3: #e8eaf0;
+  --line: #d8dce4;
+  --line2: #c8cdd8;
+  --line3: #aeb5c2;
+  --line-soft: #e4e7ee;
+  --hover: #e9ebf1;
+  --text: #1b1e26;
+  --text2: #2c3140;
+  --mut: #5b6374;
+  --mut2: #4f5868;
+  --dim: #798193;
+  --faint: #99a0b0;
+  --accent: #b07d10;
+  --green: #178f5c;
+  --amber: #a86a00;
+  --red: #d43f3f;
+  --red-soft: #c25555;
+  --code-bg: rgba(0, 0, 0, 0.055);
+  --selection: rgba(176, 125, 16, 0.25);
+}
+
+:root[data-theme='midnight'] {
+  --bg: #060a14;
+  --bg2: #081020;
+  --bg3: #050912;
+  --panel: #0a101f;
+  --panel2: #0e1628;
+  --panel3: #131c33;
+  --line: #1c2740;
+  --line2: #253352;
+  --line3: #32436b;
+  --line-soft: #16203a;
+  --hover: #16203a;
+  --text: #e4e9f5;
+  --text2: #c3cce0;
+  --mut: #8b96ad;
+  --mut2: #9aa6bf;
+  --dim: #5f6b85;
+  --faint: #47526b;
+  --accent: #6fa8ff;
+  --green: #3ddc97;
+  --amber: #ffb020;
+  --red: #ff5c5c;
+  --red-soft: #ff7a7a;
+  --code-bg: rgba(255, 255, 255, 0.07);
+  --selection: rgba(111, 168, 255, 0.3);
+}
+
+/* density presets */
+:root[data-density='compact'] {
+  --chat-font: 12.5px;
+  --chat-gap: 5px;
+  --bubble-pad: 5px 9px;
+  --row-pad: 5px 8px;
+}
+:root[data-density='comfortable'] {
+  --chat-font: 14px;
+  --chat-gap: 13px;
+  --bubble-pad: 11px 15px;
+  --row-pad: 12px 12px;
 }
 
 * {
@@ -57,7 +151,7 @@ input {
 }
 
 ::selection {
-  background: rgba(245, 196, 81, 0.28);
+  background: var(--selection);
 }
 
 ::-webkit-scrollbar {
@@ -69,7 +163,7 @@ input {
   border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a4150;
+  background: var(--line3);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -133,10 +227,10 @@ button {
 }
 
 .mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 .grotesk {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Space Grotesk', var(--font-sans);
 }
 
 /* icon-sized ghost buttons (title bar, pane headers, panel close) */
@@ -171,7 +265,7 @@ button {
 
 .deny-btn {
   background: transparent;
-  color: #9aa3b2;
+  color: var(--mut2);
   border: 1px solid var(--line2);
   border-radius: 8px;
   font-size: 12.5px;
@@ -191,12 +285,12 @@ button {
   border-radius: 9px;
   padding: 6px 14px;
   color: var(--mut);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 .cmdk-btn:hover {
   border-color: var(--line2);
-  color: #9aa3b2;
+  color: var(--mut2);
 }
 
 .needs-btn {
@@ -254,7 +348,7 @@ button {
   color: var(--text);
 }
 .open-btn:hover {
-  border-color: #3a4150;
+  border-color: var(--line3);
 }
 
 .resume-btn {
@@ -290,7 +384,7 @@ button {
   cursor: pointer;
 }
 .palette-item:hover {
-  background: #1b1f27;
+  background: var(--hover);
 }
 
 .notif-item {
@@ -301,8 +395,8 @@ button {
 }
 
 .board-card:hover {
-  border-color: #3a4150;
-  background: #151922;
+  border-color: var(--line3);
+  background: var(--hover);
 }
 .card-delete {
   opacity: 0;
@@ -381,7 +475,7 @@ button {
   padding: 7px;
   font-size: 12px;
   font-weight: 600;
-  color: #9aa3b2;
+  color: var(--mut2);
 }
 .review-btn:hover {
   background: var(--panel3);

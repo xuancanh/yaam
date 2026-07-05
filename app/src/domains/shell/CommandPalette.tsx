@@ -108,7 +108,7 @@ export function CommandPalette() {
             placeholder="Route a task, jump to a view, build a tool…"
             style={{
               flex: 1, background: 'transparent', border: 'none', outline: 'none',
-              color: 'var(--text)', fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: 15,
+              color: 'var(--text)', fontFamily: 'var(--font-sans)', fontSize: 15,
             }}
           />
           <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', border: '1px solid var(--line)', borderRadius: 5, padding: '2px 7px' }}>esc</span>
@@ -125,7 +125,7 @@ export function CommandPalette() {
               }}
             >
               <span style={{
-                width: 30, height: 30, borderRadius: 8, background: '#0A0B0F', border: '1px solid var(--line)',
+                width: 30, height: 30, borderRadius: 8, background: 'var(--bg2)', border: '1px solid var(--line)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', flexShrink: 0,
               }}>
                 <Icon paths={ICONS[c.icon] || ICONS.go} size={15} stroke={1.7} />

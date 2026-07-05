@@ -10,7 +10,7 @@ import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from './TaskSpecForm
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
   padding: '9px 12px', color: 'var(--text)', outline: 'none', fontSize: 12.5,
-  fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+  fontFamily: 'var(--font-sans)',
 } as const
 
 /** Convert an epoch timestamp to a datetime-local input value. */
@@ -165,7 +165,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
               )}
               {agent ? (
                 <>
-                  <button onClick={() => focusTab(agent.id)} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', border: 'none', color: '#9AA3B2', fontSize: 11, padding: 0 }}>
+                  <button onClick={() => focusTab(agent.id)} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', border: 'none', color: 'var(--mut2)', fontSize: 11, padding: 0 }}>
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: agent.color }} />
                     {agent.name} — open session
                   </button>
@@ -205,11 +205,11 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
               </div>
               <div>
                 <FieldLabel hint="one per line">Criteria</FieldLabel>
-                <textarea value={critDraft} onChange={e => setCritDraft(e.target.value)} rows={3} style={{ ...FIELD, resize: 'vertical', fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5 }} />
+                <textarea value={critDraft} onChange={e => setCritDraft(e.target.value)} rows={3} style={{ ...FIELD, resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: 11.5 }} />
               </div>
               <div>
                 <FieldLabel hint="used when (re)launching the session">Working folder</FieldLabel>
-                <input value={cwdDraft} onChange={e => setCwdDraft(e.target.value)} placeholder="default" style={{ ...FIELD, fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5 }} />
+                <input value={cwdDraft} onChange={e => setCwdDraft(e.target.value)} placeholder="default" style={{ ...FIELD, fontFamily: 'var(--font-mono)', fontSize: 11.5 }} />
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="approve-btn" style={{ padding: '6px 16px', fontSize: 11.5 }} onClick={saveSpec}>Save</button>
@@ -227,7 +227,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
                   <Icon paths={['M12 20h9', 'M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z']} size={11} stroke={1.8} />
                 </button>
               </div>
-              <div style={{ fontSize: 12.5, color: '#C7CCD6', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+              <div style={{ fontSize: 12.5, color: 'var(--text2)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
                 {task.description || <span style={{ color: 'var(--dim)' }}>No description.</span>}
               </div>
               {(task.criteria ?? []).length > 0 && (
@@ -266,7 +266,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
               onKeyDown={onKey}
               placeholder="Message the task's watcher…"
               rows={2}
-              style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none', color: 'var(--text)', fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.5 }}
+              style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none', color: 'var(--text)', fontFamily: 'var(--font-sans)', fontSize: 12.5, lineHeight: 1.5 }}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button className="send-btn" onClick={send} style={{ width: 30, height: 30 }}>
@@ -292,7 +292,7 @@ function SchedulePopover({ card, onClose }: { card: BoardTask; onClose: () => vo
   const field = {
     width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 7,
     padding: '6px 9px', color: 'var(--text)', outline: 'none', fontSize: 12,
-    fontFamily: "'JetBrains Mono', monospace", colorScheme: 'dark',
+    fontFamily: 'var(--font-mono)', colorScheme: 'dark',
   } as const
 
   return (
@@ -386,7 +386,7 @@ function Card({ card, agent, onOpen }: { card: BoardTask; agent: Agent | null; o
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9 }}>
         <span style={{ width: 7, height: 7, borderRadius: '50%', background: agent ? agent.color : 'var(--dim)', flexShrink: 0 }} />
         {agent ? (
-          <span style={{ fontSize: 11, color: '#9AA3B2', whiteSpace: 'nowrap' }}>{agent.name}</span>
+          <span style={{ fontSize: 11, color: 'var(--mut2)', whiteSpace: 'nowrap' }}>{agent.name}</span>
         ) : (
           <button
             title="Spawn a one-shot session; the task's watcher drives it"
@@ -465,11 +465,11 @@ export function Board() {
               onDrop={e => { e.preventDefault(); dropTo(col.id) }}
               style={{
                 width: 258, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#0B0C10',
-                border: `1px solid ${s.dragOverCol === col.id ? ACCENT : '#1a1e26'}`,
+                border: `1px solid ${s.dragOverCol === col.id ? ACCENT : 'var(--line-soft)'}`,
                 borderRadius: 14, minHeight: 0, transition: 'border-color .12s',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 14px', borderBottom: '1px solid #1a1e26', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 14px', borderBottom: '1px solid var(--line-soft)', flexShrink: 0 }}>
                 <span style={{ width: 9, height: 9, borderRadius: 3, background: col.dot }} />
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{col.label}</span>
                 <span className="mono" style={{ fontSize: 11, color: 'var(--mut)', background: 'var(--panel2)', borderRadius: 6, padding: '1px 8px', marginLeft: 2 }}>{cards.length}</span>

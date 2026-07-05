@@ -30,7 +30,7 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
       onClick={() => setActivePane(index)}
       style={{
         flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-        background: '#0A0B0F', boxShadow: showRing && active ? `inset 0 0 0 1.5px ${ACCENT}` : 'none',
+        background: 'var(--bg2)', boxShadow: showRing && active ? `inset 0 0 0 1.5px ${ACCENT}` : 'none',
         position: 'relative',
       }}
     >

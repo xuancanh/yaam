@@ -56,7 +56,7 @@ function LayoutMenu({ group }: { group: TabGroup | undefined }) {
         style={{
           width: 38, height: 30, gap: 3,
           background: split || open ? hexToRgba(ACCENT, 0.14) : 'transparent',
-          color: split || open ? 'var(--accent)' : '#9AA3B2',
+          color: split || open ? 'var(--accent)' : 'var(--mut2)',
         }}
       >
         <LayoutGlyph k={current} color="currentColor" />
@@ -86,7 +86,7 @@ function LayoutMenu({ group }: { group: TabGroup | undefined }) {
                     color: active ? 'var(--accent)' : 'var(--text)', textAlign: 'left',
                   }}
                 >
-                  <LayoutGlyph k={l.key} color={active ? 'var(--accent)' : '#9AA3B2'} />
+                  <LayoutGlyph k={l.key} color={active ? 'var(--accent)' : 'var(--mut2)'} />
                   <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600 }}>{l.label}</span>
                   <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{l.hint}</span>
                 </button>
@@ -119,7 +119,7 @@ function EmptySlot({ index }: { index: number }) {
       onClick={() => setPicking(p => !p)}
       style={{
         flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex',
-        alignItems: 'center', justifyContent: 'center', background: '#0A0B0F', cursor: 'pointer',
+        alignItems: 'center', justifyContent: 'center', background: 'var(--bg2)', cursor: 'pointer',
       }}
     >
       {!picking ? (
@@ -260,7 +260,7 @@ export function Workspace() {
                   }}
                 >
                   {a ? tabDot(a) : <LayoutGlyph k={layoutKeyOf(g)} color="var(--dim)" />}
-                  <span style={{ fontSize: 12.5, fontWeight: 600, color: activeG ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: activeG ? 'var(--text)' : 'var(--mut2)', whiteSpace: 'nowrap' }}>
                     {a?.name ?? `empty · ${g.slots.length} pane${g.slots.length > 1 ? 's' : ''}`}
                   </span>
                   {a && <span className="mono" style={repoStyle}>{a.repo}</span>}
@@ -295,7 +295,7 @@ export function Workspace() {
                       }}
                     >
                       {tabDot(a)}
-                      <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--text)' : 'var(--mut2)', whiteSpace: 'nowrap' }}>{a.name}</span>
                       <StatusPill agent={a} small />
                     </button>
                   )
@@ -320,21 +320,21 @@ export function Workspace() {
               style={{ background: 'transparent', borderTop: '2px solid transparent' }}
             >
               {tabDot(a)}
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--mut2)', whiteSpace: 'nowrap' }}>{a.name}</span>
               <span className="mono" style={repoStyle}>{a.repo}</span>
               <StatusPill agent={a} small />
             </button>
           ))}
         </div>
         <LayoutMenu group={ag} />
-        <button className="icon-btn" title="New agent session" onClick={openNewSession} style={{ width: 30, height: 30, flexShrink: 0, color: '#9AA3B2' }}>
+        <button className="icon-btn" title="New agent session" onClick={openNewSession} style={{ width: 30, height: 30, flexShrink: 0, color: 'var(--mut2)' }}>
           <Icon paths={IC.plus} size={17} stroke={1.8} />
         </button>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--line)' }}>
         {wsAgents.length === 0 && s.groups.length === 0 ? (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: '#0A0B0F' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: 'var(--bg2)' }}>
             <div className="grotesk" style={{ fontSize: 17, fontWeight: 600, color: 'var(--mut)' }}>No sessions yet</div>
             <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
               Launch any CLI as a live session — Claude Code, Codex, Aider, a REPL, or a plain shell.

@@ -116,7 +116,7 @@ function NotifPopover() {
               style={{
                 width: '100%', textAlign: 'left', display: 'flex', gap: 10, padding: '12px 14px',
                 background: n.read ? 'transparent' : hexToRgba(NOTIF_COLORS[n.kind] || '#8B93A1', 0.06),
-                border: 'none', borderBottom: '1px solid #1a1e26',
+                border: 'none', borderBottom: '1px solid var(--line-soft)',
               }}
             >
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, marginTop: 5, flexShrink: 0, opacity: n.read ? 0 : 1 }} />
@@ -189,7 +189,7 @@ export function TitleBar() {
       <div className="grotesk" style={{
         width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(140deg,#3a4150,#20242d)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600,
-        color: '#C7CCD6', border: '1px solid var(--line2)',
+        color: 'var(--text2)', border: '1px solid var(--line2)',
       }}>
         KP
       </div>

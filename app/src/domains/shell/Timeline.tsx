@@ -29,14 +29,14 @@ export function Timeline() {
                   <div style={{ width: 30, height: 30, borderRadius: 9, background: soft, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <span style={{ width: 9, height: 9, borderRadius: '50%', background: color }} />
                   </div>
-                  <div style={{ flex: 1, width: 2, background: '#1a1e26', margin: '3px 0', minHeight: 14 }} />
+                  <div style={{ flex: 1, width: 2, background: 'var(--line-soft)', margin: '3px 0', minHeight: 14 }} />
                 </div>
                 <div style={{ paddingBottom: 20, flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                     <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color, background: soft, borderRadius: 5, padding: '2px 7px' }}>
                       {e.type.toUpperCase()}
                     </span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#C7CCD6' }}>{agent ? agent.name : 'Master'}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)' }}>{agent ? agent.name : 'Master'}</span>
                     <span className="mono" style={{ fontSize: 11, color: 'var(--dim)', marginLeft: 'auto' }}>{e.time}</span>
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--text)', marginTop: 5, lineHeight: 1.45 }}>{e.text}</div>

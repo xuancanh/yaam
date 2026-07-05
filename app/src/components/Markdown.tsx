@@ -18,7 +18,7 @@ function inline(text: string, keyBase: string): ReactNode[] {
     const key = `${keyBase}-${k++}`
     if (tok.startsWith('`')) {
       out.push(
-        <code key={key} className="mono" style={{ fontSize: '0.92em', background: 'rgba(255,255,255,.07)', border: '1px solid var(--line2)', borderRadius: 4, padding: '0 4px' }}>
+        <code key={key} className="mono" style={{ fontSize: '0.92em', background: 'var(--code-bg)', border: '1px solid var(--line2)', borderRadius: 4, padding: '0 4px' }}>
           {tok.slice(1, -1)}
         </code>,
       )
@@ -72,7 +72,7 @@ export function Markdown({ text }: { text: string }) {
       i++
       blocks.push(
         <pre key={`b${k++}`} className="mono" style={{
-          background: '#07080B', border: '1px solid var(--line)', borderRadius: 8,
+          background: 'var(--bg3)', border: '1px solid var(--line)', borderRadius: 8,
           padding: '8px 11px', fontSize: '0.9em', lineHeight: 1.5, overflowX: 'auto',
           whiteSpace: 'pre', margin: '6px 0',
         }}>
@@ -110,7 +110,8 @@ export function Markdown({ text }: { text: string }) {
       while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(parseRow(lines[i++]))
       blocks.push(
         <div key={`b${k++}`} style={{ overflowX: 'auto', margin: '6px 0' }}>
-          <table style={{ borderCollapse: 'collapse', fontSize: '0.95em' }}>
+          {/* table typography follows Settings → Appearance (size + family) */}
+          <table style={{ borderCollapse: 'collapse', fontSize: 'var(--table-font-size)', fontFamily: 'var(--table-font)' }}>
             <thead>
               <tr>
                 {header.map((c, j) => (

@@ -6,7 +6,7 @@ import { SHELLS } from '../../core/data'
 const FIELD_STYLE = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
   padding: '9px 12px', color: 'var(--text)', outline: 'none', fontSize: 13,
-  fontFamily: "'JetBrains Mono', monospace",
+  fontFamily: 'var(--font-mono)',
 } as const
 
 /** Render a consistent label for session-launch fields. */

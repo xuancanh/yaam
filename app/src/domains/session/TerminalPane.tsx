@@ -51,7 +51,7 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
       onMouseDown={() => getTerminal(agent.id).term.focus()}
       style={{
         flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden',
-        background: '#0A0B0F', padding: '8px 2px 2px 10px',
+        background: 'var(--bg2)', padding: '8px 2px 2px 10px',
       }}
     />
   )

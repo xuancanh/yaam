@@ -339,6 +339,20 @@ export interface Skill {
   body: string
 }
 
+/** Settings → Appearance: theme, scale, density, and typography. All optional —
+ *  absent fields fall back to APPEARANCE_DEFAULTS (dark / 100% / normal). */
+export interface AppearanceSettings {
+  theme?: 'dark' | 'light' | 'midnight' | 'system'
+  /** whole-UI scale in percent (80–140) */
+  uiScale?: number
+  density?: 'compact' | 'normal' | 'comfortable'
+  uiFont?: 'plex' | 'system' | 'grotesk'
+  monoFont?: 'jetbrains' | 'system'
+  /** markdown table font size, px */
+  tableFontSize?: number
+  tableFont?: 'sans' | 'mono'
+}
+
 export interface OrchestrationSettings {
   autoRoute: boolean
   approveDestructive: boolean
@@ -373,6 +387,8 @@ export interface OrchestrationSettings {
   /** shell command that prints the API credential (raw key or JSON);
    *  re-run automatically on expiry or when the API rejects it */
   credCmd: string
+  /** Settings → Appearance: theme, scale, density, typography */
+  appearance?: AppearanceSettings
   /** Master chat panel width (px, drag-resizable) */
   sidebarWidth?: number
   /** Master chat panel collapsed to a slim rail */

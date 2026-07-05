@@ -61,7 +61,7 @@ export function Overview() {
                 )}
                 {a.summary ? (
                   <div style={{
-                    background: 'var(--bg)', border: '1px solid #1a1e26', borderRadius: 8, padding: '8px 10px',
+                    background: 'var(--bg)', border: '1px solid var(--line-soft)', borderRadius: 8, padding: '8px 10px',
                     fontSize: 11.5, color: 'var(--mut)', lineHeight: 1.45,
                   }}>
                     {a.summary}
@@ -69,7 +69,7 @@ export function Overview() {
                   </div>
                 ) : (
                   <div className="mono" style={{
-                    background: 'var(--bg)', border: '1px solid #1a1e26', borderRadius: 8, padding: '8px 10px',
+                    background: 'var(--bg)', border: '1px solid var(--line-soft)', borderRadius: 8, padding: '8px 10px',
                     fontSize: 11, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                   }}>
                     {last}

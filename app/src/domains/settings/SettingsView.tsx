@@ -1,5 +1,8 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { APPEARANCE_DEFAULTS } from '../../app/appearance'
+import type { AppearanceSettings } from '../../core/types'
 import { hexToRgba } from '../../core/data'
 import { pickFile, pickFolder } from '../../core/native'
 import { PROVIDERS, providerFor } from '../../master'
@@ -14,7 +17,7 @@ import type { PluginEntry } from './plugin-market'
 const FIELD_STYLE = {
   background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 8,
   padding: '7px 10px', color: 'var(--text)', outline: 'none', fontSize: 12.5,
-  fontFamily: "'JetBrains Mono', monospace",
+  fontFamily: 'var(--font-mono)',
 } as const
 
 /** One configured MCP server row: status, connect, enable, remove, and an
@@ -25,11 +28,11 @@ function McpServerRow({ m }: { m: import('../../core/types').McpServer }) {
   const stdio = m.transport === 'stdio'
   const detail = stdio ? `${m.command ?? ''} ${(m.args ?? []).join(' ')}`.trim() : m.url
   return (
-    <div style={{ padding: '12px 0', borderBottom: '1px solid #1a1e26' }}>
+    <div style={{ padding: '12px 0', borderBottom: '1px solid var(--line-soft)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <span style={{
           width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-          background: m.lastError ? 'var(--red-soft)' : m.toolCount !== undefined ? 'var(--green)' : '#3a4150',
+          background: m.lastError ? 'var(--red-soft)' : m.toolCount !== undefined ? 'var(--green)' : 'var(--line3)',
         }} />
         <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => setOpen(v => !v)} title="Click to edit">
           <div style={{ fontSize: 13, fontWeight: 600 }}>
@@ -99,7 +102,7 @@ function McpCandidateRow({ c, onAdd }: { c: McpCandidate; onAdd: () => void }) {
   const detail = c.transport === 'http' ? c.url : `${c.command} ${(c.args ?? []).join(' ')}`
   const needsCreds = (c.env ?? '').split('\n').some(l => l.trim().endsWith('='))
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid #1a1e26' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--line-soft)' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12.5, fontWeight: 600 }}>
           {c.name}
@@ -239,7 +242,7 @@ function McpSection() {
 /** One plugin row inside a browsed marketplace. */
 function PluginRow({ p, installed, onInstall }: { p: PluginEntry; installed: string | null; onInstall: () => void }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #1a1e26' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--line-soft)' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12.5, fontWeight: 600 }}>
           {p.name}
@@ -337,7 +340,7 @@ function PluginsSection() {
       <SectionLabel>PLUGIN MARKETPLACES — Claude plugins (skills, commands, MCP) for chat agents</SectionLabel>
       <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
         {registries.map(reg => (
-          <div key={reg.url} style={{ padding: '10px 0', borderBottom: '1px solid #1a1e26' }}>
+          <div key={reg.url} style={{ padding: '10px 0', borderBottom: '1px solid var(--line-soft)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{reg.name}</div>
@@ -405,7 +408,7 @@ function SkillsSection() {
       <SectionLabel>SKILLS — reusable instructions for chat agents</SectionLabel>
       <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
         {s.skills.map(sk => (
-          <div key={sk.id} style={{ padding: '11px 0', borderBottom: '1px solid #1a1e26' }}>
+          <div key={sk.id} style={{ padding: '11px 0', borderBottom: '1px solid var(--line-soft)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <button
                 onClick={() => setOpenId(openId === sk.id ? null : sk.id)}
@@ -432,7 +435,7 @@ function SkillsSection() {
                   onChange={e => updateSkill(sk.id, { body: e.target.value })}
                   placeholder="the instructions injected when a chat agent loads this skill"
                   rows={4}
-                  style={{ ...FIELD_STYLE, resize: 'vertical', fontFamily: "'IBM Plex Sans', system-ui, sans-serif", lineHeight: 1.5 }}
+                  style={{ ...FIELD_STYLE, resize: 'vertical', fontFamily: 'var(--font-sans)', lineHeight: 1.5 }}
                 />
               </div>
             )}
@@ -467,7 +470,7 @@ function PersonasSection() {
           <div style={{ padding: '14px 0', fontSize: 12, color: 'var(--dim)' }}>No personas yet.</div>
         )}
         {s.personas.map(pe => (
-          <div key={pe.id} style={{ padding: '11px 0', borderBottom: '1px solid #1a1e26' }}>
+          <div key={pe.id} style={{ padding: '11px 0', borderBottom: '1px solid var(--line-soft)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <button
                 onClick={() => setOpenId(openId === pe.id ? null : pe.id)}
@@ -494,7 +497,7 @@ function PersonasSection() {
                   onChange={e => updatePersona(pe.id, { body: e.target.value })}
                   placeholder="the persona instructions appended to the chat agent's system prompt"
                   rows={4}
-                  style={{ ...FIELD_STYLE, resize: 'vertical', fontFamily: "'IBM Plex Sans', system-ui, sans-serif", lineHeight: 1.5 }}
+                  style={{ ...FIELD_STYLE, resize: 'vertical', fontFamily: 'var(--font-sans)', lineHeight: 1.5 }}
                 />
               </div>
             )}
@@ -517,10 +520,10 @@ function SkillRegistriesSection() {
       <SectionLabel>SKILL REGISTRIES — SKILL.md folders (GitHub tree URL or local path)</SectionLabel>
       <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
         {s.skillRegistries.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: '1px solid #1a1e26' }}>
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: '1px solid var(--line-soft)' }}>
             <span style={{
               width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-              background: r.lastError ? 'var(--red-soft)' : r.skillCount !== undefined ? 'var(--green)' : '#3a4150',
+              background: r.lastError ? 'var(--red-soft)' : r.skillCount !== undefined ? 'var(--green)' : 'var(--line3)',
             }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>
@@ -658,7 +661,7 @@ function ChatTypesSection() {
                   onChange={e => updateChatAgentType(t.id, { systemPrompt: e.target.value || undefined })}
                   placeholder="persona (optional) · appended to the agent's system prompt"
                   rows={2}
-                  style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11, resize: 'vertical', minHeight: 30, fontFamily: "'IBM Plex Sans', system-ui, sans-serif" }}
+                  style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11, resize: 'vertical', minHeight: 30, fontFamily: 'var(--font-sans)' }}
                 />
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
                   <span style={{ fontSize: 11, color: t.enabled ? 'var(--green)' : '#6B7280', fontWeight: 600 }}>
@@ -670,6 +673,83 @@ function ChatTypesSection() {
             </div>
           )
         })}
+      </div>
+    </>
+  )
+}
+
+/** One labeled appearance row with the control on the right. */
+function AppearanceRow({ label, detail, children, last }: { label: string; detail: string; children: ReactNode; last?: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 0', borderBottom: last ? 'none' : '1px solid var(--line-soft)' }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>{detail}</div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/** Theme, UI scale, density, and typography (Settings → General). */
+function AppearanceSection() {
+  const s = useConductorSelector(x => ({ appearance: x.settings.appearance }), shallowEqual)
+  const { updateSettings } = useActions()
+  const a = { ...APPEARANCE_DEFAULTS, ...s.appearance }
+  const patch = (p: AppearanceSettings) => updateSettings({ appearance: { ...s.appearance, ...p } })
+  return (
+    <>
+      <SectionLabel>APPEARANCE</SectionLabel>
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
+        <AppearanceRow label="Theme" detail="Color palette for the whole app; System follows the OS light/dark setting.">
+          <select value={a.theme} onChange={e => patch({ theme: e.target.value as AppearanceSettings['theme'] })} style={{ ...FIELD_STYLE, width: 160 }}>
+            <option value="dark">Dark</option>
+            <option value="midnight">Midnight</option>
+            <option value="light">Light</option>
+            <option value="system">System</option>
+          </select>
+        </AppearanceRow>
+        <AppearanceRow label="Interface scale" detail="Scales all text and spacing together.">
+          <input
+            type="range" min={80} max={140} step={5}
+            value={a.uiScale}
+            onChange={e => patch({ uiScale: Number(e.target.value) })}
+            style={{ width: 150 }}
+          />
+          <span className="mono" style={{ fontSize: 12, width: 44, textAlign: 'right' }}>{a.uiScale}%</span>
+        </AppearanceRow>
+        <AppearanceRow label="Density" detail="Row spacing and message padding in chats and lists.">
+          <select value={a.density} onChange={e => patch({ density: e.target.value as AppearanceSettings['density'] })} style={{ ...FIELD_STYLE, width: 160 }}>
+            <option value="compact">Compact</option>
+            <option value="normal">Normal</option>
+            <option value="comfortable">Comfortable</option>
+          </select>
+        </AppearanceRow>
+        <AppearanceRow label="Interface font" detail="The sans-serif face used across the app.">
+          <select value={a.uiFont} onChange={e => patch({ uiFont: e.target.value as AppearanceSettings['uiFont'] })} style={{ ...FIELD_STYLE, width: 160 }}>
+            <option value="plex">IBM Plex Sans</option>
+            <option value="system">System</option>
+            <option value="grotesk">Space Grotesk</option>
+          </select>
+        </AppearanceRow>
+        <AppearanceRow label="Monospace font" detail="Code, paths, terminals-adjacent labels.">
+          <select value={a.monoFont} onChange={e => patch({ monoFont: e.target.value as AppearanceSettings['monoFont'] })} style={{ ...FIELD_STYLE, width: 160 }}>
+            <option value="jetbrains">JetBrains Mono</option>
+            <option value="system">System mono</option>
+          </select>
+        </AppearanceRow>
+        <AppearanceRow label="Table typography" detail="Font size and family for markdown tables in chat replies." last>
+          <input
+            type="number" min={10} max={20}
+            value={a.tableFontSize}
+            onChange={e => patch({ tableFontSize: Math.max(10, Math.min(20, Number(e.target.value) || 13)) })}
+            style={{ ...FIELD_STYLE, width: 64 }}
+          />
+          <select value={a.tableFont} onChange={e => patch({ tableFont: e.target.value as AppearanceSettings['tableFont'] })} style={{ ...FIELD_STYLE, width: 120 }}>
+            <option value="sans">Sans</option>
+            <option value="mono">Mono</option>
+          </select>
+        </AppearanceRow>
       </div>
     </>
   )
@@ -744,7 +824,7 @@ export function SettingsView() {
           {tab === 'brain' && <>
           <SectionLabel>MASTER BRAIN</SectionLabel>
           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>LLM Master</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
@@ -753,7 +833,7 @@ export function SettingsView() {
               </div>
               <Switch on={s.settings.masterEnabled} onToggle={() => updateSettings({ masterEnabled: !s.settings.masterEnabled })} />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Provider</div>
               </div>
@@ -770,7 +850,7 @@ export function SettingsView() {
             </div>
             {providerFor(s.settings.provider).id === 'bedrock' && (
               <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600 }}>AWS region</div>
                     <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Region hosting the Bedrock inference profile.</div>
@@ -782,7 +862,7 @@ export function SettingsView() {
                     style={{ ...FIELD_STYLE, width: 260 }}
                   />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600 }}>AWS profile</div>
                     <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
@@ -796,7 +876,7 @@ export function SettingsView() {
                     style={{ ...FIELD_STYLE, width: 260 }}
                   />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600 }}>Credential command</div>
                     <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
@@ -814,7 +894,7 @@ export function SettingsView() {
                     style={{ ...FIELD_STYLE, width: 260 }}
                   />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600 }}>Credential refresh command</div>
                     <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
@@ -831,7 +911,7 @@ export function SettingsView() {
               </>
             )}
             {providerFor(s.settings.provider).id === 'custom' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600 }}>Base URL</div>
                   <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>OpenAI-compatible endpoint root, e.g. http://localhost:11434/v1</div>
@@ -844,7 +924,7 @@ export function SettingsView() {
                 />
               </div>
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Model</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Type any model id — suggestions per provider.</div>
@@ -860,7 +940,7 @@ export function SettingsView() {
                 {providerFor(s.settings.provider).models.map(m => <option key={m} value={m} />)}
               </datalist>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Monitor model</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
@@ -877,7 +957,7 @@ export function SettingsView() {
             </div>
             {providerFor(s.settings.provider).id !== 'bedrock' && (
               <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600 }}>API key</div>
                     <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Stored locally in the app data folder. Leave empty if you use a credential command below.</div>
@@ -914,9 +994,10 @@ export function SettingsView() {
           </>}
 
           {tab === 'general' && <>
+          <AppearanceSection />
           <SectionLabel>SESSION DEFAULTS</SectionLabel>
           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Terminal shell</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Used when launching a plain terminal session.</div>
@@ -947,7 +1028,7 @@ export function SettingsView() {
           <SectionLabel>ORCHESTRATION</SectionLabel>
           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
             {ORCHESTRATION.map(o => (
-              <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #1a1e26' }}>
+              <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600 }}>{o.label}</div>
                   <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>{o.detail}</div>

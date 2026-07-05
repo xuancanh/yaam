@@ -34,7 +34,7 @@ export function emptyTaskSpec(defaultCwd: string): TaskSpecValue {
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
   padding: '9px 12px', color: 'var(--text)', outline: 'none', fontSize: 12.5,
-  fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+  fontFamily: 'var(--font-sans)',
 } as const
 
 function FieldLabel({ children, hint }: { children: string; hint?: string }) {
@@ -147,7 +147,7 @@ export function TaskSpecFields({ v, set, questions, error, autoFocus }: {
       </div>
       <div>
         <FieldLabel hint="one per line — the watcher verifies these before done">Acceptance criteria</FieldLabel>
-        <textarea value={v.criteria} onChange={e => set({ ...v, criteria: e.target.value })} rows={3} placeholder={'tests pass locally\nno console errors on login page'} style={{ ...FIELD, resize: 'vertical', lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
+        <textarea value={v.criteria} onChange={e => set({ ...v, criteria: e.target.value })} rows={3} placeholder={'tests pass locally\nno console errors on login page'} style={{ ...FIELD, resize: 'vertical', lineHeight: 1.5, fontFamily: 'var(--font-mono)', fontSize: 12 }} />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <div>
@@ -165,7 +165,7 @@ export function TaskSpecFields({ v, set, questions, error, autoFocus }: {
         <div>
           <FieldLabel>Working folder</FieldLabel>
           <div style={{ display: 'flex', gap: 6 }}>
-            <input value={v.cwd} onChange={e => set({ ...v, cwd: e.target.value })} placeholder="default" style={{ ...FIELD, fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5 }} />
+            <input value={v.cwd} onChange={e => set({ ...v, cwd: e.target.value })} placeholder="default" style={{ ...FIELD, fontFamily: 'var(--font-mono)', fontSize: 11.5 }} />
             <button className="open-btn" style={{ flex: 'none', padding: '0 11px', fontSize: 11.5 }} onClick={browse} disabled={!isTauri}>…</button>
           </div>
         </div>
@@ -174,7 +174,7 @@ export function TaskSpecFields({ v, set, questions, error, autoFocus }: {
         <div style={{ border: '1px solid rgba(255,176,32,.4)', background: 'rgba(255,176,32,.07)', borderRadius: 10, padding: '10px 13px' }}>
           <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--amber)', marginBottom: 6 }}>Needs more info before it can be created</div>
           {questions.map((q, i) => (
-            <div key={i} style={{ fontSize: 12, color: '#C7CCD6', lineHeight: 1.5, marginBottom: 3 }}>• {q}</div>
+            <div key={i} style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5, marginBottom: 3 }}>• {q}</div>
           ))}
         </div>
       )}

@@ -64,7 +64,7 @@ function DiffBody({ agent }: { agent: Agent }) {
         {files.map(f => (
           <div key={f.file} style={{ border: '1px solid var(--line)', borderRadius: 11, overflow: 'hidden', marginBottom: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 13px', background: 'var(--panel2)', borderBottom: '1px solid var(--line)' }}>
-              <span className="mono" style={{ fontSize: 12, color: '#C7CCD6', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.file}</span>
+              <span className="mono" style={{ fontSize: 12, color: 'var(--text2)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.file}</span>
               <span className="mono" style={{ fontSize: 11, color: '#7FE3B0', fontWeight: 600 }}>+{f.add}</span>
               <span className="mono" style={{ fontSize: 11, color: '#FF9B9B', fontWeight: 600 }}>−{f.del}</span>
             </div>
@@ -132,7 +132,7 @@ function AgentBody({ agent }: { agent: Agent }) {
           ))}
         </div>
         <div className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, color: 'var(--mut)', marginBottom: 10 }}>SESSION HISTORY</div>
-        <div className="mono" style={{ background: 'var(--bg)', border: '1px solid #1a1e26', borderRadius: 11, padding: '12px 14px', fontSize: 12, lineHeight: 1.6 }}>
+        <div className="mono" style={{ background: 'var(--bg)', border: '1px solid var(--line-soft)', borderRadius: 11, padding: '12px 14px', fontSize: 12, lineHeight: 1.6 }}>
           {history.map((line, i) => (
             <div key={i} style={{
               color: LOG_COLORS[line.t] || 'var(--mut)', fontStyle: line.t === 'think' ? 'italic' : 'normal',
