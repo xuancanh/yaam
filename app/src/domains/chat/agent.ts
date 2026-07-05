@@ -24,6 +24,61 @@ const MCP_PREFIX = 'mcp__'
 /** sanitize server/tool names into a valid tool identifier */
 const ident = (x: string) => x.replace(/[^a-zA-Z0-9_]/g, '_')
 
+/** App-level abilities the chat agent gets beyond the filesystem: drive the
+ *  kanban board, create schedules, and save/refine skills. Implemented by the
+ *  runner against the store. Every method returns a human-readable result. */
+export interface ChatAppPort {
+  listBoardTasks: () => string
+  addBoardTask: (title: string, description?: string, criteria?: string[]) => string
+  listSchedules: () => string
+  /** cronExpr XOR atIso; the fired schedule adds a board task */
+  addSchedule: (name: string, cronExpr: string | undefined, atIso: string | undefined, taskTitle: string, description?: string) => string
+  /** create or update a local skill by name */
+  saveSkill: (name: string, description: string, body: string) => string
+}
+
+/** single-quote a string for POSIX shells */
+const shellEsc = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'", '#x27': "'" }
+const decodeEntities = (s: string) => s.replace(/&(#?\w+);/g, (m, e: string) => {
+  if (ENTITIES[e]) return ENTITIES[e]
+  if (e.startsWith('#x') || e.startsWith('#X')) return String.fromCodePoint(parseInt(e.slice(2), 16) || 63)
+  if (e.startsWith('#')) return String.fromCodePoint(parseInt(e.slice(1), 10) || 63)
+  return m
+})
+
+/** crude but dependency-free page → readable text */
+function htmlToText(html: string): string {
+  return decodeEntities(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)[^>]*>/gi, '\n')
+      .replace(/<[^>]+>/g, ' '),
+  )
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .trim()
+}
+
+/** DuckDuckGo HTML results → "title — url\nsnippet" blocks */
+function parseDdg(html: string): string {
+  const titles = [...html.matchAll(/class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)]
+  const snippets = [...html.matchAll(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g)]
+  const out: string[] = []
+  for (let i = 0; i < Math.min(titles.length, 8); i++) {
+    let url = titles[i][1]
+    const uddg = url.match(/[?&]uddg=([^&]+)/)
+    if (uddg) url = decodeURIComponent(uddg[1])
+    const title = htmlToText(titles[i][2])
+    const snip = snippets[i] ? htmlToText(snippets[i][1]) : ''
+    out.push(`${title}\n${url}${snip ? `\n${snip}` : ''}`)
+  }
+  return out.length ? out.join('\n\n') : '(no results — try a different query or fetch_url a known site)'
+}
+
 function builtinTools(skills: CatalogSkill[]) {
   return [
     {
@@ -33,11 +88,117 @@ function builtinTools(skills: CatalogSkill[]) {
     },
     {
       name: 'read_file',
-      description: 'Read a UTF-8 text file. Large files are truncated; pass offset/limit (line numbers) to page.',
+      description: 'Read UTF-8 text file(s). Pass `paths` to read several at once. Large files are truncated; pass offset/limit (line numbers) to page.',
       input_schema: {
         type: 'object',
-        properties: { path: { type: 'string' }, offset: { type: 'number', description: '1-based first line' }, limit: { type: 'number', description: 'max lines' } },
-        required: ['path'],
+        properties: {
+          path: { type: 'string' },
+          paths: { type: 'array', items: { type: 'string' }, description: 'read multiple files in one call (max 8)' },
+          offset: { type: 'number', description: '1-based first line' },
+          limit: { type: 'number', description: 'max lines' },
+        },
+      },
+    },
+    {
+      name: 'glob_files',
+      description: 'Find files by name pattern (shell glob like "*.tsx" or "report*"), recursively under path (default: working folder). Skips .git and node_modules.',
+      input_schema: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' } }, required: ['pattern'] },
+    },
+    {
+      name: 'grep_files',
+      description: 'Regex content search across files, returning file:line: hits. path defaults to the working folder; glob (e.g. "*.md") narrows the files searched.',
+      input_schema: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string' } }, required: ['pattern'] },
+    },
+    {
+      name: 'create_dir',
+      description: 'Create a directory (with parents) inside the working folder.',
+      input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+    },
+    {
+      name: 'move_path',
+      description: 'Move or rename a file/directory. Both source and destination must be inside the working folder.',
+      input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] },
+    },
+    {
+      name: 'copy_path',
+      description: 'Copy a file/directory. The source may be anywhere readable; the destination must be inside the working folder.',
+      input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] },
+    },
+    {
+      name: 'delete_path',
+      description: 'Delete a file or directory inside the working folder. Irreversible — confirm with the user unless they clearly asked for the deletion.',
+      input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+    },
+    {
+      name: 'web_search',
+      description: 'Search the web for current information. Returns titles, URLs, and snippets; follow up with fetch_url to read a result.',
+      input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    },
+    {
+      name: 'fetch_url',
+      description: 'Fetch a web page and return its readable text (tags stripped, capped).',
+      input_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] },
+    },
+    {
+      name: 'http_request',
+      description: 'Raw HTTP request for APIs: method + url + optional headers/body. Returns status and body (capped).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          method: { type: 'string', description: 'GET/POST/PUT/PATCH/DELETE…' },
+          url: { type: 'string' },
+          headers: { type: 'object', additionalProperties: { type: 'string' } },
+          body: { type: 'string' },
+        },
+        required: ['method', 'url'],
+      },
+    },
+    {
+      name: 'run_applescript',
+      description: 'Control native macOS apps (Finder, Mail, Safari, Calendar…) by running an AppleScript via osascript. macOS only; prefer this over pixel-guessing.',
+      input_schema: { type: 'object', properties: { script: { type: 'string' } }, required: ['script'] },
+    },
+    {
+      name: 'list_board_tasks',
+      description: "List the tasks on YAAM's kanban board (id, column, title).",
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'add_board_task',
+      description: 'Add a task to the kanban board backlog so an agent session can pick it up; include acceptance criteria when the user gave any.',
+      input_schema: {
+        type: 'object',
+        properties: { title: { type: 'string' }, description: { type: 'string' }, criteria: { type: 'array', items: { type: 'string' } } },
+        required: ['title'],
+      },
+    },
+    {
+      name: 'list_schedules',
+      description: 'List configured schedules (recurring crons and one-time runs).',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'add_schedule',
+      description: 'Schedule a board task: recurring (cron expression "m h dom mon dow") or one-time (at = ISO datetime). Exactly one of cron/at.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          cron: { type: 'string', description: 'cron expression for recurring' },
+          at: { type: 'string', description: 'ISO datetime for one-time' },
+          task_title: { type: 'string' },
+          description: { type: 'string' },
+        },
+        required: ['name', 'task_title'],
+      },
+    },
+    {
+      name: 'save_skill',
+      description: 'Create or update a local skill (reusable instruction pack) by name — capture a workflow that went well, or rewrite an existing skill to fix weaknesses. It becomes slash-invocable immediately.',
+      input_schema: {
+        type: 'object',
+        properties: { name: { type: 'string' }, description: { type: 'string' }, body: { type: 'string' } },
+        required: ['name', 'description', 'body'],
       },
     },
     {
@@ -89,7 +250,7 @@ function normalizePath(p: string): string {
 
 class ToolError extends Error {}
 
-async function runBuiltin(name: string, input: Record<string, unknown>, agent: Agent, skills: CatalogSkill[]): Promise<string> {
+async function runBuiltin(name: string, input: Record<string, unknown>, agent: Agent, skills: CatalogSkill[], app?: ChatAppPort): Promise<string> {
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '')
   const root = agent.cwd ? normalizePath(agent.cwd.replace(/\/+$/, '')) : ''
   // Reads/lists resolve relative to the working folder; absolute paths pass through.
@@ -119,15 +280,117 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
       return entries.map(e => `${e.isDir ? 'd' : '-'} ${e.name}`).join('\n')
     }
     case 'read_file': {
-      const text = await native.readTextFile(readPath())
-      const lines = text.split('\n')
-      const offset = Math.max(1, Number(input.offset) || 1)
-      const limit = Math.max(1, Math.min(2000, Number(input.limit) || 800))
-      const slice = lines.slice(offset - 1, offset - 1 + limit)
-      const body = slice.map((l, i) => `${offset + i}\t${l}`).join('\n')
-      const capped = body.length > 40_000 ? `${body.slice(0, 40_000)}\n… (truncated — page with offset/limit)` : body
-      return `${lines.length} lines total\n${capped}`
+      const multi = Array.isArray(input.paths) ? (input.paths as unknown[]).filter((p): p is string => typeof p === 'string').slice(0, 8) : null
+      const readOne = async (raw: string) => {
+        const p = raw.startsWith('/') ? normalizePath(raw) : root ? normalizePath(`${root}/${raw}`) : raw
+        const text = await native.readTextFile(p)
+        const lines = text.split('\n')
+        const offset = Math.max(1, Number(input.offset) || 1)
+        const limit = Math.max(1, Math.min(2000, Number(input.limit) || 800))
+        const slice = lines.slice(offset - 1, offset - 1 + limit)
+        const body = slice.map((l, i) => `${offset + i}\t${l}`).join('\n')
+        const capped = body.length > 40_000 ? `${body.slice(0, 40_000)}\n… (truncated — page with offset/limit)` : body
+        return `${lines.length} lines total\n${capped}`
+      }
+      if (multi && multi.length) {
+        const parts = await Promise.all(multi.map(async p => {
+          try { return `=== ${p} ===\n${await readOne(p)}` } catch (e) { return `=== ${p} ===\nerror: ${e instanceof Error ? e.message : e}` }
+        }))
+        return parts.join('\n\n')
+      }
+      return await readOne(str('path') || (() => { throw new ToolError('read_file: "path" or "paths" is required') })())
     }
+    case 'glob_files': {
+      const pattern = str('pattern')
+      if (!pattern) throw new ToolError('glob_files: "pattern" is required')
+      const dir = str('path') ? readPath() : root
+      if (!dir) throw new ToolError('glob_files: no working folder — pass "path"')
+      const res = await native.execCommand(
+        `find ${shellEsc(dir)} \\( -name .git -o -name node_modules \\) -prune -o -name ${shellEsc(pattern)} -print 2>/dev/null | head -200`,
+        undefined, 30_000,
+      )
+      return res.output.trim() || '(no matches)'
+    }
+    case 'grep_files': {
+      const pattern = str('pattern')
+      if (!pattern) throw new ToolError('grep_files: "pattern" is required')
+      const dir = str('path') ? readPath() : root
+      if (!dir) throw new ToolError('grep_files: no working folder — pass "path"')
+      const inc = str('glob') ? ` --include=${shellEsc(str('glob'))}` : ''
+      const res = await native.execCommand(
+        `grep -rnIE --exclude-dir=.git --exclude-dir=node_modules${inc} -e ${shellEsc(pattern)} ${shellEsc(dir)} 2>/dev/null | head -200`,
+        undefined, 30_000,
+      )
+      const out = res.output.trim()
+      return out ? (out.length > 30_000 ? `${out.slice(0, 30_000)}\n… (truncated — narrow the pattern)` : out) : '(no matches)'
+    }
+    case 'create_dir': {
+      const target = writePath()
+      const res = await native.execCommand(`mkdir -p ${shellEsc(target)}`, undefined, 10_000)
+      return res.code === 0 ? `created ${target}` : `mkdir failed: ${res.output}`
+    }
+    case 'move_path': {
+      const from = writePath('from')
+      const to = writePath('to')
+      const res = await native.execCommand(`mv ${shellEsc(from)} ${shellEsc(to)}`, undefined, 10_000)
+      return res.code === 0 ? `moved ${from} → ${to}` : `mv failed: ${res.output}`
+    }
+    case 'copy_path': {
+      const from = readPath('from') // sources may be read from anywhere readable
+      const to = writePath('to')
+      const res = await native.execCommand(`cp -R ${shellEsc(from)} ${shellEsc(to)}`, undefined, 30_000)
+      return res.code === 0 ? `copied ${from} → ${to}` : `cp failed: ${res.output}`
+    }
+    case 'delete_path': {
+      const target = writePath()
+      if (target === root) throw new ToolError('delete_path: refusing to delete the working folder itself')
+      const res = await native.execCommand(`rm -rf ${shellEsc(target)}`, undefined, 10_000)
+      return res.code === 0 ? `deleted ${target}` : `rm failed: ${res.output}`
+    }
+    case 'web_search': {
+      const query = str('query')
+      if (!query.trim()) throw new ToolError('web_search: "query" is required')
+      const html = await native.httpGetText(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`)
+      return parseDdg(html)
+    }
+    case 'fetch_url': {
+      const url = str('url')
+      if (!/^https?:\/\//.test(url)) throw new ToolError('fetch_url: "url" must be http(s)')
+      const text = htmlToText(await native.httpGetText(url))
+      return text.length > 18_000 ? `${text.slice(0, 18_000)}\n… (truncated)` : (text || '(empty page)')
+    }
+    case 'http_request': {
+      const url = str('url')
+      const method = str('method') || 'GET'
+      if (!/^https?:\/\//.test(url)) throw new ToolError('http_request: "url" must be http(s)')
+      const headers = (input.headers && typeof input.headers === 'object' ? input.headers : {}) as Record<string, string>
+      const res = await native.httpRequest(method, url, headers, typeof input.body === 'string' ? input.body : undefined)
+      const body = res.text.length > 18_000 ? `${res.text.slice(0, 18_000)}\n… (truncated)` : res.text
+      return `HTTP ${res.status}${res.contentType ? ` (${res.contentType})` : ''}\n${body || '(empty body)'}`
+    }
+    case 'run_applescript': {
+      const script = str('script')
+      if (!script.trim()) throw new ToolError('run_applescript: "script" is required')
+      const res = await native.execCommand(`osascript -e ${shellEsc(script)}`, undefined, 60_000)
+      return `exit ${res.code}\n${res.output || '(no output)'}`
+    }
+    case 'list_board_tasks':
+      if (!app) return 'board tools are unavailable in this context'
+      return app.listBoardTasks()
+    case 'add_board_task':
+      if (!app) return 'board tools are unavailable in this context'
+      return app.addBoardTask(str('title'), str('description') || undefined,
+        Array.isArray(input.criteria) ? (input.criteria as unknown[]).filter((c): c is string => typeof c === 'string') : undefined)
+    case 'list_schedules':
+      if (!app) return 'schedule tools are unavailable in this context'
+      return app.listSchedules()
+    case 'add_schedule':
+      if (!app) return 'schedule tools are unavailable in this context'
+      return app.addSchedule(str('name'), str('cron') || undefined, str('at') || undefined, str('task_title'), str('description') || undefined)
+    case 'save_skill':
+      if (!app) return 'skill tools are unavailable in this context'
+      if (!str('name') || !str('body')) throw new ToolError('save_skill: "name" and "body" are required')
+      return app.saveSkill(str('name'), str('description'), str('body'))
     case 'write_file': {
       if (input.content === undefined) throw new ToolError('write_file: "content" is required')
       const target = writePath()
@@ -169,7 +432,7 @@ function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], per
 WORKING FOLDER: ${agent.cwd || '(none set — you cannot write files until the user sets one)'}
 - Writes (write_file / edit_file) are sandboxed to the working folder: pass paths relative to it (e.g. "report.docx", "src/main.py"). Absolute paths or ".."/"~" that escape the folder are refused. Reads may use absolute paths.
 
-You can navigate and read files (list_dir/read_file), change them (edit_file for surgical replacements, write_file for new/replaced files), run shell scripts and commands (run_command — real execution on the user's machine), load skills from the user's registry (load_skill) and follow them, and call tools on the user's connected MCP servers${mcp.length ? ` (${mcp.map(s => `${s.serverName}: ${s.tools.length} tools`).join(', ')})` : ' (none connected)'}.
+You can navigate, find, and read files (list_dir/glob_files/grep_files/read_file), change and organize them (edit_file for surgical replacements, write_file for new/replaced files, create_dir/move_path/copy_path/delete_path), run shell scripts and commands (run_command — real execution on the user's machine), control native macOS apps (run_applescript), research the web (web_search then fetch_url; http_request for APIs), drive YAAM itself (list/add board tasks, list/add schedules — the board's watcher agents take tasks from there), save reusable skills (save_skill) plus load them (load_skill), and call tools on the user's connected MCP servers${mcp.length ? ` (${mcp.map(s => `${s.serverName}: ${s.tools.length} tools`).join(', ')})` : ' (none connected)'}.
 
 SKILLS (load with load_skill when relevant — descriptions say when)${skills.length ? skills.map(s => `\n- ${s.name} [${s.source}]: ${(s.description || '(no description)').slice(0, 200)}`).join('') : '\n(none available)'}
 
@@ -195,6 +458,7 @@ export async function runChatTurn(
   onEvent: (e: ChatTurnEvent) => void,
   persona?: string,
   signal?: AbortSignal,
+  app?: ChatAppPort,
 ): Promise<void> {
   // a stopped/aborted turn can leave the history mid-tool-round (assistant
   // tool_use without its tool_result) — providers reject that; drop the debris
@@ -234,7 +498,7 @@ export async function runChatTurn(
             const toolName = session?.tools.find(t => ident(t.name) === rest.join('__'))?.name
             content = session && toolName ? await mcpCallTool(session, toolName, input) : `unknown MCP tool ${name}`
           } else {
-            content = await runBuiltin(name, input, getAgent() ?? ({} as Agent), skills)
+            content = await runBuiltin(name, input, getAgent() ?? ({} as Agent), skills, app)
           }
         } catch (e) {
           content = `error: ${e instanceof Error ? e.message : String(e)}`

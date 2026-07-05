@@ -132,6 +132,19 @@ export async function httpPostText(url: string, body: string, headers: Record<st
   return { text, contentType: res.headers.get('content-type') ?? '', mcpSessionId: res.headers.get('mcp-session-id') }
 }
 
+/** Generic HTTP request through Tauri's plugin (CORS-free on desktop); returns
+ *  status + body so tool callers can surface API errors to the model. */
+export async function httpRequest(method: string, url: string, headers: Record<string, string>, body?: string): Promise<{ status: number; text: string; contentType: string }> {
+  const m = method.toUpperCase()
+  const res = await (isTauri ? tauriFetch : fetch)(url, {
+    method: m,
+    headers,
+    ...(body !== undefined && m !== 'GET' && m !== 'HEAD' ? { body } : {}),
+  })
+  const text = await res.text()
+  return { status: res.status, text, contentType: res.headers.get('content-type') ?? '' }
+}
+
 export interface ExecResult {
   code: number
   output: string

@@ -8,6 +8,7 @@ import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import { buildChatCfg, callApi, chatTypeHasCreds } from '../../llm/client'
 import { runChatTurn } from './agent'
+import type { ChatAppPort } from './agent'
 import { mkId } from '../../shared/id'
 import type { AbortRegistry } from '../../core/abort-registry'
 import { isAbortError } from '../../core/abort-registry'
@@ -25,6 +26,60 @@ export interface ChatCtx {
   updateChatLog: (agentId: string, msgId: string, text: string) => void
   flash: (t: string) => void
   refreshSkillCatalog: (id: string) => Promise<string>
+}
+
+/** App-level tools (board/schedules/skills) backed by the store — the chat
+ *  agent's bridge into YAAM's own orchestration surfaces. */
+function makeAppPort(ctx: ChatCtx): ChatAppPort {
+  return {
+    listBoardTasks: () => {
+      const tasks = ctx.stateRef.current.tasks
+      if (!tasks.length) return '(board is empty)'
+      return tasks.map(t => `${t.id} [${t.col}] ${t.title}${t.watcherNote ? ` — ${t.watcherNote}` : ''}`).join('\n')
+    },
+    addBoardTask: (title, description, criteria) => {
+      if (!title.trim()) return 'error: title is required'
+      const id = mkId('t')
+      ctx.dispatch(s => ({
+        ...s,
+        tasks: s.tasks.concat([{ id, title: title.trim(), col: 'backlog', agentId: null, description, criteria }]),
+      }))
+      return `added board task ${id} to the backlog — the user can start it from the Board view`
+    },
+    listSchedules: () => {
+      const crons = ctx.stateRef.current.crons
+      if (!crons.length) return '(no schedules)'
+      return crons.map(c => `${c.id} [${c.on ? 'on' : 'off'}] ${c.name} — ${c.at ? `once at ${new Date(c.at).toLocaleString()}` : c.schedule}`).join('\n')
+    },
+    addSchedule: (name, cronExpr, atIso, taskTitle, description) => {
+      if (!name.trim() || !taskTitle.trim()) return 'error: name and task_title are required'
+      if (!cronExpr === !atIso) return 'error: pass exactly one of cron / at'
+      let at: number | undefined
+      if (atIso) {
+        at = Date.parse(atIso)
+        if (Number.isNaN(at)) return `error: could not parse "${atIso}" as a datetime`
+        if (at < Date.now()) return `error: ${atIso} is in the past`
+      }
+      const id = mkId('c')
+      ctx.dispatch(s => ({
+        ...s,
+        crons: s.crons.concat([{
+          id, name: name.trim(), schedule: cronExpr ?? '', human: cronExpr ?? `once at ${new Date(at!).toLocaleString()}`,
+          target: 'board task', agent: '', color: '#7FD1FF', on: true, built: false, last: '—', at,
+          boardTask: { title: taskTitle.trim(), description },
+        }]),
+      }))
+      return `created schedule ${id} (“${name.trim()}”) — it will add the board task when it fires`
+    },
+    saveSkill: (name, description, body) => {
+      const slug = name.trim()
+      const existing = ctx.stateRef.current.skills.find(k => k.name.toLowerCase() === slug.toLowerCase())
+      ctx.dispatch(s => existing
+        ? { ...s, skills: s.skills.map(k => k.id === existing.id ? { ...k, description, body } : k) }
+        : { ...s, skills: s.skills.concat([{ id: mkId('sk'), name: slug, description, body }]) })
+      return `${existing ? 'updated' : 'saved'} skill “${slug}” — invocable as /${slug}`
+    },
+  }
 }
 
 /** Run one chat-agent turn, streaming deltas/reasoning/tool traces into the UI. */
@@ -154,6 +209,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       },
       persona || undefined,
       ctx.aborts.signal(agentId),
+      makeAppPort(ctx),
     )
     seal()
     // auto-title: after a successful turn, chats still carrying the default

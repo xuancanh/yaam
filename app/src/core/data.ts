@@ -190,6 +190,12 @@ export function seedState(): AppState {
     ],
     skills: [
       {
+        id: 'skill-deep-research',
+        name: 'deep-research',
+        description: 'Multi-source research with fact-checking: search, read several sources, cross-check claims, cite everything.',
+        body: 'Research the question in stages. 1) web_search 2-4 differently-phrased queries; collect candidate sources. 2) fetch_url the 3-6 most credible/diverse sources (primary sources > news > blogs; check dates). 3) Cross-check: a claim counts as established only when 2+ independent sources agree; note disagreements explicitly instead of averaging them away. 4) Answer with a short conclusion first, then the evidence, then a Sources list of the URLs actually used. Say clearly when something could not be verified.',
+      },
+      {
         id: 'skill-commit-style',
         name: 'clean-commits',
         description: 'House rules for writing commit messages and splitting commits.',
