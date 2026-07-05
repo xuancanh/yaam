@@ -18,7 +18,8 @@ import { createWatcherRuntime } from './domains/board/watcher-runtime'
 import type { WatcherRuntime } from './domains/board/watcher-runtime'
 import { createChatRuntime } from './domains/chat/chat-runtime'
 import type { ChatRuntime } from './domains/chat/chat-runtime'
-import { runMasterLoop } from './domains/master/runner'
+import { createMasterRuntime } from './domains/master/master-runtime'
+import type { MasterRuntime } from './domains/master/master-runtime'
 import { useSettingsActions } from './domains/settings/actions'
 import { useBoardActions } from './domains/board/actions'
 import { useSchedulesActions } from './domains/schedules/actions'
@@ -277,6 +278,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // ---- per-addon LLM agents: an addon's own mini-Master, tools = its API ----
   const addonAgentHistories = useRef<Map<string, ApiMessage[]>>(new Map())
+  const addonEditorHistories = useRef<Map<string, ApiMessage[]>>(new Map())
   const addonAgentBusy = useRef<Set<string>>(new Set())
   // per-addon cancellation for in-flight agent turns (aborted when the addon is removed)
   const addonAborts = useRef(new AbortRegistry())
@@ -369,21 +371,17 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
   }), [logEvent, notify, launchSession, spawnTaskSession]))
 
-  // Master brain: run one LLM turn (chat → tools → chat), serializing turns
-  const masterBusyRef = useRef(false)
-  const masterQueued = useRef<{ note?: string } | null>(null)
-  // cancellation for the single global Master turn (aborted on workspace delete)
-  const masterAborts = useRef(new AbortRegistry())
-
-  const lastEventRef = useRef<{ note: string; at: number } | null>(null)
-
-  // Serialize Master turns, coalesce proactive events, and append the final reply.
-  const runMaster = useCallback((eventNote?: string) => runMasterLoop({
-    stateRef, dispatch, masterBusyRef, masterQueued, lastEventRef, toolApprovalsRef, userStoppedRef,
-    addonAgentHistories, addonEditorHistories, launchSession, launchFromTemplate, armResponseWatch,
-    sessionScreenTail, logEvent, flash, applyAgentStatus, setNeedsInput, makeAddonApi,
-    signal: () => masterAborts.current.signal('master'),
-  }, eventNote), [applyAgentStatus, armResponseWatch, flash, makeAddonApi, launchFromTemplate, launchSession, logEvent, sessionScreenTail, setNeedsInput])
+  // Master brain: the runtime owns the single global loop's busy/queue/dedup/
+  // cancellation state (domains/master/master-runtime).
+  const masterRef = useRef<MasterRuntime>(undefined)
+  if (!masterRef.current) {
+    masterRef.current = createMasterRuntime({
+      stateRef, dispatch, toolApprovalsRef, userStoppedRef,
+      addonAgentHistories, addonEditorHistories, launchSession, launchFromTemplate, armResponseWatch,
+      sessionScreenTail, logEvent, flash, applyAgentStatus, setNeedsInput, makeAddonApi,
+    })
+  }
+  const runMaster = masterRef.current.run
 
   masterEventRef.current = (note, agentId) => {
     const s = stateRef.current
@@ -403,8 +401,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }
 
   // dedicated customization chat per addon: private LLM history, edits apply
-  // through the update_addon tool (full package replacement, validated)
-  const addonEditorHistories = useRef<Map<string, ApiMessage[]>>(new Map())
 
   // Run the scoped addon editor and apply its validated package replacement.
   const addonRuntime = useAddonRuntime(useMemo(() => ({
@@ -438,7 +434,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const workspaceActions = useWorkspaceActions(useMemo(() => ({
     dispatch, stateRef, later, flash, runMaster,
     markUserStopped: (id: string) => userStoppedRef.current.add(id), disposeSessionRuntime,
-    abortMaster: () => masterAborts.current.abort('master'),
+    abortMaster: () => masterRef.current!.abort(),
   }), [later, flash, runMaster, disposeSessionRuntime]))
   const shellActions = useShellActions()
   const sessionLayoutActions = useSessionLayoutActions()
