@@ -41,16 +41,23 @@ export interface SessionExitPorts {
   detectCliSession: (probe: string, cwd: string | undefined, launchedAt: number) => Promise<string | null>
   /** delayed auto-archive (window.setTimeout in production, immediate/controllable in tests) */
   scheduleArchive: (fn: () => void, ms: number) => void
+  /** undo terminal modes the dead process left behind (alt screen, mouse,
+   *  bracketed paste, hidden cursor) — a Ctrl+C'd TUI never restores them
+   *  itself and the pane otherwise reads as frozen/corrupted */
+  restoreTerminalModes: (id: string) => void
 }
 
 /** The provider's hook input: the ports minus the ones the hook wires itself
- *  (dispatch / detectCliSession / scheduleArchive come from the real runtime). */
-export type SessionExitCtx = Omit<SessionExitPorts, 'dispatch' | 'detectCliSession' | 'scheduleArchive'>
+ *  (dispatch / detectCliSession / scheduleArchive / terminal restore come from
+ *  the real runtime). */
+export type SessionExitCtx = Omit<SessionExitPorts, 'dispatch' | 'detectCliSession' | 'scheduleArchive' | 'restoreTerminalModes'>
 
 /** Fan a single session exit out to every consequence. Returns the pure
  *  classification so callers/tests can assert the decision that was taken. */
 export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts): SessionExit {
   const { stateRef, dispatch: dispatchFn, takeUserStopped, taskForSession, pushTaskChat, logEvent, notify, fireAddonHook, runWatcher, monitorEvent, detectCliSession, scheduleArchive } = p
+  // whatever screen state the process died in, leave the pane readable
+  p.restoreTerminalModes(e.id)
   const agent = stateRef.current.agents.find(a => a.id === e.id)
   const userStopped = takeUserStopped(e.id)
   const taskFor = taskForSession(e.id)
@@ -164,6 +171,7 @@ export function subscribeSessionExits(ctx: SessionExitCtx): () => void {
       dispatch,
       detectCliSession: (probe, cwd, launchedAt) => realSessionProcessPort.detectCliSession(probe, cwd, launchedAt),
       scheduleArchive: (fn, ms) => { window.setTimeout(fn, ms) },
+      restoreTerminalModes: id => realSessionProcessPort.restoreTerminalModes(id),
     })
   })
 }

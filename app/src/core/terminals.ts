@@ -148,6 +148,30 @@ export function repaintSession(id: string) {
   }).catch(() => {})
 }
 
+// A TUI killed mid-render (Ctrl+C, crash) never restores the terminal: the
+// xterm stays in the alternate screen with mouse tracking, bracketed paste,
+// application cursor keys, and a hidden cursor — which reads as "frozen /
+// corrupted". These sequences undo those modes WITHOUT clearing the main
+// buffer, so the session's scrollback survives.
+const MODE_RESTORE =
+  '\x1b[?1049l\x1b[?47l' + // leave the alternate screen (both variants)
+  '\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l' + // mouse tracking off
+  '\x1b[?2004l' + // bracketed paste off
+  '\x1b[?1l' + // application cursor keys off
+  '\x1b[?25h' + // cursor visible
+  '\x1b[0m' // SGR attributes reset
+
+/** Undo the terminal modes a dead process left behind (scrollback kept). */
+export function restoreTerminalModes(id: string) {
+  entries.get(id)?.term.write(MODE_RESTORE)
+}
+
+/** Full xterm reset (modes + buffers) — the clean slate before a respawn
+ *  reuses this terminal (resume), so the new process never inherits state. */
+export function resetTerminal(id: string) {
+  entries.get(id)?.term.reset()
+}
+
 /** Dispose xterm resources and remove a session from the module registry. */
 export function disposeTerminal(id: string) {
   const entry = entries.get(id)

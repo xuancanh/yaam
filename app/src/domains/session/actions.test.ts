@@ -25,6 +25,8 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     sendLine: vi.fn(),
     detectCliSession: vi.fn(async () => null),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
+    restoreTerminalModes: vi.fn(),
+    resetTerminal: vi.fn(),
     attachTerminal: vi.fn((): TerminalHandle => ({ writeln: vi.fn() })),
     disposeTerminal: vi.fn(),
     ...over,
@@ -114,6 +116,18 @@ describe('createSessionActions', () => {
     expect(port.spawnSession).toHaveBeenCalledWith('a1', expect.stringContaining('mycli --resume sid-9'), '/repo', undefined, undefined, undefined)
     expect(c.probeCliSession).toHaveBeenCalledWith('a1', 'mycli --resume sid-9', '/repo', true)
     expect(get('a1')?.status).toBe('running')
+  })
+
+  // a corrupted terminal (alt screen / mouse modes left by a Ctrl+C-killed
+  // TUI) must never leak into the resumed process
+  it('resume fully resets the reused xterm BEFORE respawning', () => {
+    seed([agent({ status: 'error' })])
+    const port = fakePort()
+    const order: string[] = []
+    vi.mocked(port.resetTerminal).mockImplementation(() => { order.push('reset') })
+    vi.mocked(port.spawnSession).mockImplementation(async () => { order.push('spawn') })
+    createSessionActions(ctx(port)).resume('a1')
+    expect(order).toEqual(['reset', 'spawn'])
   })
 
   it('resume is a no-op for a chat agent (no process)', () => {

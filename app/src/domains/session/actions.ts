@@ -154,6 +154,10 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
             resumeNote = `resuming via · ${cmd}`
           }
         }
+        // the respawn reuses this xterm — a full reset first, or the new
+        // process inherits whatever modes the old one died in (alt screen,
+        // mouse tracking, …) and renders corrupted from its first frame
+        port.resetTerminal(id)
         port.spawnSession(id, `${envPrefix(type?.env)}${cmd}`.trim(), agent.cwd || undefined, undefined, undefined, terminalShell).catch(() => {})
         probeCliSession(id, cmd, agent.cwd || '', true)
       }

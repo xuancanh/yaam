@@ -4,7 +4,7 @@
 // core/terminals wholesale and can be tested with fakes. The real implementation
 // wires the interface to the actual IPC and terminal registry; tests pass their own.
 import * as native from '../../core/native'
-import { getTerminal, disposeTerminal } from '../../core/terminals'
+import { getTerminal, disposeTerminal, resetTerminal, restoreTerminalModes } from '../../core/terminals'
 import { sendLineToSession } from './command'
 
 /** A minimal handle to a session's terminal — just what callers need to write. */
@@ -39,6 +39,10 @@ export interface SessionProcessPort {
   ) => TerminalHandle
   /** free a session's xterm buffer */
   disposeTerminal: (id: string) => void
+  /** undo modes a dead TUI left behind (alt screen, mouse, …); keeps scrollback */
+  restoreTerminalModes: (id: string) => void
+  /** full xterm reset before a respawn reuses this terminal */
+  resetTerminal: (id: string) => void
 }
 
 export const realSessionProcessPort: SessionProcessPort = {
@@ -55,4 +59,6 @@ export const realSessionProcessPort: SessionProcessPort = {
     return { writeln: text => term.writeln(text) }
   },
   disposeTerminal: id => disposeTerminal(id),
+  restoreTerminalModes: id => restoreTerminalModes(id),
+  resetTerminal: id => resetTerminal(id),
 }
