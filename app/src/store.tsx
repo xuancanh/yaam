@@ -1259,6 +1259,25 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const chatBusy = useRef<Set<string>>(new Set())
   const mcpSessionsRef = useRef<Map<string, McpSession>>(new Map())
 
+  // Tear down ALL per-session runtime state in one place: the xterm instance
+  // (and its 5k-line scrollback), the settle timer, and the monitor/chat/task
+  // registries keyed by session id. Called on delete, archive, and workspace
+  // removal so nothing leaks past a session's visible lifetime.
+  const disposeSessionRuntime = useCallback((id: string) => {
+    disposeTerminal(id)
+    const st = settleRef.current.get(id)
+    if (st) window.clearTimeout(st.timer)
+    settleRef.current.delete(id)
+    armedRef.current.delete(id)
+    lastFlaggedRef.current.delete(id)
+    monitorHistories.current.delete(id)
+    monitorBusy.current.delete(id)
+    monitorQueue.current.delete(id)
+    chatHistories.current.delete(id)
+    chatBusy.current.delete(id)
+    taskSessionsRef.current.delete(id)
+  }, [])
+
   // Replace the text of one existing chat message (streaming updates).
   const updateChatLog = useCallback((agentId: string, msgId: string, text: string) => {
     dispatch(s => ({
@@ -1805,6 +1824,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         userStoppedRef.current.add(id)
         native.killSession(id).catch(() => {})
       }
+      // free the xterm buffer + runtime registries; the agent (with its log
+      // tail) stays persisted and the terminal is rebuilt on unarchive
+      disposeSessionRuntime(id)
       dispatch(s => ({
         ...s,
         ...removeFromGroups(s, id),
@@ -1816,16 +1838,25 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       logEvent('edit', id, `Archived session ${agent?.name ?? id}`)
     },
 
-    unarchiveSession: id => dispatch(s => focusSessionIn(s, id)),
+    unarchiveSession: id => {
+      // the xterm was disposed on archive — recreate it and replay the retained
+      // (dimmed) tail, mirroring how restore rebuilds a paused session
+      const agent = stateRef.current.agents.find(a => a.id === id)
+      if (agent && agent.kind !== 'chat') {
+        disposeTerminal(id)
+        const { term } = getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
+        for (const l of agent.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
+        term.writeln('\x1b[33m── unarchived · press ▶ to relaunch ──\x1b[0m')
+      }
+      dispatch(s => focusSessionIn(s, id))
+    },
 
     deleteSession: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
       userStoppedRef.current.add(id)
       native.killSession(id).catch(() => {})
-      disposeTerminal(id)
-      monitorHistories.current.delete(id)
-      chatHistories.current.delete(id)
-      taskSessionsRef.current.delete(id)
+      disposeSessionRuntime(id)
+      native.removeSession(id).catch(() => {}) // drop its persisted file too
       dispatch(s => ({
         ...s,
         ...removeFromGroups(s, id),
@@ -2460,13 +2491,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         flash('Cannot delete the last workspace')
         return
       }
-      // kill the workspace's sessions and drop their terminals
+      // kill the workspace's sessions and tear down all their runtime state
       for (const a of s0.agents.filter(a => a.workspaceId === id)) {
         userStoppedRef.current.add(a.id)
         native.killSession(a.id).catch(() => {})
-        disposeTerminal(a.id)
-        monitorHistories.current.delete(a.id)
-        taskSessionsRef.current.delete(a.id)
+        disposeSessionRuntime(a.id)
+        native.removeSession(a.id).catch(() => {})
       }
       dispatch(s => {
         let next = s
@@ -2531,7 +2561,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [armResponseWatch, connectMcp, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, pushTaskChat, refreshSkillCatalog, runChatMessage, runMaster, runWatcher, sendAddonChatImpl, spawnSessionForTask, startTaskViaWatcher])
+  }), [appendTail, armResponseWatch, bumpSettle, clearNeeds, connectMcp, disposeSessionRuntime, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, pushTaskChat, refreshSkillCatalog, runChatMessage, runMaster, runWatcher, sendAddonChatImpl, spawnSessionForTask, startTaskViaWatcher])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)
