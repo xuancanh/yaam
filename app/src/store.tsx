@@ -33,6 +33,7 @@ import { useWorkspaceActions } from './domains/workspace/actions'
 import { useShellActions } from './domains/shell/actions'
 import { useSessionLayoutActions } from './domains/session/layout-actions'
 import { useSessionConfigActions } from './domains/session/config-actions'
+import { useSessionPromptActions } from './domains/session/prompt-actions'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
@@ -1157,6 +1158,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const shellActions = useShellActions()
   const sessionLayoutActions = useSessionLayoutActions()
   const sessionConfigActions = useSessionConfigActions()
+  const sessionPromptActions = useSessionPromptActions(useMemo(() => ({
+    stateRef, flash, logEvent, armResponseWatch, clearFlagged,
+  }), [flash, logEvent, armResponseWatch, clearFlagged]))
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
@@ -1169,6 +1173,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     ...shellActions,
     ...sessionLayoutActions,
     ...sessionConfigActions,
+    ...sessionPromptActions,
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
     send: () => {
@@ -1292,63 +1297,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }, id))
     },
 
-    answerPrompt: (aid, num) => {
-      const st = stateRef.current
-      const agent = st.agents.find(a => a.id === aid)
-      const msg = [...st.messages].reverse().find(m => m.kind === 'escalate' && m.escFor === aid && m.esc && !m.esc.resolved)
-      const esc = msg?.esc
-      if (!agent || !esc?.options?.length) return
-      const target = esc.options.find(o => o.num === num)
-      if (!target) return
-      const delta = num - (esc.cursorNum ?? 1)
-      const moves = delta > 0 ? '\x1b[B'.repeat(delta) : '\x1b[A'.repeat(-delta)
-      if (moves) native.writeSession(aid, moves).catch(() => {})
-      window.setTimeout(() => { native.writeSession(aid, '\r').catch(() => {}) }, 200)
-      clearFlagged(aid)
-      dispatch(s => ({
-        ...s,
-        agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'you' as const, x: `chose ${num}. ${target.label}` }]) }
-          : a),
-        messages: s.messages.map(m => m === msg && m.esc
-          ? { ...m, esc: { ...m.esc, resolved: true, decision: 'approved' as const, choice: `${num}. ${target.label}` } }
-          : m),
-      }))
-      flash(`Chose “${target.label}”`)
-      logEvent('done', aid, `Answered prompt · ${num}. ${target.label}`)
-      armResponseWatch(aid)
-    },
-
-    approve: aid => {
-      const agent = stateRef.current.agents.find(a => a.id === aid)
-      // answer the prompt: Enter accepts the default / highlighted option
-      if (agent?.kind === 'real') native.writeSession(aid, '\r').catch(() => {})
-      dispatch(s => ({
-        ...s,
-        agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'approved by you' }]) }
-          : a),
-        messages: s.messages.map(m => (m.escFor === aid && m.esc ? { ...m, esc: { ...m.esc, resolved: true, decision: 'approved' as const } } : m)),
-      }))
-      flash(`Approved — ${agent?.name || 'agent'} resumed`)
-      logEvent('done', aid, 'Approved · prompt accepted')
-    },
-
-    deny: aid => {
-      const agent = stateRef.current.agents.find(a => a.id === aid)
-      // Escape cancels the prompt
-      if (agent?.kind === 'real') native.writeSession(aid, '\x1b').catch(() => {})
-      dispatch(s => ({
-        ...s,
-        agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'denied · prompt cancelled' }]) }
-          : a),
-        messages: s.messages.map(m => (m.escFor === aid && m.esc ? { ...m, esc: { ...m.esc, resolved: true, decision: 'denied' as const } } : m)),
-      }))
-      flash(`Denied — prompt cancelled`)
-      logEvent('escalate', aid, 'Denied · prompt cancelled')
-    },
-
     approveDiff: id => {
       dispatch(s => ({
         ...s,
@@ -1412,7 +1360,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, appendTail, armResponseWatch, bumpSettle, clearFlagged, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
+  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, sessionPromptActions, appendTail, armResponseWatch, bumpSettle, clearFlagged, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)

@@ -12,6 +12,7 @@ import type { AddonsActions } from '../domains/addons/actions'
 import type { WorkspaceActions } from '../domains/workspace/actions'
 import type { SessionLayoutActions } from '../domains/session/layout-actions'
 import type { SessionConfigActions } from '../domains/session/config-actions'
+import type { SessionPromptActions } from '../domains/session/prompt-actions'
 
 /** Actions still owned by the provider (session lifecycle/layout/config, prompt
  *  answering, Master composer/send, diff review, tool-approval). Not yet a
@@ -30,10 +31,6 @@ export interface ProviderActions {
   newRealSession: (command: string, cwd: string, terminalShell?: string) => void
   sendInput: (id: string, text: string) => void
   stopSession: (id: string) => void
-  // prompt answering
-  approve: (aid: string) => void
-  answerPrompt: (aid: string, num: number) => void
-  deny: (aid: string) => void
   // diff review still lives in the provider
   approveDiff: (id: string) => void
   requestChanges: (id: string) => void
@@ -41,11 +38,11 @@ export interface ProviderActions {
 
 export type ConductorActions =
   ShellActions & SettingsActions & BoardActions & SchedulesActions &
-  ChatActions & AddonsActions & WorkspaceActions & SessionLayoutActions & SessionConfigActions & ProviderActions
+  ChatActions & AddonsActions & WorkspaceActions & SessionLayoutActions & SessionConfigActions & SessionPromptActions & ProviderActions
 
 // Re-export the domain action interfaces so the composition and consumers can
 // name individual slices without reaching into each domain module.
 export type {
   ShellActions, SettingsActions, BoardActions, SchedulesActions,
-  ChatActions, AddonsActions, WorkspaceActions, SessionLayoutActions, SessionConfigActions,
+  ChatActions, AddonsActions, WorkspaceActions, SessionLayoutActions, SessionConfigActions, SessionPromptActions,
 }
