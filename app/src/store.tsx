@@ -34,6 +34,7 @@ import { useShellActions } from './domains/shell/actions'
 import { useSessionLayoutActions } from './domains/session/layout-actions'
 import { useSessionConfigActions } from './domains/session/config-actions'
 import { useSessionPromptActions } from './domains/session/prompt-actions'
+import { useMasterActions } from './domains/master/actions'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
@@ -1136,12 +1137,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     mcpSessions: mcpSessionsRef, skillCatalogs: skillCatalogsRef,
   }), [later, connectMcp, refreshSkillCatalog]))
   const boardActions = useBoardActions(useMemo(() => ({
-    dispatch, stateRef, dragId, later, flash,
+    dispatch, stateRef, dragId, later, flash, logEvent,
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
     spawnSessionForTask, startTaskViaWatcher, runWatcher, pushTaskChat,
     markUserStopped: (id: string) => userStoppedRef.current.add(id),
     watcherHistories, watcherQueue, abortWatcher: (tid: string) => watcherAborts.current.abort(tid), taskSessions: taskSessionsRef,
-  }), [later, flash, spawnSessionForTask, startTaskViaWatcher, runWatcher, pushTaskChat]))
+  }), [later, flash, logEvent, spawnSessionForTask, startTaskViaWatcher, runWatcher, pushTaskChat]))
   const schedulesActions = useSchedulesActions(useMemo(() => ({ dispatch, flash, logEvent, launchFromTemplate }), [flash, logEvent, launchFromTemplate]))
   const chatActions = useChatActions(useMemo(() => ({ dispatch, stateRef, logEvent, runChatMessage }), [logEvent, runChatMessage]))
   const addonsActions = useAddonsActions(useMemo(() => ({
@@ -1161,6 +1162,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const sessionPromptActions = useSessionPromptActions(useMemo(() => ({
     stateRef, flash, logEvent, armResponseWatch, clearFlagged,
   }), [flash, logEvent, armResponseWatch, clearFlagged]))
+  const masterActions = useMasterActions(useMemo(() => ({
+    stateRef, later, runMaster, toolApprovals: toolApprovalsRef,
+  }), [later, runMaster]))
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
@@ -1174,39 +1178,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     ...sessionLayoutActions,
     ...sessionConfigActions,
     ...sessionPromptActions,
-    setComposer: v => dispatch(s => ({ ...s, composer: v })),
-
-    send: () => {
-      // side effects must stay OUT of the dispatch updater — React double-
-      // invokes reducers in dev, which used to schedule two Master turns
-      // (the second re-answered with nothing new = double replies)
-      const text = stateRef.current.composer.trim()
-      if (!text) return
-      dispatch(s => ({
-        ...s,
-        messages: s.messages.concat([{ id: mkId('u'), role: 'you', kind: 'text', text }]),
-        composer: '',
-      }))
-      const st = stateRef.current.settings
-      if (hasCreds(st) && st.masterEnabled) {
-        later(50, () => { void runMaster() })
-      } else {
-        later(300, () => dispatch(s2 => ({
-          ...s2,
-          messages: s2.messages.concat([{
-            id: mkId('m'), role: 'master', kind: 'text',
-            text: hasCreds(s2.settings)
-              ? 'My brain is switched off — enable “LLM Master” in Settings → Master Brain and I’ll take it from there.'
-              : 'I need a brain first: pick a provider in Settings → Master Brain (API key, or AWS Bedrock with your credential chain) and flip the LLM Master toggle, then ask me again.',
-          }]),
-        })))
-      }
-    },
-
-    focusComposer: () => {
-      const el = document.querySelector<HTMLTextAreaElement>('[data-composer]')
-      el?.focus()
-    },
+    ...masterActions,
 
     archiveSession: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
@@ -1297,25 +1269,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }, id))
     },
 
-    approveDiff: id => {
-      dispatch(s => ({
-        ...s,
-        drawer: null,
-        tasks: s.tasks.map(t => (t.agentId === id && t.col === 'review' ? { ...t, col: 'done' as const } : t)),
-      }))
-      logEvent('done', id, 'Approved changes')
-      flash('Changes approved')
-    },
-
-    requestChanges: id => {
-      dispatch(s => ({ ...s, drawer: null }))
-      logEvent('edit', id, 'Requested changes on the diff')
-      flash('Requested changes')
-    },
-
-
-
-
 
 
     newRealSession: (command, cwd, terminalShell) => {
@@ -1337,18 +1290,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       sendLineToSession(id, text)
     },
 
-    resolveToolApproval: (id, approve) => {
-      const pa = stateRef.current.pendingToolApprovals.find(x => x.id === id)
-      dispatch(s => ({ ...s, pendingToolApprovals: s.pendingToolApprovals.filter(x => x.id !== id) }))
-      if (!pa) return
-      if (approve) toolApprovalsRef.current.add(pa.toolId)
-      later(50, () => {
-        void runMaster(approve
-          ? `[the user approved one use of "${pa.toolId}" — retry the blocked call now]`
-          : `[the user denied "${pa.toolId}" — do not retry it; adjust your plan or ask the user]`)
-      })
-    },
-
     stopSession: id => {
       userStoppedRef.current.add(id)
       native.killSession(id).catch(() => {})
@@ -1360,7 +1301,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, sessionPromptActions, appendTail, armResponseWatch, bumpSettle, clearFlagged, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
+  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, sessionPromptActions, masterActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, launchSession, logEvent, probeCliSession])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)

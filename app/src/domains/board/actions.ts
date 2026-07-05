@@ -17,6 +17,7 @@ export interface BoardActionsCtx {
   dragId: MutableRefObject<string | null>
   later: (ms: number, fn: () => void) => void
   flash: (t: string) => void
+  logEvent: (type: import('../../core/types').EventType, agentId: string | null, text: string) => void
   fireAddonHook: (hook: 'onTaskMoved', event: Record<string, unknown>) => void
   spawnSessionForTask: (taskId: string) => void
   startTaskViaWatcher: (taskId: string) => void
@@ -43,6 +44,8 @@ export interface BoardActions {
   renameTask: (id: string, title: string) => void
   deleteTask: (id: string) => void
   scheduleTask: (taskId: string, at: number | null, templateId?: string | null) => void
+  approveDiff: (id: string) => void
+  requestChanges: (id: string) => void
 }
 
 export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
@@ -138,5 +141,21 @@ export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
         ? { ...t, scheduleAt: at ?? undefined, ...(templateId !== undefined ? { templateId: templateId ?? undefined } : {}) }
         : t),
     })),
+
+    approveDiff: id => {
+      dispatch(s => ({
+        ...s,
+        drawer: null,
+        tasks: s.tasks.map(t => (t.agentId === id && t.col === 'review' ? { ...t, col: 'done' as const } : t)),
+      }))
+      ctx.logEvent('done', id, 'Approved changes')
+      ctx.flash('Changes approved')
+    },
+
+    requestChanges: id => {
+      dispatch(s => ({ ...s, drawer: null }))
+      ctx.logEvent('edit', id, 'Requested changes on the diff')
+      ctx.flash('Requested changes')
+    },
   }), [dispatch, stateRef, dragId, later, ctx])
 }
