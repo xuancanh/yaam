@@ -20,22 +20,18 @@ only escalates digests to Master, so Master isn't spammed by raw terminal noise.
 
 ```
 app/                     Tauri app (the whole product)
-  src/                   React frontend — feature code lives in domains/, shared core at the root
+  src/                   React frontend. Root holds only the app hub; everything else is grouped.
+    App.tsx main.tsx     composition root + entry
     store.tsx            central provider: shared refs/effects/persistence + the actions object
+    master.ts monitor.ts compatibility barrels (llm/client + domains/master/*)
     store/               store internals: hooks (useConductor/useConductorSelector/useActions),
                          state-helpers, secrets (keychain redaction), + tests
-    state-lib.ts         pure helpers (cron, command building, workspace scoping, PTY line send)
-    types.ts             all TypeScript types (AppState, Agent, AgentTemplate, Cron, …)
-    data.ts              seedState() + static catalogs (agent types, tools, colors)
-    native.ts            Tauri bridge (invoke wrappers); no-ops in plain browser
-    terminals.ts         module-level xterm.js registry + ANSI/screen helpers (shared runtime service)
-    context.ts           StateCtx/ActionsCtx/StoreCtx (stable module — HMR fix, do not move)
-    highlight.ts         shared regex syntax highlighter
-    addons.ts            shared addon contract: AddonApi type, permissions, snapshot, package parse
-    mcp.ts               streamable-HTTP MCP client
-    master.ts / monitor.ts  compatibility barrels re-exporting llm/client + domains/master/*
     llm/client.ts        shared LLM core: provider defs + protocol adapters + SSE streaming
     components/          shared UI primitives only: ui.tsx, Markdown.tsx
+    core/                shared foundation used across domains:
+      types.ts data.ts state-lib.ts context.ts   types, seed/catalogs, pure helpers, contexts
+      native.ts mcp.ts terminals.ts               Tauri bridge, MCP client, xterm registry
+      addons.ts highlight.ts skills.ts usage.ts   addon contract, highlighter, skills, usage est.
     domains/             feature domains — each owns its view, components, logic (runner), actions:
       session/           terminal-session UI: Workspace, Pane, TerminalPane, FilesPane, NewSessionDialog
       chat/              ChatView, ChatPane, runner, agent (in-app chat agents)

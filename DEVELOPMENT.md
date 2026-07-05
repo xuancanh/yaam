@@ -27,20 +27,15 @@ Use `cargo test` for the Rust unit tests (Bedrock credential parser, session lau
 ## Repository map
 
 ```text
-app/src/               feature code in domains/, shared core at the root
-  App.tsx            composition root
+app/src/               root holds the app hub; the rest is grouped
+  App.tsx main.tsx   composition root + entry
   store.tsx          state owner: shared refs/effects/persistence + the actions object
-  store/             hooks (useConductor/useConductorSelector/useActions), state-helpers, secrets
-  state-lib.ts       pure state/command/cron helpers + persistence selectors
-  types.ts data.ts   central types; seedState + static catalogs
-  context.ts         stable React contexts (State/Actions/Store); do not move into store.tsx
-  native.ts          typed frontend wrappers around Tauri commands/events
-  terminals.ts       module-level xterm registry + screen inspection (shared runtime service)
-  mcp.ts skills.ts   MCP client; skill-registry fetchers
-  addons.ts          shared addon contract (AddonApi, permissions, snapshot, parse)
-  llm/client.ts      shared LLM core: providers/protocols + SSE streaming
   master.ts monitor.ts  compatibility barrels (llm/client + domains/master/*)
+  store/             hooks (useConductor/useConductorSelector/useActions), state-helpers, secrets
+  llm/client.ts      shared LLM core: providers/protocols + SSE streaming
   components/        shared UI primitives only: ui.tsx, Markdown.tsx
+  core/              shared foundation: types, data, state-lib (+persistence selectors),
+                     context, native, mcp, terminals, addons contract, highlight, skills, usage
   domains/           each owns its view + components + logic (runner) + actions:
     session/ chat/ board/ master/ addons/ settings/ schedules/ shell/
 app/src-tauri/src/    backend domains (state + logic + command boundary + tests per module)
