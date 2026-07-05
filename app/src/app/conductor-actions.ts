@@ -20,9 +20,8 @@ import { useWorkspaceActions } from '../domains/workspace/actions'
 import { useShellActions } from '../domains/shell/actions'
 import { useSessionLayoutActions } from '../domains/session/layout-actions'
 import { useSessionConfigActions } from '../domains/session/config-actions'
-import { useSessionPromptActions } from '../domains/session/prompt-actions'
 import { useMasterActions } from '../domains/master/actions'
-import { useSessionActions } from '../domains/session/actions'
+import { useSessionController } from '../domains/session/controller'
 
 export interface ConductorActionsDeps {
   stateRef: MutableRefObject<AppState>
@@ -91,21 +90,20 @@ export function useConductorActions(d: ConductorActionsDeps): ConductorActions {
   const shellActions = useShellActions()
   const sessionLayoutActions = useSessionLayoutActions()
   const sessionConfigActions = useSessionConfigActions()
-  const sessionPromptActions = useSessionPromptActions(useMemo(() => ({
-    stateRef: d.stateRef, flash: d.flash, logEvent: d.logEvent, armResponseWatch: d.armResponseWatch, clearFlagged: d.clearFlagged,
-  }), [d.stateRef, d.flash, d.logEvent, d.armResponseWatch, d.clearFlagged]))
   const masterActions = useMasterActions(useMemo(() => ({
     stateRef: d.stateRef, later: d.later, runMaster: d.runMaster, toolApprovals: d.toolApprovals,
   }), [d.stateRef, d.later, d.runMaster, d.toolApprovals]))
-  const sessionActions = useSessionActions(useMemo(() => ({
+  // one controller owns the whole session process/terminal lifecycle
+  const sessionController = useSessionController(useMemo(() => ({
     stateRef: d.stateRef, flash: d.flash, logEvent: d.logEvent, markUserStopped: d.markUserStopped,
     disposeSessionRuntime: d.disposeSessionRuntime, launchSession: d.launchSession, probeCliSession: d.probeCliSession,
     armResponseWatch: d.armResponseWatch, appendTail: d.appendTail, clearNeeds: d.clearNeeds, bumpSettle: d.bumpSettle,
-  }), [d.stateRef, d.flash, d.logEvent, d.markUserStopped, d.disposeSessionRuntime, d.launchSession, d.probeCliSession, d.armResponseWatch, d.appendTail, d.clearNeeds, d.bumpSettle]))
+    clearFlagged: d.clearFlagged,
+  }), [d.stateRef, d.flash, d.logEvent, d.markUserStopped, d.disposeSessionRuntime, d.launchSession, d.probeCliSession, d.armResponseWatch, d.appendTail, d.clearNeeds, d.bumpSettle, d.clearFlagged]))
 
   return useMemo<ConductorActions>(() => ({
     ...settingsActions, ...boardActions, ...schedulesActions, ...chatActions, ...addonsActions,
     ...workspaceActions, ...shellActions, ...sessionLayoutActions, ...sessionConfigActions,
-    ...sessionPromptActions, ...sessionActions, ...masterActions,
-  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, sessionPromptActions, sessionActions, masterActions])
+    ...sessionController, ...masterActions,
+  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, sessionController, masterActions])
 }
