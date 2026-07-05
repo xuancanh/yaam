@@ -11,10 +11,6 @@ import type { ApiMessage } from './master'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './core/terminals'
 import { enforcePermissions, execAddonHook } from './core/addons'
 import { runAddonAgentTurn } from './domains/addons/addon-agent'
-import { fetchSkillRegistry } from './core/skills'
-import type { CatalogSkill } from './core/skills'
-import { mcpConnect } from './core/mcp'
-import type { McpSession } from './core/mcp'
 import { estimateLogUsage, estimateOutputUsage } from './core/usage'
 import type { AddonApi } from './core/addons'
 import { ActionsCtx } from './core/context'
@@ -37,6 +33,7 @@ import { useMasterActions } from './domains/master/actions'
 import { useSessionActions } from './domains/session/actions'
 import { useActivityService } from './domains/activity/service'
 import { useAddonRuntime } from './domains/addons/runtime'
+import { useIntegrationRuntime } from './domains/settings/integrations'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
@@ -742,7 +739,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const chatBusy = useRef<Set<string>>(new Set())
   // per-chat cancellation for in-flight replies (aborted when the chat is deleted)
   const chatAborts = useRef(new AbortRegistry())
-  const mcpSessionsRef = useRef<Map<string, McpSession>>(new Map())
+  const { mcpSessions: mcpSessionsRef, skillCatalogs: skillCatalogsRef, connectMcp, refreshSkillCatalog } = useIntegrationRuntime(stateRef)
 
   // Tear down ALL per-session runtime state in one place: the xterm instance
   // (and its 5k-line scrollback), the settle timer, and the monitor/chat/task
@@ -779,53 +776,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         ? { ...a, chatLog: [...(a.chatLog ?? []), { id: mkId('cm'), at: Date.now(), ...msg }].slice(-200) }
         : a),
     }))
-  }, [])
-
-  // (Re)connect one MCP server and cache its live session + tool inventory.
-  const connectMcp = useCallback(async (id: string): Promise<string> => {
-    const server = stateRef.current.mcpServers.find(x => x.id === id)
-    if (!server) return 'server not found'
-    try {
-      const session = await mcpConnect(server.name, server.url, server.headers)
-      mcpSessionsRef.current.set(id, session)
-      dispatch(s => ({
-        ...s,
-        mcpServers: s.mcpServers.map(x => x.id === id ? { ...x, toolCount: session.tools.length, lastError: undefined } : x),
-      }))
-      return ''
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      mcpSessionsRef.current.delete(id)
-      dispatch(s => ({
-        ...s,
-        mcpServers: s.mcpServers.map(x => x.id === id ? { ...x, toolCount: undefined, lastError: msg } : x),
-      }))
-      return msg
-    }
-  }, [])
-
-  // skill-registry catalogs (fetched lazily, cached per registry id)
-  const skillCatalogsRef = useRef<Map<string, CatalogSkill[]>>(new Map())
-
-  const refreshSkillCatalog = useCallback(async (id: string): Promise<string> => {
-    const reg = stateRef.current.skillRegistries.find(r => r.id === id)
-    if (!reg) return 'registry not found'
-    try {
-      const catalog = await fetchSkillRegistry(reg.name, reg.url)
-      skillCatalogsRef.current.set(id, catalog)
-      dispatch(s2 => ({
-        ...s2,
-        skillRegistries: s2.skillRegistries.map(r => (r.id === id ? { ...r, skillCount: catalog.length, lastError: undefined } : r)),
-      }))
-      return ''
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      dispatch(s2 => ({
-        ...s2,
-        skillRegistries: s2.skillRegistries.map(r => (r.id === id ? { ...r, skillCount: undefined, lastError: msg } : r)),
-      }))
-      return msg
-    }
   }, [])
 
   // keep the embedded search index in sync with chat transcripts (debounced).
