@@ -18,6 +18,7 @@ export interface SchedulesActions {
   runTemplate: (id: string, task?: string) => void
   addCron: (cron: Omit<Cron, 'id' | 'on' | 'built' | 'last'>) => void
   deleteCron: (id: string) => void
+  toggleCron: (id: string) => void
 }
 
 export function useSchedulesActions(ctx: SchedulesActionsCtx): SchedulesActions {
@@ -60,5 +61,6 @@ export function useSchedulesActions(ctx: SchedulesActionsCtx): SchedulesActions 
       ctx.logEvent('cron', null, `Created schedule ${cron.name}`)
     },
     deleteCron: id => dispatch(s => ({ ...s, crons: s.crons.filter(c => c.id !== id) })),
+    toggleCron: id => dispatch(s => ({ ...s, crons: s.crons.map(c => (c.id === id ? { ...c, on: !c.on } : c)) })),
   }), [dispatch, ctx])
 }

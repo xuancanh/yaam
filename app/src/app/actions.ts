@@ -11,6 +11,7 @@ import type { ChatActions } from '../domains/chat/actions'
 import type { AddonsActions } from '../domains/addons/actions'
 import type { WorkspaceActions } from '../domains/workspace/actions'
 import type { SessionLayoutActions } from '../domains/session/layout-actions'
+import type { SessionConfigActions } from '../domains/session/config-actions'
 
 /** Actions still owned by the provider (session lifecycle/layout/config, prompt
  *  answering, Master composer/send, diff review, tool-approval). Not yet a
@@ -22,7 +23,6 @@ export interface ProviderActions {
   focusComposer: () => void
   resolveToolApproval: (id: string, approve: boolean) => void
   // session lifecycle
-  renameSession: (id: string, name: string) => void
   archiveSession: (id: string) => void
   unarchiveSession: (id: string) => void
   deleteSession: (id: string) => void
@@ -30,27 +30,22 @@ export interface ProviderActions {
   newRealSession: (command: string, cwd: string, terminalShell?: string) => void
   sendInput: (id: string, text: string) => void
   stopSession: (id: string) => void
-  // per-session config
-  toggleMem: (aid: string, mid: string) => void
-  toggleTool: (aid: string, tid: string) => void
-  cyclePerm: (aid: string, tid: string) => void
   // prompt answering
   approve: (aid: string) => void
   answerPrompt: (aid: string, num: number) => void
   deny: (aid: string) => void
-  // schedule toggle + diff review still live in the provider
-  toggleCron: (id: string) => void
+  // diff review still lives in the provider
   approveDiff: (id: string) => void
   requestChanges: (id: string) => void
 }
 
 export type ConductorActions =
   ShellActions & SettingsActions & BoardActions & SchedulesActions &
-  ChatActions & AddonsActions & WorkspaceActions & SessionLayoutActions & ProviderActions
+  ChatActions & AddonsActions & WorkspaceActions & SessionLayoutActions & SessionConfigActions & ProviderActions
 
 // Re-export the domain action interfaces so the composition and consumers can
 // name individual slices without reaching into each domain module.
 export type {
   ShellActions, SettingsActions, BoardActions, SchedulesActions,
-  ChatActions, AddonsActions, WorkspaceActions, SessionLayoutActions,
+  ChatActions, AddonsActions, WorkspaceActions, SessionLayoutActions, SessionConfigActions,
 }

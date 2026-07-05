@@ -5,7 +5,6 @@ import type {
   Addon, AddonHookName, AgentTemplate, AppState, BoardTask, EscOption, EventType, LogLine,
   ChatMsg, NotifKind, PersistedState, TaskChatMsg,
 } from './core/types'
-import { PERM_ORDER } from './core/data'
 import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
@@ -33,6 +32,7 @@ import { useAddonsActions } from './domains/addons/actions'
 import { useWorkspaceActions } from './domains/workspace/actions'
 import { useShellActions } from './domains/shell/actions'
 import { useSessionLayoutActions } from './domains/session/layout-actions'
+import { useSessionConfigActions } from './domains/session/config-actions'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
@@ -1156,6 +1156,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }), [later, flash, runMaster, disposeSessionRuntime]))
   const shellActions = useShellActions()
   const sessionLayoutActions = useSessionLayoutActions()
+  const sessionConfigActions = useSessionConfigActions()
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
@@ -1167,6 +1168,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     ...workspaceActions,
     ...shellActions,
     ...sessionLayoutActions,
+    ...sessionConfigActions,
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
     send: () => {
@@ -1200,13 +1202,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const el = document.querySelector<HTMLTextAreaElement>('[data-composer]')
       el?.focus()
     },
-
-    renameSession: (id, name) => dispatch(s => ({
-      ...s,
-      agents: s.agents.map(a => a.id === id
-        ? { ...a, name: name.trim() || a.name, short: (name.trim() || a.name).slice(0, 2).toUpperCase(), nameIsDefault: false }
-        : a),
-    })),
 
     archiveSession: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
@@ -1296,37 +1291,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
           : a),
       }, id))
     },
-
-    toggleMem: (aid, mid) => dispatch(s => ({
-      ...s,
-      agents: s.agents.map(a => a.id === aid
-        ? { ...a, memory: a.memory.map(m => (m.id === mid ? { ...m, on: !m.on } : m)) }
-        : a),
-    })),
-
-    toggleTool: (aid, tid) => dispatch(s => ({
-      ...s,
-      agents: s.agents.map(a => a.id === aid
-        ? { ...a, tools: a.tools.map(t => (t.id === tid ? { ...t, on: !t.on } : t)) }
-        : a),
-    })),
-
-    cyclePerm: (aid, tid) => dispatch(s => ({
-      ...s,
-      agents: s.agents.map(a => a.id === aid
-        ? {
-            ...a,
-            tools: a.tools.map(t => t.id === tid
-              ? { ...t, perm: PERM_ORDER[(PERM_ORDER.indexOf(t.perm) + 1) % PERM_ORDER.length] }
-              : t),
-          }
-        : a),
-    })),
-
-    toggleCron: id => dispatch(s => ({
-      ...s,
-      crons: s.crons.map(c => (c.id === id ? { ...c, on: !c.on } : c)),
-    })),
 
     answerPrompt: (aid, num) => {
       const st = stateRef.current
@@ -1448,7 +1412,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, appendTail, armResponseWatch, bumpSettle, clearFlagged, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
+  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, appendTail, armResponseWatch, bumpSettle, clearFlagged, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)
