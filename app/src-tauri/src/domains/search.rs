@@ -87,7 +87,11 @@ pub fn reindex(state: &ChatSearchState, docs: Vec<ChatDoc>) -> Result<usize, Str
 }
 
 /// Query the index; returns the best-matching messages with their chat ids.
-pub fn search(state: &ChatSearchState, query: String, limit: Option<usize>) -> Result<Vec<ChatHit>, String> {
+pub fn search(
+    state: &ChatSearchState,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<ChatHit>, String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     let Some(engine) = guard.as_ref() else {
         return Ok(vec![]);
@@ -117,4 +121,86 @@ pub fn search(state: &ChatSearchState, query: String, limit: Option<usize>) -> R
         });
     }
     Ok(hits)
+}
+
+#[tauri::command]
+pub fn chat_search_reindex(
+    state: tauri::State<'_, ChatSearchState>,
+    docs: Vec<ChatDoc>,
+) -> Result<usize, String> {
+    reindex(&state, docs)
+}
+
+#[tauri::command]
+pub fn chat_search(
+    state: tauri::State<'_, ChatSearchState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<ChatHit>, String> {
+    search(&state, query, limit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{reindex, search, ChatDoc, ChatSearchState};
+
+    fn doc(chat_id: &str, msg_id: &str, role: &str, text: &str) -> ChatDoc {
+        ChatDoc {
+            chat_id: chat_id.to_string(),
+            msg_id: msg_id.to_string(),
+            role: role.to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn search_before_the_first_index_is_empty() {
+        let state = ChatSearchState::default();
+        assert!(search(&state, "anything".to_string(), None)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn reindex_returns_searchable_messages_with_metadata_and_limit() {
+        let state = ChatSearchState::default();
+        let count = reindex(
+            &state,
+            vec![
+                doc("chat-a", "msg-1", "user", "Rust persistence recovery"),
+                doc("chat-b", "msg-2", "assistant", "Rust session manager"),
+                doc("chat-c", "msg-3", "assistant", "unrelated frontend text"),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(count, 3);
+        let hits = search(&state, "rust".to_string(), Some(1)).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].chat_id == "chat-a" || hits[0].chat_id == "chat-b");
+        assert!(hits[0].msg_id.starts_with("msg-"));
+        assert!(hits[0].role == "user" || hits[0].role == "assistant");
+        assert!(hits[0].score > 0.0);
+    }
+
+    #[test]
+    fn a_new_index_replaces_old_documents_and_truncates_unicode_safely() {
+        let state = ChatSearchState::default();
+        reindex(
+            &state,
+            vec![doc("old", "old-msg", "user", "obsolete marker")],
+        )
+        .unwrap();
+
+        let long = format!("needle {}", "é".repeat(11_000));
+        reindex(&state, vec![doc("new", "new-msg", "assistant", &long)]).unwrap();
+
+        assert!(search(&state, "obsolete".to_string(), None)
+            .unwrap()
+            .is_empty());
+        let hits = search(&state, "needle".to_string(), None).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].chat_id, "new");
+        assert!(hits[0].text.len() <= 20_000);
+    }
 }

@@ -273,6 +273,27 @@ export async function loadPartition(name: string): Promise<string | null> {
   return await invoke<string | null>('load_partition', { name })
 }
 
+// OS keychain for credentials. In the browser build there is no keychain, so
+// these resolve to a no-op / null — secrets then stay in the localStorage
+// state (unchanged pre-keychain behavior) rather than being lost.
+/** Store a secret in the OS keychain (empty value deletes it). */
+export async function secretSet(account: string, value: string): Promise<void> {
+  if (!isTauri) return
+  await invoke('secret_set', { account, value })
+}
+
+/** Read a secret from the OS keychain, or null if absent/unavailable. */
+export async function secretGet(account: string): Promise<string | null> {
+  if (!isTauri) return null
+  return await invoke<string | null>('secret_get', { account })
+}
+
+/** Delete a secret from the OS keychain. */
+export async function secretDelete(account: string): Promise<void> {
+  if (!isTauri) return
+  await invoke('secret_delete', { account })
+}
+
 /** Persist one session (agent) to its own file, serialized per session id.
  *  One file per session keeps a terminal line / chat token from rewriting a
  *  monolithic all-sessions blob. */

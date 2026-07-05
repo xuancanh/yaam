@@ -14,7 +14,9 @@ pub fn init(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(mtm) = MainThreadMarker::new() {
             let data = NSData::with_bytes(include_bytes!("../icons/icon.png"));
             if let Some(img) = NSImage::initWithData(NSImage::alloc(), &data) {
-                unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&img)) };
+                unsafe {
+                    NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&img))
+                };
             }
         }
     }

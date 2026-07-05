@@ -1,7 +1,7 @@
 //! PTY session engine: owns the live child processes, streams their output to
 //! the frontend, and reaps them on exit. This is the domain logic behind the
 //! session commands — the managed `SessionManager` state lives here.
-use crate::core::util::expand_tilde;
+use crate::util::expand_tilde;
 use base64::Engine;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::Command;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Resolve a shell name with the user's login PATH without interpolating it
 /// into shell code.
@@ -33,15 +33,13 @@ fn resolve_login_executable(executable: &str) -> Result<String, String> {
     let resolved = String::from_utf8_lossy(&out.stdout)
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .next_back()
+        .rfind(|line| !line.is_empty())
         .unwrap_or_default()
         .to_string();
-    if !out.status.success()
-        || resolved.is_empty()
-        || !std::path::Path::new(&resolved).is_file()
-    {
-        return Err(format!("terminal shell not found in login PATH: {requested}"));
+    if !out.status.success() || resolved.is_empty() || !std::path::Path::new(&resolved).is_file() {
+        return Err(format!(
+            "terminal shell not found in login PATH: {requested}"
+        ));
     }
     Ok(resolved)
 }
@@ -173,7 +171,13 @@ impl SessionManager {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
                         let data = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-                        let _ = app_out.emit("session-data", DataEvent { id: id_out.clone(), data });
+                        let _ = app_out.emit(
+                            "session-data",
+                            DataEvent {
+                                id: id_out.clone(),
+                                data,
+                            },
+                        );
                     }
                 }
             }
@@ -221,7 +225,12 @@ impl SessionManager {
         let handle = sessions.get(id).ok_or("no such session")?;
         handle
             .master
-            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .map_err(|e| e.to_string())
     }
 
@@ -238,9 +247,195 @@ impl SessionManager {
     }
 }
 
+/// Collect candidate session files whose creation time falls in [since, until].
+/// Creation time (not mtime) prevents an older, concurrently active session
+/// from shadowing the file created by the process being detected.
+fn files_in_window(
+    dir: &std::path::Path,
+    since_ms: u64,
+    until_ms: u64,
+    recurse: bool,
+    matches: &dyn Fn(&std::path::Path) -> bool,
+    out: &mut Vec<(u64, std::path::PathBuf)>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if recurse {
+                files_in_window(&path, since_ms, until_ms, true, matches, out);
+            }
+            continue;
+        }
+        if !matches(&path) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let created = meta
+            .created()
+            .or_else(|_| meta.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64);
+        if let Some(created) = created {
+            if created >= since_ms && created <= until_ms {
+                out.push((created, path));
+            }
+        }
+    }
+}
+
+/// Turn a session file path into the CLI's resume id for the given kind.
+fn derive_session_id(kind: &str, path: &std::path::Path) -> Option<String> {
+    let stem = path.file_stem()?.to_string_lossy().to_string();
+    match kind {
+        // ~/.codex/sessions/.../rollout-<ts>-<uuid>.jsonl -> trailing UUID
+        "codex" if stem.len() >= 36 => Some(stem[stem.len() - 36..].to_string()),
+        // Claude and OpenCode use the complete file stem.
+        _ => Some(stem),
+    }
+}
+
+fn select_session_id(
+    kind: &str,
+    candidates: &mut [(u64, std::path::PathBuf)],
+    exclude: &[String],
+) -> Option<String> {
+    candidates.sort_by_key(|(created, _)| *created);
+    let mut seen = std::collections::HashSet::new();
+    for (_, path) in candidates {
+        let Some(id) = derive_session_id(kind, path) else {
+            continue;
+        };
+        if seen.insert(id.clone()) && !exclude.contains(&id) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+type SessionStoreSpec = (
+    std::path::PathBuf,
+    bool,
+    Box<dyn Fn(&std::path::Path) -> bool>,
+);
+
+/// Detect the session id a CLI created after `since_ms`.
+fn detect_cli_session_impl(
+    kind: &str,
+    cwd: Option<String>,
+    since_ms: f64,
+    exclude: &[String],
+) -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let since = since_ms as u64;
+    let until = since.saturating_add(180_000);
+
+    let (dir, recurse, matcher): SessionStoreSpec = match kind {
+        "claude" => {
+            let base = expand_tilde(
+                &cwd.filter(|c| !c.is_empty())
+                    .unwrap_or_else(|| home.clone()),
+            );
+            let encoded = base.replace(['/', '.'], "-");
+            let project = std::path::PathBuf::from(&home)
+                .join(".claude/projects")
+                .join(encoded);
+            (
+                project,
+                false,
+                Box::new(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl")),
+            )
+        }
+        "codex" => (
+            std::path::PathBuf::from(&home).join(".codex/sessions"),
+            true,
+            Box::new(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl")),
+        ),
+        "opencode" => (
+            std::path::PathBuf::from(&home).join(".local/share/opencode/storage"),
+            true,
+            Box::new(|p| {
+                p.extension().and_then(|e| e.to_str()) == Some("json")
+                    && p.file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.starts_with("ses_"))
+                        .unwrap_or(false)
+            }),
+        ),
+        _ => return None,
+    };
+
+    let mut candidates = Vec::new();
+    files_in_window(&dir, since, until, recurse, &matcher, &mut candidates);
+    select_session_id(kind, &mut candidates, exclude)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_session(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+    id: String,
+    command: String,
+    terminal_shell: Option<String>,
+    cwd: Option<String>,
+    rows: Option<u16>,
+    cols: Option<u16>,
+) -> Result<(), String> {
+    state.spawn(app, id, command, terminal_shell, cwd, rows, cols)
+}
+
+#[tauri::command]
+pub fn write_session(
+    state: State<'_, SessionManager>,
+    id: String,
+    data: String,
+) -> Result<(), String> {
+    state.write(&id, &data)
+}
+
+#[tauri::command]
+pub fn resize_session(
+    state: State<'_, SessionManager>,
+    id: String,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    state.resize(&id, rows, cols)
+}
+
+#[tauri::command]
+pub fn kill_session(state: State<'_, SessionManager>, id: String) -> Result<(), String> {
+    state.kill(&id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn live_sessions(state: State<'_, SessionManager>) -> Vec<String> {
+    state.live_ids()
+}
+
+#[tauri::command]
+pub fn detect_cli_session(
+    kind: String,
+    cwd: Option<String>,
+    since_ms: f64,
+    exclude: Vec<String>,
+) -> Option<String> {
+    detect_cli_session_impl(&kind, cwd, since_ms, &exclude)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{resolve_login_executable, session_launch_spec};
+    use super::{
+        derive_session_id, resolve_login_executable, select_session_id, session_launch_spec,
+    };
+    use std::path::{Path, PathBuf};
 
     #[test]
     /// Resolve a guaranteed system shell through an explicit path.
@@ -271,5 +466,55 @@ mod tests {
         assert_eq!(exe, "/bin/sh");
         assert_eq!(args, vec!["-l".to_string(), "-i".to_string()]);
         assert_eq!(shell.as_deref(), Some("/bin/sh"));
+    }
+
+    #[test]
+    fn derives_session_ids_per_cli() {
+        assert_eq!(
+            derive_session_id(
+                "codex",
+                Path::new(
+                    "/x/rollout-2026-03-29T22-06-43-019d3d23-176a-7663-baaa-fdc8cef1e988.jsonl"
+                )
+            ),
+            Some("019d3d23-176a-7663-baaa-fdc8cef1e988".to_string()),
+        );
+        assert_eq!(
+            derive_session_id("claude", Path::new("/x/abc-123-def.jsonl")),
+            Some("abc-123-def".to_string()),
+        );
+        assert_eq!(
+            derive_session_id("opencode", Path::new("/x/ses_1a8d3093dffeV2rBjv.json")),
+            Some("ses_1a8d3093dffeV2rBjv".to_string()),
+        );
+    }
+
+    #[test]
+    fn selects_the_earliest_unclaimed_session() {
+        let mut candidates = vec![
+            (30, PathBuf::from("/x/third.jsonl")),
+            (10, PathBuf::from("/x/first.jsonl")),
+            (20, PathBuf::from("/x/second.jsonl")),
+        ];
+        let excluded = vec!["first".to_string()];
+
+        assert_eq!(
+            select_session_id("claude", &mut candidates, &excluded).as_deref(),
+            Some("second")
+        );
+    }
+
+    #[test]
+    fn does_not_select_an_excluded_duplicate_id() {
+        let id = "019d3d23-176a-7663-baaa-fdc8cef1e988";
+        let mut candidates = vec![
+            (10, PathBuf::from(format!("/x/rollout-a-{id}.jsonl"))),
+            (20, PathBuf::from(format!("/x/rollout-b-{id}.jsonl"))),
+        ];
+
+        assert_eq!(
+            select_session_id("codex", &mut candidates, &[id.to_string()]),
+            None
+        );
     }
 }

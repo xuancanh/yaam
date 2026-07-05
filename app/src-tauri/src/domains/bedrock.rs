@@ -4,6 +4,7 @@
 //!    a nested { Credentials: … } payload, or AWS_* env-style lines), or
 //!  - the standard AWS credential chain (env vars, ~/.aws profiles, SSO, IMDS),
 //!    which caches and auto-refreshes temporary credentials on its own.
+//!
 //! Clients are cached until the exported credentials expire. On an auth failure
 //! we run the user's optional refresh command (e.g. `aws sso login`), rebuild
 //! the client (re-running the credential command), and retry once.
@@ -30,7 +31,9 @@ pub struct BedrockState {
 /// Parse ISO text or epoch seconds/milliseconds into a credential expiry time.
 fn parse_expiration(v: &serde_json::Value) -> Option<SystemTime> {
     if let Some(s) = v.as_str() {
-        let dt = aws_smithy_types::DateTime::from_str(s, aws_smithy_types::date_time::Format::DateTime).ok()?;
+        let dt =
+            aws_smithy_types::DateTime::from_str(s, aws_smithy_types::date_time::Format::DateTime)
+                .ok()?;
         return SystemTime::try_from(dt).ok();
     }
     if let Some(n) = v.as_f64() {
@@ -57,16 +60,46 @@ fn parse_aws_creds(raw: &str) -> Result<Credentials, String> {
                 .find_map(|n| obj.get(*n).and_then(|x| x.as_str()))
                 .map(str::to_string)
         };
-        let access = get(&["AccessKeyId", "accessKeyId", "aws_access_key_id", "AWS_ACCESS_KEY_ID"]);
-        let secret = get(&["SecretAccessKey", "secretAccessKey", "aws_secret_access_key", "AWS_SECRET_ACCESS_KEY"]);
-        let session = get(&["SessionToken", "sessionToken", "aws_session_token", "AWS_SESSION_TOKEN"]);
-        let expires = ["Expiration", "expiration", "Expires", "expiresAt", "expires_at"]
-            .iter()
-            .find_map(|n| obj.get(*n))
-            .and_then(parse_expiration);
+        let access = get(&[
+            "AccessKeyId",
+            "accessKeyId",
+            "aws_access_key_id",
+            "AWS_ACCESS_KEY_ID",
+        ]);
+        let secret = get(&[
+            "SecretAccessKey",
+            "secretAccessKey",
+            "aws_secret_access_key",
+            "AWS_SECRET_ACCESS_KEY",
+        ]);
+        let session = get(&[
+            "SessionToken",
+            "sessionToken",
+            "aws_session_token",
+            "AWS_SESSION_TOKEN",
+        ]);
+        let expires = [
+            "Expiration",
+            "expiration",
+            "Expires",
+            "expiresAt",
+            "expires_at",
+        ]
+        .iter()
+        .find_map(|n| obj.get(*n))
+        .and_then(parse_expiration);
         return match (access, secret) {
-            (Some(a), Some(s)) => Ok(Credentials::new(a, s, session, expires, "yaam-credential-command")),
-            _ => Err("credential command output is JSON but has no AccessKeyId/SecretAccessKey".to_string()),
+            (Some(a), Some(s)) => Ok(Credentials::new(
+                a,
+                s,
+                session,
+                expires,
+                "yaam-credential-command",
+            )),
+            _ => Err(
+                "credential command output is JSON but has no AccessKeyId/SecretAccessKey"
+                    .to_string(),
+            ),
         };
     }
 
@@ -81,7 +114,10 @@ fn parse_aws_creds(raw: &str) -> Result<Credentials, String> {
             );
         }
     }
-    match (map.get("AWS_ACCESS_KEY_ID"), map.get("AWS_SECRET_ACCESS_KEY")) {
+    match (
+        map.get("AWS_ACCESS_KEY_ID"),
+        map.get("AWS_SECRET_ACCESS_KEY"),
+    ) {
         (Some(a), Some(s)) => Ok(Credentials::new(
             a.clone(),
             s.clone(),
@@ -99,7 +135,9 @@ fn parse_aws_creds(raw: &str) -> Result<Credentials, String> {
 /// Run a credential or refresh command in a login shell without blocking async tasks.
 async fn run_shell(cmd: String) -> Result<String, String> {
     let out = tauri::async_runtime::spawn_blocking(move || {
-        std::process::Command::new("/bin/sh").args(["-lc", &cmd]).output()
+        std::process::Command::new("/bin/sh")
+            .args(["-lc", &cmd])
+            .output()
     })
     .await
     .map_err(|e| e.to_string())?
@@ -132,7 +170,10 @@ async fn make_client(region: &str, profile: &str, cred_cmd: &str) -> Result<Cach
     } else if !profile.is_empty() {
         loader = loader.profile_name(profile);
     }
-    Ok(CachedClient { client: Client::new(&loader.load().await), expires })
+    Ok(CachedClient {
+        client: Client::new(&loader.load().await),
+        expires,
+    })
 }
 
 /// Invoke one Bedrock model and return its response body as UTF-8 text.
@@ -208,9 +249,9 @@ pub async fn invoke_model(
     // credentials look stale — refresh (optional command through a login shell,
     // so aws/corporate CLIs resolve), rebuild the client, retry once
     if !refresh_cmd.is_empty() {
-        run_shell(refresh_cmd)
-            .await
-            .map_err(|e| format!("bedrock auth failed ({err}) and the refresh command also failed: {e}"))?;
+        run_shell(refresh_cmd).await.map_err(|e| {
+            format!("bedrock auth failed ({err}) and the refresh command also failed: {e}")
+        })?;
     }
     state.clients.lock().unwrap().remove(&key);
     let client = make_client(&region, &profile, &cred_cmd).await?;
@@ -218,9 +259,25 @@ pub async fn invoke_model(
     invoke(&client.client, &model, &body).await
 }
 
+/// Tauri IPC boundary for invoking an AWS Bedrock model.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn bedrock_invoke(
+    state: tauri::State<'_, BedrockState>,
+    region: String,
+    profile: String,
+    refresh_cmd: String,
+    cred_cmd: String,
+    model: String,
+    body: String,
+) -> Result<String, String> {
+    invoke_model(&state, region, profile, refresh_cmd, cred_cmd, model, body).await
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_aws_creds;
+    use super::{is_auth_error, parse_aws_creds, parse_expiration};
+    use std::time::UNIX_EPOCH;
 
     #[test]
     /// Accept the shape emitted by `aws configure export-credentials`.
@@ -261,5 +318,43 @@ mod tests {
     fn rejects_api_key_output() {
         assert!(parse_aws_creds("sk-ant-api-abc").is_err());
         assert!(parse_aws_creds(r#"{"apiKey":"sk-ant-api-abc"}"#).is_err());
+    }
+
+    #[test]
+    fn parses_uppercase_json_and_optional_session_tokens() {
+        let c = parse_aws_creds(r#"{"AWS_ACCESS_KEY_ID":"AKIA4","AWS_SECRET_ACCESS_KEY":"S4"}"#)
+            .unwrap();
+
+        assert_eq!(c.access_key_id(), "AKIA4");
+        assert_eq!(c.secret_access_key(), "S4");
+        assert_eq!(c.session_token(), None);
+    }
+
+    #[test]
+    fn treats_epoch_seconds_and_milliseconds_equally() {
+        let seconds = parse_expiration(&serde_json::json!(1_893_456_000)).unwrap();
+        let millis = parse_expiration(&serde_json::json!(1_893_456_000_000_u64)).unwrap();
+
+        assert_eq!(
+            seconds.duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            millis.duration_since(UNIX_EPOCH).unwrap().as_secs()
+        );
+        assert!(parse_expiration(&serde_json::json!("not-a-date")).is_none());
+    }
+
+    #[test]
+    fn classifies_only_refreshable_bedrock_failures_as_auth_errors() {
+        for message in [
+            "ExpiredTokenException",
+            "security token is invalid",
+            "AccessDeniedException",
+            "no providers in chain",
+            "dispatch failure",
+        ] {
+            assert!(is_auth_error(message), "did not classify {message:?}");
+        }
+        for message in ["model not found", "invalid JSON body", "request timed out"] {
+            assert!(!is_auth_error(message), "misclassified {message:?}");
+        }
     }
 }

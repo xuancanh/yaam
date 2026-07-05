@@ -1,13 +1,12 @@
-//! Composition root: declare the layered modules, register managed state and
-//! the command surface, and run the Tauri app. Domain logic lives in `core`;
-//! the IPC handlers live in `commands`; one-time startup lives in `setup`.
-mod commands;
-mod core;
+//! Composition root: register domain-managed state and command boundaries,
+//! then run the Tauri app. Each domain owns its command handlers and logic.
+mod domains;
 mod setup;
+mod util;
 
-use core::bedrock::BedrockState;
-use core::pty::SessionManager;
-use core::search::ChatSearchState;
+use domains::bedrock::BedrockState;
+use domains::search::ChatSearchState;
+use domains::session::SessionManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -18,31 +17,34 @@ pub fn run() {
         .manage(BedrockState::default())
         .manage(ChatSearchState::default())
         .invoke_handler(tauri::generate_handler![
-            commands::session::spawn_session,
-            commands::session::write_session,
-            commands::session::resize_session,
-            commands::session::kill_session,
-            commands::session::live_sessions,
-            commands::session::detect_cli_session,
-            commands::git::git_diff,
-            commands::git::git_status,
-            commands::git::git_file_diff,
-            commands::fs::list_dir,
-            commands::fs::read_text_file,
-            commands::fs::write_text_file,
-            commands::fs::run_credential_command,
-            commands::fs::exec_command,
-            commands::state::save_state,
-            commands::state::load_state,
-            commands::state::load_state_backup,
-            commands::state::save_partition,
-            commands::state::load_partition,
-            commands::state::save_session,
-            commands::state::remove_session,
-            commands::state::load_sessions,
-            commands::search::chat_search_reindex,
-            commands::search::chat_search,
-            commands::bedrock::bedrock_invoke,
+            domains::session::spawn_session,
+            domains::session::write_session,
+            domains::session::resize_session,
+            domains::session::kill_session,
+            domains::session::live_sessions,
+            domains::session::detect_cli_session,
+            domains::git::git_diff,
+            domains::git::git_status,
+            domains::git::git_file_diff,
+            domains::fs::list_dir,
+            domains::fs::read_text_file,
+            domains::fs::write_text_file,
+            domains::fs::run_credential_command,
+            domains::fs::exec_command,
+            domains::state::save_state,
+            domains::state::load_state,
+            domains::state::load_state_backup,
+            domains::state::save_partition,
+            domains::state::load_partition,
+            domains::state::save_session,
+            domains::state::remove_session,
+            domains::state::load_sessions,
+            domains::search::chat_search_reindex,
+            domains::search::chat_search,
+            domains::bedrock::bedrock_invoke,
+            domains::secrets::secret_set,
+            domains::secrets::secret_get,
+            domains::secrets::secret_delete,
         ])
         .setup(|app| setup::init(app))
         .run(tauri::generate_context!())

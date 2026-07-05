@@ -3,5 +3,5 @@
 
 /// Delegate the desktop binary entry point to the shared Tauri library bootstrap.
 fn main() {
-  app_lib::run();
+    app_lib::run();
 }
