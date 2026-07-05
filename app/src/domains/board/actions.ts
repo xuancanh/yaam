@@ -148,7 +148,8 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
       for (const [sessionId, binding] of ctx.taskSessions.current) {
         if (binding.taskId === id) ctx.taskSessions.current.delete(sessionId)
       }
-      dispatch(s => ({ ...s, tasks: s.tasks.filter(t => t.id !== id) }))
+      if (ctx.execCommand) void ctx.execCommand('remove_task', { id }, { actor: { kind: 'user' } })
+      else dispatch(s => ({ ...s, tasks: s.tasks.filter(t => t.id !== id) }))
     },
     scheduleTask: (taskId, at, templateId) => dispatch(s => ({
       ...s,

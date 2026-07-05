@@ -22,6 +22,8 @@ export interface AddTaskInput {
   templateId?: string
 }
 
+export interface RemoveTaskInput { id: string }
+
 const COLS: BoardCol[] = ['backlog', 'progress', 'review', 'done', 'failed']
 
 export function registerBoardCommands(registry: CommandRegistry, state: StatePort): void {
@@ -49,5 +51,12 @@ export function registerBoardCommands(registry: CommandRegistry, state: StatePor
       }))
       return id
     },
+  })
+
+  registry.register<RemoveTaskInput, void>({
+    name: 'remove_task',
+    capability: 'tasks',
+    validate: i => { if (!i.id) throw new Error('remove_task: id is required') },
+    handler: i => state.update(s => ({ ...s, tasks: s.tasks.filter(t => t.id !== i.id) })),
   })
 }

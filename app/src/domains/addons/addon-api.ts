@@ -125,7 +125,10 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
         }))
         ctx.fireAddonHook('onTaskMoved', { taskId: id, title: prev.title, col: String(col), from: prev.col })
       },
-      remove: id => dispatch(s2 => ({ ...s2, tasks: s2.tasks.filter(t => t.id !== id) })),
+      remove: id => {
+        if (ctx.execCommand) ctx.execCommand('remove_task', { id: String(id) }, addonId)
+        else dispatch(s2 => ({ ...s2, tasks: s2.tasks.filter(t => t.id !== id) }))
+      },
       start: id => ctx.spawnSessionForTask(String(id)),
       restart: id => {
         const t = stateRef.current.tasks.find(x => x.id === id)
