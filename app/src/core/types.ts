@@ -391,6 +391,9 @@ export interface OrchestrationSettings {
   credCmd: string
   /** Settings → Appearance: theme, scale, density, typography */
   appearance?: AppearanceSettings
+  /** native desktop notifications for escalations/finished work when the app
+   *  is unfocused (default on) */
+  osNotifications?: boolean
   /** Master chat panel width (px, drag-resizable) */
   sidebarWidth?: number
   /** Master chat panel collapsed to a slim rail */

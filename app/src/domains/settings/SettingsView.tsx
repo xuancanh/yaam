@@ -1038,6 +1038,16 @@ export function SettingsView() {
                 <Switch on={s.settings[o.id]} onToggle={() => toggleSetting(o.id)} />
               </div>
             ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Desktop notifications</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Escalations and finished work reach the OS notification center while YAAM is in the background.</div>
+              </div>
+              <Switch
+                on={s.settings.osNotifications !== false}
+                onToggle={() => updateSettings({ osNotifications: s.settings.osNotifications === false })}
+              />
+            </div>
           </div>
 
           </>}

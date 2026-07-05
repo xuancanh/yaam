@@ -5,6 +5,7 @@
 import { useMemo } from 'react'
 import type { AppState, EventType, NotifKind } from '../../core/types'
 import { createStorePort, type StatePort } from '../../core/ports'
+import { osNotify } from '../../infrastructure/native/notify'
 import { mkId } from '../../shared/id'
 
 export interface ActivityService {
@@ -38,6 +39,12 @@ export function createActivityService(state: StatePort): ActivityService {
     },
     notify: (kind, title, detail, agentId) => {
       const item = { id: mkId('n'), kind, title, detail, time: stamp(), read: false, agentId }
+      // escalations (and finished work) also reach the OS notification center
+      // when the app isn't focused — approvals shouldn't require watching
+      const focused = typeof document !== 'undefined' && document.hasFocus()
+      if (state.get().settings.osNotifications !== false && (kind === 'escalate' || kind === 'done') && !focused) {
+        void osNotify(title, detail)
+      }
       state.update(s => {
         const wid = widOf(s, agentId)
         if (wid === s.activeWorkspace) return { ...s, notifications: [item].concat(s.notifications).slice(0, 30) }
