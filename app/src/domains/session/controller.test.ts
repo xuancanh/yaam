@@ -15,6 +15,8 @@ function fakePort(): SessionProcessPort {
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     restoreTerminalModes: vi.fn(),
     quiesceTerminal: vi.fn(),
+    repaintTerminal: vi.fn(),
+    terminalSize: vi.fn(() => ({ rows: 48, cols: 190 })),
     resetTerminal: vi.fn(),
     attachTerminal: vi.fn(() => ({ writeln: vi.fn() })), disposeTerminal: vi.fn(), isAltScreen: vi.fn(() => false),
   }

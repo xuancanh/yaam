@@ -165,7 +165,17 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         const wasCorrupted = port.isAltScreen(id)
         port.restoreTerminalModes(id)
         if (wasCorrupted) resumeNote += ' · the previous TUI was killed mid-render — if the screen looks garbled, use the pane\'s ↻ Clear terminal button'
-        port.spawnSession(id, `${envPrefix(type?.env)}${cmd}`.trim(), agent.cwd || undefined, undefined, undefined, terminalShell).catch(() => {})
+        // spawn at the pane's REAL size — the pane is already mounted on
+        // resume, so nothing would ever correct the backend's 24×80 default
+        // and the CLI would keep rendering for the wrong terminal
+        const size = port.terminalSize(id)
+        port.spawnSession(id, `${envPrefix(type?.env)}${cmd}`.trim(), agent.cwd || undefined, size?.rows, size?.cols, terminalShell)
+          .then(() => {
+            // …and nudge a repaint once the CLI has booted, so resumed TUIs
+            // draw a correct first frame even if layout shifted meanwhile
+            setTimeout(() => port.repaintTerminal(id), 400)
+          })
+          .catch(() => {})
         probeCliSession(id, cmd, agent.cwd || '', true)
       }
       dispatch(s => focusSessionIn({

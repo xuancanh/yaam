@@ -162,6 +162,13 @@ export function isAltScreen(id: string): boolean {
   return entries.get(id)?.term.buffer.active.type === 'alternate'
 }
 
+/** Current xterm dimensions, so a respawn can open its PTY at the pane's real
+ *  size instead of the backend's 24×80 default. */
+export function terminalSize(id: string): { rows: number; cols: number } | null {
+  const term = entries.get(id)?.term
+  return term ? { rows: term.rows, cols: term.cols } : null
+}
+
 /** Fit xterm to its container and propagate the resulting size to the PTY. */
 export function fitTerminal(id: string) {
   const entry = entries.get(id)

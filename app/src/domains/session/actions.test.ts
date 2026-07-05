@@ -27,6 +27,8 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     restoreTerminalModes: vi.fn(),
     quiesceTerminal: vi.fn(),
+    repaintTerminal: vi.fn(),
+    terminalSize: vi.fn(() => ({ rows: 48, cols: 190 })),
     resetTerminal: vi.fn(),
     isAltScreen: vi.fn(() => false),
     attachTerminal: vi.fn((): TerminalHandle => ({ writeln: vi.fn() })),
@@ -115,7 +117,7 @@ describe('createSessionActions', () => {
     const port = fakePort()
     const c = ctx(port)
     createSessionActions(c).resume('a1')
-    expect(port.spawnSession).toHaveBeenCalledWith('a1', expect.stringContaining('mycli --resume sid-9'), '/repo', undefined, undefined, undefined)
+    expect(port.spawnSession).toHaveBeenCalledWith('a1', expect.stringContaining('mycli --resume sid-9'), '/repo', 48, 190, undefined)
     expect(c.probeCliSession).toHaveBeenCalledWith('a1', 'mycli --resume sid-9', '/repo', true)
     expect(get('a1')?.status).toBe('running')
   })
@@ -140,6 +142,18 @@ describe('createSessionActions', () => {
     expect(port.resetTerminal).not.toHaveBeenCalled()
     expect(port.restoreTerminalModes).toHaveBeenCalledWith('a1')
     expect(get('a1')?.log.at(-1)?.x).toContain('Clear terminal')
+  })
+
+  it('resume syncs the PTY size and nudges a repaint once the respawn settles', async () => {
+    vi.useFakeTimers()
+    seed([agent({ status: 'idle' })])
+    const port = fakePort()
+    createSessionActions(ctx(port)).resume('a1')
+    await Promise.resolve() // let the spawn promise settle
+    expect(port.repaintTerminal).not.toHaveBeenCalled() // waits for the CLI to boot
+    await vi.advanceTimersByTimeAsync(500)
+    expect(port.repaintTerminal).toHaveBeenCalledWith('a1')
+    vi.useRealTimers()
   })
 
   it('refreshTerminal is the explicit user reset: restore modes, then wipe', () => {

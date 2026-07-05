@@ -4,7 +4,7 @@
 // core/terminals wholesale and can be tested with fakes. The real implementation
 // wires the interface to the actual IPC and terminal registry; tests pass their own.
 import * as native from '../../core/native'
-import { getTerminal, disposeTerminal, isAltScreen, quiesceTerminal, resetTerminal, restoreTerminalModes } from '../../core/terminals'
+import { fitTerminal, getTerminal, disposeTerminal, isAltScreen, quiesceTerminal, repaintSession, resetTerminal, restoreTerminalModes, terminalSize } from '../../core/terminals'
 import { sendLineToSession } from './command'
 
 /** A minimal handle to a session's terminal — just what callers need to write. */
@@ -43,6 +43,10 @@ export interface SessionProcessPort {
   restoreTerminalModes: (id: string) => void
   /** exit-time rest: restore modes, then hide/stop the cursor (dead session) */
   quiesceTerminal: (id: string) => void
+  /** size the PTY to the pane and nudge the app to repaint (two-step resize) */
+  repaintTerminal: (id: string) => void
+  /** the pane's current terminal dimensions, for spawning at the right size */
+  terminalSize: (id: string) => { rows: number; cols: number } | null
   /** full xterm reset (modes + buffers + scrollback) */
   resetTerminal: (id: string) => void
   /** true while the terminal is stuck in the alternate screen (dead TUI) */
@@ -65,6 +69,8 @@ export const realSessionProcessPort: SessionProcessPort = {
   disposeTerminal: id => disposeTerminal(id),
   restoreTerminalModes: id => restoreTerminalModes(id),
   quiesceTerminal: id => quiesceTerminal(id),
+  repaintTerminal: id => { fitTerminal(id); repaintSession(id) },
+  terminalSize: id => terminalSize(id),
   resetTerminal: id => resetTerminal(id),
   isAltScreen: id => isAltScreen(id),
 }
