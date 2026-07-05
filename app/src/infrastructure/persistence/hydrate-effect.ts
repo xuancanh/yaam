@@ -29,6 +29,16 @@ export function useHydration(ctx: HydrationCtx): void {
   useEffect(() => {
     if (started.current) return
     started.current = true
+    runHydration(ctx)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+}
+
+/** The one-shot boot sequence: load + apply the persisted snapshot, rebuild
+ *  terminals, resolve secrets, mark ready, then start integrations. Plain (no
+ *  React); the caller guards against running it twice. */
+export function runHydration(ctx: HydrationCtx): void {
+  {
     const { stateRef, persistence, startIntegrations, appendTail, clearNeeds, bumpSettle, armResponseWatch } = ctx
     // Apply one merged snapshot: dispatch the pure hydration result, then rebuild terminals.
     const hydrateFrom = (p: Partial<PersistedState>) => {
@@ -91,6 +101,5 @@ export function useHydration(ctx: HydrationCtx): void {
       dispatch(s => (s.bootStatus === 'failed' ? s : { ...s, bootStatus: 'ready' }))
       startIntegrations()
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }
 }
