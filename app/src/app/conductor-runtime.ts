@@ -45,6 +45,7 @@ export function useConductorRuntime(k: ConductorKernel): ConductorRuntimeDeps {
     launchFromTemplate: (templateId: string, task?: string) => session.launchFromTemplate(templateId, task),
     runChatMessage: chat.runChatMessage, stopChatMessage: chat.stopChatMessage,
     retryChatMessage: chat.retryChatMessage, resetChatRuntime: chat.resetChatRuntime,
+    resolveChatApproval: chat.resolveChatApproval,
     installPackage: addon.installPackage, sendAddonChat: addon.sendAddonChat,
     makeAddonApi: addon.makeAddonApi, disposeAddon: addon.disposeAddon,
     runMaster: master.runMaster, disposeSessionRuntime: chat.disposeSessionRuntime, abortMaster: master.abortMaster,

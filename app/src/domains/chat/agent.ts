@@ -28,6 +28,8 @@ const ident = (x: string) => x.replace(/[^a-zA-Z0-9_]/g, '_')
  *  kanban board, create schedules, and save/refine skills. Implemented by the
  *  runner against the store. Every method returns a human-readable result. */
 export interface ChatAppPort {
+  /** ask-mode gate: render an inline approval prompt; resolves with the verdict */
+  requestApproval: (tool: string, preview: string) => Promise<boolean>
   listBoardTasks: () => string
   addBoardTask: (title: string, description?: string, criteria?: string[]) => string
   listSchedules: () => string
@@ -440,6 +442,7 @@ RULES
 - Ground every claim in tool results; read before you edit; verify after you change (re-read or run the relevant check).
 - Prefer edit_file with exact context over rewriting whole files.
 - Destructive or hard-to-undo actions (deleting files, git push, package publish, rm -rf) need the user's explicit go-ahead first.
+- Some tool calls (shell commands, AppleScript, deletions) may pause for the user's inline approval. A denial is guidance, not an error — adjust course instead of retrying.
 - Keep replies concise markdown. Reference files as \`path:line\`. When a skill is relevant to the request, load it before answering.${persona?.trim() ? `\n\nPERSONA (set by the user for this agent type)\n${persona.trim()}` : ''}`
 }
 
@@ -494,6 +497,18 @@ export async function runChatTurn(
           content = `error: the arguments for "${name}" were cut off before they finished (likely the response hit the token limit). Retry with a smaller payload — for large files, write in sections with write_file then append via edit_file.`
           onEvent({ kind: 'tool', text: `${name} — arguments truncated, not executed` })
           return { type: 'tool_result', tool_use_id: b.id, content }
+        }
+        // ask mode (the default): shell, AppleScript, and deletions pause for
+        // an inline user approval before running
+        const gated = name === 'run_command' || name === 'run_applescript' || name === 'delete_path'
+        if (gated && app && (getAgent()?.permMode ?? 'ask') !== 'auto') {
+          const preview = (typeof input.command === 'string' && input.command)
+            || (typeof input.script === 'string' && input.script)
+            || (typeof input.path === 'string' && input.path) || ''
+          const ok = await app.requestApproval(name, preview.slice(0, 300))
+          if (!ok) {
+            return { type: 'tool_result', tool_use_id: b.id, content: 'The user declined this action. Do not retry it as-is — ask them or take another approach.' }
+          }
         }
         try {
           if (name.startsWith(MCP_PREFIX)) {

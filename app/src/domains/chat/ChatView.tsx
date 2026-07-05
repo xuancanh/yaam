@@ -115,7 +115,7 @@ function NewChatRow({ onCreated }: { onCreated: (id: string) => void }) {
 
 export function ChatView() {
   const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId, activeWorkspace: x.activeWorkspace }), shallowEqual)
-  const { openChat, deleteSession, renameSession } = useActions()
+  const { openChat, deleteSession, renameSession, setChatPermMode } = useActions()
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<ChatSearchHit[] | null>(null)
   const [creating, setCreating] = useState(false)
@@ -257,6 +257,21 @@ export function ChatView() {
                   thinking
                 </span>
               )}
+              <button
+                className="mono"
+                title={(selected.permMode ?? 'ask') === 'ask'
+                  ? 'Ask mode: shell commands, AppleScript, and deletions pause for your approval — click for auto'
+                  : 'Auto mode: risky tools run without asking — click to require approval'}
+                onClick={() => setChatPermMode(selected.id, (selected.permMode ?? 'ask') === 'ask' ? 'auto' : 'ask')}
+                style={{
+                  fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 6, cursor: 'pointer', letterSpacing: 0.4,
+                  border: `1px solid ${(selected.permMode ?? 'ask') === 'ask' ? 'rgba(61,220,151,.35)' : 'rgba(245,196,81,.4)'}`,
+                  background: 'transparent',
+                  color: (selected.permMode ?? 'ask') === 'ask' ? 'var(--green)' : 'var(--accent)',
+                }}
+              >
+                {(selected.permMode ?? 'ask') === 'ask' ? 'ASK' : 'AUTO'}
+              </button>
               <button
                 className="icon-btn"
                 title={filesOpen[selected.id] ? 'Hide the file explorer' : 'Browse & preview files next to this chat'}

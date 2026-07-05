@@ -48,6 +48,7 @@ export interface ConductorActionsDeps {
   stopChatMessage: (agentId: string) => void
   retryChatMessage: (agentId: string) => void
   resetChatRuntime: (agentId: string) => void
+  resolveChatApproval: (agentId: string, msgId: string, ok: boolean) => void
   // addons
   installPackage: (json: string, source: import('../core/types').Addon['source']) => void
   sendAddonChat: (id: string, text: string) => void
@@ -84,8 +85,8 @@ export function useConductorActions(d: ConductorActionsDeps): ConductorActions {
   const chatActions = useChatActions(useMemo(() => ({
     dispatch, stateRef: d.stateRef, logEvent: d.logEvent, runChatMessage: d.runChatMessage,
     stopChatMessage: d.stopChatMessage, retryChatMessage: d.retryChatMessage,
-    resetChatRuntime: d.resetChatRuntime, skillCatalogs: d.skillCatalogs,
-  }), [d.stateRef, d.logEvent, d.runChatMessage, d.stopChatMessage, d.retryChatMessage, d.resetChatRuntime, d.skillCatalogs]))
+    resetChatRuntime: d.resetChatRuntime, resolveChatApproval: d.resolveChatApproval, skillCatalogs: d.skillCatalogs,
+  }), [d.stateRef, d.logEvent, d.runChatMessage, d.stopChatMessage, d.retryChatMessage, d.resetChatRuntime, d.resolveChatApproval, d.skillCatalogs]))
   const addonsActions = useAddonsActions(useMemo(() => ({
     dispatch, stateRef: d.stateRef, flash: d.flash, installPackage: d.installPackage, sendAddonChat: d.sendAddonChat,
     makeAddonApi: d.makeAddonApi, disposeAddon: d.disposeAddon,

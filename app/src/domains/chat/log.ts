@@ -8,7 +8,8 @@ import { mkId } from '../../shared/id'
 
 export interface ChatLog {
   updateChatLog: (agentId: string, msgId: string, text: string) => void
-  pushChatLog: (id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => void
+  /** append one visible message; returns its id (approval flows resolve by id) */
+  pushChatLog: (id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => string
 }
 
 export function useChatLog(): ChatLog {
@@ -27,12 +28,14 @@ export function createChatLog(): ChatLog {
       }))
     },
     pushChatLog: (id, msg) => {
+      const msgId = mkId('cm')
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
-          ? { ...a, chatLog: [...(a.chatLog ?? []), { id: mkId('cm'), at: Date.now(), ...msg }].slice(-200) }
+          ? { ...a, chatLog: [...(a.chatLog ?? []), { id: msgId, at: Date.now(), ...msg }].slice(-200) }
           : a),
       }))
+      return msgId
     },
   }
 }

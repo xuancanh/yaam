@@ -90,10 +90,39 @@ function HoverBtn({ title, paths, onClick }: { title: string; paths: string[]; o
   )
 }
 
-function Bubble({ m, live, canRetry, onRetry }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void }) {
+/** Ask-mode approval prompt: Allow / Deny while the turn is paused on it. */
+function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDecide: (ok: boolean) => void }) {
+  const pending = m.approval === 'pending'
+  const verdict = m.approval === 'approved' ? '✓ allowed' : m.approval === 'denied' ? '✕ denied' : busy ? null : 'expired'
+  return (
+    <div style={{
+      alignSelf: 'stretch', flexShrink: 0, margin: '0 4px', padding: '8px 12px', borderRadius: 10,
+      background: 'rgba(245,196,81,.06)', border: '1px solid rgba(245,196,81,.3)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', flexShrink: 0 }}>agent wants to run</span>
+        {verdict && <span className="mono" style={{ fontSize: 10.5, color: m.approval === 'approved' ? 'var(--green)' : 'var(--dim)', marginLeft: 'auto' }}>{verdict}</span>}
+        {pending && busy && (
+          <span style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+            <button className="approve-btn" style={{ padding: '3px 14px', fontSize: 11.5 }} onClick={() => onDecide(true)}>Allow</button>
+            <button className="open-btn" style={{ padding: '3px 14px', fontSize: 11.5 }} onClick={() => onDecide(false)}>Deny</button>
+          </span>
+        )}
+      </div>
+      <div className="mono" style={{ fontSize: 11, color: 'var(--mut)', marginTop: 4, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 90, overflowY: 'auto' }}>
+        {m.text}
+      </div>
+    </div>
+  )
+}
+
+function Bubble({ m, live, canRetry, onRetry, busy, onApprove }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, ok: boolean) => void }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
   if (m.role === 'thinking') return <ThinkingBubble m={m} live={!!live} />
+  if (m.role === 'tool' && m.approval) {
+    return <ApprovalBubble m={m} busy={!!busy} onDecide={ok => onApprove?.(m.id, ok)} />
+  }
   if (m.role === 'tool') {
     return (
       <div className="mono" title={m.text} style={{
@@ -169,7 +198,7 @@ function SlashMenu({ items, sel, onPick }: {
 }
 
 export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
-  const { sendChatMessage, stopChat, retryChat, clearChat, chatSkills } = useActions()
+  const { sendChatMessage, stopChat, retryChat, clearChat, chatSkills, approveChatTool } = useActions()
   const [draft, setDraft] = useState('')
   const [queue, setQueue] = useState<{ text: string; atts?: ChatAttachment[] }[]>([])
   const [atts, setAtts] = useState<ChatAttachment[]>([])
@@ -318,6 +347,8 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
             live={busy && i === log.length - 1}
             canRetry={m.id === lastAssistantId && hasUserMsg}
             onRetry={() => retryChat(agent.id)}
+            busy={busy}
+            onApprove={(msgId, ok) => approveChatTool(agent.id, msgId, ok)}
           />
         ))}
         {busy && (

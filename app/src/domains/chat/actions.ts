@@ -18,6 +18,7 @@ export interface ChatActionsCtx {
   stopChatMessage: (agentId: string) => void
   retryChatMessage: (agentId: string) => void
   resetChatRuntime: (agentId: string) => void
+  resolveChatApproval: (agentId: string, msgId: string, ok: boolean) => void
   skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
 }
 
@@ -28,6 +29,10 @@ export interface ChatActions {
   stopChat: (agentId: string) => void
   retryChat: (agentId: string) => void
   clearChat: (agentId: string) => void
+  /** answer a pending ask-mode tool approval */
+  approveChatTool: (agentId: string, msgId: string, ok: boolean) => void
+  /** flip a chat between ask (approve risky tools) and auto */
+  setChatPermMode: (agentId: string, mode: 'ask' | 'auto') => void
   /** skills visible to this chat (its sources, cached registry catalogs only) */
   chatSkills: (agentId: string) => CatalogSkill[]
 }
@@ -87,6 +92,13 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
         agents: s.agents.map(a => a.id === agentId ? { ...a, chatLog: [], status: 'idle' as const } : a),
       }))
     },
+
+    approveChatTool: (agentId, msgId, ok) => ctx.resolveChatApproval(agentId, msgId, ok),
+
+    setChatPermMode: (agentId, mode) => dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === agentId ? { ...a, permMode: mode } : a),
+    })),
 
     chatSkills: agentId => {
       const s = stateRef.current

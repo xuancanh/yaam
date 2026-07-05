@@ -105,6 +105,9 @@ export interface Agent {
   personaId?: string
   /** skill sources for this chat: 'local' and/or SkillRegistry ids */
   skillSourceIds?: string[]
+  /** chat tool safety: 'ask' (default) pauses shell/AppleScript/delete tool
+   *  calls for inline approval; 'auto' runs them without asking */
+  permMode?: 'ask' | 'auto'
 }
 
 /** one message in a chat-mode session */
@@ -113,6 +116,8 @@ export interface ChatMsg {
   role: 'user' | 'assistant' | 'tool' | 'thinking'
   text: string
   at: number
+  /** set on tool-approval prompts (ask mode): awaiting → user decided */
+  approval?: 'pending' | 'approved' | 'denied'
 }
 
 export interface RouteEntry {

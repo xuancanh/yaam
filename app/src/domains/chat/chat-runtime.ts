@@ -16,7 +16,7 @@ export interface ChatPorts {
   dispatch: (f: (s: AppState) => AppState) => void
   mcpSessions: MutableRefObject<Map<string, McpSession>>
   skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
-  pushChatLog: (id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => void
+  pushChatLog: (id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => string
   updateChatLog: (agentId: string, msgId: string, text: string) => void
   flash: (t: string) => void
   refreshSkillCatalog: (id: string) => Promise<string>
@@ -28,6 +28,8 @@ export interface ChatRuntime {
   stop: (agentId: string) => void
   /** re-run the last user message: drop everything after it and send it again */
   retry: (agentId: string) => void
+  /** answer a pending ask-mode tool approval (by its chat-message id) */
+  resolveApproval: (agentId: string, msgId: string, ok: boolean) => void
   dispose: (id: string) => void
 }
 
@@ -35,8 +37,17 @@ export function createChatRuntime(ports: ChatPorts): ChatRuntime {
   const histories = new Map<string, ApiMessage[]>()
   const busy = new Set<string>()
   const aborts = new AbortRegistry()
+  const pendingApprovals = new Map<string, { agentId: string; resolve: (ok: boolean) => void }>()
+  const markApproval = (agentId: string, msgId: string, state: 'approved' | 'denied') => {
+    ports.dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === agentId
+        ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, approval: state } : m)) }
+        : a),
+    }))
+  }
   const run = (agentId: string, text: string, atts?: ChatAttachment[]) => {
-    void runChatMessageTurn({ ...ports, histories, busy, aborts }, agentId, text, atts)
+    void runChatMessageTurn({ ...ports, histories, busy, aborts, pendingApprovals }, agentId, text, atts)
   }
   return {
     run,
@@ -67,8 +78,18 @@ export function createChatRuntime(ports: ChatPorts): ChatRuntime {
       }
       run(agentId, text)
     },
+    resolveApproval: (agentId, msgId, ok) => {
+      const pending = pendingApprovals.get(msgId)
+      if (!pending || pending.agentId !== agentId) return
+      pendingApprovals.delete(msgId)
+      markApproval(agentId, msgId, ok ? 'approved' : 'denied')
+      pending.resolve(ok)
+    },
     dispose: (id) => {
       aborts.abort(id) // cancel any in-flight chat reply for this session
+      for (const [msgId, p] of pendingApprovals) {
+        if (p.agentId === id) { pendingApprovals.delete(msgId); p.resolve(false) }
+      }
       histories.delete(id)
       busy.delete(id)
     },

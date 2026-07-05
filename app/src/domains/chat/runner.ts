@@ -23,10 +23,12 @@ export interface ChatCtx {
   histories: Map<string, ApiMessage[]>
   mcpSessions: MutableRefObject<Map<string, McpSession>>
   skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
-  pushChatLog: (id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => void
+  pushChatLog: (id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => string
   updateChatLog: (agentId: string, msgId: string, text: string) => void
   flash: (t: string) => void
   refreshSkillCatalog: (id: string) => Promise<string>
+  /** ask-mode gate: pending tool approvals by chat-message id */
+  pendingApprovals: Map<string, { agentId: string; resolve: (ok: boolean) => void }>
 }
 
 /** One file attached to an outgoing chat message. Text-ish files (and
@@ -43,8 +45,18 @@ export interface ChatAttachment {
 
 /** App-level tools (board/schedules/skills) backed by the store — the chat
  *  agent's bridge into YAAM's own orchestration surfaces. */
-function makeAppPort(ctx: ChatCtx): ChatAppPort {
+function makeAppPort(ctx: ChatCtx, agentId: string): ChatAppPort {
   return {
+    requestApproval: (tool, preview) => {
+      const msgId = ctx.pushChatLog(agentId, { role: 'tool', text: `${tool} → ${preview}`, approval: 'pending' })
+      return new Promise<boolean>(resolve => {
+        ctx.pendingApprovals.set(msgId, { agentId, resolve })
+        // an aborted/stopped turn must not leave the promise hanging
+        ctx.aborts.signal(agentId).addEventListener('abort', () => {
+          if (ctx.pendingApprovals.delete(msgId)) resolve(false)
+        }, { once: true })
+      })
+    },
     listBoardTasks: () => {
       const tasks = ctx.stateRef.current.tasks
       if (!tasks.length) return '(board is empty)'
@@ -239,7 +251,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       },
       persona || undefined,
       ctx.aborts.signal(agentId),
-      makeAppPort(ctx),
+      makeAppPort(ctx, agentId),
     )
     seal()
     // auto-title: after a successful turn, chats still carrying the default
