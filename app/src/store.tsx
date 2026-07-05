@@ -36,6 +36,7 @@ import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
 import { buildLaunch } from './domains/session/launch'
+import { classifyExit } from './domains/session/exit'
 import { useSessionSettle } from './domains/session/use-settle'
 import { buildHydration } from './infrastructure/persistence/hydrate'
 import { loadSnapshot } from './infrastructure/persistence/loaders'
@@ -331,8 +332,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const offExit = native.onSessionExit(e => {
       const agent = stateRef.current.agents.find(a => a.id === e.id)
       const userStopped = userStoppedRef.current.delete(e.id)
-      const failed = !userStopped && e.code !== 0 && e.code !== null
       const taskFor = taskForSession(e.id)
+      const cls = classifyExit({
+        code: e.code, userStopped, ephemeral: !!agent?.ephemeral,
+        autoArchive: !!agent?.autoArchive, hasTask: !!taskFor,
+      })
+      const { failed } = cls
       dispatch(s => {
         const withAgent = {
           ...s,
@@ -403,7 +408,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
               ? `This one-shot (ephemeral) agent exited with code ${e.code} before completing. Summarize what went wrong from the output and report to Master.`
               : 'This one-shot (ephemeral) agent finished its task and exited cleanly, as designed. Summarize what it did from the final output and report a digest to Master.')
           }
-          if (!failed && agent.autoArchive) {
+          if (cls.autoArchive) {
             // give the monitor a moment to read the final screen, then tidy up
             window.setTimeout(() => dispatch(s => ({
               ...s,
