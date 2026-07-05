@@ -27,6 +27,8 @@ export interface SessionActionsCtx {
   bumpSettle: (id: string) => void
   /** native PTY + terminal capability; defaults to the real IPC-backed port */
   port?: SessionProcessPort
+  /** application command registry entry point (routes the PTY write + policy) */
+  execCommand?: <R = unknown>(name: string, input: unknown, ctx: { actor: { kind: 'user' } }) => Promise<R>
 }
 
 export interface SessionActions {
@@ -41,7 +43,7 @@ export interface SessionActions {
 
 export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => createSessionActions(ctx), [ctx.stateRef, ctx.flash, ctx.logEvent, ctx.markUserStopped, ctx.disposeSessionRuntime, ctx.launchSession, ctx.probeCliSession, ctx.armResponseWatch, ctx.appendTail, ctx.clearNeeds, ctx.bumpSettle, ctx.port])
+  return useMemo(() => createSessionActions(ctx), [ctx.stateRef, ctx.flash, ctx.logEvent, ctx.markUserStopped, ctx.disposeSessionRuntime, ctx.launchSession, ctx.probeCliSession, ctx.armResponseWatch, ctx.appendTail, ctx.clearNeeds, ctx.bumpSettle, ctx.port, ctx.execCommand])
 }
 
 /** The session lifecycle actions as a plain factory (no React), so they can be
@@ -155,7 +157,11 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           ? { ...a, log: a.log.concat([{ t: 'you', x: text }]) }
           : a),
       }))
-      port.sendLine(id, text)
+      // route the PTY write through the command registry (user actor) so every
+      // caller shares one send path + policy; fall back to the port directly
+      // when no registry is wired (unit tests, standalone use)
+      if (ctx.execCommand) void ctx.execCommand('send_to_session', { sessionId: id, text }, { actor: { kind: 'user' } })
+      else port.sendLine(id, text)
     },
 
     stopSession: id => {

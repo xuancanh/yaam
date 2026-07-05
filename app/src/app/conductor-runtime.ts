@@ -24,6 +24,9 @@ import type { MasterSubsystem } from './runtime/master'
 import { createConductorActions } from './conductor-actions'
 import type { ConductorActionsDeps } from './conductor-actions'
 import type { ConductorActions } from './actions'
+import { createCommandRegistry } from './commands/registry'
+import { createDefaultPolicy } from './commands/policy'
+import { registerSessionCommands } from './commands/session-commands'
 
 /** Foundation the provider owns and shares with both the runtime and the actions. */
 export interface ConductorKernel {
@@ -36,8 +39,9 @@ export interface ConductorKernel {
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
 }
 
-/** Everything the action composition needs beyond the kernel. */
-export type ConductorRuntimeDeps = Omit<ConductorActionsDeps, keyof ConductorKernel>
+/** Everything the action composition needs beyond the kernel and the command
+ *  registry entry point (both supplied directly by createAppRuntime). */
+export type ConductorRuntimeDeps = Omit<ConductorActionsDeps, keyof ConductorKernel | 'execCommand'>
 
 /** Map the four subsystems + cycle refs into the runtime deps the actions need. */
 function assembleRuntimeDeps(
@@ -109,7 +113,19 @@ export function createAppRuntime(): AppRuntime {
   const chat = createChatBoot(kernel, refs, session)
   const master = createMasterSubsystem(kernel, refs, session, addon)
 
-  const actions = createConductorActions({ ...kernel, ...assembleRuntimeDeps(refs, session, addon, chat, master) })
+  // one command registry + policy governs use cases across actors (addons are
+  // gated by their granted capabilities; the UI/Master/watcher/chat are trusted)
+  const registry = createCommandRegistry(createDefaultPolicy(id => {
+    const a = stateRef.current.addons.find(x => x.id === id)
+    return a?.enabled ? a.granted : []
+  }))
+  registerSessionCommands(registry, { stateRef })
+
+  const actions = createConductorActions({
+    ...kernel,
+    ...assembleRuntimeDeps(refs, session, addon, chat, master),
+    execCommand: registry.execute,
+  })
 
   return {
     actions,

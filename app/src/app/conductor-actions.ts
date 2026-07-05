@@ -21,6 +21,7 @@ import { createSessionLayoutActions } from '../domains/session/layout-actions'
 import { createSessionConfigActions } from '../domains/session/config-actions'
 import { createMasterActions } from '../domains/master/actions'
 import { createSessionController } from '../domains/session/controller'
+import type { CommandRegistry } from './commands/registry'
 
 export interface ConductorActionsDeps {
   stateRef: MutableRefObject<AppState>
@@ -67,6 +68,8 @@ export interface ConductorActionsDeps {
   clearNeeds: (id: string) => void
   bumpSettle: (id: string) => void
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
+  // application command registry entry point (actor-scoped use cases + policy)
+  execCommand: CommandRegistry['execute']
 }
 
 /** Plain (non-React) composition of every domain action slice into the single
@@ -106,7 +109,7 @@ export function createConductorActions(d: ConductorActionsDeps): ConductorAction
       stateRef: d.stateRef, flash: d.flash, logEvent: d.logEvent, markUserStopped: d.markUserStopped,
       disposeSessionRuntime: d.disposeSessionRuntime, launchSession: d.launchSession, probeCliSession: d.probeCliSession,
       armResponseWatch: d.armResponseWatch, appendTail: d.appendTail, clearNeeds: d.clearNeeds, bumpSettle: d.bumpSettle,
-      clearFlagged: d.clearFlagged,
+      clearFlagged: d.clearFlagged, execCommand: d.execCommand,
     }),
   }
 }
