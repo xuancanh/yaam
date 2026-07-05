@@ -211,6 +211,15 @@ export function Workspace() {
   const inAnyGroup = new Set(s.groups.flatMap(g => g.slots).filter(Boolean))
   const looseTabs = wsAgents.filter(a => !inAnyGroup.has(a.id))
 
+  // With more than one tab in the bar, truncate the folder name so tabs stay a
+  // consistent size instead of each stretching to its full cwd length. The full
+  // path stays available in the tab's tooltip.
+  const truncateRepo = s.groups.length + looseTabs.length > 1
+  const repoStyle = {
+    fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' as const,
+    ...(truncateRepo ? { maxWidth: 52, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const, display: 'inline-block' as const } : {}),
+  }
+
   const tabDot = (a: Agent) => {
     const flash = a.status === 'needs' || a.attention
     return (
@@ -243,6 +252,7 @@ export function Workspace() {
                 <button
                   key={g.id}
                   className="tab-btn"
+                  title={a ? `${a.name} · ${a.repo}` : undefined}
                   onClick={() => (a ? focusTab(a.id) : activateGroup(g.id))}
                   style={{
                     background: activeG ? 'var(--panel2)' : 'transparent',
@@ -253,7 +263,7 @@ export function Workspace() {
                   <span style={{ fontSize: 12.5, fontWeight: 600, color: activeG ? 'var(--text)' : '#9AA3B2', whiteSpace: 'nowrap' }}>
                     {a?.name ?? `empty · ${g.slots.length} pane${g.slots.length > 1 ? 's' : ''}`}
                   </span>
-                  {a && <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>}
+                  {a && <span className="mono" style={repoStyle}>{a.repo}</span>}
                   {a && <StatusPill agent={a} small />}
                 </button>
               )
@@ -305,13 +315,13 @@ export function Workspace() {
             <button
               key={a.id}
               className="tab-btn"
-              title="Open this session"
+              title={`${a.name} · ${a.repo}`}
               onClick={() => focusTab(a.id)}
               style={{ background: 'transparent', borderTop: '2px solid transparent' }}
             >
               {tabDot(a)}
               <span style={{ fontSize: 12.5, fontWeight: 600, color: '#9AA3B2', whiteSpace: 'nowrap' }}>{a.name}</span>
-              <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap' }}>{a.repo}</span>
+              <span className="mono" style={repoStyle}>{a.repo}</span>
               <StatusPill agent={a} small />
             </button>
           ))}
