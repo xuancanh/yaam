@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { DIFF_BG, DIFF_COLORS, LOG_COLORS } from '../../core/data'
-import { gitDiff, isTauri, worktreeDiff } from '../../core/native'
+import { isTauri, worktreeDiff } from '../../core/native'
+import { multiRepoDiff } from '../../shared/git-repos'
 import type { Agent, DiffFile } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon } from '../../components/ui'
 
@@ -47,7 +48,10 @@ function DiffBody({ agent }: { agent: Agent }) {
         return repos.flatMap(r => parseUnifiedDiff(r.diff).map(f =>
           repos.length > 1 ? { ...f, file: `${r.name}/${f.file}` } : f))
       }
-      return parseUnifiedDiff(await gitDiff(agent.cwd!))
+      // plain sessions: the cwd may itself be a folder of repos
+      const repos = await multiRepoDiff(agent.cwd!)
+      return repos.flatMap(r => parseUnifiedDiff(r.diff).map(f =>
+        r.name ? { ...f, file: `${r.name}/${f.file}` } : f))
     }
     load().then(parsed => {
       if (!alive) return

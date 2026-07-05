@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { gitDiff, worktreeDiff } from '../../core/native'
+import { worktreeDiff } from '../../core/native'
+import { multiRepoDiff } from '../../shared/git-repos'
 import type { BoardTask } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 
@@ -64,8 +65,9 @@ export function ReviewPanel({ task, onClose }: { task: BoardTask; onClose: () =>
           const res = await worktreeDiff(worktree.root)
           if (live) setDiffs(res)
         } else if (task.cwd) {
-          const diff = await gitDiff(task.cwd)
-          if (live) setDiffs([{ name: task.cwd, diff }])
+          // the task folder may itself be a folder of repos — diff each one
+          const repos = await multiRepoDiff(task.cwd)
+          if (live) setDiffs(repos.map(r => ({ name: r.name || task.cwd!, diff: r.diff })))
         } else {
           if (live) setLoadErr('This task has no worktree and no working folder — nothing to diff.')
         }

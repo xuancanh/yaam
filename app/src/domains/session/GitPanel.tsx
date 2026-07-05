@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useActions, useConductorSelector } from '../../store'
 import {
-  gitCommit, gitFileDiffSide, gitStage, gitStatus, gitUnstage, listDir, readTextFile,
+  gitCommit, gitFileDiffSide, gitStage, gitStatus, gitUnstage, readTextFile,
 } from '../../core/native'
+import { detectRepoDirs } from '../../shared/git-repos'
 import type { GitStatusResult } from '../../core/native'
 import { buildCfg, callApi, hasCreds } from '../../llm/client'
 import type { Agent } from '../../core/types'
@@ -164,6 +165,11 @@ export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null)
   const [diff, setDiff] = useState('')
+  /** single = one file at a time · all = continuous scroll of every diff */
+  const [viewMode, setViewMode] = useState<'single' | 'all'>('single')
+  const [sections, setSections] = useState<{ key: string; path: string; staged: boolean; diff: string }[]>([])
+  const sectionRefs = useRef(new Map<string, HTMLDivElement>())
+  const diffScrollRef = useRef<HTMLDivElement>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [genBusy, setGenBusy] = useState(false)
@@ -183,45 +189,60 @@ export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void
   // resolve the repo (or, for a multi-repo worktree/folder cwd, the repo list)
   useEffect(() => {
     let live = true
-    const boot = async () => {
-      const base = agent.cwd ?? ''
-      try {
-        await gitStatus(base)
-        if (live) { setRepos([base]); setRepo(base); void refresh(base) }
-      } catch {
-        // cwd isn't a repo — offer its immediate repo subfolders (multi-repo workspace)
-        const entries = await listDir(base).catch(() => [])
-        const candidates: string[] = []
-        for (const e of entries.filter(x => x.isDir && x.name !== '.git').slice(0, 16)) {
-          try { await gitStatus(e.path); candidates.push(e.path) } catch { /* not a repo */ }
-        }
-        if (!live) return
-        setRepos(candidates)
-        if (candidates.length) { setRepo(candidates[0]); void refresh(candidates[0]) }
-        else setError('no git repository found in this session\'s working folder')
-      }
-    }
-    void boot()
+    void detectRepoDirs(agent.cwd ?? '').then(candidates => {
+      if (!live) return
+      setRepos(candidates)
+      if (candidates.length) { setRepo(candidates[0]); void refresh(candidates[0]) }
+      else setError('no git repository found in this session\'s working folder')
+    })
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent.id])
 
-  // load the selected file's diff (staged/unstaged side; untracked = whole file)
-  useEffect(() => {
-    if (!selected || !status) { setDiff(''); return }
-    let live = true
-    const load = async () => {
-      const abs = `${status.root}/${selected.path}`
-      const f = status.files.find(x => x.path === selected.path)
-      if (!selected.staged && f?.status === '??') {
-        const text = await readTextFile(abs).catch(() => '(binary or unreadable file)')
-        return `+++ ${selected.path} (untracked)\n${text.split('\n').slice(0, 800).map(l => `+${l}`).join('\n')}`
-      }
-      return await gitFileDiffSide(status.root, selected.path, selected.staged)
+  // one file's diff for its side; untracked files show their contents
+  const loadFileDiff = useCallback(async (st: GitStatusResult, path: string, staged: boolean): Promise<string> => {
+    const f = st.files.find(x => x.path === path)
+    if (!staged && f?.status === '??') {
+      const text = await readTextFile(`${st.root}/${path}`).catch(() => '(binary or unreadable file)')
+      return `+++ ${path} (untracked)\n${text.split('\n').slice(0, 800).map(l => `+${l}`).join('\n')}`
     }
-    load().then(d => { if (live) setDiff(d) }).catch(e => { if (live) setDiff(String(e)) })
+    return await gitFileDiffSide(st.root, path, staged)
+  }, [])
+
+  // single-file view: load the selected file's diff
+  useEffect(() => {
+    if (viewMode !== 'single' || !selected || !status) { setDiff(''); return }
+    let live = true
+    loadFileDiff(status, selected.path, selected.staged)
+      .then(d => { if (live) setDiff(d) })
+      .catch(e => { if (live) setDiff(String(e)) })
     return () => { live = false }
-  }, [selected, status])
+  }, [selected, status, viewMode, loadFileDiff])
+
+  // all-files view: load every diff (staged sections first) for continuous scroll
+  useEffect(() => {
+    if (viewMode !== 'all' || !status) { setSections([]); return }
+    let live = true
+    const wanted = [
+      ...status.files.filter(f => f.index !== ' ' && f.index !== '?').map(f => ({ path: f.path, staged: true })),
+      ...status.files.filter(f => f.work !== ' ').map(f => ({ path: f.path, staged: false })),
+    ]
+    void Promise.all(wanted.slice(0, 60).map(async w => ({
+      key: `${w.staged}:${w.path}`,
+      path: w.path,
+      staged: w.staged,
+      diff: await loadFileDiff(status, w.path, w.staged).catch(e => String(e)),
+    }))).then(secs => { if (live) setSections(secs) })
+    return () => { live = false }
+  }, [viewMode, status, loadFileDiff])
+
+  // in all-files view, picking a file on the left scrolls to its section
+  const selectFile = (f: FileRow) => {
+    setSelected({ path: f.path, staged: f.staged })
+    if (viewMode === 'all') {
+      sectionRefs.current.get(`${f.staged}:${f.path}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
 
   const files = status?.files ?? []
   const stagedFiles: FileRow[] = files.filter(f => f.index !== ' ' && f.index !== '?').map(f => ({ path: f.path, status: f.index, staged: true }))
@@ -311,6 +332,16 @@ export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void
               {repos.map(r => <option key={r} value={r}>{repoName(r)}</option>)}
             </select>
           )}
+          <button
+            className="icon-btn"
+            title={viewMode === 'single' ? 'Single-file view — click for a continuous scroll of all diffs' : 'All-files view — click for one file at a time'}
+            onClick={() => setViewMode(m => (m === 'single' ? 'all' : 'single'))}
+            style={{ width: 26, height: 26, borderRadius: 7, color: viewMode === 'all' ? 'var(--accent)' : undefined }}
+          >
+            {viewMode === 'all'
+              ? <Icon paths={['M4 5h16', 'M4 9h16', 'M4 13h16', 'M4 17h16']} size={13} stroke={1.8} />
+              : <Icon paths={['M5 4h14v16H5z', 'M9 9h6', 'M9 13h6']} size={13} stroke={1.7} />}
+          </button>
           <button className="icon-btn" title="Refresh status" onClick={() => { void refresh() }} style={{ width: 26, height: 26, borderRadius: 7 }}>
             <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={13} stroke={1.8} />
           </button>
@@ -332,7 +363,7 @@ export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void
                       onBulk={() => { void act(() => gitUnstage(status!.root, stagedFiles.map(f => f.path))) }}
                       selectedPath={selected?.path ?? null}
                       selectedStaged={selected?.staged ?? false}
-                      onSelect={f => setSelected({ path: f.path, staged: true })}
+                      onSelect={selectFile}
                       onToggle={f => { void toggle(f) }}
                     />
                     <div style={{ borderTop: '1px solid var(--line-soft)', margin: '4px 0' }} />
@@ -343,7 +374,7 @@ export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void
                       onBulk={() => { void act(() => gitStage(status!.root, unstagedFiles.map(f => f.path))) }}
                       selectedPath={selected?.path ?? null}
                       selectedStaged={selected?.staged ?? true}
-                      onSelect={f => setSelected({ path: f.path, staged: false })}
+                      onSelect={selectFile}
                       onToggle={f => { void toggle(f) }}
                     />
                   </>}
@@ -385,13 +416,42 @@ export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void
             </div>
           </div>
 
-          <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', background: 'var(--bg3)' }}>
-            {selected && (
-              <div className="mono" style={{ position: 'sticky', top: 0, padding: '7px 14px', fontSize: 11, fontWeight: 600, color: 'var(--text2)', background: 'var(--panel2)', borderBottom: '1px solid var(--line)' }}>
-                {selected.path} <span style={{ color: 'var(--dim)', fontWeight: 400 }}>· {selected.staged ? 'staged' : 'unstaged'}</span>
-              </div>
+          <div ref={diffScrollRef} style={{ flex: 1, minWidth: 0, overflowY: 'auto', background: 'var(--bg3)' }}>
+            {viewMode === 'single' ? (
+              <>
+                {selected && (
+                  <div className="mono" style={{ position: 'sticky', top: 0, padding: '7px 14px', fontSize: 11, fontWeight: 600, color: 'var(--text2)', background: 'var(--panel2)', borderBottom: '1px solid var(--line)' }}>
+                    {selected.path} <span style={{ color: 'var(--dim)', fontWeight: 400 }}>· {selected.staged ? 'staged' : 'unstaged'}</span>
+                  </div>
+                )}
+                <DiffView diff={diff} />
+              </>
+            ) : sections.length ? (
+              sections.map(sec => (
+                <div
+                  key={sec.key}
+                  ref={el => {
+                    if (el) sectionRefs.current.set(sec.key, el)
+                    else sectionRefs.current.delete(sec.key)
+                  }}
+                >
+                  <div
+                    className="mono"
+                    onClick={() => setSelected({ path: sec.path, staged: sec.staged })}
+                    style={{
+                      position: 'sticky', top: 0, zIndex: 2, padding: '7px 14px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                      color: selected?.path === sec.path && selected?.staged === sec.staged ? 'var(--accent)' : 'var(--text2)',
+                      background: 'var(--panel2)', borderBottom: '1px solid var(--line)', borderTop: '1px solid var(--line)',
+                    }}
+                  >
+                    {sec.path} <span style={{ color: sec.staged ? 'var(--green)' : 'var(--amber)', fontWeight: 400 }}>· {sec.staged ? 'staged' : 'unstaged'}</span>
+                  </div>
+                  <DiffView diff={sec.diff} />
+                </div>
+              ))
+            ) : (
+              <div style={{ padding: 16, fontSize: 12, color: 'var(--dim)' }}>no changes</div>
             )}
-            <DiffView diff={diff} />
           </div>
         </div>
       </div>
