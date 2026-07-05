@@ -51,11 +51,24 @@
 >   (cancellation-on-delete: dispose aborts the in-flight LLM turn and the loop
 >   unwinds). schema test asserts `bootStatus` is never persisted.
 >
-> **All numbered findings from this review are now addressed.** The remaining
-> forward-looking work is the doc's larger target architecture (the non-React
-> `AppRuntime`/`AppCoordinator` in the sections below), which is a separate
-> initiative from closing out these findings. The original review text below is
-> preserved for that architecture.
+> **All numbered findings from this review are now addressed**, **and the target
+> "non-React application runtime" (below) is now delivered:** `createAppRuntime()`
+> (`app/conductor-runtime.ts`) builds the foundation kernel (store-mirrored
+> stateRef, ClockPort-backed timers, activity service), the four domain subsystems
+> (session/addon/chat/master) as plain factories cross-wired through plain cycle
+> refs, and the composed action surface via `createConductorActions` — returning
+> `{ actions, start, dispose }`. `ConductorProvider` is now just
+> `createAppRuntime()` + `useEffect(start/dispose)`. State mirroring, timers,
+> subscriptions, the scheduler, settle, search indexing, and the hydration boot all
+> run outside React with an explicit lifecycle; every runtime + action slice has a
+> `createX` factory (the `useX` hooks remain as thin adapters). Domain runtimes
+> gained fake-clock/fake-store tests via `core/ports.fakes.ts`.
+>
+> The doc's `StatePort`/`ClockPort` seam is `core/ports.ts`. Remaining polish (not
+> blocking): retire the now-unused `useConductorRuntime`/`useConductorActions` hook
+> path once nothing imports it. Broader system rework continues in
+> `docs/rearchitecture-hotspots.md`. The original target-architecture text is
+> preserved below.
 
 Reviewed on 2026-07-04 against commit `c8f6981` plus the active selector-migration
 changes in the working tree.
