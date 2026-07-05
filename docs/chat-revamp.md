@@ -169,3 +169,25 @@ Feature-by-feature assessment:
 Risks / constraints: other sessions are active in `domains/addons/*` and Rust
 security hotspots — keep Rust additions to new modules + minimal `lib.rs`
 registration; commit per cut with explicit paths.
+
+## Status (2026-07-05)
+
+All cuts shipped:
+
+1. ✅ Chat UX core — stop, slash menu (skills + /clear /export), copy/retry, send queue.
+2. ✅ File import — drag & drop + paperclip, docx/xlsx/pptx/PDF extraction
+   (`shared/zip.ts`, `shared/filetext.ts`), vision blocks, `read_file_b64` (Rust).
+3. ✅ Files panel in chat + rich viewer (images, PDF, office) in `FilesPane`.
+4. ✅ MCP marketplace + import (`settings/mcp-market.ts`): curated catalog,
+   Claude Desktop / Claude Code / Cursor / Windsurf / Codex config scan.
+5. ✅ stdio MCP transport (`src-tauri/domains/mcp.rs` + `core/mcp.ts` switch).
+6. ✅ `.mcpb`/`.dxt` bundle install (unpack → manifest → stdio server).
+7. ✅ ask/auto permission mode with inline Allow/Deny approval bubbles.
+8. ✅ Expanded tool set — glob/grep, file management, web_search/fetch_url/
+   http_request, run_applescript, board/schedule tools, save_skill,
+   multi-path read_file; seeded deep-research skill.
+
+Known v1 limits: image attachments stay in the API history for the life of the
+capped window (token cost on long chats); PDF extraction is best-effort (no
+OCR); stdio MCP requests serialize per server; stale approval bubbles from a
+previous app run render as "expired".
