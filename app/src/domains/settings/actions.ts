@@ -5,6 +5,7 @@
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AppState, ChatAgentType, McpServer, Persona, Skill, SkillRegistry } from '../../core/types'
+import { mcpDisconnect } from '../../core/mcp'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import { mkId } from '../../shared/id'
@@ -21,8 +22,8 @@ export interface SettingsActionsCtx {
 
 export interface SettingsActions {
   toggleAgentType: (id: string) => void
-  addMcpServer: (name: string, url: string, headers?: string) => void
-  updateMcpServer: (id: string, patch: Partial<Pick<McpServer, 'name' | 'url' | 'headers' | 'enabled'>>) => void
+  addMcpServer: (name: string, url: string, headers?: string, extra?: Partial<Pick<McpServer, 'transport' | 'command' | 'args' | 'env' | 'cwd'>>) => void
+  updateMcpServer: (id: string, patch: Partial<Pick<McpServer, 'name' | 'url' | 'headers' | 'enabled' | 'transport' | 'command' | 'args' | 'env' | 'cwd'>>) => void
   removeMcpServer: (id: string) => void
   connectMcpServer: (id: string) => Promise<string>
   addSkill: () => string
@@ -61,12 +62,13 @@ export function createSettingsActions(ctx: SettingsActionsCtx): SettingsActions 
       agentTypes: s.agentTypes.map(x => (x.id === id ? { ...x, enabled: !x.enabled } : x)),
     })),
 
-    addMcpServer: (name, url, headers) => {
+    addMcpServer: (name, url, headers, extra) => {
       const id = mkId('mcp')
       dispatch(s => ({
         ...s,
         mcpServers: s.mcpServers.concat([{
-          id, name: name.trim() || url.trim(), url: url.trim(), headers: headers?.trim() || undefined, enabled: true,
+          id, name: name.trim() || url.trim() || extra?.command || 'mcp', url: url.trim(),
+          headers: headers?.trim() || undefined, enabled: true, ...extra,
         }]),
       }))
       later(50, () => { void ctx.connectMcp(id) })
@@ -77,11 +79,19 @@ export function createSettingsActions(ctx: SettingsActionsCtx): SettingsActions 
         ...s,
         mcpServers: s.mcpServers.map(x => (x.id === id ? { ...x, ...patch } : x)),
       }))
-      if (patch.url !== undefined || patch.headers !== undefined || patch.enabled === true) later(50, () => { void ctx.connectMcp(id) })
-      if (patch.enabled === false) ctx.mcpSessions.current.delete(id)
+      const reconnect = patch.url !== undefined || patch.headers !== undefined || patch.enabled === true
+        || patch.command !== undefined || patch.args !== undefined || patch.env !== undefined
+      if (reconnect) later(50, () => { void ctx.connectMcp(id) })
+      if (patch.enabled === false) {
+        const session = ctx.mcpSessions.current.get(id)
+        if (session) void mcpDisconnect(session) // stop the stdio process, not just the cache entry
+        ctx.mcpSessions.current.delete(id)
+      }
     },
 
     removeMcpServer: id => {
+      const session = ctx.mcpSessions.current.get(id)
+      if (session) void mcpDisconnect(session)
       ctx.mcpSessions.current.delete(id)
       dispatch(s => ({ ...s, mcpServers: s.mcpServers.filter(x => x.id !== id) }))
     },

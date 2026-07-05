@@ -258,14 +258,25 @@ export interface AgentType {
   probe?: 'claude' | 'codex'
 }
 
-/** a streamable-HTTP MCP server chat agents can call tools on */
+/** an MCP server chat agents can call tools on — streamable HTTP or a local
+ *  stdio process (the transport most published servers use) */
 export interface McpServer {
   id: string
   name: string
-  /** http(s) endpoint implementing MCP streamable HTTP */
+  /** http(s) endpoint implementing MCP streamable HTTP (http transport) */
   url: string
   /** extra request headers, one "KEY: value" per line (auth tokens etc.) */
   headers?: string
+  /** transport; absent = 'http' (pre-stdio servers) */
+  transport?: 'http' | 'stdio'
+  /** stdio: executable to spawn (npx, uvx, node, a binary…) */
+  command?: string
+  /** stdio: arguments */
+  args?: string[]
+  /** stdio: environment, one "KEY=value" per line */
+  env?: string
+  /** stdio: working directory (e.g. an unpacked .mcpb bundle dir) */
+  cwd?: string
   enabled: boolean
   /** last successful connection's tool count */
   toolCount?: number

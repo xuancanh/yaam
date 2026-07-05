@@ -1,7 +1,9 @@
-// Minimal MCP client over streamable HTTP: JSON-RPC POSTs to the server URL,
-// accepting plain-JSON and SSE-framed responses. Covers what chat agents
-// need — initialize, tools/list, tools/call — with per-server headers.
-import { httpPostText } from './native'
+// Minimal MCP client over two transports: streamable HTTP (JSON-RPC POSTs,
+// accepting plain-JSON and SSE-framed responses) and stdio (a local server
+// process owned by the Rust backend). Covers what chat agents need —
+// initialize, tools/list, tools/call — with per-server headers/env.
+import { httpPostText, mcpStdioNotify, mcpStdioRequest, mcpStdioStart, mcpStdioStop } from './native'
+import type { McpServer } from './types'
 
 export interface McpToolDef {
   name: string
@@ -11,6 +13,9 @@ export interface McpToolDef {
 }
 
 export interface McpSession {
+  transport: 'http' | 'stdio'
+  /** server id — the stdio process key in the backend */
+  serverId: string
   url: string
   headers: Record<string, string>
   sessionId: string | null
@@ -23,6 +28,16 @@ export function parseHeaderLines(text?: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const line of (text ?? '').split('\n')) {
     const i = line.indexOf(':')
+    if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+  }
+  return out
+}
+
+/** "KEY=value" lines → env map. */
+export function parseEnvLines(text?: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of (text ?? '').split('\n')) {
+    const i = line.indexOf('=')
     if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim()
   }
   return out
@@ -55,11 +70,19 @@ function parseRpcBody(text: string, contentType: string, id: number): RpcRespons
 
 let rpcId = 0
 
-/** One JSON-RPC call (or fire-and-forget notification when method starts with "notifications/"). */
-async function rpc(s: Pick<McpSession, 'url' | 'headers' | 'sessionId'>, method: string, params?: unknown): Promise<unknown> {
+/** One JSON-RPC call (or fire-and-forget notification when method starts with
+ *  "notifications/") over the session's transport. */
+async function rpc(s: Pick<McpSession, 'transport' | 'serverId' | 'url' | 'headers' | 'sessionId'>, method: string, params?: unknown): Promise<unknown> {
   const isNotification = method.startsWith('notifications/')
   const id = ++rpcId
   const body = JSON.stringify({ jsonrpc: '2.0', method, ...(params !== undefined ? { params } : {}), ...(isNotification ? {} : { id }) })
+  if (s.transport === 'stdio') {
+    if (isNotification) { await mcpStdioNotify(s.serverId, body); return undefined }
+    const line = await mcpStdioRequest(s.serverId, body, 60_000)
+    const res = JSON.parse(line) as RpcResponse
+    if (res.error) throw new Error(res.error.message || `MCP error ${res.error.code}`)
+    return res.result
+  }
   const { text, contentType } = await httpPostText(s.url, body, {
     'content-type': 'application/json',
     accept: 'application/json, text/event-stream',
@@ -73,28 +96,14 @@ async function rpc(s: Pick<McpSession, 'url' | 'headers' | 'sessionId'>, method:
   return res.result
 }
 
-/** Connect to a streamable-HTTP MCP server: initialize + list its tools. */
-export async function mcpConnect(serverName: string, url: string, headerLines?: string): Promise<McpSession> {
-  const headers = parseHeaderLines(headerLines)
-  const id = ++rpcId
-  const initBody = JSON.stringify({
-    jsonrpc: '2.0', id,
-    method: 'initialize',
-    params: {
-      protocolVersion: '2025-03-26',
-      capabilities: {},
-      clientInfo: { name: 'yaam', version: '1.0' },
-    },
-  })
-  const { text, contentType, mcpSessionId } = await httpPostText(url, initBody, {
-    'content-type': 'application/json',
-    accept: 'application/json, text/event-stream',
-    ...headers,
-  })
-  const init = parseRpcBody(text, contentType, id)
-  if (!init) throw new Error('server sent no initialize response')
-  if (init.error) throw new Error(init.error.message || 'initialize failed')
-  const session: McpSession = { url, headers, sessionId: mcpSessionId, tools: [], serverName }
+const INIT_PARAMS = {
+  protocolVersion: '2025-03-26',
+  capabilities: {},
+  clientInfo: { name: 'yaam', version: '1.0' },
+}
+
+/** After initialize: announce readiness and pull the tool list. */
+async function finishConnect(session: McpSession): Promise<McpSession> {
   await rpc(session, 'notifications/initialized').catch(() => { /* some servers reject notifications; not fatal */ })
   const listed = await rpc(session, 'tools/list') as { tools?: { name: string; description?: string; inputSchema?: Record<string, unknown> }[] }
   session.tools = (listed?.tools ?? []).map(t => ({
@@ -103,6 +112,39 @@ export async function mcpConnect(serverName: string, url: string, headerLines?: 
     inputSchema: t.inputSchema ?? { type: 'object', properties: {} },
   }))
   return session
+}
+
+/** Connect one configured MCP server (http or stdio): initialize + list tools. */
+export async function mcpConnect(server: Pick<McpServer, 'id' | 'name' | 'url' | 'headers' | 'transport' | 'command' | 'args' | 'env' | 'cwd'>): Promise<McpSession> {
+  if (server.transport === 'stdio') {
+    if (!server.command?.trim()) throw new Error('stdio server needs a command')
+    await mcpStdioStart(server.id, server.command.trim(), server.args ?? [], parseEnvLines(server.env), server.cwd)
+    const session: McpSession = { transport: 'stdio', serverId: server.id, url: '', headers: {}, sessionId: null, tools: [], serverName: server.name }
+    const init = await rpc(session, 'initialize', INIT_PARAMS).catch(async e => {
+      await mcpStdioStop(server.id).catch(() => {})
+      throw e
+    })
+    if (init === undefined) throw new Error('server sent no initialize response')
+    return await finishConnect(session)
+  }
+  const headers = parseHeaderLines(server.headers)
+  const id = ++rpcId
+  const initBody = JSON.stringify({ jsonrpc: '2.0', id, method: 'initialize', params: INIT_PARAMS })
+  const { text, contentType, mcpSessionId } = await httpPostText(server.url, initBody, {
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+    ...headers,
+  })
+  const init = parseRpcBody(text, contentType, id)
+  if (!init) throw new Error('server sent no initialize response')
+  if (init.error) throw new Error(init.error.message || 'initialize failed')
+  const session: McpSession = { transport: 'http', serverId: server.id, url: server.url, headers, sessionId: mcpSessionId, tools: [], serverName: server.name }
+  return await finishConnect(session)
+}
+
+/** Tear a session down (stops the stdio process; http sessions just drop). */
+export async function mcpDisconnect(session: McpSession): Promise<void> {
+  if (session.transport === 'stdio') await mcpStdioStop(session.serverId).catch(() => {})
 }
 
 /** Call one MCP tool; flattens the content blocks into text for the LLM. */

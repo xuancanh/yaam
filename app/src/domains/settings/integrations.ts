@@ -7,7 +7,7 @@ import type { MutableRefObject } from 'react'
 import type { AppState } from '../../core/types'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
-import { mcpConnect } from '../../core/mcp'
+import { mcpConnect, mcpDisconnect } from '../../core/mcp'
 import { fetchSkillRegistry } from '../../core/skills'
 import { dispatch } from '../../core/store'
 import type { StatePort } from '../../core/ports'
@@ -33,7 +33,9 @@ export function createIntegrationRuntime(state: StatePort): IntegrationRuntime {
     const server = state.get().mcpServers.find(x => x.id === id)
     if (!server) return 'server not found'
     try {
-      const session = await mcpConnect(server.name, server.url, server.headers)
+      const prev = mcpSessions.current.get(id)
+      if (prev) await mcpDisconnect(prev) // reconnect must not leak a stdio process
+      const session = await mcpConnect(server)
       mcpSessions.current.set(id, session)
       state.update(s => ({
         ...s,

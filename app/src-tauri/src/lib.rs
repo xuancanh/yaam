@@ -5,6 +5,7 @@ mod setup;
 mod util;
 
 use domains::bedrock::BedrockState;
+use domains::mcp::McpManager;
 use domains::search::ChatSearchState;
 use domains::session::SessionManager;
 use tauri::{Emitter, WindowEvent};
@@ -27,6 +28,7 @@ pub fn run() {
         .manage(SessionManager::default())
         .manage(BedrockState::default())
         .manage(ChatSearchState::default())
+        .manage(McpManager::default())
         .invoke_handler(tauri::generate_handler![
             domains::session::spawn_session,
             domains::session::write_session,
@@ -51,6 +53,10 @@ pub fn run() {
             domains::state::save_session,
             domains::state::remove_session,
             domains::state::load_sessions,
+            domains::mcp::mcp_stdio_start,
+            domains::mcp::mcp_stdio_request,
+            domains::mcp::mcp_stdio_notify,
+            domains::mcp::mcp_stdio_stop,
             domains::search::chat_search_reindex,
             domains::search::chat_search,
             domains::bedrock::bedrock_invoke,
