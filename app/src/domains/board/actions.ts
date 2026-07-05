@@ -45,6 +45,10 @@ export interface BoardActions {
   sendTaskChat: (taskId: string, text: string) => void
   draftTask: (input: { title: string; description: string; criteria: string[] }) => Promise<TaskSpecDraft | null>
   renameTask: (id: string, title: string) => void
+  /** archive = the default "delete": leaves the board, recoverable from the
+   *  Archived viewer (the only place hard deletion is offered) */
+  archiveTask: (id: string) => void
+  restoreTask: (id: string) => void
   deleteTask: (id: string) => void
   scheduleTask: (taskId: string, at: number | null, templateId?: string | null) => void
   approveDiff: (id: string) => void
@@ -154,6 +158,20 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
       ...s,
       tasks: s.tasks.map(t => (t.id === id ? { ...t, title: title.trim() || t.title } : t)),
     })),
+    archiveTask: id => {
+      ctx.disposeWatcher(id) // stop the watcher; the task itself stays recoverable
+      for (const [sessionId, binding] of ctx.taskSessions.current) {
+        if (binding.taskId === id) ctx.taskSessions.current.delete(sessionId)
+      }
+      dispatch(s => ({ ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, archived: true, awaitingUser: false } : t)) }))
+      ctx.flash('Task archived — restore or delete it from Archived')
+    },
+
+    restoreTask: id => {
+      dispatch(s => ({ ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, archived: false } : t)) }))
+      ctx.flash('Task restored')
+    },
+
     deleteTask: id => {
       ctx.disposeWatcher(id) // cancel any in-flight watcher turn + drop its registries
       for (const [sessionId, binding] of ctx.taskSessions.current) {

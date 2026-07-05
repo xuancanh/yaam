@@ -6,6 +6,7 @@ import { AddonSource } from './AddonSource'
 import { addonSnapshot } from '../../core/addons'
 import type { Addon } from '../../core/types'
 import { IC, Icon, MasterMark, ViewHeader } from '../../components/ui'
+import { confirmAction } from '../../components/Confirm'
 
 /** Host the scoped LLM customization conversation for one addon package. */
 function AddonChat({ addon }: { addon: Addon }) {
@@ -169,7 +170,7 @@ export function AddonView() {
           className="icon-btn danger"
           title="Remove addon"
           style={{ width: 28, height: 28 }}
-          onClick={() => removeAddon(addon.id)}
+          onClick={() => { void confirmAction({ title: `Uninstall addon “${addon.name.slice(0, 40)}”?`, detail: 'Removes the addon, its tools, hooks, and stored data. Reinstalling starts fresh.', confirmLabel: 'Uninstall' }).then(ok => { if (ok) removeAddon(addon.id) }) }}
         >
           <Icon paths={IC.close} size={14} stroke={1.8} />
         </button>

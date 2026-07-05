@@ -3,6 +3,7 @@ import { useConductorSelector, shallowEqual, useActions } from '../../store'
 import { buildTemplateCommand } from './template-command'
 import type { AgentTemplate, TemplateApproval, TemplateMode } from '../../core/types'
 import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
+import { confirmAction } from '../../components/Confirm'
 
 const FIELD_STYLE = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
@@ -188,7 +189,7 @@ function TemplateCard({ tpl, onEdit }: { tpl: AgentTemplate; onEdit: () => void 
         <button className="icon-btn" title="Edit template" style={{ width: 24, height: 24, borderRadius: 6 }} onClick={e => { e.stopPropagation(); onEdit() }}>
           <Icon paths={['M12 20h9', 'M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z']} size={12} stroke={1.8} />
         </button>
-        <button className="icon-btn danger" title="Delete template" style={{ width: 24, height: 24, borderRadius: 6 }} onClick={e => { e.stopPropagation(); deleteTemplate(tpl.id) }}>
+        <button className="icon-btn danger" title="Delete template" style={{ width: 24, height: 24, borderRadius: 6 }} onClick={e => { e.stopPropagation(); void confirmAction({ title: `Delete template “${tpl.name.slice(0, 40)}”?`, detail: 'Tasks and schedules using it fall back to the default agent type. This cannot be undone.' }).then(ok => { if (ok) deleteTemplate(tpl.id) }) }}>
           <Icon paths={IC.close} size={11} stroke={2} />
         </button>
       </div>

@@ -4,6 +4,7 @@ import { httpGetText, readTextFile } from '../../core/native'
 import { ALL_PERMISSIONS } from '../../core/addons'
 import type { Addon } from '../../core/types'
 import { IC, Icon, Switch, ViewHeader } from '../../components/ui'
+import { confirmAction } from '../../components/Confirm'
 
 // VS-Code-marketplace-style addon manager: sidebar (installed + market from
 // every configured registry + registry management), detail pane, AI generator.
@@ -136,7 +137,7 @@ function InstalledDetail({ a }: { a: Addon }) {
       <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
         {a.html && <button className="approve-btn" style={{ padding: '8px 18px' }} onClick={() => openAddon(a.id)}>Open tab</button>}
         <button className="open-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => exportAddon(a.id)}>Export .yaam.json</button>
-        <button className="deny-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => removeAddon(a.id)}>Uninstall</button>
+        <button className="deny-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => { void confirmAction({ title: `Uninstall addon “${a.name.slice(0, 40)}”?`, detail: 'Removes the addon, its tools, hooks, and stored data. Reinstalling starts fresh.', confirmLabel: 'Uninstall' }).then(ok => { if (ok) removeAddon(a.id) }) }}>Uninstall</button>
       </div>
       <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.5, marginTop: 18 }}>
         ⚠ Tools, hooks, and agents run with app privileges (bounded by the granted scopes above). Views stay sandboxed.

@@ -6,6 +6,7 @@ import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
 import { availableCatalog, installMcpb, scanImportableMcpServers } from './mcp-market'
 import type { McpCandidate } from './mcp-market'
+import { confirmAction } from '../../components/Confirm'
 
 /** One configured MCP server row: status, connect, enable, remove, and an
  *  expandable editor (stdio command/env/cwd or http url/headers). */
@@ -36,7 +37,7 @@ function McpServerRow({ m }: { m: import('../../core/types').McpServer }) {
           {m.toolCount !== undefined ? 'Reconnect' : 'Connect'}
         </button>
         <Switch on={m.enabled} onToggle={() => updateMcpServer(m.id, { enabled: !m.enabled })} />
-        <button className="icon-btn danger" title="Remove server" style={{ width: 26, height: 26 }} onClick={() => removeMcpServer(m.id)}>
+        <button className="icon-btn danger" title="Remove server" style={{ width: 26, height: 26 }} onClick={() => { void confirmAction({ title: `Remove MCP server “${m.name.slice(0, 40)}”?`, detail: 'Stops the server and removes its configuration (including credentials in its env/headers).' }).then(ok => { if (ok) removeMcpServer(m.id) }) }}>
           <Icon paths={IC.close} size={12} stroke={2} />
         </button>
       </div>

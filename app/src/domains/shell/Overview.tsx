@@ -2,6 +2,7 @@ import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { formatEstimatedTokens } from '../../core/usage'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from '../../components/ui'
 import { UsageSummary } from './UsageSummary'
+import { confirmAction } from '../../components/Confirm'
 
 /** Compact inline token/cost readout with a slim budget bar for one agent row. */
 function InlineUsage({ agent }: { agent: { used: number; cost: number; budget: number; color: string } }) {
@@ -124,7 +125,7 @@ export function Overview() {
                     {formatEstimatedTokens(a.used)} · ${a.cost.toFixed(2)}
                   </span>
                   <button className="open-btn" style={{ flex: 'none', padding: '5px 12px' }} onClick={() => unarchiveSession(a.id)}>Restore</button>
-                  <button className="icon-btn danger" title="Delete permanently" style={{ width: 28, height: 28 }} onClick={() => deleteSession(a.id)}>
+                  <button className="icon-btn danger" title="Delete permanently" style={{ width: 28, height: 28 }} onClick={() => { void confirmAction({ title: `Delete session “${a.name.slice(0, 40)}”?`, detail: 'Permanently removes the session, its terminal history, and resume data. This cannot be undone.' }).then(ok => { if (ok) deleteSession(a.id) }) }}>
                     <Icon paths={IC.close} size={13} stroke={1.8} />
                   </button>
                 </div>

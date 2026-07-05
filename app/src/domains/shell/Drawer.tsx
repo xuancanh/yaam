@@ -4,6 +4,7 @@ import { LOG_COLORS } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon } from '../../components/ui'
 import { GitWorkbench } from '../session/GitPanel'
+import { confirmAction } from '../../components/Confirm'
 
 /** Review actions under the shared git workbench: a feedback chatbox that
  *  types straight into the session's terminal, worktree merge-back (real git)
@@ -158,7 +159,7 @@ function AgentBody({ agent }: { agent: Agent }) {
         <button
           className="deny-btn"
           style={{ padding: 10, fontSize: 13, borderRadius: 9, color: 'var(--red-soft)', borderColor: 'rgba(255,92,92,.4)' }}
-          onClick={() => deleteSession(agent.id)}
+          onClick={() => { void confirmAction({ title: `Delete session “${agent.name.slice(0, 40)}”?`, detail: 'Permanently removes the session, its terminal history, and resume data. This cannot be undone.' }).then(ok => { if (ok) deleteSession(agent.id) }) }}
         >
           Delete
         </button>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { NOTIF_COLORS, hexToRgba } from '../../core/data'
 import { EditableName, IC, Icon, MasterMark } from '../../components/ui'
+import { confirmAction } from '../../components/Confirm'
 
 /** Switch, create, rename, and delete workspace-scoped state pools. */
 function WorkspaceSwitcher() {
@@ -57,7 +58,7 @@ function WorkspaceSwitcher() {
                     className="icon-btn danger"
                     title="Delete workspace (kills its sessions)"
                     style={{ width: 20, height: 20, borderRadius: 5 }}
-                    onClick={e => { e.stopPropagation(); deleteWorkspace(w.id) }}
+                    onClick={e => { e.stopPropagation(); void confirmAction({ title: `Delete workspace “${w.name.slice(0, 40)}”?`, detail: 'Removes the workspace with its sessions, tasks, schedules, and chats. This cannot be undone.' }).then(ok => { if (ok) deleteWorkspace(w.id) }) }}
                   >
                     <Icon paths={IC.close} size={10} stroke={2} />
                   </button>

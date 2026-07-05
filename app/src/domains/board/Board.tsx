@@ -8,6 +8,7 @@ import { Markdown } from '../../components/Markdown'
 import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from './TaskSpecForm'
 import { ReviewPanel } from './ReviewPanel'
 import { GitWorkbench } from '../session/GitPanel'
+import { confirmAction } from '../../components/Confirm'
 
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
@@ -172,7 +173,7 @@ function TaskReviewFooter({ task, onClose }: { task: BoardTask; onClose: () => v
 
 function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | null; onClose: () => void }) {
   const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes, agents: x.agents }), shallowEqual)
-  const { updateTask, sendTaskChat, focusTab, startTask, restartTask, deleteTask } = useActions()
+  const { updateTask, sendTaskChat, focusTab, startTask, restartTask, archiveTask } = useActions()
   const [view, setView] = useState<'chat' | 'review'>('chat')
   // the task's worktree, if any of its sessions ran isolated
   const worktree = (task.agentIds ?? [])
@@ -267,7 +268,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
           >
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={13} stroke={1.7} />
           </button>
-          <button className="icon-btn danger" title="Delete task" style={{ width: 26, height: 26, borderRadius: 7 }} onClick={() => { deleteTask(task.id); onClose() }}>
+          <button className="icon-btn danger" title="Archive task (recoverable — delete lives in the Archived viewer)" style={{ width: 26, height: 26, borderRadius: 7 }} onClick={() => { archiveTask(task.id); onClose() }}>
             <Icon paths={IC.close} size={12} stroke={1.8} />
           </button>
           <button className="icon-btn" title="Close" style={{ width: 26, height: 26, borderRadius: 7 }} onClick={onClose}>
@@ -369,6 +370,59 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
   )
 }
 
+// ---------- archived tasks: restore, or the ONLY place to hard-delete ----------
+
+function ArchivedTasks({ onClose }: { onClose: () => void }) {
+  const s = useConductorSelector(x => ({ tasks: x.tasks }), shallowEqual)
+  const { restoreTask, deleteTask } = useActions()
+  const archived = s.tasks.filter(t => t.archived)
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.55)', zIndex: 46, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '12vh' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 560, maxWidth: '94vw', maxHeight: '72vh', display: 'flex', flexDirection: 'column', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 15, boxShadow: '0 26px 70px rgba(0,0,0,.6)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '14px 18px', borderBottom: '1px solid var(--line)' }}>
+          <span className="grotesk" style={{ fontSize: 14.5, fontWeight: 600, flex: 1 }}>Archived tasks</span>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--mut)' }}>{archived.length}</span>
+          <button className="icon-btn" style={{ width: 26, height: 26, borderRadius: 7 }} onClick={onClose}>
+            <Icon paths={IC.close} size={12} stroke={2} />
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '6px 12px 12px' }}>
+          {archived.length === 0 && (
+            <div style={{ padding: '22px 8px', fontSize: 12, color: 'var(--dim)', textAlign: 'center', lineHeight: 1.6 }}>
+              Nothing here — archiving a task (the ✕ on a card, or the drawer) moves it into this list.
+            </div>
+          )}
+          {archived.map(t => (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 6px', borderBottom: '1px solid var(--line-soft)' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.title}</div>
+                <div className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>
+                  was in {t.col}{t.cwd ? ` · ${t.cwd}` : ''}
+                </div>
+              </div>
+              <button className="open-btn" style={{ flex: 'none', padding: '5px 12px', fontSize: 11.5 }} onClick={() => restoreTask(t.id)}>
+                Restore
+              </button>
+              <button
+                className="deny-btn"
+                style={{ flex: 'none', padding: '5px 12px', fontSize: 11.5, color: 'var(--red-soft)', borderColor: 'rgba(255,92,92,.4)' }}
+                onClick={() => {
+                  void confirmAction({
+                    title: `Delete “${t.title.slice(0, 48)}”?`,
+                    detail: 'Permanently removes the task, its watcher chat, and its history. This cannot be undone.',
+                  }).then(ok => { if (ok) deleteTask(t.id) })
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---------- board ----------
 
 /** Configure or clear a board task's one-time launch time and template. */
@@ -422,7 +476,7 @@ function SchedulePopover({ card, onClose }: { card: BoardTask; onClose: () => vo
 /** Render a draggable task summary with worker and watcher status. */
 function Card({ card, agent, onOpen, onReview }: { card: BoardTask; agent: Agent | null; onOpen: () => void; onReview: () => void }) {
   const s = useConductorSelector(x => ({ templates: x.templates }), shallowEqual)
-  const { startCardDrag, deleteTask, startTask } = useActions()
+  const { startCardDrag, archiveTask, startTask } = useActions()
   const [scheduling, setScheduling] = useState(false)
   const unread = (card.chat ?? []).length
 
@@ -455,8 +509,8 @@ function Card({ card, agent, onOpen, onReview }: { card: BoardTask; agent: Agent
       ) : null}
       <button
         className="card-delete"
-        title="Delete task"
-        onClick={e => { e.stopPropagation(); deleteTask(card.id) }}
+        title="Archive task (recoverable)"
+        onClick={e => { e.stopPropagation(); archiveTask(card.id) }}
         style={{
           position: 'absolute', top: 6, right: 6, width: 20, height: 20, border: 'none',
           background: 'transparent', color: 'var(--dim)', borderRadius: 5,
@@ -539,6 +593,7 @@ export function Board() {
   const [creating, setCreating] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [reviewTaskId, setReviewTaskId] = useState<string | null>(null)
+  const [archivedOpen, setArchivedOpen] = useState(false)
   const byId = new Map(s.agents.map(a => [a.id, a]))
   const openTask = openTaskId ? s.tasks.find(t => t.id === openTaskId) : undefined
 
@@ -553,13 +608,21 @@ export function Board() {
       <ViewHeader title="Task board">
         <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Each started task gets a one-shot session driven by its own watcher — click a card for details & chat</span>
         <div style={{ flex: 1 }} />
+        <button
+          className="open-btn"
+          style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', color: 'var(--mut)' }}
+          onClick={() => setArchivedOpen(true)}
+          title="Archived tasks — restore them, or delete permanently (only possible here)"
+        >
+          Archived{s.tasks.filter(t => t.archived).length ? ` · ${s.tasks.filter(t => t.archived).length}` : ''}
+        </button>
         <button className="open-btn" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px' }} onClick={() => setCreating(true)}>
           <Icon paths={IC.plus} size={14} stroke={1.8} />New task
         </button>
       </ViewHeader>
       <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', padding: 16, display: 'flex', gap: 14 }}>
         {COLS.map(col => {
-          const cards = s.tasks.filter(t => t.col === col.id)
+          const cards = s.tasks.filter(t => t.col === col.id && !t.archived)
           return (
             <div
               key={col.id}
@@ -593,6 +656,7 @@ export function Board() {
         })}
       </div>
       {creating && <NewTaskDialog onClose={() => setCreating(false)} />}
+      {archivedOpen && <ArchivedTasks onClose={() => setArchivedOpen(false)} />}
       {(() => {
         const reviewTask = reviewTaskId ? s.tasks.find(t => t.id === reviewTaskId) : undefined
         return reviewTask ? <ReviewPanel task={reviewTask} onClose={() => setReviewTaskId(null)} /> : null

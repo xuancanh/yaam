@@ -7,6 +7,7 @@ import type { Agent } from '../../core/types'
 import { EditableName, IC, Icon } from '../../components/ui'
 import { ChatPane } from './ChatPane'
 import { FilesPane } from '../session/FilesPane'
+import { confirmAction } from '../../components/Confirm'
 
 // ChatGPT/Claude-style chat home: a sidebar of conversations (full-text
 // searchable via the embedded tantivy engine) and the selected conversation
@@ -260,7 +261,7 @@ export function ChatView() {
                 className="icon-btn danger"
                 title="Delete chat"
                 style={{ width: 20, height: 20, borderRadius: 5, flexShrink: 0 }}
-                onClick={e => { e.stopPropagation(); deleteSession(a.id) }}
+                onClick={e => { e.stopPropagation(); void confirmAction({ title: `Delete chat “${a.name.slice(0, 40)}”?`, detail: 'Permanently removes the conversation and its transcript. This cannot be undone.' }).then(ok => { if (ok) deleteSession(a.id) }) }}
               >
                 <Icon paths={IC.close} size={10} stroke={2} />
               </button>

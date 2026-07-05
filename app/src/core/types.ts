@@ -467,6 +467,9 @@ export interface BoardTask {
   cwd?: string
   /** run the task's sessions in an isolated git worktree (reviewed via the queue) */
   isolate?: boolean
+  /** archived tasks leave the board but stay recoverable; deletion only
+   *  happens from the Archived viewer */
+  archived?: boolean
 }
 
 export interface AddonTool {

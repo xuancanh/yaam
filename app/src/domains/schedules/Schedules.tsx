@@ -4,6 +4,7 @@ import { ACCENT, hexToRgba } from '../../core/data'
 import type { Cron } from '../../core/types'
 import { IC, Icon, Switch, ViewHeader } from '../../components/ui'
 import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from '../board/TaskSpecForm'
+import { confirmAction } from '../../components/Confirm'
 
 /** default for the one-time picker: next full hour, in datetime-local format */
 /** Return the next local clock hour in datetime-local input format. */
@@ -211,7 +212,7 @@ export function Schedules() {
               <span style={{ fontSize: 12, color: 'var(--text2)' }}>{c.agent}</span>
             </div>
             <div className="mono" style={{ width: 120, textAlign: 'right', fontSize: 11, color: 'var(--dim)', flexShrink: 0 }}>{c.last}</div>
-            <button className="icon-btn danger" title="Delete schedule" style={{ width: 27, height: 27, borderRadius: 7, flexShrink: 0 }} onClick={() => deleteCron(c.id)}>
+            <button className="icon-btn danger" title="Delete schedule" style={{ width: 27, height: 27, borderRadius: 7, flexShrink: 0 }} onClick={() => { void confirmAction({ title: `Delete schedule “${c.name.slice(0, 40)}”?`, detail: 'The schedule stops firing and cannot be recovered.' }).then(ok => { if (ok) deleteCron(c.id) }) }}>
               <Icon paths={IC.close} size={13} stroke={1.8} />
             </button>
           </div>

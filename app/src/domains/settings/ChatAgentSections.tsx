@@ -6,6 +6,7 @@ import { EditableName, IC, Icon, Switch } from '../../components/ui'
 import { DraftInput, DraftTextarea } from '../../components/DraftInput'
 import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
+import { confirmAction } from '../../components/Confirm'
 
 /** Skills registry: reusable instruction packs chat agents load on demand. */
 export function SkillsSection() {
@@ -30,7 +31,7 @@ export function SkillsSection() {
                 <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{sk.name}</span>
                 <span style={{ fontSize: 11.5, color: 'var(--mut)', marginLeft: 8 }}>{sk.description || 'no description'}</span>
               </div>
-              <button className="icon-btn danger" title="Remove skill" style={{ width: 24, height: 24 }} onClick={() => removeSkill(sk.id)}>
+              <button className="icon-btn danger" title="Remove skill" style={{ width: 24, height: 24 }} onClick={() => { void confirmAction({ title: `Delete skill “${sk.name.slice(0, 40)}”?`, detail: 'The skill and its instructions are removed for every chat. This cannot be undone.' }).then(ok => { if (ok) removeSkill(sk.id) }) }}>
                 <Icon paths={IC.close} size={11} stroke={2} />
               </button>
             </div>
@@ -92,7 +93,7 @@ export function PersonasSection() {
                 <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{pe.name}</span>
                 <span style={{ fontSize: 11.5, color: 'var(--mut)', marginLeft: 8 }}>{pe.description || 'no description'}</span>
               </div>
-              <button className="icon-btn danger" title="Remove persona" style={{ width: 24, height: 24 }} onClick={() => removePersona(pe.id)}>
+              <button className="icon-btn danger" title="Remove persona" style={{ width: 24, height: 24 }} onClick={() => { void confirmAction({ title: `Delete persona “${pe.name.slice(0, 40)}”?`, detail: 'Chats using it keep running without a persona. This cannot be undone.' }).then(ok => { if (ok) removePersona(pe.id) }) }}>
                 <Icon paths={IC.close} size={11} stroke={2} />
               </button>
             </div>
@@ -150,7 +151,7 @@ export function SkillRegistriesSection() {
               Refresh
             </button>
             <Switch on={r.enabled} onToggle={() => updateSkillRegistry(r.id, { enabled: !r.enabled })} />
-            <button className="icon-btn danger" title="Remove registry" style={{ width: 26, height: 26 }} onClick={() => removeSkillRegistry(r.id)}>
+            <button className="icon-btn danger" title="Remove registry" style={{ width: 26, height: 26 }} onClick={() => { void confirmAction({ title: `Remove skill registry “${r.name.slice(0, 40)}”?`, detail: 'Its skills disappear from the slash menu and chats. Re-adding the URL restores them.' }).then(ok => { if (ok) removeSkillRegistry(r.id) }) }}>
               <Icon paths={IC.close} size={12} stroke={2} />
             </button>
           </div>
@@ -209,7 +210,7 @@ export function ChatTypesSection() {
                     className="icon-btn danger"
                     title="Delete chat agent type"
                     style={{ width: 22, height: 22, borderRadius: 6, marginLeft: 'auto' }}
-                    onClick={() => deleteChatAgentType(t.id)}
+                    onClick={() => { void confirmAction({ title: `Delete chat agent “${t.name.slice(0, 40)}”?`, detail: 'Its configuration and API key entry are removed. Existing chats fall back to another enabled agent.' }).then(ok => { if (ok) deleteChatAgentType(t.id) }) }}
                   >
                     <Icon paths={IC.close} size={11} stroke={2} />
                   </button>

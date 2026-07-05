@@ -13,6 +13,7 @@ import { McpSection } from './McpSection'
 import { PluginsSection } from './PluginsSection'
 import { AppearanceSection } from './AppearanceSection'
 import { SkillsSection, PersonasSection, SkillRegistriesSection, ChatTypesSection, AddChatTypeButton } from './ChatAgentSections'
+import { confirmAction } from '../../components/Confirm'
 
 const ORCHESTRATION: Array<{ id: 'autoRoute' | 'approveDestructive' | 'followMode'; label: string; detail: string }> = [
   { id: 'autoRoute', label: 'Auto-route requests', detail: 'Master assigns tasks to the right agent without asking first.' },
@@ -340,7 +341,7 @@ export function SettingsView() {
                         className="icon-btn danger"
                         title="Delete agent type"
                         style={{ width: 22, height: 22, borderRadius: 6, marginLeft: 'auto' }}
-                        onClick={() => deleteAgentType(t.id)}
+                        onClick={() => { void confirmAction({ title: `Delete agent type “${t.name.slice(0, 40)}”?`, detail: 'Sessions, templates, and tasks referencing it fall back to defaults. This cannot be undone.' }).then(ok => { if (ok) deleteAgentType(t.id) }) }}
                       >
                         <Icon paths={IC.close} size={11} stroke={2} />
                       </button>
