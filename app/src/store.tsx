@@ -2,16 +2,15 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  AddonHookName, BoardTask, EscOption, LogLine,
+  AddonHookName, BoardTask, LogLine,
   ChatMsg, PersistedState, TaskChatMsg,
 } from './core/types'
 import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
-import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './core/terminals'
+import { disposeTerminal, getTerminal, repaintSession } from './core/terminals'
 import { enforcePermissions, execAddonHook } from './core/addons'
 import { runAddonAgentTurn } from './domains/addons/addon-agent'
-import { estimateLogUsage, estimateOutputUsage } from './core/usage'
 import type { AddonApi } from './core/addons'
 import { ActionsCtx } from './core/context'
 import { dispatch, useAppStore } from './core/store'
@@ -35,6 +34,7 @@ import { useActivityService } from './domains/activity/service'
 import { useAddonRuntime } from './domains/addons/runtime'
 import { useIntegrationRuntime } from './domains/settings/integrations'
 import { useLaunchRuntime } from './domains/session/launch-runtime'
+import { useSessionAttention } from './domains/session/attention'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
@@ -116,41 +116,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // decides whether the session is waiting on the user (flag_needs_input);
   // without it, a prompt-shaped final line is required.
   // Prefer the rendered screen for TUI context and fall back to retained log lines.
-  const sessionScreenTail = useCallback((id: string): string => {
-    const lines = isAltScreen(id)
-      ? readScreen(id)
-      : (stateRef.current.agents.find(a => a.id === id)?.log ?? []).map(l => l.x)
-    return lines.filter(Boolean).slice(-10).join('\n') || '(no output)'
-  }, [])
-
-  // Record a settled prompt, deduplicate it, and surface user-action state.
-  const setNeedsInput = useCallback((id: string, question: string, options?: EscOption[], cursorNum?: number) => {
-    const agent = stateRef.current.agents.find(a => a.id === id)
-    if (!agent || agent.status !== 'running') return
-    dispatch(s => {
-      const msg = {
-        id: mkId('m'), role: 'master' as const, kind: 'escalate' as const, escFor: id,
-        esc: {
-          name: agent.name, color: agent.color, repo: agent.repo, reason: question,
-          resolved: false, decision: null,
-          options: options?.length ? options : undefined,
-          cursorNum: cursorNum ?? 1,
-        },
-      }
-      const withStatus = {
-        ...s,
-        agents: s.agents.map(a => a.id === id ? { ...a, status: 'needs' as const, escReason: question, attention: true } : a),
-      }
-      const wid = widOf(s, id)
-      if (wid === s.activeWorkspace) return { ...withStatus, messages: s.messages.concat([msg]) }
-      const d = s.workspaceData[wid]
-      if (!d) return withStatus
-      return { ...withStatus, workspaceData: { ...s.workspaceData, [wid]: { ...d, messages: d.messages.concat([msg]) } } }
-    })
-    logEvent('escalate', id, `${agent.name} is asking for input: ${question.slice(0, 64)}`)
-    notify('escalate', `${agent.name} needs your input`, question.slice(0, 80), id)
-    fireAddonHookRef.current('onNeedsInput', { sessionId: id, name: agent.name, question })
-  }, [logEvent, notify, widOf])
+  // Session output/status/prompt helpers (domains/session/attention). clearNeeds
+  // stays below — it needs the settle watcher's clearFlagged.
+  const { sessionScreenTail, setNeedsInput, applyAgentStatus, appendTail } = useSessionAttention(useMemo(() => ({
+    stateRef, widOf, logEvent, notify,
+    fireAddonHook: (hook: AddonHookName, event: Record<string, unknown>) => fireAddonHookRef.current(hook, event),
+  }), [widOf, logEvent, notify]))
 
   // ref: setNeedsInput is declared before the hook runner
   const fireAddonHookRef = useRef<(hook: AddonHookName, event: Record<string, unknown>) => void>(() => {})
@@ -161,24 +132,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const toolApprovalsRef = useRef<Set<string>>(new Set())
 
   // shared by Master's update_agent_status tool and the per-session monitors
-  // Merge monitor-authored status fields into one session card.
-  const applyAgentStatus = useCallback((sid: string, task?: string, summary?: string, actionNeeded?: string) => {
-    const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    dispatch(s2 => ({
-      ...s2,
-      agents: s2.agents.map(a => a.id === sid
-        ? {
-            ...a,
-            task: task !== undefined ? (task || undefined) : a.task,
-            summary: summary !== undefined ? (summary || undefined) : a.summary,
-            actionNeeded: actionNeeded !== undefined ? (actionNeeded || undefined) : a.actionNeeded,
-            attention: a.attention || Boolean(actionNeeded),
-            summaryAt: at,
-          }
-        : a),
-    }))
-  }, [])
-
   // Per-session monitor LLMs: private history + serialized turns per session.
   // They digest terminal output locally; Master only sees report_to_master.
   const monitorHistories = useRef<Map<string, ApiMessage[]>>(new Map())
@@ -243,31 +196,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     stateRef, later, notify, setNeedsInput, runMonitor, taskForSession,
     masterEventRef, monitorEventRef, runWatcherRef,
   })
-
-  // ANSI-stripped tail of each terminal, kept for Master's context, overview
-  // cards, and rough output-volume accounting (provider usage is unavailable).
-  // Retain bounded plain-text output and update character-based usage estimates.
-  const appendTail = useCallback((id: string, line: string) => {
-    dispatch(s => ({
-      ...s,
-      agents: s.agents.map(a => {
-        if (a.id !== id) return a
-        // Old releases added a fixed 10 tokens for every line. Rebase those
-        // counters on the retained output tail before using the character estimate.
-        const base = a.usageVersion === 1 ? a : estimateLogUsage(a.log)
-        const delta = estimateOutputUsage(line)
-        const log = a.log.concat([{ t: 'out' as const, x: line }])
-        if (log.length > 200) log.splice(0, log.length - 200)
-        return {
-          ...a,
-          log,
-          used: base.used + delta.used,
-          cost: base.cost + delta.cost,
-          usageVersion: 1,
-        }
-      }),
-    }))
-  }, [])
 
   // typing into a terminal clears its "needs action" state
   // Clear a session's prompt state after the user or Master answers it.
