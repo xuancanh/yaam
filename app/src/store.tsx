@@ -1033,10 +1033,23 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const REAL_COLORS = ['#7FD1FF', '#F5C451', '#3DDC97', '#FF9B9B', '#C77DFF', '#E8A87C']
     const color = REAL_COLORS[Math.floor(Math.random() * REAL_COLORS.length)]
     const dir = cwd.trim()
+    const launchType = stateRef.current.agentTypes.find(t => t.id === (typeId ?? '')) ?? typeForCommand(trimmed, stateRef.current.agentTypes)
+    // Deterministic Claude sessions: Claude Code honors `--session-id <uuid>`, so
+    // we mint the id ourselves and know it immediately — no fragile file
+    // detection. The flag goes only into the SPAWNED command (reusing an id
+    // errors "already in use"), while cmd stays clean for relaunch/resume.
+    // codex/opencode have no launch-time id flag, so they keep file detection.
+    let knownSessionId: string | undefined
+    let spawnCommand = trimmed
+    if (launchType?.probe === 'claude' && !/(^|\s)(--session-id|--resume|-r|--continue|-c)(\s|=|$)/.test(trimmed)) {
+      knownSessionId = crypto.randomUUID()
+      spawnCommand = trimmed.replace(/^(\s*\S+)/, `$1 --session-id ${knownSessionId}`)
+    }
     const agent: Agent = {
       id, name: nameHint || bin, short: (nameHint || bin).slice(0, 2).toUpperCase(), color,
       repo: dir ? dir.split('/').pop() || dir : '~', branch: 'live',
       status: 'running', model: trimmed, kind: 'real', cmd: trimmed, cwd: dir, launchedAt: Date.now(),
+      cliSessionId: knownSessionId,
       typeId: typeId ?? typeForCommand(trimmed, stateRef.current.agentTypes)?.id,
       workspaceId: workspaceId ?? stateRef.current.activeWorkspace,
       ephemeral: opts?.ephemeral, autoArchive: opts?.autoArchive, templateId: opts?.templateId,
@@ -1058,9 +1071,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       return { ...focusSessionIn(withAgent, id), newSessionOpen: false }
     })
     getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
-    probeCliSession(id, trimmed, dir, false)
-    const launchType = stateRef.current.agentTypes.find(t => t.id === (typeId ?? '')) ?? typeForCommand(trimmed, stateRef.current.agentTypes)
-    native.spawnSession(id, `${envPrefix(launchType?.env)}${trimmed}`, dir || undefined, undefined, undefined, opts?.terminalShell).catch(err => {
+    // Claude's id is known up front; only codex/opencode need file detection.
+    if (!knownSessionId) probeCliSession(id, trimmed, dir, false)
+    native.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, dir || undefined, undefined, undefined, opts?.terminalShell).catch(err => {
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
