@@ -15,6 +15,18 @@ type Pairing = 'checking' | 'bad-token' | 'unpaired' | 'waiting' | 'paired'
 type Tab = 'tasks' | 'chats' | 'sessions' | 'approvals'
 type Detail = { kind: 'task' | 'chat' | 'session'; id: string } | null
 
+/** Wide viewport → desktop-style icon rail + master-detail instead of tabs. */
+function useWide(): boolean {
+  const [wide, setWide] = useState(() => window.matchMedia('(min-width: 880px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 880px)')
+    const on = () => setWide(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return wide
+}
+
 function defaultDeviceName(): string {
   const ua = navigator.userAgent
   if (/iPhone/.test(ua)) return 'iPhone'
@@ -132,8 +144,8 @@ function TaskDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
           <span className="name" style={{ fontSize: 16, whiteSpace: 'normal' }}>{t.title}</span>
           <span className={`pill ${t.col}`}>{t.col}</span>
         </div>
-        {t.description && <p style={{ color: '#b7bdc9', fontSize: 13.5, marginBottom: 8 }}>{t.description}</p>}
-        {t.criteria.map((c, i) => <div key={i} className="crit"><span style={{ color: '#3ddc97' }}>✓</span>{c}</div>)}
+        {t.description && <p style={{ color: 'var(--text2)', fontSize: 13.5, marginBottom: 8 }}>{t.description}</p>}
+        {t.criteria.map((c, i) => <div key={i} className="crit"><span style={{ color: 'var(--green)' }}>✓</span>{c}</div>)}
         {t.watcherNote && <div className="warn">⌁ {t.watcherNote}</div>}
         {(t.col === 'backlog' || t.col === 'failed') && (
           <div className="btnrow">
@@ -201,14 +213,15 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
 
 const COL_ORDER = ['progress', 'review', 'backlog', 'done', 'failed']
 
-function Lists({ tab, snap, open }: { tab: Tab; snap: RemoteSnapshot; open: (d: Detail) => void }) {
+function Lists({ tab, snap, open, selected }: { tab: Tab; snap: RemoteSnapshot; open: (d: Detail) => void; selected?: string }) {
+  const cardCls = (id: string) => `card${selected === id ? ' sel' : ''}`
   if (tab === 'tasks') {
     const tasks = [...snap.tasks].sort((a, b) => COL_ORDER.indexOf(a.col) - COL_ORDER.indexOf(b.col))
     return (
       <div className="body">
         {tasks.length === 0 && <div className="empty">No tasks on the board.</div>}
         {tasks.map(t => (
-          <button key={t.id} className="card" onClick={() => open({ kind: 'task', id: t.id })}>
+          <button key={t.id} className={cardCls(t.id)} onClick={() => open({ kind: 'task', id: t.id })}>
             <div className="row">
               <span className="name">{t.title}</span>
               {t.chat.length > 0 && <span className="spend">💬 {t.chat.length}</span>}
@@ -226,7 +239,7 @@ function Lists({ tab, snap, open }: { tab: Tab; snap: RemoteSnapshot; open: (d: 
       <div className="body">
         {snap.chats.length === 0 && <div className="empty">No chat conversations.</div>}
         {snap.chats.map(c => (
-          <button key={c.id} className="card" onClick={() => open({ kind: 'chat', id: c.id })}>
+          <button key={c.id} className={cardCls(c.id)} onClick={() => open({ kind: 'chat', id: c.id })}>
             <div className="row">
               <span className="name">{c.name}</span>
               <span className="pill">{c.model}</span>
@@ -242,7 +255,7 @@ function Lists({ tab, snap, open }: { tab: Tab; snap: RemoteSnapshot; open: (d: 
       <div className="body">
         {snap.sessions.length === 0 && <div className="empty">No live sessions.</div>}
         {snap.sessions.map(s => (
-          <button key={s.id} className="card" onClick={() => open({ kind: 'session', id: s.id })}>
+          <button key={s.id} className={cardCls(s.id)} onClick={() => open({ kind: 'session', id: s.id })}>
             <div className="row">
               <span className="name">{s.name}</span>
               <span className="spend">${s.cost.toFixed(2)}</span>
@@ -297,6 +310,8 @@ export function MobileApp() {
   const [online, setOnline] = useState(true)
   const [tab, setTab] = useState<Tab>('tasks')
   const [detail, setDetail] = useState<Detail>(null)
+  const wide = useWide()
+  const pickTab = (t: Tab) => { setTab(t); setDetail(null) }
 
   // resolve the initial pairing state from the stored token
   useEffect(() => {
@@ -355,6 +370,44 @@ export function MobileApp() {
       : snap?.sessions.find(s => s.id === detail.id)?.name) ?? '…'
     : snap?.workspace ?? 'YAAM'
 
+  const detailView = !snap ? null
+    : detail?.kind === 'task' ? <TaskDetail snap={snap} id={detail.id} />
+    : detail?.kind === 'chat' ? <ChatDetail snap={snap} id={detail.id} />
+    : detail?.kind === 'session' ? <SessionDetail snap={snap} id={detail.id} />
+    : null
+
+  const navButtons = TABS.map(t => (
+    <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => pickTab(t.id)}>
+      <span className="glyph">
+        {t.glyph}
+        {t.id === 'approvals' && (snap?.approvals.length ?? 0) > 0 && <span className="badge">{snap!.approvals.length}</span>}
+      </span>
+      {t.label}
+    </button>
+  ))
+
+  // wide viewport: desktop-app shell — icon rail, list column, detail pane
+  if (wide) {
+    return (
+      <div className="shell">
+        <div className="topbar">
+          <span className="brand">YAAM REMOTE</span>
+          <h1>{snap?.workspace ?? ''}</h1>
+          <span className={`dot${online ? '' : ' off'}`} />
+        </div>
+        <div className="cols">
+          <nav className="rail">{navButtons}</nav>
+          <div className="listcol">
+            {snap ? <Lists tab={tab} snap={snap} open={setDetail} selected={detail?.id} /> : <div className="pairwrap"><div className="spinner" /></div>}
+          </div>
+          <div className="detailcol">
+            {detailView ?? <div className="placeholder">{snap ? (tab === 'approvals' ? 'Approvals are answered directly in the list' : `Select a ${tab.slice(0, -1)} on the left`) : ''}</div>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="shell">
       <div className="topbar">
@@ -364,28 +417,10 @@ export function MobileApp() {
       </div>
       {!snap ? (
         <div className="pairwrap"><div className="spinner" /></div>
-      ) : detail?.kind === 'task' ? (
-        <TaskDetail snap={snap} id={detail.id} />
-      ) : detail?.kind === 'chat' ? (
-        <ChatDetail snap={snap} id={detail.id} />
-      ) : detail?.kind === 'session' ? (
-        <SessionDetail snap={snap} id={detail.id} />
       ) : (
-        <Lists tab={tab} snap={snap} open={setDetail} />
+        detailView ?? <Lists tab={tab} snap={snap} open={setDetail} />
       )}
-      {!detail && (
-        <div className="tabs">
-          {TABS.map(t => (
-            <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>
-              <span className="glyph">
-                {t.glyph}
-                {t.id === 'approvals' && (snap?.approvals.length ?? 0) > 0 && <span className="badge">{snap!.approvals.length}</span>}
-              </span>
-              {t.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {!detail && <div className="tabs">{navButtons}</div>}
     </div>
   )
 }
