@@ -24,10 +24,14 @@ export function useSchedulerRuntime(ctx: SchedulerCtx): void {
   useEffect(() => {
     const { stateRef, logEvent, notify, launchSession, spawnTaskSession, fireAddonHook } = ctx
     const timer = window.setInterval(() => {
+      const st = stateRef.current
+      // don't fire schedules until the runtime has finished restoring — otherwise
+      // a slow hydration lets the ticker observe seed state (or double-fire a
+      // schedule that restoration is about to re-arm)
+      if (st.bootStatus !== 'ready' && st.bootStatus !== 'failed') return
       const now = new Date()
       const minuteKey = now.toISOString().slice(0, 16)
       const timeLabel = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      const st = stateRef.current
       // schedules fire in every workspace, active or not
       const pools: Array<{ wid: string; crons: typeof st.crons }> = [
         { wid: st.activeWorkspace, crons: st.crons },

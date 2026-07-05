@@ -123,6 +123,7 @@ export function defaultDetail(): AgentDetail {
 /** Build a complete fresh AppState used before persisted state is hydrated. */
 export function seedState(): AppState {
   return {
+    bootStatus: 'loading',
     view: 'workspace',
     workspaces: [{ id: 'ws-default', name: 'Default' }],
     activeWorkspace: 'ws-default',

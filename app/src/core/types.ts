@@ -635,4 +635,11 @@ export interface AppState {
   chatAgentTypes: ChatAgentType[]
   settings: OrchestrationSettings
   tasks: BoardTask[]
+  /** transient runtime restoration lifecycle (never persisted). Dependent
+   *  runtimes (scheduler, integrations) gate their work on 'ready'. */
+  bootStatus: BootStatus
 }
+
+/** Runtime restoration lifecycle: load+apply the persisted snapshot, rebuild
+ *  terminals/resolve secrets, then mark ready so dependent runtimes may start. */
+export type BootStatus = 'loading' | 'restoring-runtime' | 'ready' | 'failed'

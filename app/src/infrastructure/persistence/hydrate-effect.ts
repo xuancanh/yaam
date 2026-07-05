@@ -33,7 +33,8 @@ export function useHydration(ctx: HydrationCtx): void {
     // Apply one merged snapshot: dispatch the pure hydration result, then rebuild terminals.
     const hydrateFrom = (p: Partial<PersistedState>) => {
       const { next, restoredAgents } = buildHydration(p, stateRef.current)
-      dispatch(() => next)
+      // pure snapshot applied — now rebuilding terminals + resolving secrets
+      dispatch(() => ({ ...next, bootStatus: 'restoring-runtime' }))
       // rebuild each restored session's terminal with its saved tail, and
       // reattach to PTYs that are still alive in the backend (webview reload)
       native.liveSessions().then(liveIds => {
@@ -67,7 +68,7 @@ export function useHydration(ctx: HydrationCtx): void {
         if (Object.keys(merged).some(k => k !== 'agents') || merged.agents?.length) hydrateFrom(merged)
       } catch (e) {
         console.error('[yaam] hydration failed — starting fresh:', e)
-        dispatch(s => ({ ...s, toast: 'Saved state was unreadable — starting fresh' }))
+        dispatch(s => ({ ...s, toast: 'Saved state was unreadable — starting fresh', bootStatus: 'failed' }))
       }
       // fill credential fields the file no longer holds from the OS keychain,
       // and mark anything already present (legacy plaintext) as keychain-bound
@@ -82,8 +83,12 @@ export function useHydration(ctx: HydrationCtx): void {
       } catch (e) {
         console.error('[yaam] keychain resolve failed:', e)
       }
-      // restored state is fully applied — enable saves, then connect integrations
+      // restored state is fully applied — enable saves, mark the runtime ready
+      // (unless restoration hard-failed above), then connect integrations. Gating
+      // dependent runtimes on 'ready'/'failed' keeps them from observing seed
+      // state mid-load. Persistence is enabled regardless so post-boot edits save.
       persistence.markReady()
+      dispatch(s => (s.bootStatus === 'failed' ? s : { ...s, bootStatus: 'ready' }))
       startIntegrations()
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps

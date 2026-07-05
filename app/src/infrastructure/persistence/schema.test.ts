@@ -27,6 +27,10 @@ describe('persistence selectors', () => {
     expect(main.messages!.length).toBe(60)
     expect(main.events!.length).toBe(60)
   })
+  it('never persists the transient bootStatus', () => {
+    const main = selectMainState(baseState({ bootStatus: 'ready' } as Partial<AppState>))
+    expect('bootStatus' in main).toBe(false)
+  })
   it('selectSession wraps one agent, caps its log, and drops runtime status', () => {
     const agent = { id: 'a1', status: 'running', escReason: 'prompt', cmd: 'claude', log: Array.from({ length: 500 }, (_, i) => ({ t: 'out', x: `${i}` })) } as unknown as AppState['agents'][number]
     const out = selectSession(agent)
