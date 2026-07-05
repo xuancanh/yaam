@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  AddonHookName, AgentTemplate, BoardTask, EscOption, LogLine,
+  AddonHookName, BoardTask, EscOption, LogLine,
   ChatMsg, PersistedState, TaskChatMsg,
 } from './core/types'
 import * as native from './core/native'
@@ -34,10 +34,10 @@ import { useSessionActions } from './domains/session/actions'
 import { useActivityService } from './domains/activity/service'
 import { useAddonRuntime } from './domains/addons/runtime'
 import { useIntegrationRuntime } from './domains/settings/integrations'
+import { useLaunchRuntime } from './domains/session/launch-runtime'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
-import { buildLaunch } from './domains/session/launch'
 import { classifyExit } from './domains/session/exit'
 import { useSessionSettle } from './domains/session/use-settle'
 import { buildHydration } from './infrastructure/persistence/hydrate'
@@ -53,10 +53,8 @@ import { chatTranscriptsChanged } from './infrastructure/persistence/subscribe'
 import { createPersistenceRuntime } from './infrastructure/persistence/runtime'
 import type { PersistenceRuntime } from './infrastructure/persistence/runtime'
 import { collectDueSchedules, collectDueTasks } from './domains/schedules/due'
-import { buildTemplateCommand } from './domains/schedules/template-command'
-import { focusSessionIn, removeFromGroups } from './domains/session/layout-state'
-import { envPrefix, typeForCommand } from './domains/session/command'
-import { taskContract, taskWorkText } from './domains/board/task-prompt'
+import { removeFromGroups } from './domains/session/layout-state'
+import { typeForCommand } from './domains/session/command'
 
 export { cronMatches, humanizeCron } from './domains/schedules/cron'
 
@@ -492,187 +490,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return () => persistence.dispose()
   }, [persistence])
 
-  // Capture the CLI's own session id (claude/codex) by watching for the
-  // session file it creates. Interactive claude ignores --session-id for
-  // local persistence, so file detection is the reliable mechanism; after a
-  // resume we re-probe because --fork-session (and older CLIs) mint a new id.
-  // Poll native session files until the launched CLI's resume id is discoverable.
-  const probeCliSession = useCallback((id: string, command: string, cwd: string, isResume: boolean) => {
-    const probeType = typeForCommand(command, stateRef.current.agentTypes)
-      ?? typeForCommand(stateRef.current.agents.find(a => a.id === id)?.cmd ?? '', stateRef.current.agentTypes)
-    if (!probeType?.probe || !native.isTauri) return
-    if (!isResume && /--resume|resume |--continue/.test(command)) return
-    const spawnedAt = Date.now()
-    // Probe repeatedly because CLIs create their resume files after process start.
-    const tryDetect = () => {
-      const current = stateRef.current.agents.find(a => a.id === id)
-      if (!current) return
-      if (!isResume && current.cliSessionId) return
-      // ids already claimed by other live sessions — so concurrent sessions
-      // (codex/opencode stores aren't cwd-scoped) can't resolve to the same file
-      const exclude = stateRef.current.agents
-        .filter(a => a.id !== id && a.cliSessionId)
-        .map(a => a.cliSessionId!)
-      native.detectCliSession(probeType.probe!, cwd || undefined, spawnedAt, exclude).then(sid => {
-        if (!sid || sid === stateRef.current.agents.find(a => a.id === id)?.cliSessionId) return
-        dispatch(s2 => ({
-          ...s2,
-          agents: s2.agents.map(a => a.id === id
-            ? { ...a, cliSessionId: sid, log: a.log.concat([{ t: 'sys', x: `${isResume ? 'session id changed on resume' : `captured ${probeType.name} session`} · ${sid}` }]) }
-            : a),
-        }))
-      }).catch(() => {})
-    }
-    later(7000, tryDetect)
-    later(25000, tryDetect)
-    if (!isResume) later(60000, tryDetect)
-  }, [later])
-
-  // Create optimistic session state, spawn its PTY, and attach lifecycle tracking.
-  const launchSession = useCallback((command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }): string | null => {
-    const plan = buildLaunch({ command, cwd, nameHint, typeId, workspaceId, opts }, stateRef.current.agentTypes, stateRef.current.activeWorkspace)
-    if (!plan) return null
-    const { agent, spawnCommand, knownSessionId, launchType } = plan
-    const id = agent.id
-    dispatch(s => {
-      const withAgent = { ...s, agents: s.agents.concat([agent]) }
-      // background-workspace launches (cron) must not touch the active layout
-      if (agent.workspaceId !== s.activeWorkspace) return withAgent
-      return { ...focusSessionIn(withAgent, id), newSessionOpen: false }
-    })
-    getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
-    // Claude's id is known up front; only codex/opencode need file detection.
-    if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', agent.cwd ?? '', false)
-    native.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, agent.cwd || undefined, undefined, undefined, opts?.terminalShell).catch(err => {
-      dispatch(s => ({
-        ...s,
-        agents: s.agents.map(a => a.id === id
-          ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err', x: String(err) }]) }
-          : a),
-      }))
-    })
-    return id
-  }, [appendTail, armResponseWatch, bumpSettle, clearNeeds, probeCliSession])
-
-  // Launch a session from an agent template: the template decides the CLI,
-  // one-shot vs interactive mode, prompt/system prompt, approval, and model.
-  // Resolve a persisted template into a command and launch it in the target workspace.
-  const launchFromTemplate = useCallback((templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string): string | null => {
-    const st = stateRef.current
-    const stored = (st.templates ?? []).find(t => t.id === templateId)
-    if (!stored) {
-      flash('Template not found')
-      return null
-    }
-    const tpl = forceEphemeral && stored.mode !== 'ephemeral' ? { ...stored, mode: 'ephemeral' as const } : stored
-    const type = st.agentTypes.find(t => t.id === tpl.typeId)
-    const command = buildTemplateCommand(tpl, type, task, contract)
-    const id = launchSession(command, cwdOverride || tpl.cwd || st.settings.defaultCwd || '', tpl.name, type?.id, workspaceId, {
-      ephemeral: tpl.mode === 'ephemeral', autoArchive: tpl.autoArchive, templateId: tpl.id,
-    })
-    if (id) logEvent('route', id, `Launched template “${tpl.name}”${task ? ` · ${task.slice(0, 48)}` : ''}`)
-    return id
-  }, [flash, launchSession, logEvent])
-
-  // Board → session: an unassigned task dragged into work (or explicitly
-  // started) spawns its template — or the default agent type — with the task
-  // as its prompt.
-  // Launch a one-shot worker for a board task and bind its dedicated watcher.
-  // Core one-shot launch for a board task. The watcher owns spawning: it calls
-  // this via its spawn_session tool (extraInstructions augment the prompt), and
-  // a task may accumulate several sessions (task.agentIds).
-  // The ONE canonical one-shot launch for a board task, in any workspace (active
-  // or background). Locates the task, launches its template — or the default
-  // agent type — one-shot, binds its watcher, and updates the card in its own
-  // workspace slice. The scheduler, the watcher's spawn tool, and the board's
-  // start/drag paths all go through here so active and background behave identically.
-  const spawnTaskSession = useCallback((
-    taskId: string,
-    opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string },
-  ): string | null => {
-    const st = stateRef.current
-    const located = findTaskInState(st, taskId, opts?.workspaceId)
-    if (!located) return null
-    const { task, workspaceId } = located
-    // layered prompt: work text fills the template's {task} slot; the
-    // verification contract (criteria + goal) is appended after the composed
-    // prompt so template framing can't swallow or contradict it
-    const work = taskWorkText(task)
-      + (opts?.extraInstructions?.trim() ? `\n\nAdditional instructions from the task watcher:\n${opts.extraInstructions.trim()}` : '')
-    const contract = taskContract(task)
-    let id: string | null = null
-    // watcher-driven task sessions are ALWAYS one-shot: they run the task and exit
-    if (task.templateId && (st.templates ?? []).some(t => t.id === task.templateId)) {
-      id = launchFromTemplate(task.templateId, work, workspaceId, task.cwd, true, contract)
-    } else {
-      const type = (task.typeId ? st.agentTypes.find(t => t.id === task.typeId) : undefined)
-        ?? st.agentTypes.find(t => t.enabled)
-      if (!type) {
-        flash('No enabled agent type to handle the task')
-        return null
-      }
-      const oneShot: AgentTemplate = {
-        id: '', name: task.title.slice(0, 18), typeId: type.id, mode: 'ephemeral',
-        prompt: '{task}', systemPrompt: '', model: '', approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
-      }
-      id = launchSession(buildTemplateCommand(oneShot, type, work, contract), task.cwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, workspaceId, { ephemeral: true })
-    }
-    if (!id) return null
-    taskSessionsRef.current.set(id, { taskId, workspaceId })
-    const sessionName = stateRef.current.agents.find(a => a.id === id)?.name ?? id
-    dispatch(s2 => updateLocatedTask(s2, taskId, t => ({
-      ...t, agentId: id, agentIds: [...(t.agentIds ?? []), id!], scheduleAt: undefined,
-      col: t.col === 'backlog' || t.col === 'done' || t.col === 'failed' ? 'progress' as const : t.col,
-    }), workspaceId))
-    armResponseWatch(id)
-    pushTaskChat(taskId, 'system', `Spawned one-shot session “${sessionName}” for this task`)
-    if (!task.cwd && !st.settings.defaultCwd && !(task.templateId && (st.templates ?? []).find(t => t.id === task.templateId)?.cwd)) {
-      pushTaskChat(taskId, 'system',
-        '⚠ No working folder set — the session runs in your home directory. If this task targets a repo, set the folder in the task spec and Relaunch.')
-    }
-    if (opts?.briefWatcher) {
-      runWatcherRef.current(taskId,
-        `A one-shot session "${sessionName}" was just spawned to work this task; it received the title, description and criteria as its prompt, with the criteria set as an explicit goal (stop condition) it must self-verify before exiting. ` +
-        'Set your card note, make sure the task sits in the right column, and post one short kickoff message for the user.')
-    }
-    logEvent('route', id, `Spawned session for task “${task.title.slice(0, 48)}”`)
-    flash(`Session spawned for “${task.title.slice(0, 28)}”`)
-    return id
-  }, [armResponseWatch, flash, launchFromTemplate, launchSession, logEvent, pushTaskChat])
-
+  // Session/task launch + CLI resume-id probing (domains/session/launch-runtime).
+  const { probeCliSession, launchSession, launchFromTemplate, spawnTaskSession, spawnSessionForTask, startTaskViaWatcher } = useLaunchRuntime(useMemo(() => ({
+    stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch,
+    pushTaskChat, runWatcher, taskSessions: taskSessionsRef,
+  }), [later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch, pushTaskChat, runWatcher]))
   spawnTaskSessionRef.current = (taskId, extraInstructions) => spawnTaskSession(taskId, { extraInstructions })
-
-  // Deterministic start (drag to progress, schedules, no-brain fallback):
-  // spawn directly, then brief the watcher. Optionally targets a background
-  // workspace (the scheduler fires tasks in every workspace).
-  const spawnSessionForTask = useCallback((taskId: string, workspaceId?: string) => {
-    const located = findTaskInState(stateRef.current, taskId, workspaceId)
-    if (!located || located.task.agentId) return
-    spawnTaskSession(taskId, { briefWatcher: true, workspaceId: located.workspaceId })
-  }, [spawnTaskSession])
-
-  // Watcher-first start (the mini master owns spawning): hand the task to its
-  // watcher, which calls spawn_session; fall back to a direct spawn when there
-  // is no brain or the watcher fails to act.
-  const startTaskViaWatcher = useCallback((taskId: string) => {
-    const st = stateRef.current
-    const task = st.tasks.find(t => t.id === taskId)
-    if (!task || task.agentId) return
-    if (!(st.settings.masterEnabled && hasCreds(st.settings))) {
-      spawnSessionForTask(taskId)
-      return
-    }
-    pushTaskChat(taskId, 'system', 'Start requested — handing to the watcher')
-    void runWatcher(taskId,
-      'The user started this task. You own spawning: call spawn_session now (add extra_instructions only if the spec needs augmenting), set your card note, and post one short kickoff message. If spawning fails, tell the user why.',
-    ).then(() => {
-      const after = stateRef.current.tasks.find(t => t.id === taskId)
-      if (after && !after.agentId && !(after.agentIds ?? []).length) {
-        pushTaskChat(taskId, 'system', 'Watcher did not spawn a session — starting one directly')
-        spawnSessionForTask(taskId)
-      }
-    })
-  }, [pushTaskChat, runWatcher, spawnSessionForTask])
 
   // API surface handed to addon code (tools, hooks, and view RPC) — scoped
   // per addon so storage is namespaced
