@@ -38,6 +38,7 @@ export function selectMainState(s: AppState): MainPartition {
     minimizedIds: s.minimizedIds,
     addons: s.addons,
     addonStorage: s.addonStorage,
+    chatMemory: s.chatMemory,
     messages: s.messages.slice(-60),
     events: s.events.slice(0, 60),
     notifications: s.notifications.slice(0, 30),

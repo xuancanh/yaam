@@ -37,6 +37,8 @@ export interface ChatAppPort {
   addSchedule: (name: string, cronExpr: string | undefined, atIso: string | undefined, taskTitle: string, description?: string) => string
   /** create or update a local skill by name */
   saveSkill: (name: string, description: string, body: string) => string
+  /** append one distilled fact to the workspace's durable memory */
+  remember: (fact: string) => string
 }
 
 /** single-quote a string for POSIX shells */
@@ -193,6 +195,11 @@ function builtinTools(skills: CatalogSkill[]) {
         },
         required: ['name', 'task_title'],
       },
+    },
+    {
+      name: 'remember',
+      description: 'Save one durable fact to this workspace\'s memory (shown to every chat agent here, across restarts). Use for stable facts worth keeping: preferences, project conventions, decisions, key paths — not transient task state.',
+      input_schema: { type: 'object', properties: { fact: { type: 'string', description: 'one concise sentence' } }, required: ['fact'] },
     },
     {
       name: 'save_skill',
@@ -388,6 +395,10 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
     case 'add_schedule':
       if (!app) return 'schedule tools are unavailable in this context'
       return app.addSchedule(str('name'), str('cron') || undefined, str('at') || undefined, str('task_title'), str('description') || undefined)
+    case 'remember':
+      if (!app) return 'memory is unavailable in this context'
+      if (!str('fact').trim()) throw new ToolError('remember: "fact" is required')
+      return app.remember(str('fact').trim())
     case 'save_skill':
       if (!app) return 'skill tools are unavailable in this context'
       if (!str('name') || !str('body')) throw new ToolError('save_skill: "name" and "body" are required')
@@ -427,7 +438,7 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
   }
 }
 
-function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], persona?: string): string {
+function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], persona?: string, memory?: string): string {
   return `You are a chat agent inside YAAM (an agent-orchestration desktop app) — the user's hands-on assistant in this workspace, like a desktop Claude. You live in a pane named "${agent.name}".
 
 WORKING FOLDER: ${agent.cwd || '(none set — you cannot write files until the user sets one)'}
@@ -436,6 +447,12 @@ WORKING FOLDER: ${agent.cwd || '(none set — you cannot write files until the u
 You can navigate, find, and read files (list_dir/glob_files/grep_files/read_file), change and organize them (edit_file for surgical replacements, write_file for new/replaced files, create_dir/move_path/copy_path/delete_path), run shell scripts and commands (run_command — real execution on the user's machine), control native macOS apps (run_applescript), research the web (web_search then fetch_url; http_request for APIs), drive YAAM itself (list/add board tasks, list/add schedules — the board's watcher agents take tasks from there), save reusable skills (save_skill) plus load them (load_skill), and call tools on the user's connected MCP servers${mcp.length ? ` (${mcp.map(s => `${s.serverName}: ${s.tools.length} tools`).join(', ')})` : ' (none connected)'}.
 
 SKILLS (load with load_skill when relevant — descriptions say when)${skills.length ? skills.map(s => `\n- ${s.name} [${s.source}]: ${(s.description || '(no description)').slice(0, 200)}`).join('') : '\n(none available)'}
+${memory?.trim() ? `
+MEMORY (durable workspace notes written by chat agents in earlier conversations — trust them as context, but verify anything filesystem-specific before acting on it; add new stable facts with the remember tool)
+${memory.trim()}
+` : `
+MEMORY: empty. When you learn a stable fact worth keeping across conversations (a preference, a project convention, a decision), save it with the remember tool.
+`}
 
 RULES
 - Ground every claim in tool results; read before you edit; verify after you change (re-read or run the relevant check).
@@ -461,6 +478,7 @@ export async function runChatTurn(
   persona?: string,
   signal?: AbortSignal,
   app?: ChatAppPort,
+  memory?: string,
 ): Promise<void> {
   // a stopped/aborted turn can leave the history mid-tool-round (assistant
   // tool_use without its tool_result) — providers reject that; drop the debris.
@@ -474,7 +492,7 @@ export async function runChatTurn(
   for (let i = 0; i < 24; i++) {
     const agent = getAgent()
     if (!agent) return
-    const res = await callApiStream(cfg, chatSystem(agent, skills, mcp, persona), history, tools,
+    const res = await callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory), history, tools,
       (d, ch) => onEvent({ kind: ch === 'thinking' ? 'thinking' : 'delta', text: d }), signal)
     if (res.stop_reason !== 'tool_use') {
       const text = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()

@@ -33,6 +33,8 @@ export interface ChatActions {
   approveChatTool: (agentId: string, msgId: string, ok: boolean) => void
   /** flip a chat between ask (approve risky tools) and auto */
   setChatPermMode: (agentId: string, mode: 'ask' | 'auto') => void
+  /** replace one workspace's durable chat memory (Memory editor) */
+  setChatMemory: (workspaceId: string, text: string) => void
   /** skills visible to this chat (its sources, cached registry catalogs only) */
   chatSkills: (agentId: string) => CatalogSkill[]
 }
@@ -98,6 +100,11 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
     setChatPermMode: (agentId, mode) => dispatch(s => ({
       ...s,
       agents: s.agents.map(a => a.id === agentId ? { ...a, permMode: mode } : a),
+    })),
+
+    setChatMemory: (workspaceId, text) => dispatch(s => ({
+      ...s,
+      chatMemory: { ...s.chatMemory, [workspaceId]: text.trim() },
     })),
 
     chatSkills: agentId => {

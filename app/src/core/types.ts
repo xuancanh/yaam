@@ -567,6 +567,7 @@ export interface PersistedState {
   activeWorkspace?: string
   workspaceData?: Record<string, WorkspaceData>
   addonStorage?: Record<string, Record<string, unknown>>
+  chatMemory?: Record<string, string>
   /** session definitions + output tails; restored as paused sessions */
   agents?: Agent[]
   groups?: TabGroup[]
@@ -660,6 +661,9 @@ export interface AppState {
   activeAddon: string | null
   /** per-addon persistent key-value storage */
   addonStorage: Record<string, Record<string, unknown>>
+  /** durable chat memory by workspace id: distilled facts every chat agent in
+   *  the workspace reads at turn start and appends to via the remember tool */
+  chatMemory: Record<string, string>
   /** per-addon customization chat (in-memory) */
   addonChats: Record<string, { role: 'you' | 'master'; text: string }[]>
   addonChatBusy: string | null

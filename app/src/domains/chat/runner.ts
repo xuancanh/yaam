@@ -96,6 +96,16 @@ function makeAppPort(ctx: ChatCtx, agentId: string): ChatAppPort {
       }))
       return `created schedule ${id} (“${name.trim()}”) — it will add the board task when it fires`
     },
+    remember: fact => {
+      const st = ctx.stateRef.current
+      const wid = st.agents.find(a => a.id === agentId)?.workspaceId ?? st.activeWorkspace
+      const cur = st.chatMemory?.[wid] ?? ''
+      if (cur.length > 8000) return 'memory is full (8k chars) — ask the user to prune it via the Memory editor in the chat header'
+      const line = `- ${fact.replace(/\s+/g, ' ').trim()}`
+      if (cur.includes(line)) return 'already remembered'
+      ctx.dispatch(s => ({ ...s, chatMemory: { ...s.chatMemory, [wid]: cur ? `${cur}\n${line}` : line } }))
+      return `remembered: ${fact.trim()}`
+    },
     saveSkill: (name, description, body) => {
       const slug = name.trim()
       const existing = ctx.stateRef.current.skills.find(k => k.name.toLowerCase() === slug.toLowerCase())
@@ -272,6 +282,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       persona || undefined,
       ctx.aborts.signal(agentId),
       makeAppPort(ctx, agentId),
+      ctx.stateRef.current.chatMemory?.[agent.workspaceId ?? ctx.stateRef.current.activeWorkspace],
     )
     seal()
     // auto-title: after a successful turn, chats still carrying the default

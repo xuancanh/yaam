@@ -113,6 +113,38 @@ function NewChatRow({ onCreated }: { onCreated: (id: string) => void }) {
   )
 }
 
+/** Durable workspace memory editor — what every chat agent here reads at turn
+ *  start; agents append via the remember tool, humans prune here. */
+function MemoryEditor({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+  const s = useConductorSelector(x => ({ chatMemory: x.chatMemory }), shallowEqual)
+  const { setChatMemory } = useActions()
+  const [text, setText] = useState(s.chatMemory[workspaceId] ?? '')
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.55)', zIndex: 48, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 560, maxWidth: '92vw', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 14, padding: 16 }}>
+        <div className="grotesk" style={{ fontSize: 14.5, fontWeight: 600 }}>Workspace memory</div>
+        <div style={{ fontSize: 11.5, color: 'var(--mut)', margin: '4px 0 10px', lineHeight: 1.5 }}>
+          Durable notes every chat agent in this workspace sees at the start of each turn. Agents add facts with the <span className="mono">remember</span> tool; edit or prune freely — one fact per line.
+        </div>
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          rows={12}
+          placeholder={'- prefers TypeScript strict mode\n- staging deploys happen from the release branch\n- the API docs live in docs/api.md'}
+          style={{ ...FIELD, resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.6 }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+          <span className="mono" style={{ fontSize: 10, color: text.length > 8000 ? 'var(--red-soft)' : 'var(--dim)' }}>{text.length} / 8000 chars</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="deny-btn" style={{ padding: '7px 16px' }} onClick={onClose}>Cancel</button>
+            <button className="approve-btn" style={{ padding: '7px 18px' }} onClick={() => { setChatMemory(workspaceId, text); onClose() }}>Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function ChatView() {
   const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId, activeWorkspace: x.activeWorkspace }), shallowEqual)
   const { openChat, deleteSession, renameSession, setChatPermMode } = useActions()
@@ -121,6 +153,7 @@ export function ChatView() {
   const [creating, setCreating] = useState(false)
   // per-chat Files-panel toggle (explorer + viewer beside the conversation)
   const [filesOpen, setFilesOpen] = useState<Record<string, boolean>>({})
+  const [memoryOpen, setMemoryOpen] = useState(false)
 
   // chats are workspace-specific (each carries the workspace it was created in)
   const inWorkspace = (a: Agent) => a.kind === 'chat' && !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace
@@ -274,6 +307,14 @@ export function ChatView() {
               </button>
               <button
                 className="icon-btn"
+                title="Workspace memory — durable notes all chat agents here share"
+                onClick={() => setMemoryOpen(true)}
+                style={{ width: 26, height: 26, borderRadius: 7 }}
+              >
+                <Icon paths={['M12 3a7 7 0 00-4 12.7V18a2 2 0 002 2h4a2 2 0 002-2v-2.3A7 7 0 0012 3z', 'M10 22h4']} size={14} stroke={1.7} />
+              </button>
+              <button
+                className="icon-btn"
                 title={filesOpen[selected.id] ? 'Hide the file explorer' : 'Browse & preview files next to this chat'}
                 onClick={() => setFilesOpen(cur => ({ ...cur, [selected.id]: !cur[selected.id] }))}
                 style={{ width: 26, height: 26, borderRadius: 7, color: filesOpen[selected.id] ? 'var(--accent)' : undefined }}
@@ -299,6 +340,7 @@ export function ChatView() {
           </div>
         )}
       </div>
+      {memoryOpen && <MemoryEditor workspaceId={s.activeWorkspace} onClose={() => setMemoryOpen(false)} />}
     </div>
   )
 }

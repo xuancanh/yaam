@@ -114,6 +114,7 @@ export function buildHydration(p: Partial<PersistedState>, seed: AppState): Hydr
     activeWorkspace,
     workspaceData,
     addonStorage: p.addonStorage ?? {},
+    chatMemory: p.chatMemory ?? {},
     addons: (p.addons ?? seed.addons).map(a => {
       const partial = a as Partial<Addon>
       const permissions = partial.permissions ?? ALL_PERMISSIONS.map(x => x.id)
