@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react'
 import { useActions, useConductor } from '../../store'
 import { AddonSource } from './AddonSource'
 import { addonSnapshot } from '../../core/addons'
-import type { Addon } from '../../types'
+import type { Addon } from '../../core/types'
 import { IC, Icon, MasterMark, ViewHeader } from '../../components/ui'
 
 /** Host the scoped LLM customization conversation for one addon package. */

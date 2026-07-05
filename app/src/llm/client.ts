@@ -2,7 +2,7 @@
 // chat completions). HTTP goes through the Tauri backend to avoid CORS.
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { bedrockInvoke, isTauri, runCredentialCommand } from '../core/native'
-import type { AppState } from '../types'
+import type { AppState } from '../core/types'
 
 /** Select Tauri HTTP on desktop and the browser fetch implementation in web previews. */
 const doFetch: typeof fetch = (...args) => (isTauri ? tauriFetch(...args) : fetch(...args))

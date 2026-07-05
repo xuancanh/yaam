@@ -1,5 +1,5 @@
 // Master turn harness: call the model, execute tools, verify claims.
-import type { AppState } from '../../types'
+import type { AppState } from '../../core/types'
 import { buildCfg, callApi } from '../../llm/client'
 import { runTool, TOOLS } from './tools'
 import { addonToolDefs } from '../../core/addons'

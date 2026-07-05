@@ -2,7 +2,7 @@
 // and execution of addon tools / hooks. Addons are data (a JSON package) —
 // views render in a sandboxed iframe; tool handlers and hooks are JS run in
 // the app context against this curated API, so only install trusted packages.
-import type { Addon, AddonHookName, AddonPermission, AddonTool, AppState } from '../types'
+import type { Addon, AddonHookName, AddonPermission, AddonTool, AppState } from './types'
 
 /** full task spec accepted by tasks.add / tasks.update */
 export interface AddonTaskSpec {
@@ -396,7 +396,7 @@ export function parseAddonPackage(json: string): Omit<Addon, 'id' | 'enabled' | 
     ? {
         system: agentRaw.system,
         on: Array.isArray(agentRaw.on)
-          ? (agentRaw.on as unknown[]).filter((x): x is import('../types').AddonHookName => HOOK_NAMES.includes(x as string))
+          ? (agentRaw.on as unknown[]).filter((x): x is import('./types').AddonHookName => HOOK_NAMES.includes(x as string))
           : undefined,
       }
     : undefined

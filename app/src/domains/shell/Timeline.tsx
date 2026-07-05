@@ -1,5 +1,5 @@
 import { useConductor } from '../../store'
-import { EVENT_COLORS, hexToRgba } from '../../data'
+import { EVENT_COLORS, hexToRgba } from '../../core/data'
 import { ViewHeader } from '../../components/ui'
 
 /** Render the active workspace's reverse-chronological activity feed. */

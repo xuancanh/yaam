@@ -3,7 +3,7 @@
 // card current, detects when the user is needed, and escalates a short digest
 // to Master only when something noteworthy happens — Master never sees raw
 // terminal output from the watchers.
-import type { Agent } from '../../types'
+import type { Agent } from '../../core/types'
 import { callApi } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
 

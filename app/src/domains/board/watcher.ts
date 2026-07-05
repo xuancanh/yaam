@@ -3,7 +3,7 @@
 // task's one-shot session, keeps the card moving across the board, and talks
 // to the user through the task's chat. It also powers LLM-assisted task
 // creation (drafting descriptions/criteria, or rejecting vague tasks).
-import type { Agent, BoardTask } from '../../types'
+import type { Agent, BoardTask } from '../../core/types'
 import { callApi } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
 

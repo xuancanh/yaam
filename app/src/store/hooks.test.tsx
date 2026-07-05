@@ -2,10 +2,10 @@
 import { describe, expect, it } from 'vitest'
 import { createElement, useRef } from 'react'
 import { act, render } from '@testing-library/react'
-import { StoreCtx } from '../context'
-import type { ConductorStore } from '../context'
+import { StoreCtx } from '../core/context'
+import type { ConductorStore } from '../core/context'
 import { useConductorSelector } from './hooks'
-import type { AppState } from '../types'
+import type { AppState } from '../core/types'
 
 // Minimal external store standing in for the provider — lets us drive state
 // changes and assert exactly when a selector consumer re-renders.

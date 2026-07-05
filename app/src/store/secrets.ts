@@ -4,7 +4,7 @@
 // non-secret data. Redaction is conditional on the secret being confirmed in
 // the keychain, so a keychain failure degrades to plaintext rather than losing
 // the credential.
-import type { AppState, MainPartition } from '../types'
+import type { AppState, MainPartition } from '../core/types'
 
 export interface SecretEntry {
   /** opaque keychain account id */

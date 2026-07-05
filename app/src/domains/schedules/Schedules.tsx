@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useActions, useConductor, humanizeCron } from '../../store'
-import { ACCENT, hexToRgba } from '../../data'
-import type { Cron } from '../../types'
+import { ACCENT, hexToRgba } from '../../core/data'
+import type { Cron } from '../../core/types'
 import { IC, Icon, Switch, ViewHeader } from '../../components/ui'
 import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from '../board/TaskSpecForm'
 

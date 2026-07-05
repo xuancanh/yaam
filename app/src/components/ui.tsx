@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import type { Agent } from '../types'
-import { STATUS_META, hexToRgba } from '../data'
+import type { Agent } from '../core/types'
+import { STATUS_META, hexToRgba } from '../core/data'
 
 /** Render one or more SVG paths with the shared icon defaults. */
 export function Icon({ paths, size = 17, stroke = 1.6, style }: {

@@ -1,6 +1,6 @@
 // Pure helpers shared by the store: ids, cron parsing, prompt/dialog
 // detection, agent-type utilities, pane focus semantics, and PTY input.
-import * as native from './core/native'
+import * as native from './native'
 import type { AgentTemplate, AgentType, AppState, EscOption, MainPartition, TabGroup, WorkspaceData } from './types'
 
 /** Bumped when the persisted shape changes in a way hydration must know about.

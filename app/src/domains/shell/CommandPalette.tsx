@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useActions, useConductor } from '../../store'
-import type { View } from '../../types'
+import type { View } from '../../core/types'
 import { Icon } from '../../components/ui'
 
 const ICONS: Record<string, string[]> = {

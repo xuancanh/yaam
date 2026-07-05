@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useActions, useConductor } from '../../store'
-import { DIFF_BG, DIFF_COLORS, LOG_COLORS } from '../../data'
+import { DIFF_BG, DIFF_COLORS, LOG_COLORS } from '../../core/data'
 import { gitDiff, isTauri } from '../../core/native'
-import type { Agent, DiffFile } from '../../types'
+import type { Agent, DiffFile } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon } from '../../components/ui'
 
 /** Parse `git diff` unified output into per-file hunk lists (capped for display). */

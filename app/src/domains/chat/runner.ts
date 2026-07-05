@@ -2,13 +2,13 @@
 // MCP tools) with streamed answer + reasoning bubbles and one-shot auto-titling.
 // Extracted from the provider; operates on the stable refs/callbacks in `ctx`.
 import type { MutableRefObject } from 'react'
-import type { AppState, ChatMsg } from '../../types'
+import type { AppState, ChatMsg } from '../../core/types'
 import type { ApiMessage } from '../../master'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import { buildChatCfg, callApi, chatTypeHasCreds } from '../../llm/client'
 import { runChatTurn } from './agent'
-import { mkId } from '../../state-lib'
+import { mkId } from '../../core/state-lib'
 
 export interface ChatCtx {
   stateRef: MutableRefObject<AppState>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './task-state'
-import type { AppState, BoardTask } from '../../types'
+import type { AppState, BoardTask } from '../../core/types'
 
 const task = (id: string, extra: Partial<BoardTask> = {}): BoardTask =>
   ({ id, title: id, col: 'backlog', agentId: null, ...extra })

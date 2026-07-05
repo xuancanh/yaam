@@ -1,7 +1,7 @@
 // Pure state plumbing shared by the provider: the reducer entry point, active
 // tab-group updates, and legacy-shape inference. No React, no side effects.
-import { SHELLS } from '../data'
-import type { AppState, TabGroup } from '../types'
+import { SHELLS } from '../core/data'
+import type { AppState, TabGroup } from '../core/types'
 
 export type Updater = (s: AppState) => AppState
 

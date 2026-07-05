@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { fitTerminal, getTerminal } from '../../core/terminals'
-import type { Agent } from '../../types'
+import type { Agent } from '../../core/types'
 
 /** Attach a session's registry-owned xterm instance to the current pane DOM. */
 export function TerminalPane({ agent, active }: { agent: Agent; active: boolean }) {

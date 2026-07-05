@@ -7,7 +7,7 @@ import * as native from '../../core/native'
 import { mcpCallTool } from '../../core/mcp'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
-import type { Agent } from '../../types'
+import type { Agent } from '../../core/types'
 import { callApiStream } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
 

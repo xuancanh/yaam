@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useActions, useConductor } from '../../store'
 import { httpGetText, readTextFile } from '../../core/native'
 import { ALL_PERMISSIONS } from '../../core/addons'
-import type { Addon } from '../../types'
+import type { Addon } from '../../core/types'
 import { IC, Icon, Switch, ViewHeader } from '../../components/ui'
 
 // VS-Code-marketplace-style addon manager: sidebar (installed + market from

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useActions, useConductor } from '../../store'
 import { isTauri, pickFolder } from '../../core/native'
-import { SHELLS } from '../../data'
+import { SHELLS } from '../../core/data'
 
 const FIELD_STYLE = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,

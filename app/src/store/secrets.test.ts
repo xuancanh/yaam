@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { secretEntries, redactSecrets, applyResolvedSecrets } from './secrets'
-import type { AppState, MainPartition } from '../types'
+import type { AppState, MainPartition } from '../core/types'
 
 function mkState(over: Partial<AppState> = {}): AppState {
   return {

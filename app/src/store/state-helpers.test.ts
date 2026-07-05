@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { reducer, withActiveGroup, inferLegacyTerminalShell } from './state-helpers'
-import type { AppState, TabGroup } from '../types'
+import type { AppState, TabGroup } from '../core/types'
 
 describe('reducer', () => {
   it('applies the updater function to state', () => {

@@ -2,9 +2,9 @@
 // context only, no store internals) so selector behavior is unit-testable and
 // Fast Refresh stays happy. Re-exported from ../store for existing imports.
 import { useCallback, useContext, useRef, useSyncExternalStore } from 'react'
-import type { AppState } from '../types'
+import type { AppState } from '../core/types'
 import type { ConductorActions } from '../store'
-import { ActionsCtx, StateCtx, StoreCtx } from '../context'
+import { ActionsCtx, StateCtx, StoreCtx } from '../core/context'
 
 /** Read the current AppState and fail fast when rendered outside the provider.
  *  Re-renders on EVERY state change — prefer useConductorSelector for a slice. */

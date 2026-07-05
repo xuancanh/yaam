@@ -1,5 +1,5 @@
 import { useActions, useConductor } from '../../store'
-import { ACCENT, PERM_COLORS, hexToRgba, memTokens } from '../../data'
+import { ACCENT, PERM_COLORS, hexToRgba, memTokens } from '../../core/data'
 import { AgentAvatar, IC, Icon, Switch } from '../../components/ui'
 
 /** Route the active slide-over panel to its specialized content component. */

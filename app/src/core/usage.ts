@@ -1,4 +1,4 @@
-import type { LogLine } from '../types'
+import type { LogLine } from './types'
 
 /** Terminal output is only a proxy: YAAM cannot see provider-side billing usage. */
 export const OUTPUT_CHARS_PER_TOKEN = 4

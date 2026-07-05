@@ -5,10 +5,10 @@
 import type { MutableRefObject } from 'react'
 import type { AddonApi } from '../../core/addons'
 import { addonSnapshot } from '../../core/addons'
-import type { AppState, BoardCol, TaskChatMsg } from '../../types'
-import { focusSessionIn, humanizeCron, mkId, sendLineToSession } from '../../state-lib'
+import type { AppState, BoardCol, TaskChatMsg } from '../../core/types'
+import { focusSessionIn, humanizeCron, mkId, sendLineToSession } from '../../core/state-lib'
 import { isAltScreen, readScreen } from '../../core/terminals'
-import { ACCENT } from '../../data'
+import { ACCENT } from '../../core/data'
 import * as native from '../../core/native'
 
 export interface AddonApiCtx {

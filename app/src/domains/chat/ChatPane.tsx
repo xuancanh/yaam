@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useActions } from '../../store'
-import { ACCENT, hexToRgba } from '../../data'
-import type { Agent, ChatMsg } from '../../types'
+import { ACCENT, hexToRgba } from '../../core/data'
+import type { Agent, ChatMsg } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
 

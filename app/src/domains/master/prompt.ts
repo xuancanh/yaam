@@ -1,5 +1,5 @@
 // Master's system prompt: role, rules, and the serialized app state.
-import type { AppState } from '../../types'
+import type { AppState } from '../../core/types'
 import type { ApiMessage } from '../../llm/client'
 import { addonPromptAppends } from '../../core/addons'
 

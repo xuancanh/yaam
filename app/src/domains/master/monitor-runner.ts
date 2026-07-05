@@ -3,13 +3,13 @@
 // Extracted from the provider: it operates on the stable refs/callbacks passed
 // in `ctx`, so the provider keeps a thin delegating callback.
 import type { MutableRefObject } from 'react'
-import type { AppState, EscOption, EventType, NotifKind } from '../../types'
+import type { AppState, EscOption, EventType, NotifKind } from '../../core/types'
 import type { ApiMessage } from '../../master'
 import { buildCfg, hasCreds } from '../../master'
 import { runMonitorTurn } from '../../monitor'
 import type { MonitorExec } from '../../monitor'
 import { isAltScreen, readScreen } from '../../core/terminals'
-import { extractOptions } from '../../state-lib'
+import { extractOptions } from '../../core/state-lib'
 
 export interface MonitorCtx {
   stateRef: MutableRefObject<AppState>

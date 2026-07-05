@@ -1,6 +1,6 @@
 import { useActions, useConductor } from '../../store'
-import { hexToRgba, ACCENT } from '../../data'
-import type { View } from '../../types'
+import { hexToRgba, ACCENT } from '../../core/data'
+import type { View } from '../../core/types'
 import { IC, Icon, MasterMark } from '../../components/ui'
 
 const NAV: Array<{ id: View; label: string; paths: string[] }> = [

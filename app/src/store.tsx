@@ -4,8 +4,8 @@ import type { ReactNode } from 'react'
 import type {
   Addon, AddonHookName, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
   ChatAgentType, ChatMsg, McpServer, NotifKind, Notification, Panel, Persona, PersistedState, Skill, SkillRegistry, TaskChatMsg, View,
-} from './types'
-import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
+} from './core/types'
+import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState } from './core/data'
 import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
@@ -22,8 +22,8 @@ import { mcpConnect } from './core/mcp'
 import type { McpSession } from './core/mcp'
 import { estimateLogUsage, estimateOutputUsage } from './core/usage'
 import type { AddonApi } from './core/addons'
-import { ActionsCtx, StateCtx, StoreCtx } from './context'
-import type { ConductorStore } from './context'
+import { ActionsCtx, StateCtx, StoreCtx } from './core/context'
+import type { ConductorStore } from './core/context'
 import { runMonitorLoop } from './domains/master/monitor-runner'
 import { runWatcherLoop } from './domains/board/watcher-runner'
 import { runChatMessageTurn } from './domains/chat/runner'
@@ -170,9 +170,9 @@ import {
   activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, groupsFromLegacy,
   mkGroup, mkId, removeFromGroups, selectMainState, selectSession,
   sendLineToSession, spawnAgentProcess, switchWorkspaceIn, taskContract, taskWorkText, typeForCommand,
-} from './state-lib'
+} from './core/state-lib'
 
-export { cronMatches, humanizeCron } from './state-lib'
+export { cronMatches, humanizeCron } from './core/state-lib'
 
 /** Own the complete app state, native/LLM effects, and action surface for the UI. */
 export function ConductorProvider({ children }: { children: ReactNode }) {

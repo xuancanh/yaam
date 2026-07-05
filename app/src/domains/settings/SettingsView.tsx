@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useActions, useConductor } from '../../store'
-import { hexToRgba } from '../../data'
+import { hexToRgba } from '../../core/data'
 import { pickFolder } from '../../core/native'
 import { PROVIDERS, providerFor } from '../../master'
-import { SHELLS } from '../../data'
+import { SHELLS } from '../../core/data'
 import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
 import { ToolsSection } from './ToolsView'
 

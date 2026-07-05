@@ -2,7 +2,7 @@
 // mini-orchestrator (like Master and the task watchers), whose tools ARE the
 // addon's permission-scoped API. Hook events can wake it, and addon views can
 // chat with it over the RPC bridge (agent.wake returns the reply).
-import type { Addon } from '../../types'
+import type { Addon } from '../../core/types'
 import type { AddonApi } from '../../core/addons'
 import { callApi } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
