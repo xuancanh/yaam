@@ -27,6 +27,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     resetTerminal: vi.fn(),
     attachTerminal: vi.fn(() => ({ writeln: vi.fn() })),
     disposeTerminal: vi.fn(),
+    isAltScreen: vi.fn(() => false),
     ...over,
   }
 }

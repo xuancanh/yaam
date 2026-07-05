@@ -27,6 +27,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     restoreTerminalModes: vi.fn(),
     resetTerminal: vi.fn(),
+    isAltScreen: vi.fn(() => false),
     attachTerminal: vi.fn((): TerminalHandle => ({ writeln: vi.fn() })),
     disposeTerminal: vi.fn(),
     ...over,
@@ -118,16 +119,38 @@ describe('createSessionActions', () => {
     expect(get('a1')?.status).toBe('running')
   })
 
-  // a corrupted terminal (alt screen / mouse modes left by a Ctrl+C-killed
-  // TUI) must never leak into the resumed process
-  it('resume fully resets the reused xterm BEFORE respawning', () => {
+  // a corrupted terminal (stuck in the alt screen after a Ctrl+C-killed TUI)
+  // must never leak into the resumed process — but ONLY that case may wipe
+  // the scrollback
+  it('resume hard-resets the reused xterm BEFORE respawning only when stuck in the alt screen', () => {
     seed([agent({ status: 'error' })])
-    const port = fakePort()
+    const port = fakePort({ isAltScreen: vi.fn(() => true) })
     const order: string[] = []
     vi.mocked(port.resetTerminal).mockImplementation(() => { order.push('reset') })
     vi.mocked(port.spawnSession).mockImplementation(async () => { order.push('spawn') })
     createSessionActions(ctx(port)).resume('a1')
     expect(order).toEqual(['reset', 'spawn'])
+    expect(port.restoreTerminalModes).not.toHaveBeenCalled()
+  })
+
+  // a session that exited normally keeps its scrollback across resume — the
+  // regression was an unconditional reset clearing healthy history
+  it('resume of a healthy terminal restores modes and PRESERVES the scrollback', () => {
+    seed([agent({ status: 'idle' })])
+    const port = fakePort() // isAltScreen defaults to false
+    createSessionActions(ctx(port)).resume('a1')
+    expect(port.resetTerminal).not.toHaveBeenCalled()
+    expect(port.restoreTerminalModes).toHaveBeenCalledWith('a1')
+    expect(port.spawnSession).toHaveBeenCalled()
+  })
+
+  it('refreshTerminal is the explicit user reset: restore modes, then wipe', () => {
+    const port = fakePort()
+    const order: string[] = []
+    vi.mocked(port.restoreTerminalModes).mockImplementation(() => { order.push('restore') })
+    vi.mocked(port.resetTerminal).mockImplementation(() => { order.push('reset') })
+    createSessionActions(ctx(port)).refreshTerminal('a1')
+    expect(order).toEqual(['restore', 'reset'])
   })
 
   it('resume is a no-op for a chat agent (no process)', () => {

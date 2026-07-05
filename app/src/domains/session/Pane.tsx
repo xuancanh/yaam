@@ -13,7 +13,7 @@ const filesOpenCache = new Map<string, boolean>()
 
 /** Render one terminal pane with session controls and optional file explorer. */
 export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
-  const { setActivePane, closePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession } = useActions()
+  const { setActivePane, closePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession, refreshTerminal } = useActions()
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
   const [gitOpen, setGitOpen] = useState(false)
   // Toggle the pane-local file explorer and repaint the terminal after resizing.
@@ -83,6 +83,16 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         {agent.kind === 'real' && agent.status === 'running' && (
           <button className="icon-btn" title="Stop session" style={{ width: 27, height: 27, borderRadius: 7, color: 'var(--red-soft)' }} onClick={e => { e.stopPropagation(); stopSession(agent.id) }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+          </button>
+        )}
+        {agent.kind !== 'chat' && (
+          <button
+            className="icon-btn"
+            title="Clear terminal — full reset of the display and scrollback (fixes a corrupted pane; a live TUI repaints with Ctrl+L)"
+            style={{ width: 27, height: 27, borderRadius: 7 }}
+            onClick={e => { e.stopPropagation(); refreshTerminal(agent.id) }}
+          >
+            <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={13} stroke={1.8} />
           </button>
         )}
         <button className="icon-btn" title="Minimize to dock" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); minimizePane(index) }}>

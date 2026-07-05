@@ -40,6 +40,9 @@ export interface SessionActions {
   unarchiveSession: (id: string) => void
   deleteSession: (id: string) => void
   resume: (id: string) => void
+  /** user-initiated full terminal reset (modes + scrollback) — the manual fix
+   *  for a corrupted pane; never triggered automatically */
+  refreshTerminal: (id: string) => void
   newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean) => void
   sendInput: (id: string, text: string) => void
   stopSession: (id: string) => void
@@ -154,10 +157,12 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
             resumeNote = `resuming via · ${cmd}`
           }
         }
-        // the respawn reuses this xterm — a full reset first, or the new
-        // process inherits whatever modes the old one died in (alt screen,
-        // mouse tracking, …) and renders corrupted from its first frame
-        port.resetTerminal(id)
+        // the respawn reuses this xterm. Only hard-reset (which wipes the
+        // scrollback) when the old process actually died stuck in the
+        // alternate screen; a clean exit just gets its modes re-normalized so
+        // the session's history survives the resume.
+        if (port.isAltScreen(id)) port.resetTerminal(id)
+        else port.restoreTerminalModes(id)
         port.spawnSession(id, `${envPrefix(type?.env)}${cmd}`.trim(), agent.cwd || undefined, undefined, undefined, terminalShell).catch(() => {})
         probeCliSession(id, cmd, agent.cwd || '', true)
       }
@@ -167,6 +172,14 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           ? { ...a, terminalShell, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]) }
           : a),
       }, id))
+    },
+
+    refreshTerminal: id => {
+      // restore sane modes first so the reset lands on the normal buffer,
+      // then wipe; a live process repaints on the follow-up resize/redraw
+      port.restoreTerminalModes(id)
+      port.resetTerminal(id)
+      flash('Terminal cleared')
     },
 
     newRealSession: (command, cwd, terminalShell, isolate) => {
