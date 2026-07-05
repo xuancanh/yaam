@@ -63,7 +63,7 @@ The desktop process has three layers:
 
 Agents carry a `kind` (`real` PTY session or `chat` in-app agent). Chat agents run an in-app tool loop (`llm/chat-agent.ts`) with built-in file/exec tools plus tools from connected MCP servers (`mcp.ts`) and loadable skills (`skills.ts`); their file writes are sandboxed to the chat's working folder. Chat transcripts are indexed for full-text search by `core/search.rs` (tantivy), reindexed from the frontend on a debounce.
 
-`store.tsx` is intentionally the integration point. `stateRef.current` mirrors reducer state for asynchronous callbacks. Refs such as `masterEventRef`, `onSettleRef`, and `runWatcherRef` break callback declaration cycles without moving side effects into the reducer.
+`store.tsx` is intentionally the integration point. `stateRef.current` mirrors the Zustand store state for asynchronous callbacks. Refs such as `masterEventRef`, `onSettleRef`, and `runWatcherRef` break callback declaration cycles without moving side effects into a dispatch updater.
 
 ## Primary data flows
 
