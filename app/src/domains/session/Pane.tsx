@@ -12,7 +12,7 @@ const filesOpenCache = new Map<string, boolean>()
 
 /** Render one terminal pane with session controls and optional file explorer. */
 export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
-  const { setActivePane, closePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession } = useActions()
+  const { setActivePane, closePane, openPanel, openDiff, resume, stopSession, toggleMaximize, minimizePane, renameSession } = useActions()
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
   // Toggle the pane-local file explorer and repaint the terminal after resizing.
   const toggleFiles = () => {
@@ -42,7 +42,7 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         <div style={{ minWidth: 0, overflow: 'hidden' }}>
           <EditableName name={agent.name} onRename={name => renameSession(agent.id, name)} fontSize={12.5} />
           <div className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {agent.repo} · {agent.branch}
+            {agent.repo} · {agent.branch}{agent.worktree ? <span style={{ color: 'var(--amber)' }}> · isolated</span> : null}
           </div>
         </div>
         <div style={{ marginLeft: 6 }}>
@@ -57,6 +57,16 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         >
           <Icon paths={['M3 7a2 2 0 012-2h4l2 2h9a1 1 0 011 1v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z']} size={15} stroke={1.6} />
         </button>
+        {agent.kind !== 'chat' && agent.cwd && (
+          <button
+            className="icon-btn"
+            title={agent.worktree ? 'Review & merge worktree changes' : 'Review working-tree diff'}
+            style={{ width: 27, height: 27, borderRadius: 7, color: agent.worktree ? 'var(--amber)' : undefined }}
+            onClick={e => { e.stopPropagation(); openDiff(agent.id) }}
+          >
+            <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={15} stroke={1.7} />
+          </button>
+        )}
         <button className="icon-btn" title="Memory & context" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); openPanel(agent.id, 'memory') }}>
           <Icon paths={['M7 7h10v10H7z', ...IC.chip]} size={15} />
         </button>
