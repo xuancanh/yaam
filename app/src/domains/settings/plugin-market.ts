@@ -5,6 +5,7 @@
 // registries (slash-invocable), and .mcp.json servers become MCP candidates.
 // Plugin agents/hooks are Claude-Code-specific and are reported as skipped.
 import { httpGetText } from '../../core/native'
+import { parseSkillMd } from '../../core/skills'
 import { fromMcpServersMap } from './mcp-market'
 import type { McpCandidate, RawEntry } from './mcp-market'
 
@@ -34,7 +35,9 @@ export interface PluginInstall {
   skillRegistries: { name: string; url: string }[]
   /** MCP servers declared by the plugin's .mcp.json */
   mcpServers: McpCandidate[]
-  /** components we cannot represent in chat (agents, hooks) */
+  /** plugin agents/*.md translated into chat personas (system prompts) */
+  personas: { name: string; description: string; body: string }[]
+  /** components we cannot represent in chat (hooks) */
   skipped: string[]
 }
 
@@ -104,7 +107,7 @@ export async function resolvePluginInstall(plugin: PluginEntry): Promise<PluginI
   if (!Array.isArray(listing)) throw new Error('unexpected GitHub API response for the plugin folder')
   const has = (name: string, type: string) => listing.some(e => e.name === name && e.type === type)
 
-  const out: PluginInstall = { skillRegistries: [], mcpServers: [], skipped: [] }
+  const out: PluginInstall = { skillRegistries: [], mcpServers: [], personas: [], skipped: [] }
   if (has('skills', 'dir')) out.skillRegistries.push({ name: plugin.name, url: treeUrl(l, 'skills') })
   if (has('commands', 'dir')) out.skillRegistries.push({ name: `${plugin.name}-commands`, url: treeUrl(l, 'commands') })
   if (has('.mcp.json', 'file')) {
@@ -115,10 +118,33 @@ export async function resolvePluginInstall(plugin: PluginEntry): Promise<PluginI
       out.skipped.push('.mcp.json (unparseable)')
     }
   }
-  if (has('agents', 'dir')) out.skipped.push('agents (Claude Code only)')
-  if (has('hooks', 'dir') || has('hooks.json', 'file')) out.skipped.push('hooks (Claude Code only)')
-  if (!out.skillRegistries.length && !out.mcpServers.length) {
-    throw new Error('nothing chat-compatible found (no skills/, commands/, or .mcp.json)')
+  if (has('agents', 'dir')) {
+    // Claude Code agents are markdown system prompts with name/description
+    // frontmatter — exactly YAAM's persona shape, so translate them
+    try {
+      const agents = JSON.parse(await httpGetText(
+        `https://api.github.com/repos/${l.owner}/${l.repo}/contents/${[l.path, 'agents'].filter(Boolean).join('/')}?ref=${l.ref}`,
+      )) as { name: string; type: string }[]
+      for (const a of agents.filter(e => e.type === 'file' && /\.md$/i.test(e.name)).slice(0, 20)) {
+        try {
+          const parsed = parseSkillMd(await httpGetText(rawUrl(l, `agents/${a.name}`)), a.name.replace(/\.md$/i, ''))
+          if (parsed.body.trim()) {
+            out.personas.push({
+              name: `${plugin.name}:${parsed.name}`,
+              description: parsed.description || `agent from the ${plugin.name} plugin`,
+              body: parsed.body,
+            })
+          }
+        } catch { /* unreadable agent file — skip it, keep the rest */ }
+      }
+      if (!out.personas.length) out.skipped.push('agents (none parseable)')
+    } catch {
+      out.skipped.push('agents (listing failed)')
+    }
+  }
+  if (has('hooks', 'dir') || has('hooks.json', 'file')) out.skipped.push('hooks (Claude Code lifecycle — not applicable)')
+  if (!out.skillRegistries.length && !out.mcpServers.length && !out.personas.length) {
+    throw new Error('nothing chat-compatible found (no skills/, commands/, agents/, or .mcp.json)')
   }
   return out
 }

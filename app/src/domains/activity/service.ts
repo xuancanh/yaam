@@ -42,7 +42,7 @@ export function createActivityService(state: StatePort): ActivityService {
       // escalations (and finished work) also reach the OS notification center
       // when the app isn't focused — approvals shouldn't require watching
       const focused = typeof document !== 'undefined' && document.hasFocus()
-      if (state.get().settings.osNotifications !== false && (kind === 'escalate' || kind === 'done') && !focused) {
+      if (state.get().settings?.osNotifications !== false && (kind === 'escalate' || kind === 'done') && !focused) {
         void osNotify(title, detail)
       }
       state.update(s => {

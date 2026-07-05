@@ -14,7 +14,7 @@ export interface CatalogSkill {
 
 /** Tolerantly pull name/description out of SKILL.md frontmatter; returns the
  *  body with the frontmatter stripped. */
-function parseSkillMd(text: string, fallbackName: string): { name: string; description: string; body: string } {
+export function parseSkillMd(text: string, fallbackName: string): { name: string; description: string; body: string } {
   let name = fallbackName
   let description = ''
   let body = text

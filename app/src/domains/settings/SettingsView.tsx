@@ -270,8 +270,8 @@ function PluginRow({ p, installed, onInstall }: { p: PluginEntry; installed: str
  *  for chat — skills/commands become skill registries, .mcp.json becomes MCP
  *  servers. Claude-Code-only parts (agents, hooks) are skipped. */
 function PluginsSection() {
-  const s = useConductorSelector(x => ({ settings: x.settings, skillRegistries: x.skillRegistries, mcpServers: x.mcpServers }), shallowEqual)
-  const { updateSettings, addSkillRegistry, addMcpServer } = useActions()
+  const s = useConductorSelector(x => ({ settings: x.settings, skillRegistries: x.skillRegistries, mcpServers: x.mcpServers, personas: x.personas }), shallowEqual)
+  const { updateSettings, addSkillRegistry, addMcpServer, addPersona, updatePersona } = useActions()
   const registries = s.settings.pluginRegistries ?? [DEFAULT_PLUGIN_REGISTRY]
   const [open, setOpen] = useState<string | null>(null)
   const [plugins, setPlugins] = useState<PluginEntry[]>([])
@@ -314,9 +314,18 @@ function PluginsSection() {
           : { transport: 'http' })
         mcps++
       }
+      // plugin agents arrive as personas (pickable when starting a chat)
+      const havePersona = new Set(s.personas.map(pe => pe.name))
+      let personas = 0
+      for (const pe of res.personas) {
+        if (havePersona.has(pe.name)) continue
+        updatePersona(addPersona(), pe)
+        personas++
+      }
       const parts = [
         regs ? `${regs} skill registr${regs > 1 ? 'ies' : 'y'}` : '',
         mcps ? `${mcps} MCP server${mcps > 1 ? 's' : ''}` : '',
+        personas ? `${personas} persona${personas > 1 ? 's' : ''}` : '',
         res.skipped.length ? `skipped: ${res.skipped.join(', ')}` : '',
       ].filter(Boolean)
       setInstalled(cur => ({ ...cur, [p.name]: `installed — ${parts.join(' · ') || 'already present'}` }))

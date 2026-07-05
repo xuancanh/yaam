@@ -15,6 +15,7 @@ describe('secretEntries', () => {
   it('lists master, per-chat-type, and per-mcp secrets', () => {
     expect(secretEntries(mkState())).toEqual([
       { account: 'master.apiKey', value: 'sk-master' },
+      { account: 'github.token', value: '' },
       { account: 'chat.ct1.apiKey', value: 'sk-chat' },
       { account: 'chat.ct2.apiKey', value: '' },
       { account: 'mcp.m1.headers', value: 'Authorization: Bearer tok' },
