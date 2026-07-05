@@ -12,6 +12,7 @@ import { dispatch } from '../../core/store'
 import * as native from '../../core/native'
 import { classifyExit } from './exit'
 import type { SessionExit } from './exit'
+import { realSessionProcessPort } from './ports'
 import { removeFromGroups } from './layout-state'
 import { typeForCommand } from './command'
 import { updateLocatedTask } from '../board/task-state'
@@ -160,7 +161,7 @@ export function useSessionExitHandler(ctx: SessionExitCtx): void {
       coordinateSessionExit(e, {
         ...ctx,
         dispatch,
-        detectCliSession: (probe, cwd, launchedAt) => native.detectCliSession(probe, cwd, launchedAt),
+        detectCliSession: (probe, cwd, launchedAt) => realSessionProcessPort.detectCliSession(probe, cwd, launchedAt),
         scheduleArchive: (fn, ms) => { window.setTimeout(fn, ms) },
       })
     })

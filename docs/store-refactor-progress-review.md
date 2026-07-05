@@ -21,15 +21,26 @@
 >   on `chatTranscriptsChanged`.
 > - **#7 session-exit coordinator — partial.** `classifyExit` (pure) **and** the
 >   effectful fan-out (`coordinateSessionExit`, ports-injected + tested) are
->   extracted. A full `SessionController` over native/terminal ports is not yet done.
-> - **#12 orchestration tests — partial.** Added `exit-handler.test.ts` (8 cases).
->   Still missing: launch-failure rollback, delete/workspace-delete cleanup,
->   cancellation-on-delete, boot readiness.
+>   extracted. The session action surface (launch/resume/stop/archive/unarchive/
+>   delete/send/answerPrompt) is now port-backed and tested — the substance of a
+>   `SessionController` — though not yet unified into one named interface.
+> - **#10 capability ports — largely done for the session domain.** Introduced
+>   `domains/session/ports.ts` (`SessionProcessPort`: spawn/kill/remove/write/
+>   sendLine/detect/attachTerminal+writeln/disposeTerminal). The launch runtime,
+>   session actions, prompt actions, and the exit fan-out all drive native/xterm
+>   only through the port (the only remaining wholesale `native` use is the
+>   `onSessionExit` subscription, which is the native boundary by design). Board/
+>   workspace/addon action modules are not yet audited for the same treatment.
+> - **#12 orchestration tests — substantially expanded** (91 → 115). Added
+>   `exit-handler.test.ts` (fan-out), `launch-runtime.test.ts` (incl. launch-failure
+>   rollback), `actions.test.ts` (archive/delete/stop/resume/unarchive cleanup +
+>   task-unbind), `prompt-actions.test.ts`. Still missing: workspace-delete cascade,
+>   in-flight cancellation-on-delete, boot readiness.
 >
 > Still open / deliberately deferred: **#3** explicit `BootStatus` lifecycle,
-> **#4** `beforeunload`→Tauri-close hardening, **#7** full `SessionController`,
-> **#10** capability ports (the launch runtime still imports `native`/`getTerminal`
-> directly — a prerequisite for the launch-failure test). The original review text
+> **#4** `beforeunload`→Tauri-close hardening, **#7** unifying the port-backed
+> session actions into one named `SessionController`, **#10** applying the same
+> port treatment to board/workspace/addon action modules. The original review text
 > below is preserved for the target architecture.
 
 Reviewed on 2026-07-04 against commit `c8f6981` plus the active selector-migration
