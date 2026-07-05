@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  Addon, AddonHookName, Agent, AgentTemplate, AppState, BoardTask, EscOption, EventType, LogLine,
+  Addon, AddonHookName, AgentTemplate, AppState, BoardTask, EscOption, EventType, LogLine,
   ChatMsg, NotifKind, PersistedState, TaskChatMsg,
 } from './core/types'
 import { PERM_ORDER } from './core/data'
@@ -33,7 +33,7 @@ import { useAddonsActions } from './domains/addons/actions'
 import { useWorkspaceActions } from './domains/workspace/actions'
 import { useShellActions } from './domains/shell/actions'
 import { createAddonApi } from './domains/addons/addon-api'
-import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
+import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { buildLaunch } from './domains/session/launch'
 import { useSessionSettle } from './domains/session/use-settle'
 import { buildHydration } from './infrastructure/persistence/hydrate'
@@ -46,8 +46,9 @@ import type { ConductorActions } from './app/actions'
 
 
 import { mkId } from './shared/id'
-import { selectMainState, selectSession } from './infrastructure/persistence/schema'
-import { chatTranscriptsChanged, mainPartitionChanged, secretsChanged, sessionsChanged } from './infrastructure/persistence/subscribe'
+import { chatTranscriptsChanged } from './infrastructure/persistence/subscribe'
+import { createPersistenceRuntime } from './infrastructure/persistence/runtime'
+import type { PersistenceRuntime } from './infrastructure/persistence/runtime'
 import { cronMatches } from './domains/schedules/cron'
 import { buildTemplateCommand } from './domains/schedules/template-command'
 import { activeGroupOf, focusSessionIn, mkGroup, removeFromGroups } from './domains/session/layout-state'
@@ -426,10 +427,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // persistence: restore everything (including session definitions and their
   // output tails) on launch, save on change. Restored sessions come back
   // paused — resume respawns their command.
-  // accounts whose secret is confirmed in the OS keychain (so the plaintext
-  // file can safely redact them); populated on hydrate + by the sync effect
-  const keychainReadyRef = useRef<Set<string>>(new Set())
-  const hydrated = useRef(false)
+  // the save-side persistence runtime (created once in render, below). Hydration
+  // seeds its keychain-ready set and calls markReady() when the snapshot applies.
+  const persistenceRef = useRef<PersistenceRuntime | undefined>(undefined)
   const hydrateStarted = useRef(false)
   // connect enabled MCP/skill integrations once hydration has actually finished.
   // Set below (after connectMcp/refreshSkillCatalog exist) and invoked from the
@@ -486,122 +486,33 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         for (const { account, value } of secretEntries(stateRef.current)) {
           if (value) continue // legacy plaintext still in the loaded file
           const v = await native.secretGet(account)
-          if (v) { resolved[account] = v; keychainReadyRef.current.add(account) }
+          if (v) { resolved[account] = v; persistenceRef.current!.keychainReady.add(account) }
         }
         if (Object.keys(resolved).length) dispatch(s => applyResolvedSecrets(s, resolved))
       } catch (e) {
         console.error('[yaam] keychain resolve failed:', e)
       }
-      hydrated.current = true
-      // restored state is fully applied — now connect enabled integrations
+      // restored state is fully applied — enable saves, then connect integrations
+      persistenceRef.current!.markReady()
       startIntegrationsRef.current()
     })()
   }, [appendTail, armResponseWatch, bumpSettle, clearNeeds])
 
-  const mainSaveTimer = useRef<number | undefined>(undefined)
-  const sessionSaveTimer = useRef<number | undefined>(undefined)
-  const saveFailedRef = useRef(false)
-  // warn once per failure streak, not on every debounced save
-  const onSaveError = useCallback((where: string, e: unknown) => {
-    console.error(`[yaam] ${where} save failed:`, e)
-    if (!saveFailedRef.current) {
-      saveFailedRef.current = true
-      dispatch(s => ({ ...s, toast: 'Could not save state to disk — recent changes may be lost on restart' }))
-    }
-  }, [])
-
-  // Main (low-churn) partition: everything durable except the agents. Driven by
-  // a direct store subscription that arms the debounce only when a durable slice
-  // changes reference — transient UI churn (toast/composer) and per-line
-  // terminal/agent updates never touch it. Saves the latest state at fire time.
-  const armMainSave = useCallback(() => {
-    if (!hydrated.current) return
-    if (mainSaveTimer.current) window.clearTimeout(mainSaveTimer.current)
-    mainSaveTimer.current = window.setTimeout(() => {
-      // redact secrets already safe in the keychain so the file holds no plaintext
-      const main = redactSecrets(selectMainState(stateRef.current), keychainReadyRef.current)
-      native.saveStateFile(JSON.stringify(main)).then(() => { saveFailedRef.current = false }).catch(e => onSaveError('main', e))
-    }, 800)
-  }, [onSaveError])
-  useEffect(() => useAppStore.subscribe((s, prev) => {
-    if (mainPartitionChanged(s, prev)) armMainSave()
-  }), [armMainSave])
-
-  // Sessions: one file per session. Terminal I/O and chat streaming fire
-  // constantly, so we diff against the last-saved set and write ONLY the agents
-  // whose object identity changed (agents are immutably updated, so a changed
-  // reference == changed content), and delete files for removed agents. A
-  // streaming session therefore rewrites just its own small file.
-  const savedAgentsRef = useRef<Map<string, Agent>>(new Map())
-  const armSessionSave = useCallback(() => {
-    if (!hydrated.current) return
-    if (sessionSaveTimer.current) window.clearTimeout(sessionSaveTimer.current)
-    sessionSaveTimer.current = window.setTimeout(() => {
-      const prev = savedAgentsRef.current
-      const next = new Map<string, Agent>()
-      for (const a of stateRef.current.agents) {
-        next.set(a.id, a)
-        if (prev.get(a.id) !== a) {
-          native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { saveFailedRef.current = false }).catch(e => onSaveError('session', e))
-        }
-      }
-      for (const id of prev.keys()) {
-        if (!next.has(id)) native.removeSession(id).catch(() => {})
-      }
-      savedAgentsRef.current = next
-    }, 800)
-  }, [onSaveError])
-  useEffect(() => useAppStore.subscribe((s, prev) => {
-    if (sessionsChanged(s, prev)) armSessionSave()
-  }), [armSessionSave])
-
-  // Mirror credential fields into the OS keychain (debounced). Once a secret is
-  // confirmed stored, mark it keychain-ready so the main writer redacts it from
-  // the plaintext file; a keychain failure leaves it plaintext (no data loss).
-  const secretSyncTimer = useRef<number | undefined>(undefined)
-  const armSecretSync = useCallback(() => {
-    if (!hydrated.current) return
-    if (secretSyncTimer.current) window.clearTimeout(secretSyncTimer.current)
-    secretSyncTimer.current = window.setTimeout(() => {
-      void (async () => {
-        let changed = false
-        for (const { account, value } of secretEntries(stateRef.current)) {
-          try {
-            if (value) {
-              await native.secretSet(account, value)
-              if (!keychainReadyRef.current.has(account)) { keychainReadyRef.current.add(account); changed = true }
-            } else if (keychainReadyRef.current.delete(account)) {
-              await native.secretDelete(account)
-            }
-          } catch (e) {
-            console.error(`[yaam] keychain write failed for ${account}:`, e) // stays plaintext
-          }
-        }
-        // re-persist redacted now that new secrets are safely in the keychain
-        if (changed) native.saveStateFile(JSON.stringify(redactSecrets(selectMainState(stateRef.current), keychainReadyRef.current))).catch(() => {})
-      })()
-    }, 900)
-  }, [])
-  useEffect(() => useAppStore.subscribe((s, prev) => {
-    if (secretsChanged(s, prev)) armSecretSync()
-  }), [armSecretSync])
-
-  // flush the latest state on quit/reload so nothing inside the debounce window is lost
+  // All save-side persistence (debounced main/session writers, keychain mirror,
+  // teardown flush, save-error state) lives in a dedicated runtime that subscribes
+  // to the store directly. Created once during render so the hydration effect can
+  // seed its keychain set and call markReady() when the restored snapshot is applied.
+  if (!persistenceRef.current) {
+    persistenceRef.current = createPersistenceRuntime(
+      { getState: useAppStore.getState, subscribe: useAppStore.subscribe },
+      { onToast: msg => dispatch(s => ({ ...s, toast: msg })) },
+    )
+  }
+  const persistence = persistenceRef.current
   useEffect(() => {
-    // Persist both partitions from stateRef during page teardown, through the
-    // same selectors as the debounced writers so they can never drift apart.
-    const flush = () => {
-      const st = stateRef.current
-      native.saveStateFile(JSON.stringify(redactSecrets(selectMainState(st), keychainReadyRef.current))).catch(() => {})
-      // write only sessions changed since the last debounced save
-      const prev = savedAgentsRef.current
-      for (const a of st.agents) {
-        if (prev.get(a.id) !== a) native.saveSession(a.id, JSON.stringify(selectSession(a))).catch(() => {})
-      }
-    }
-    window.addEventListener('beforeunload', flush)
-    return () => window.removeEventListener('beforeunload', flush)
-  }, [])
+    persistence.start()
+    return () => persistence.dispose()
+  }, [persistence])
 
   // Capture the CLI's own session id (claude/codex) by watching for the
   // session file it creates. Interactive claude ignores --session-id for

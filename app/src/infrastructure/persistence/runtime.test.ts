@@ -1,0 +1,109 @@
+// @vitest-environment jsdom
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+
+vi.mock('../../core/native', () => ({
+  saveStateFile: vi.fn(() => Promise.resolve()),
+  saveSession: vi.fn(() => Promise.resolve()),
+  removeSession: vi.fn(() => Promise.resolve()),
+  secretSet: vi.fn(() => Promise.resolve()),
+  secretDelete: vi.fn(() => Promise.resolve()),
+}))
+
+import * as native from '../../core/native'
+import { createPersistenceRuntime } from './runtime'
+type AppState = import('../../core/types').AppState
+
+function baseState(over: Partial<AppState> = {}): AppState {
+  return {
+    schemaVersion: 1,
+    tasks: [], crons: [], settings: { apiKey: '' }, toolsCatalog: [], agentTypes: [], templates: [],
+    mcpServers: [], skills: [], personas: [], skillRegistries: [], chatAgentTypes: [],
+    workspaces: [], activeWorkspace: 'ws-a', workspaceData: {},
+    agents: [], groups: [], activeGroup: null, minimizedIds: [], addons: [], addonStorage: {},
+    messages: [], events: [], notifications: [], pendingMasterNotes: [], toast: '', composer: '',
+    ...over,
+  } as unknown as AppState
+}
+
+function fakeStore(initial: AppState) {
+  let state = initial
+  const listeners = new Set<(s: AppState, p: AppState) => void>()
+  return {
+    getState: () => state,
+    subscribe: (fn: (s: AppState, p: AppState) => void) => { listeners.add(fn); return () => { listeners.delete(fn) } },
+    set(next: AppState) { const prev = state; state = next; for (const l of [...listeners]) l(next, prev) },
+  }
+}
+
+describe('createPersistenceRuntime', () => {
+  beforeEach(() => { vi.clearAllMocks(); vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('does not write before markReady() (protects on-disk state during load)', () => {
+    const store = fakeStore(baseState())
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start()
+    store.set(baseState({ tasks: [{ id: 't' }] as unknown as AppState['tasks'] }))
+    vi.advanceTimersByTime(1000)
+    expect(native.saveStateFile).not.toHaveBeenCalled()
+    rt.dispose()
+  })
+
+  it('debounces a main-partition save after a durable slice change', () => {
+    const store = fakeStore(baseState())
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+    // immutable update: only the changed slice gets a new reference
+    store.set({ ...store.getState(), tasks: [{ id: 't' }] as unknown as AppState['tasks'] })
+    expect(native.saveStateFile).not.toHaveBeenCalled() // still within debounce
+    vi.advanceTimersByTime(800)
+    expect(native.saveStateFile).toHaveBeenCalledTimes(1)
+    rt.dispose()
+  })
+
+  it('ignores transient (non-persisted) changes', () => {
+    const store = fakeStore(baseState())
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+    // toast/composer change but every durable slice keeps its reference
+    store.set({ ...store.getState(), toast: 'hi', composer: 'typing' })
+    vi.advanceTimersByTime(1000)
+    expect(native.saveStateFile).not.toHaveBeenCalled()
+    rt.dispose()
+  })
+
+  it('writes only changed sessions and removes deleted ones', () => {
+    const a1 = { id: 'a1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
+    const a2 = { id: 'a2', kind: 'real', cmd: 'y', log: [] } as unknown as AppState['agents'][number]
+    const store = fakeStore(baseState({ agents: [a1, a2] as AppState['agents'] }))
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+    // first pass persists both
+    store.set(baseState({ agents: [a1, a2] as AppState['agents'] }))
+    vi.advanceTimersByTime(800)
+    expect(native.saveSession).toHaveBeenCalledTimes(2)
+    vi.clearAllMocks()
+    // a1 changes (new ref), a2 unchanged, and a3 added — only a1 + a3 written
+    const a1b = { ...a1, log: [{ t: 'out', x: 'hi' }] } as unknown as AppState['agents'][number]
+    const a3 = { id: 'a3', kind: 'real', cmd: 'z', log: [] } as unknown as AppState['agents'][number]
+    store.set(baseState({ agents: [a1b, a2, a3] as AppState['agents'] }))
+    vi.advanceTimersByTime(800)
+    expect(native.saveSession).toHaveBeenCalledTimes(2)
+    // a2 removed → its file is deleted
+    vi.clearAllMocks()
+    store.set(baseState({ agents: [a1b, a3] as AppState['agents'] }))
+    vi.advanceTimersByTime(800)
+    expect(native.removeSession).toHaveBeenCalledWith('a2')
+    rt.dispose()
+  })
+
+  it('dispose() cancels a pending debounced write', () => {
+    const store = fakeStore(baseState())
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+    store.set(baseState({ tasks: [{ id: 't' }] as unknown as AppState['tasks'] }))
+    rt.dispose() // before the 800ms debounce elapses
+    vi.advanceTimersByTime(2000)
+    expect(native.saveStateFile).not.toHaveBeenCalled()
+  })
+})
