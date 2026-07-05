@@ -31,6 +31,9 @@ export interface ToolLoopParams {
   /** how the loop-ending assistant turn is appended to history: the full content
    *  blocks (default) or just its prose text (some runtimes store only the reply) */
   terminalAssistant?: 'content' | 'text'
+  /** checked before each round; return false to stop early (e.g. the task the
+   *  watcher owns was deleted mid-loop). Not a failure — returns the reply so far. */
+  shouldContinue?: () => boolean
   /** injectable transport (tests provide a scripted callApi) */
   callApi?: (cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], signal?: AbortSignal) => Promise<ApiResponse>
 }
@@ -63,6 +66,7 @@ export async function runToolLoop(p: ToolLoopParams): Promise<ToolLoopResult> {
   }
 
   for (let round = 0; round < p.maxRounds; round++) {
+    if (p.shouldContinue && !p.shouldContinue()) return { text: '', rounds: round, maxedOut: false }
     const res = await call(p.cfg, sys(), p.history, toolz(), p.signal)
     const uses = res.content.filter((b): b is ApiContentBlock => b.type === 'tool_use')
 

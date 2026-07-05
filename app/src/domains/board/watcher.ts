@@ -6,6 +6,7 @@
 import type { Agent, BoardTask } from '../../core/types'
 import { callApi } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
+import { runToolLoop } from '../../llm/tool-loop'
 
 // ---------- task creation assist ----------
 
@@ -187,26 +188,14 @@ export async function runWatcherTurn(
   signal?: AbortSignal,
 ): Promise<string> {
   history.push({ role: 'user', content: note })
-  let reply = ''
-  for (let i = 0; i < 5; i++) {
-    const task = getTask()
-    if (!task) break
-    const res = await callApi(cfg, watcherSystem(task, getAgents()), history, WATCHER_TOOLS, signal)
-    if (res.stop_reason !== 'tool_use') {
-      reply = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
-      history.push({ role: 'assistant', content: reply || '(ok)' })
-      break
-    }
-    const results = res.content
-      .filter((b): b is ApiContentBlock => b.type === 'tool_use')
-      .map(b => ({
-        type: 'tool_result',
-        tool_use_id: b.id,
-        content: runWatcherTool(b.name || '', b.input || {}, exec),
-      }))
-    history.push({ role: 'assistant', content: res.content })
-    history.push({ role: 'user', content: results })
-  }
+  const { text: reply } = await runToolLoop({
+    cfg, history, tools: WATCHER_TOOLS, maxRounds: 5, signal,
+    terminalAssistant: 'text', sequential: true,
+    // re-read live task/agents each round; stop if the task was deleted mid-loop
+    shouldContinue: () => !!getTask(),
+    system: () => { const t = getTask(); return t ? watcherSystem(t, getAgents()) : '' },
+    execute: async (name, input) => runWatcherTool(name, input, exec),
+  })
   // cap the private history so long tasks stay cheap
   while (history.length > 20) history.shift()
   if (history.length && history[0].role !== 'user') history.shift()

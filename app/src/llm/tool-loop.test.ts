@@ -71,6 +71,18 @@ describe('runToolLoop', () => {
     expect(history.at(-1)).toEqual({ role: 'assistant', content: 'hi there' })
   })
 
+  it('stops early when shouldContinue() turns false (e.g. owning task deleted)', async () => {
+    const { callApi } = scripted([toolUse('t1', 'x'), toolUse('t2', 'x'), finalText('never')])
+    const history: ApiMessage[] = [{ role: 'user', content: 'go' }]
+    let alive = 2
+    const res = await runToolLoop({
+      cfg, system: 'S', history, tools: [], execute: vi.fn(async () => 'ok'), maxRounds: 5, callApi,
+      shouldContinue: () => alive-- > 0, // survives 2 round-starts, then stops
+    })
+    expect(res).toMatchObject({ text: '', maxedOut: false })
+    expect(res.rounds).toBe(2) // stopped at the start of the 3rd round
+  })
+
   it('re-reads system + tools thunks each round', async () => {
     const { callApi, calls } = scripted([toolUse('t1', 'x'), finalText('done')])
     let n = 0
