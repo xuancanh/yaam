@@ -35,6 +35,7 @@ import { useShellActions } from './domains/shell/actions'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
 import { buildLaunch } from './domains/session/launch'
+import { useSessionSettle } from './domains/session/use-settle'
 import { buildHydration } from './infrastructure/persistence/hydrate'
 import { loadSnapshot } from './infrastructure/persistence/loaders'
 import { withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
@@ -45,8 +46,7 @@ import type { ConductorActions } from './app/actions'
 
 
 import {
-  QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
-  activeGroupOf, buildTemplateCommand, cronMatches, detectPrompt, envPrefix, extractOptions, focusSessionIn,
+  activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, focusSessionIn,
   mkGroup, mkId, removeFromGroups, selectMainState, selectSession,
   sendLineToSession, spawnAgentProcess, taskContract, taskWorkText, typeForCommand,
 } from './core/state-lib'
@@ -141,11 +141,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // few seconds do we look at the tail. If the LLM Master is enabled, IT
   // decides whether the session is waiting on the user (flag_needs_input);
   // without it, a prompt-shaped final line is required.
-  // armed watch: snapshot of the screen/tail at arm time — we only relay once
-  // the content has actually changed AND the TUI is no longer busy
-  const armedRef = useRef<Map<string, { snapshot: string; at: number }>>(new Map())
-  const settleRef = useRef<Map<string, { since: number; timer: number }>>(new Map())
-
   // Prefer the rendered screen for TUI context and fall back to retained log lines.
   const sessionScreenTail = useCallback((id: string): string => {
     const lines = isAltScreen(id)
@@ -153,21 +148,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       : (stateRef.current.agents.find(a => a.id === id)?.log ?? []).map(l => l.x)
     return lines.filter(Boolean).slice(-10).join('\n') || '(no output)'
   }, [])
-
-  // Mark a session as awaiting fresh output so the next settle means completion.
-  const armResponseWatch = useCallback((id: string) => {
-    const alt = isAltScreen(id)
-    const agent = stateRef.current.agents.find(a => a.id === id)
-    const snapshot = alt
-      ? readScreen(id).join('\n')
-      : (agent?.log ?? []).slice(-14).map(l => l.x).join('\n')
-    armedRef.current.set(id, { snapshot, at: Date.now() })
-    // ensure a settle check runs even if the session produces no output at all
-    later(4000, () => bumpSettleRef.current(id))
-  }, [later])
-
-  // set below; ref avoids a declaration cycle with onSettle
-  const bumpSettleRef = useRef<(id: string) => void>(() => {})
 
   // Record a settled prompt, deduplicate it, and surface user-action state.
   const setNeedsInput = useCallback((id: string, question: string, options?: EscOption[], cursorNum?: number) => {
@@ -205,8 +185,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const userStoppedRef = useRef<Set<string>>(new Set())
   /** one-shot user approvals for Ask-first Master tools (consumed on use) */
   const toolApprovalsRef = useRef<Set<string>>(new Set())
-
-  const lastFlaggedRef = useRef<Map<string, string>>(new Map())
 
   // shared by Master's update_agent_status tool and the per-session monitors
   // Merge monitor-authored status fields into one session card.
@@ -279,119 +257,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   runWatcherRef.current = (taskId, note) => { void runWatcher(taskId, note) }
 
-  // Inspect a stable rendered screen for prompts, completion, monitors, and watchers.
-  const onSettle = useCallback((id: string, since: number) => {
-    settleRef.current.delete(id)
-    const agent = stateRef.current.agents.find(a => a.id === id)
-    if (!agent || (agent.status !== 'running' && agent.status !== 'needs')) return
-    const st = stateRef.current.settings
-    const llm = Boolean(st.masterEnabled && hasCreds(st) && st.followMode)
-    const alt = isAltScreen(id)
-    const armed = armedRef.current.get(id)
-
-    // TUIs redraw constantly, so judge the rendered screen (stable) instead
-    // of the raw output stream; plain sessions use the new stream tail.
-    const streamLines = agent.log.slice(since).map(l => l.x).filter(Boolean)
-    const content = alt ? readScreen(id) : streamLines.slice(-14)
-    if (!content.length) return
-    const lastLine = content[content.length - 1] ?? ''
-    // Never flag input, and never relay half-answers, while the TUI busy marker
-    // is visible — any question-looking text on screen is transient then.
-    const { busy, promptDetected, question } = detectPrompt(content, alt)
-
-    if (promptDetected) {
-      const already = agent.status === 'needs' && lastFlaggedRef.current.get(id) === question
-      if (!already) {
-        lastFlaggedRef.current.set(id, question)
-        const { options, cursorNum } = extractOptions(content)
-        setNeedsInput(id, question, options, cursorNum)
-        if (llm) {
-          masterEventRef.current(
-            `[event] session "${agent.name}" (${id}) is showing a dialog (approval or selection menu) and has been flagged as needing input:\n` +
-            `${content.slice(-14).join('\n')}\n\nTell the user what it is asking — include the options if it is a menu. Approve sends Enter (selects the highlighted option), Deny sends Escape; for other choices the user should click into the terminal.`,
-            id,
-          )
-        }
-        const taskFor = taskForSession(id)
-        if (taskFor) {
-          runWatcherRef.current(taskFor.task.id,
-            `The task's session "${agent.name}" is waiting at this prompt:\n${content.slice(-14).join('\n')}\n\n` +
-            'Unblock it from the task spec when safe; otherwise ask the user one focused question and update the card note.')
-        }
-      }
-      return
-    }
-
-    // prompt gone (or the session is generating again) — it was answered
-    if (agent.status === 'needs') {
-      lastFlaggedRef.current.delete(id)
-      dispatch(s => ({
-        ...s,
-        agents: s.agents.map(a => a.id === id ? { ...a, status: 'running' as const, escReason: undefined } : a),
-      }))
-    }
-
-    if (armed) {
-      const joined = content.join('\n')
-      const expired = Date.now() - armed.at > 15 * 60 * 1000
-      const unchanged = joined === armed.snapshot
-      if ((busy || unchanged) && !expired) {
-        settleRef.current.delete(id)
-        const timer = window.setTimeout(() => onSettleRef.current(id, since), 3500)
-        settleRef.current.set(id, { since, timer })
-        return
-      }
-      armedRef.current.delete(id)
-      if (!expired) {
-        // deterministic indicator, independent of the LLM layer: if the user
-        // isn't looking at this session, flash its tab and ring the bell
-        const st2 = stateRef.current
-        const g2 = activeGroupOf(st2)
-        const watching = (g2 ? g2.slots[g2.activePane] : null) === id
-          && (agent.workspaceId ?? st2.activeWorkspace) === st2.activeWorkspace
-          && document.hasFocus()
-        if (!watching) {
-          dispatch(s2 => ({
-            ...s2,
-            agents: s2.agents.map(a => (a.id === id ? { ...a, attention: true } : a)),
-          }))
-          notify('done', `${agent.name} finished responding`, lastLine.slice(0, 90), id)
-        }
-        // task sessions are watched by their task's watcher (the mini master
-        // assigns itself as monitor) — the generic session monitor skips them
-        if (llm && !taskForSession(id)) {
-          void runMonitor(id,
-            `The session finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
-            'It was given a task by Master or the user, so a completed response IS noteworthy — update the status and report a digest to Master.')
-        }
-      }
-    }
-
-    // Task watchers own progress independently of the global follow-mode
-    // monitor. Feed every stable output snapshot to the watcher, including
-    // routine progress that the session monitor deliberately does not report.
-    const taskFor = taskForSession(id)
-    if (taskFor) {
-      runWatcherRef.current(taskFor.task.id,
-        `The task's session "${agent.name}" produced stable output. ${alt ? 'Current screen' : 'New output'}:\n` +
-        `${content.slice(-14).join('\n')}\n\nTrack progress against the acceptance criteria, update the card note, and move the task only if the evidence supports it.`)
-    }
-  }, [notify, runMonitor, setNeedsInput, taskForSession])
-
-  const onSettleRef = useRef<(id: string, since: number) => void>(() => {})
-  onSettleRef.current = onSettle
-
-  // (re)start the settle watcher — checks only run once output goes quiet.
-  // Driven by RAW pty activity, because TUI redraws often contain no newlines.
-  // Reset a session's quiet-period timer whenever raw PTY activity arrives.
-  const bumpSettle = useCallback((id: string) => {
-    const prev = settleRef.current.get(id)
-    if (prev) window.clearTimeout(prev.timer)
-    const since = prev?.since ?? Math.max(0, (stateRef.current.agents.find(a => a.id === id)?.log.length ?? 1) - 1)
-    const timer = window.setTimeout(() => onSettle(id, since), 3000)
-    settleRef.current.set(id, { since, timer })
-  }, [onSettle])
-  bumpSettleRef.current = bumpSettle
+  // Session settle/prompt watcher (armed snapshots, quiet timers, dialog scan)
+  // lives in the session domain; the provider supplies state + fan-out refs.
+  const { armResponseWatch, bumpSettle, clearFlagged, disposeSettle } = useSessionSettle({
+    stateRef, later, notify, setNeedsInput, runMonitor, taskForSession,
+    masterEventRef, monitorEventRef, runWatcherRef,
+  })
 
   // ANSI-stripped tail of each terminal, kept for Master's context, overview
   // cards, and rough output-volume accounting (provider usage is unavailable).
@@ -418,51 +289,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
-  // Deterministic safety net for full-screen TUIs: scan the rendered screen of
-  // every running alt-buffer session for approval dialogs / selection menus.
-  // Settle timing doesn't matter here; dedupe prevents refiring on redraws.
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      for (const a of stateRef.current.agents) {
-        if (a.kind !== 'real') continue
-        if (a.status !== 'running' && a.status !== 'needs') continue
-        if (!isAltScreen(a.id)) continue
-        const screen = readScreen(a.id)
-        if (!screen.length) continue
-        const joined = screen.join('\n')
-        if (TUI_PROMPT_RE.test(joined)) {
-          if (a.status !== 'running') continue
-          const question = (
-            screen.find(l => QUESTION_LINE_RE.test(l)) ||
-            screen.find(l => QUESTION_MARK_LINE_RE.test(l.trim())) ||
-            screen[screen.length - 1]
-          ).trim()
-          if (lastFlaggedRef.current.get(a.id) === question) continue
-          lastFlaggedRef.current.set(a.id, question)
-          const { options, cursorNum } = extractOptions(screen)
-          setNeedsInput(a.id, question, options, cursorNum)
-          void monitorEventRef.current(a.id,
-            `A dialog was detected on the session's screen (already flagged as needing input):\n${screen.slice(-14).join('\n')}\n\n` +
-            'This needs the user — report_to_master with what it is asking, including the options if it is a menu.')
-        } else if (a.status === 'needs') {
-          lastFlaggedRef.current.delete(a.id)
-          dispatch(s2 => ({
-            ...s2,
-            agents: s2.agents.map(x => x.id === a.id ? { ...x, status: 'running' as const, escReason: undefined } : x),
-          }))
-        }
-      }
-    }, 4000)
-    return () => window.clearInterval(timer)
-  }, [setNeedsInput])
-
   // typing into a terminal clears its "needs action" state
   // Clear a session's prompt state after the user or Master answers it.
   // The user typed into the terminal — they are handling it themselves, so
   // dismiss everything we asked of them: needs status, the card's pending
   // action, and any open approval card in the Master chat.
   const clearNeeds = useCallback((id: string) => {
-    lastFlaggedRef.current.delete(id)
+    clearFlagged(id)
     dispatch(s => ({
       ...s,
       agents: s.agents.map(a => a.id === id
@@ -477,7 +310,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         ? { ...m, esc: { ...m.esc, resolved: true, choice: 'handled in the terminal' } }
         : m)),
     }))
-  }, [])
+  }, [clearFlagged])
 
   useEffect(() => {
     const offExit = native.onSessionExit(e => {
@@ -998,18 +831,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // removal so nothing leaks past a session's visible lifetime.
   const disposeSessionRuntime = useCallback((id: string) => {
     disposeTerminal(id)
-    const st = settleRef.current.get(id)
-    if (st) window.clearTimeout(st.timer)
-    settleRef.current.delete(id)
-    armedRef.current.delete(id)
-    lastFlaggedRef.current.delete(id)
+    disposeSettle(id)
     monitorHistories.current.delete(id)
     monitorBusy.current.delete(id)
     monitorQueue.current.delete(id)
     chatHistories.current.delete(id)
     chatBusy.current.delete(id)
     taskSessionsRef.current.delete(id)
-  }, [])
+  }, [disposeSettle])
 
   // Replace the text of one existing chat message (streaming updates).
   const updateChatLog = useCallback((agentId: string, msgId: string, text: string) => {
@@ -1718,7 +1547,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       const moves = delta > 0 ? '\x1b[B'.repeat(delta) : '\x1b[A'.repeat(-delta)
       if (moves) native.writeSession(aid, moves).catch(() => {})
       window.setTimeout(() => { native.writeSession(aid, '\r').catch(() => {}) }, 200)
-      lastFlaggedRef.current.delete(aid)
+      clearFlagged(aid)
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === aid
@@ -1826,7 +1655,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
+  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, appendTail, armResponseWatch, bumpSettle, clearFlagged, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)
