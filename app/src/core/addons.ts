@@ -455,8 +455,11 @@ export function addonPromptAppends(s: AppState): string {
 
 /** Compile and execute a trusted addon handler against the permission-wrapped API. */
 async function runHandler(source: string, arg: unknown, api: AddonApi): Promise<unknown> {
-  const fn = new Function('input', 'api', `"use strict";\n${source}`)
-  return await fn(arg, api)
+  // UNTRUSTED code — never `new Function` in the privileged main webview (that
+  // grants ambient fetch/Tauri/app-origin authority). Run it in the opaque-origin
+  // sandboxed iframe, where the api is only reachable via validated RPC.
+  const { addonSandbox } = await import('../domains/addons/sandbox')
+  return await addonSandbox().run(source, arg, api)
 }
 
 /** Execute an addon-contributed Master tool (name arrives namespaced). */
