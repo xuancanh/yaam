@@ -113,18 +113,20 @@ function NewChatRow({ onCreated }: { onCreated: (id: string) => void }) {
 }
 
 export function ChatView() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId, activeWorkspace: x.activeWorkspace }), shallowEqual)
   const { openChat, deleteSession, renameSession } = useActions()
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<ChatSearchHit[] | null>(null)
   const [creating, setCreating] = useState(false)
 
+  // chats are workspace-specific (each carries the workspace it was created in)
+  const inWorkspace = (a: Agent) => a.kind === 'chat' && !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace
   const chats = s.agents
-    .filter(a => a.kind === 'chat' && !a.archived)
+    .filter(inWorkspace)
     .map(a => ({ agent: a, last: lastSnippet(a) }))
     .sort((x, y) => y.last.at - x.last.at)
 
-  const selected = s.agents.find(a => a.id === s.activeChatId && a.kind === 'chat')
+  const selected = s.agents.find(a => a.id === s.activeChatId && inWorkspace(a))
 
   // full-text search through the embedded engine (debounced)
   useEffect(() => {
@@ -143,7 +145,7 @@ export function ChatView() {
     if (!hits) return null
     const byChat = new Map<string, { agent: Agent; best: number; samples: ChatSearchHit[] }>()
     for (const h of hits) {
-      const agent = s.agents.find(a => a.id === h.chatId && a.kind === 'chat' && !a.archived)
+      const agent = s.agents.find(a => a.id === h.chatId && inWorkspace(a))
       if (!agent) continue
       const g = byChat.get(h.chatId) ?? { agent, best: 0, samples: [] }
       g.best = Math.max(g.best, h.score)

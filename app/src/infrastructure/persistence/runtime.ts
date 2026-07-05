@@ -67,23 +67,33 @@ export function createPersistenceRuntime(
   // Sessions: one file per session. Diff against the last-saved set and write
   // ONLY the agents whose object identity changed (immutable updates ⇒ a changed
   // reference means changed content), and delete files for removed agents.
+  const writeSessions = () => {
+    const next = new Map<string, Agent>()
+    for (const a of store.getState().agents) {
+      next.set(a.id, a)
+      if (savedAgents.get(a.id) !== a) {
+        native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { saveFailed = false }).catch(e => onSaveError('session', e))
+      }
+    }
+    for (const id of savedAgents.keys()) {
+      if (!next.has(id)) native.removeSession(id).catch(() => {})
+    }
+    savedAgents.clear()
+    for (const [id, a] of next) savedAgents.set(id, a)
+  }
   const armSession = () => {
     if (!ready) return
     if (sessionTimer) window.clearTimeout(sessionTimer)
-    sessionTimer = window.setTimeout(() => {
-      const next = new Map<string, Agent>()
-      for (const a of store.getState().agents) {
-        next.set(a.id, a)
-        if (savedAgents.get(a.id) !== a) {
-          native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { saveFailed = false }).catch(e => onSaveError('session', e))
-        }
-      }
-      for (const id of savedAgents.keys()) {
-        if (!next.has(id)) native.removeSession(id).catch(() => {})
-      }
-      savedAgents.clear()
-      for (const [id, a] of next) savedAgents.set(id, a)
-    }, 800)
+    sessionTimer = window.setTimeout(writeSessions, 800)
+  }
+  // A session was added or removed (vs the last save) — a structural change, as
+  // opposed to a content update on an existing session. New/deleted sessions are
+  // persisted immediately so a just-created chat survives a quick restart instead
+  // of waiting out the content debounce (and racing the unload flush).
+  const sessionSetChanged = (agents: readonly Agent[]) => {
+    if (agents.length !== savedAgents.size) return true
+    for (const a of agents) if (!savedAgents.has(a.id)) return true
+    return false
   }
 
   // Mirror credential fields into the OS keychain (debounced). Once a secret is
@@ -129,7 +139,13 @@ export function createPersistenceRuntime(
     markReady() { ready = true },
     start() {
       unsubs.push(store.subscribe((s, prev) => { if (mainPartitionChanged(s, prev)) armMain() }))
-      unsubs.push(store.subscribe((s, prev) => { if (sessionsChanged(s, prev)) armSession() }))
+      unsubs.push(store.subscribe((s, prev) => {
+        if (!sessionsChanged(s, prev)) return
+        if (ready && sessionSetChanged(s.agents)) {
+          if (sessionTimer) window.clearTimeout(sessionTimer)
+          writeSessions()
+        } else armSession()
+      }))
       unsubs.push(store.subscribe((s, prev) => { if (secretsChanged(s, prev)) armSecret() }))
       window.addEventListener('beforeunload', onBeforeUnload)
     },

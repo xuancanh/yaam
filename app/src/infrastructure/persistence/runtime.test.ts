@@ -97,6 +97,35 @@ describe('createPersistenceRuntime', () => {
     rt.dispose()
   })
 
+  it('persists a newly-added session immediately (no debounce wait)', () => {
+    const store = fakeStore(baseState())
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+    const chat = { id: 'chat-1', kind: 'chat', chatLog: [], log: [] } as unknown as AppState['agents'][number]
+    store.set({ ...store.getState(), agents: [chat] as AppState['agents'] })
+    // written right away — no need to advance the 800ms debounce
+    expect(native.saveSession).toHaveBeenCalledTimes(1)
+    expect(native.saveSession).toHaveBeenCalledWith('chat-1', expect.any(String))
+    rt.dispose()
+  })
+
+  it('debounces content updates to an existing session (not immediate)', () => {
+    const a1 = { id: 'a1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
+    const store = fakeStore(baseState({ agents: [a1] as AppState['agents'] }))
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+    store.set({ ...store.getState(), agents: [a1] as AppState['agents'] }) // structural (a1 new vs empty saved) → immediate
+    expect(native.saveSession).toHaveBeenCalledTimes(1)
+    vi.clearAllMocks()
+    // same id, new ref (streaming content) → debounced, not immediate
+    const a1b = { ...a1, log: [{ t: 'out', x: 'hi' }] } as unknown as AppState['agents'][number]
+    store.set({ ...store.getState(), agents: [a1b] as AppState['agents'] })
+    expect(native.saveSession).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(800)
+    expect(native.saveSession).toHaveBeenCalledTimes(1)
+    rt.dispose()
+  })
+
   it('dispose() cancels a pending debounced write', () => {
     const store = fakeStore(baseState())
     const rt = createPersistenceRuntime(store, { onToast: () => {} })
