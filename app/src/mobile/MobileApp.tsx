@@ -29,18 +29,53 @@ function useWide(): boolean {
   return wide
 }
 
-function defaultDeviceName(): string {
+/** Real device + browser name from the user agent (e.g. "Pixel 8 · Chrome",
+ *  "iPhone · Safari", "Mac · Firefox") — refined further via UA-Client-Hints
+ *  where available. */
+function detectDeviceName(): string {
   const ua = navigator.userAgent
-  if (/iPhone/.test(ua)) return 'iPhone'
-  if (/iPad/.test(ua)) return 'iPad'
-  if (/Android/.test(ua)) return 'Android phone'
-  return 'Phone'
+  const browser = /Edg\//.test(ua) ? 'Edge'
+    : /OPR\//.test(ua) ? 'Opera'
+    : /Firefox\//.test(ua) ? 'Firefox'
+    : /Chrome\/|CriOS/.test(ua) ? 'Chrome'
+    : /Safari\//.test(ua) ? 'Safari'
+    : 'Browser'
+  let device = 'Device'
+  if (/iPhone/.test(ua)) device = 'iPhone'
+  else if (/iPad/.test(ua)) device = 'iPad'
+  else if (/Android/.test(ua)) {
+    // the Android UA carries the actual model: "(Linux; Android 14; Pixel 8)"
+    const m = ua.match(/Android [^;)]+; ([^;)]+)/)
+    device = m ? m[1].replace(/ Build\/.*/, '').trim() : 'Android'
+  } else if (/Macintosh/.test(ua)) {
+    // iPadOS Safari masquerades as a Mac but keeps its touchscreen
+    device = navigator.maxTouchPoints > 1 ? 'iPad' : 'Mac'
+  } else if (/Windows/.test(ua)) device = 'Windows PC'
+  else if (/Linux/.test(ua)) device = 'Linux'
+  return `${device} · ${browser}`
+}
+
+interface UADataNavigator {
+  userAgentData?: { getHighEntropyValues?: (hints: string[]) => Promise<{ model?: string }> }
 }
 
 // ---------------------------------------------------------------- pairing
 
 function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) => void }) {
-  const [name, setName] = useState(defaultDeviceName())
+  const [name, setName] = useState(detectDeviceName())
+  const edited = useRef(false)
+  // Chromium exposes the precise model via UA-Client-Hints — refine the
+  // suggestion unless the user already typed their own name
+  useEffect(() => {
+    const uad = (navigator as UADataNavigator).userAgentData
+    uad?.getHighEntropyValues?.(['model'])
+      .then(v => {
+        if (v.model?.trim() && !edited.current) {
+          setName(cur => `${v.model!.trim()} · ${cur.split(' · ')[1] ?? 'Browser'}`)
+        }
+      })
+      .catch(() => {})
+  }, [])
   if (state === 'checking') {
     return <div className="pairwrap"><div className="spinner" /></div>
   }
@@ -65,8 +100,8 @@ function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) 
     <div className="pairwrap">
       <h2>Pair this device</h2>
       <p>YAAM pairs devices explicitly: send a request, then approve it on your desktop. The minted device token is stored on both ends until you revoke it.</p>
-      <input value={name} onChange={e => setName(e.target.value)} placeholder="Device name" maxLength={40} />
-      <button className="btn primary" onClick={() => onPair(name.trim() || defaultDeviceName())}>Request pairing</button>
+      <input value={name} onChange={e => { edited.current = true; setName(e.target.value) }} placeholder="Device name" maxLength={40} />
+      <button className="btn primary" onClick={() => onPair(name.trim() || detectDeviceName())}>Request pairing</button>
     </div>
   )
 }
