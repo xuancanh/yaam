@@ -165,8 +165,10 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
     },
 
     stopSession: id => {
-      markUserStopped(id)
-      port.killSession(id).catch(() => {})
+      // stop-flag + kill go through the shared command (user actor); the UI
+      // status/log/toast stay here. Fall back to the port when unwired.
+      if (ctx.execCommand) void ctx.execCommand('stop_session', { sessionId: id }, { actor: { kind: 'user' } })
+      else { markUserStopped(id); port.killSession(id).catch(() => {}) }
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id

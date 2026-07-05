@@ -13,22 +13,40 @@ export interface SendToSessionInput {
   text: string
 }
 
+export interface StopSessionInput {
+  sessionId: string
+}
+
 export interface SessionCommandDeps {
   stateRef: MutableRefObject<AppState>
+  /** record that this session's exit is a user-initiated stop, not a completion */
+  markUserStopped: (id: string) => void
   port?: SessionProcessPort
 }
 
 export function registerSessionCommands(registry: CommandRegistry, deps: SessionCommandDeps): void {
   const port = deps.port ?? realSessionProcessPort
+  const exists = (id: string) => deps.stateRef.current.agents.some(a => a.id === id)
+
   registry.register<SendToSessionInput, void>({
     name: 'send_to_session',
     capability: 'sessions:send',
     validate: i => { if (!i.sessionId) throw new Error('send_to_session: sessionId is required') },
     handler: i => {
       // ignore writes to sessions that no longer exist (they may have exited)
-      if (deps.stateRef.current.agents.some(a => a.id === i.sessionId)) {
-        port.sendLine(i.sessionId, String(i.text))
-      }
+      if (exists(i.sessionId)) port.sendLine(i.sessionId, String(i.text))
+    },
+  })
+
+  registry.register<StopSessionInput, void>({
+    name: 'stop_session',
+    capability: 'sessions:send',
+    validate: i => { if (!i.sessionId) throw new Error('stop_session: sessionId is required') },
+    handler: i => {
+      if (!exists(i.sessionId)) return
+      // flag the stop first so the exit handler treats it as a user stop, then kill
+      deps.markUserStopped(i.sessionId)
+      port.killSession(i.sessionId).catch(() => {})
     },
   })
 }

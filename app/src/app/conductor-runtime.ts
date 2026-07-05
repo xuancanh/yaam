@@ -107,6 +107,9 @@ export function createAppRuntime(): AppRuntime {
     widOf: activity.widOf, logEvent: activity.logEvent, notify: activity.notify,
   }
 
+  // ── domain subsystems, cross-wired through the cycle refs ────────────────
+  const refs = createRuntimeRefs()
+
   // one command registry + policy governs use cases across actors (addons are
   // gated by their granted capabilities; the UI/Master/watcher/chat are trusted).
   // Audit flows into telemetry — denials surface as warnings, not silent drops.
@@ -120,14 +123,12 @@ export function createAppRuntime(): AppRuntime {
       detail: e.error ? { error: e.error } : undefined,
     }),
   })
-  registerSessionCommands(registry, { stateRef })
+  registerSessionCommands(registry, { stateRef, markUserStopped: id => refs.userStoppedRef.current.add(id) })
   const addonExec = (name: string, input: unknown, addonId: string) =>
     void registry.execute(name, input, { actor: { kind: 'addon', addonId } }).catch(() => {})
   const masterSendLine = (sid: string, text: string) =>
     void registry.execute('send_to_session', { sessionId: sid, text }, { actor: { kind: 'master' } }).catch(() => {})
 
-  // ── domain subsystems, cross-wired through the cycle refs ────────────────
-  const refs = createRuntimeRefs()
   const session = createSessionRuntime(kernel, refs)
   const addon = createAddonSubsystem(kernel, refs, session, addonExec)
   const chat = createChatBoot(kernel, refs, session)

@@ -62,8 +62,10 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
       },
       stop: sid => {
         if (!stateRef.current.agents.some(a => a.id === sid)) return
-        ctx.markUserStopped(String(sid))
-        native.killSession(String(sid)).catch(() => {})
+        // shared command path (audited, addon actor); enforcePermissions already
+        // gated sessions:send. Falls back to the port + stop-flag when unwired.
+        if (ctx.execCommand) ctx.execCommand('stop_session', { sessionId: String(sid) }, addonId)
+        else { ctx.markUserStopped(String(sid)); native.killSession(String(sid)).catch(() => {}) }
       },
     },
     tasks: {
