@@ -106,13 +106,6 @@ export function createAppRuntime(): AppRuntime {
     widOf: activity.widOf, logEvent: activity.logEvent, notify: activity.notify,
   }
 
-  // ── domain subsystems, cross-wired through the cycle refs ────────────────
-  const refs = createRuntimeRefs()
-  const session = createSessionRuntime(kernel, refs)
-  const addon = createAddonSubsystem(kernel, refs, session)
-  const chat = createChatBoot(kernel, refs, session)
-  const master = createMasterSubsystem(kernel, refs, session, addon)
-
   // one command registry + policy governs use cases across actors (addons are
   // gated by their granted capabilities; the UI/Master/watcher/chat are trusted)
   const registry = createCommandRegistry(createDefaultPolicy(id => {
@@ -120,6 +113,15 @@ export function createAppRuntime(): AppRuntime {
     return a?.enabled ? a.granted : []
   }))
   registerSessionCommands(registry, { stateRef })
+  const addonExec = (name: string, input: unknown, addonId: string) =>
+    void registry.execute(name, input, { actor: { kind: 'addon', addonId } }).catch(() => {})
+
+  // ── domain subsystems, cross-wired through the cycle refs ────────────────
+  const refs = createRuntimeRefs()
+  const session = createSessionRuntime(kernel, refs)
+  const addon = createAddonSubsystem(kernel, refs, session, addonExec)
+  const chat = createChatBoot(kernel, refs, session)
+  const master = createMasterSubsystem(kernel, refs, session, addon)
 
   const actions = createConductorActions({
     ...kernel,

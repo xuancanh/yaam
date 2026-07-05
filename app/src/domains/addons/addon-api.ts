@@ -17,6 +17,9 @@ import * as native from '../../core/native'
 export interface AddonApiCtx {
   stateRef: MutableRefObject<AppState>
   dispatch: (f: (s: AppState) => AppState) => void
+  /** route the PTY write through the shared command (addon actor); falls back to
+   *  the direct PTY line when unwired. `addonId` binds the actor for the audit. */
+  execCommand?: (name: string, input: unknown, addonId: string) => void
   launchSession: (command: string, cwd: string, nameHint?: string) => string | null
   launchFromTemplate: (templateId: string, task?: string) => string | null
   spawnSessionForTask: (taskId: string) => void
@@ -37,7 +40,12 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
   return {
     getState: () => addonSnapshot(stateRef.current),
     sendToSession: (sid, text) => {
-      if (stateRef.current.agents.some(a => a.id === sid)) sendLineToSession(sid, String(text))
+      if (!stateRef.current.agents.some(a => a.id === sid)) return
+      // shared command path (audited, policy-checked as the addon actor); the
+      // enforcePermissions wrapper already gated sessions:send, so this is the
+      // one write impl, not a second gate. Falls back to the port when unwired.
+      if (ctx.execCommand) ctx.execCommand('send_to_session', { sessionId: sid, text: String(text) }, addonId)
+      else sendLineToSession(sid, String(text))
     },
     launchSession: (command, cwd, name) => ctx.launchSession(String(command), cwd ? String(cwd) : '', name ? String(name) : undefined),
     focusSession: sid => dispatch(s2 => (s2.agents.some(a => a.id === sid) ? focusSessionIn(s2, sid) : s2)),

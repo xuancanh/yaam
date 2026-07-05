@@ -23,12 +23,15 @@ export interface AddonSubsystem {
   sendAddonChat: (id: string, text: string) => void
 }
 
-export function createAddonSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime): AddonSubsystem {
+/** routes an addon's send-to-session through the shared command (addon actor) */
+export type AddonExecCommand = (name: string, input: unknown, addonId: string) => void
+
+export function createAddonSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, execCommand?: AddonExecCommand): AddonSubsystem {
   const { stateRef, flash, logEvent, later, notify } = k
   const { fireAddonHookRef, runAddonAgentRef, userStoppedRef, runWatcherRef } = refs
 
   const makeAddonApiRaw = (addonId: string): AddonApi => createAddonApi({
-    stateRef, dispatch,
+    stateRef, dispatch, execCommand,
     launchSession: (command, cwd, name) => session.launchSession(command, cwd, name),
     launchFromTemplate: (templateId, task) => session.launchFromTemplate(templateId, task),
     spawnSessionForTask: id => session.spawnSessionForTask(id),
