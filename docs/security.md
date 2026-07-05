@@ -240,9 +240,13 @@ is deliberately layered:
   chat/start, session input/stop/resume, approvals), so a paired phone's
   authority is exactly the desktop UI's.
 
-Paired phones CAN type into live session terminals and message chat agents —
+Paired phones CAN type into live session terminals, message chat agents,
+stream raw terminal output, and browse files/diffs under live session working
+folders (rpc requests are path-scoped on the desktop before answering) —
 pairing a device is trusting its holder with those capabilities; approve
-requests only for devices you recognize.
+requests only for devices you recognize. The URL token persists across
+restarts by default (Settings offers regenerate + auto-rotate); device tokens
+are only ever minted through the explicit pairing dialog.
 
 Residual risk: the built-in transport is plain HTTP, so on an untrusted LAN
 the tokens and snapshot (session names, terminal tails, task/chat content)

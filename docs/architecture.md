@@ -373,11 +373,29 @@ sequenceDiagram
 ```
 
 The server never executes anything and holds no credentials — it stores the
-latest published snapshot string and a command queue. The desktop
-`RemoteCompanion` builds capped snapshots from `AppState` (sessions with
-terminal tails, the full board with watcher chats, chat transcripts,
-approvals) and applies drained commands through the same conductor actions the
-desktop buttons use, so a paired phone can never do anything the UI cannot.
+latest published snapshot string, a command queue, and an rpc response store.
+The desktop `RemoteCompanion` builds capped snapshots from `AppState` (scoped
+to the active workspace) and applies drained commands through the same
+conductor actions the desktop buttons use, so a paired phone can never do
+anything the UI cannot.
+
+**Sync model.** Terminals sync at the Rust layer: the session domain's PTY
+reader tees raw bytes into a per-session bounded ring + broadcast tap, and
+`GET /api/term` streams backlog-then-live bytes over SSE into the companion's
+own xterm.js — every device's terminal stays live without a desktop-webview
+round trip (the serialized xterm buffer in the snapshot is the fallback).
+Chats and the board stay frontend-authoritative but stream: `remote_publish`
+bumps a watch channel and `GET /api/stream` pushes the snapshot to every
+paired device the moment it changes (chat deltas land in the store per
+animation frame; the publish debounce is 300ms). File and git browsing rides
+a request/response bridge — the phone queues `rpc_*` commands, the desktop
+answers via its native adapters (path-scoped to session working folders)
+through `remote_respond`, and the phone polls `/api/rpc` for the consumed-on-
+read answer.
+
+The URL token persists in settings so connect links survive restarts (an
+auto-rotate toggle restores per-start minting); paired-device tokens are
+independent, so a rotated link never unpairs a device.
 
 Network reach: connect URLs are enumerated per interface and classified (LAN,
 Tailscale CGNAT, WireGuard, VPN), and the mobile app uses relative API paths
