@@ -5,14 +5,14 @@ import type {
   Addon, AddonHookName, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
   ChatAgentType, ChatMsg, McpServer, NotifKind, Notification, Panel, Persona, PersistedState, Skill, SkillRegistry, TaskChatMsg, View,
 } from './types'
-import { ACCENT, defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
+import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState } from './data'
 import * as native from './native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
 import { draftTaskSpec } from './llm/watcher'
 import type { TaskSpecDraft } from './llm/watcher'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './terminals'
-import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS, addonSnapshot, dispatchAddonRpc, enforcePermissions, execAddonHook, exportAddonPackage, loadAddonFolder, parseAddonPackage } from './addons'
+import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS, dispatchAddonRpc, enforcePermissions, execAddonHook, exportAddonPackage, loadAddonFolder, parseAddonPackage } from './addons'
 import { runAddonEditorTurn } from './llm/addon-editor'
 import { runAddonAgentTurn } from './llm/addon-agent'
 import { generateAddonPackage } from './llm/addon-gen'
@@ -27,6 +27,7 @@ import { runMonitorLoop } from './store/monitor-runner'
 import { runWatcherLoop } from './store/watcher-runner'
 import { runChatMessageTurn } from './store/chat-runner'
 import { runMasterLoop } from './store/master-runner'
+import { createAddonApi } from './store/addon-api'
 import { reducer, withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './store/task-state'
 import type { LocatedTask } from './store/task-state'
@@ -165,7 +166,7 @@ export interface ConductorActions {
 import {
   PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
   activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, groupsFromLegacy,
-  humanizeCron, mkGroup, mkId, removeFromGroups, selectMainState, selectSession,
+  mkGroup, mkId, removeFromGroups, selectMainState, selectSession,
   sendLineToSession, spawnAgentProcess, switchWorkspaceIn, taskContract, taskWorkText, typeForCommand,
 } from './state-lib'
 
@@ -1188,170 +1189,20 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // API surface handed to addon code (tools, hooks, and view RPC) — scoped
   // per addon so storage is namespaced
   // Build the unguarded addon API implementation scoped to one addon's storage.
-  const makeAddonApiRaw = useCallback((addonId: string): AddonApi => ({
-    getState: () => addonSnapshot(stateRef.current),
-    sendToSession: (sid, text) => {
-      if (stateRef.current.agents.some(a => a.id === sid)) sendLineToSession(sid, String(text))
-    },
-    launchSession: (command, cwd, name) => launchSession(String(command), cwd ? String(cwd) : '', name ? String(name) : undefined),
-    focusSession: sid => dispatch(s2 => (s2.agents.some(a => a.id === sid) ? focusSessionIn(s2, sid) : s2)),
-    flash: t => flash(String(t).slice(0, 80)),
-    logEvent: t => logEvent('edit', null, `[addon] ${String(t).slice(0, 120)}`),
-    notify: (title, detail) => notify('done', String(title).slice(0, 80), String(detail).slice(0, 120), null),
-    sessions: {
-      readOutput: (sid, lines) => {
-        const a = stateRef.current.agents.find(x => x.id === sid)
-        if (!a) return ''
-        const n = Math.max(1, Math.min(80, Number(lines) || 30))
-        const screen = isAltScreen(sid) ? readScreen(sid) : (a.log ?? []).map(l => l.x)
-        return screen.filter(l => l.trim()).slice(-n).join('\n')
-      },
-      stop: sid => {
-        if (!stateRef.current.agents.some(a => a.id === sid)) return
-        userStoppedRef.current.add(String(sid))
-        native.killSession(String(sid)).catch(() => {})
-      },
-    },
-    tasks: {
-      add: (title, col, spec) => {
-        const id = mkId('t')
-        const validCols = ['backlog', 'progress', 'review', 'done', 'failed']
-        const column = validCols.includes(String(col)) ? String(col) as BoardCol : 'backlog'
-        const sp = (spec ?? {}) as Record<string, unknown>
-        const strArr = (v: unknown) => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined
-        dispatch(s2 => ({
-          ...s2,
-          tasks: s2.tasks.concat([{
-            id, title: String(title).slice(0, 120), col: column, agentId: null,
-            description: typeof sp.description === 'string' ? sp.description : undefined,
-            criteria: strArr(sp.criteria),
-            cwd: typeof sp.cwd === 'string' ? sp.cwd : undefined,
-            typeId: typeof sp.typeId === 'string' ? sp.typeId : undefined,
-            templateId: typeof sp.templateId === 'string' ? sp.templateId : undefined,
-            chat: [{ id: mkId('tc'), role: 'system', text: 'Task created by an addon', at: Date.now() }],
-          }]),
-        }))
-        return id
-      },
-      update: (id, patch) => {
-        const p = (patch ?? {}) as Record<string, unknown>
-        const strArr = (v: unknown) => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined
-        dispatch(s2 => ({
-          ...s2,
-          tasks: s2.tasks.map(t => (t.id === id ? {
-            ...t,
-            title: typeof p.title === 'string' && p.title.trim() ? p.title.slice(0, 120) : t.title,
-            description: typeof p.description === 'string' ? p.description : t.description,
-            criteria: strArr(p.criteria) ?? t.criteria,
-            cwd: typeof p.cwd === 'string' ? p.cwd : t.cwd,
-            typeId: typeof p.typeId === 'string' ? p.typeId : t.typeId,
-            templateId: typeof p.templateId === 'string' ? p.templateId : t.templateId,
-          } : t)),
-        }))
-      },
-      rename: (id, title) => dispatch(s2 => ({
-        ...s2,
-        tasks: s2.tasks.map(t => (t.id === id ? { ...t, title: String(title).slice(0, 120) || t.title } : t)),
-      })),
-      move: (id, col) => {
-        const validCols = ['backlog', 'progress', 'review', 'done', 'failed']
-        if (!validCols.includes(String(col))) return
-        const prev = stateRef.current.tasks.find(t => t.id === id)
-        if (!prev || prev.col === col) return
-        dispatch(s2 => ({
-          ...s2,
-          tasks: s2.tasks.map(t => (t.id === id ? { ...t, col: String(col) as BoardCol } : t)),
-        }))
-        fireAddonHookRef.current('onTaskMoved', { taskId: id, title: prev.title, col: String(col), from: prev.col })
-      },
-      remove: id => dispatch(s2 => ({ ...s2, tasks: s2.tasks.filter(t => t.id !== id) })),
-      start: id => spawnSessionForTask(String(id)),
-      restart: id => {
-        const t = stateRef.current.tasks.find(x => x.id === id)
-        if (!t) return
-        const prev = t.agentId ? stateRef.current.agents.find(a => a.id === t.agentId) : undefined
-        if (prev && (prev.status === 'running' || prev.status === 'needs')) {
-          userStoppedRef.current.add(prev.id)
-          native.killSession(prev.id).catch(() => {})
-        }
-        dispatch(s2 => ({ ...s2, tasks: s2.tasks.map(x => (x.id === id ? { ...x, agentId: null } : x)) }))
-        later(50, () => spawnSessionForTask(String(id)))
-      },
-      chat: (id, text) => {
-        const msg = String(text).trim().slice(0, 2000)
-        if (!msg || !stateRef.current.tasks.some(t => t.id === id)) return
-        pushTaskChat(String(id), 'user', msg)
-        dispatch(s2 => ({ ...s2, tasks: s2.tasks.map(t => (t.id === id ? { ...t, awaitingUser: false } : t)) }))
-        runWatcherRef.current(String(id), `[message from an addon on the user's behalf] ${msg}`)
-      },
-    },
-    templates: {
-      list: () => (stateRef.current.templates ?? []).map(t => ({ id: t.id, name: t.name, mode: t.mode, typeId: t.typeId })),
-      run: (idOrName, task) => {
-        const tpl = (stateRef.current.templates ?? []).find(t => t.id === idOrName || t.name === idOrName)
-        return tpl ? launchFromTemplate(tpl.id, task ? String(task) : undefined) : null
-      },
-    },
-    schedules: {
-      add: spec => {
-        const sp = (spec ?? {}) as Record<string, unknown>
-        const name = String(sp.name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')
-        if (!name) return 'schedule needs a name'
-        const schedule = typeof sp.schedule === 'string' ? sp.schedule.trim() : ''
-        const at = typeof sp.at === 'number' && sp.at > Date.now() ? sp.at : undefined
-        if (!at && schedule.split(/\s+/).length !== 5) return 'needs a 5-field cron "schedule" or a future epoch-ms "at"'
-        const bt = sp.task as (Record<string, unknown> | undefined)
-        const boardTask = bt && typeof bt.title === 'string' && bt.title.trim()
-          ? {
-              title: bt.title.slice(0, 120),
-              description: typeof bt.description === 'string' ? bt.description : undefined,
-              criteria: Array.isArray(bt.criteria) ? bt.criteria.filter((x): x is string => typeof x === 'string') : undefined,
-              templateId: typeof bt.templateId === 'string' ? bt.templateId : undefined,
-              typeId: typeof bt.typeId === 'string' ? bt.typeId : undefined,
-              cwd: typeof bt.cwd === 'string' ? bt.cwd : undefined,
-              startNow: bt.startNow !== false,
-            }
-          : undefined
-        dispatch(s2 => ({
-          ...s2,
-          crons: s2.crons.concat([{
-            id: mkId('c'), name, on: true, built: true, last: 'never',
-            schedule: at ? '' : schedule,
-            human: at ? `once · ${new Date(at).toLocaleString()}` : humanizeCron(schedule),
-            at,
-            target: 'workspace', agent: boardTask ? 'Board' : 'Master', color: ACCENT,
-            cmd: !boardTask && typeof sp.cmd === 'string' ? sp.cmd : undefined,
-            cwd: !boardTask && typeof sp.cwd === 'string' ? sp.cwd : undefined,
-            boardTask,
-          }]),
-        }))
-        return `schedule "${name}" created`
-      },
-      toggle: (name, on) => dispatch(s2 => ({
-        ...s2,
-        crons: s2.crons.map(c => (c.name === name ? { ...c, on: typeof on === 'boolean' ? on : !c.on } : c)),
-      })),
-      remove: name => dispatch(s2 => ({ ...s2, crons: s2.crons.filter(c => c.name !== name) })),
-    },
-    agent: {
-      wake: note => runAddonAgentRef.current(addonId, String(note)),
-    },
-    storage: {
-      get: key => stateRef.current.addonStorage[addonId]?.[String(key)],
-      set: (key, value) => {
-        let size = 0
-        try { size = (JSON.stringify(value) ?? '').length } catch { throw new Error('storage.set: value is not JSON-serializable') }
-        if (size > 262_144) throw new Error('storage.set: value exceeds 256 KB')
-        dispatch(s2 => ({
-          ...s2,
-          addonStorage: {
-            ...s2.addonStorage,
-            [addonId]: { ...(s2.addonStorage[addonId] ?? {}), [String(key)]: value },
-          },
-        }))
-      },
-    },
-  }), [flash, later, launchFromTemplate, launchSession, logEvent, notify, pushTaskChat, spawnSessionForTask])
+  const makeAddonApiRaw = useCallback((addonId: string): AddonApi => createAddonApi({
+    stateRef, dispatch,
+    launchSession: (command, cwd, name) => launchSession(command, cwd, name),
+    launchFromTemplate: (templateId, task) => launchFromTemplate(templateId, task),
+    spawnSessionForTask: id => spawnSessionForTask(id),
+    pushTaskChat, flash,
+    logEvent: text => logEvent('edit', null, text),
+    notify: (title, detail) => notify('done', title, detail, null),
+    later,
+    markUserStopped: id => userStoppedRef.current.add(id),
+    fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
+    runWatcher: (taskId, note) => runWatcherRef.current(taskId, note),
+    wakeAgent: (aid, note) => runAddonAgentRef.current(aid, note),
+  }, addonId), [flash, later, launchFromTemplate, launchSession, logEvent, notify, pushTaskChat, spawnSessionForTask])
 
   // Wrap an addon's raw API with its current permission grants.
   const makeAddonApi = useCallback((addonId: string): AddonApi => {
