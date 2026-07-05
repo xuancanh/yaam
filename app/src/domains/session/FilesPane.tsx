@@ -154,8 +154,9 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   path: string
   gutter: 'numbers' | 'git'
   onToggleGutter: () => void
-  mode: FilesMode
-  onToggleMode: () => void
+  /** omit both to hide the split-with-terminal toggle (standalone explorer) */
+  mode?: FilesMode
+  onToggleMode?: () => void
   onClose: () => void
   git: GitInfo | null
 }) {
@@ -324,16 +325,18 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
             ? <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M6 21v0']} size={14} stroke={1.7} />
             : <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>#</span>}
         </button>
-        <button
-          className="icon-btn"
-          title={mode === 'split' ? 'Split with terminal — click to fill the pane' : 'Replacing terminal — click to split'}
-          onClick={onToggleMode}
-          style={{ width: 26, height: 26, borderRadius: 6, color: mode === 'replace' ? 'var(--accent)' : undefined }}
-        >
-          {mode === 'split'
-            ? <Icon paths={['M4 5h16v14H4z', 'M4 12h16']} size={14} stroke={1.7} />
-            : <Icon paths={['M4 5h16v14H4z']} size={14} stroke={1.7} />}
-        </button>
+        {onToggleMode && (
+          <button
+            className="icon-btn"
+            title={mode === 'split' ? 'Split with terminal — click to fill the pane' : 'Replacing terminal — click to split'}
+            onClick={onToggleMode}
+            style={{ width: 26, height: 26, borderRadius: 6, color: mode === 'replace' ? 'var(--accent)' : undefined }}
+          >
+            {mode === 'split'
+              ? <Icon paths={['M4 5h16v14H4z', 'M4 12h16']} size={14} stroke={1.7} />
+              : <Icon paths={['M4 5h16v14H4z']} size={14} stroke={1.7} />}
+          </button>
+        )}
         <button className="icon-btn" title="Close file" onClick={onClose} style={{ width: 26, height: 26, borderRadius: 6 }}>
           <Icon paths={IC.close} size={13} stroke={1.8} />
         </button>
@@ -545,6 +548,88 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
             {agent.kind === 'chat'
               ? <ChatPane agent={agent} active={active && !file} />
               : <TerminalPane agent={agent} active={active && !file} />}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- standalone
+
+/** The same tree + rich viewer with nothing attached: browse any folder and
+ *  open its files (code, markdown, images, PDF, office). Used by the review
+ *  workbench when the reviewed folder has no git repository — there is no diff
+ *  to show, but the work itself is still reviewable. */
+export function FolderExplorer({ root }: { root: string }) {
+  const init = cached(`folder:${root}`)
+  const [file, setFile] = useState<string | null>(init.file)
+  const [gutter, setGutter] = useState<'numbers' | 'git'>('numbers')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(init.expanded))
+  const [treeKey, setTreeKey] = useState(0)
+
+  useEffect(() => {
+    stateCache.set(`folder:${root}`, { file, mode: 'replace', gutter, expanded: [...expanded] })
+  }, [root, file, gutter, expanded])
+
+  const toggleDir = (path: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+      <div style={{
+        width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0,
+        background: 'var(--bg2)', borderRight: '1px solid var(--line)',
+      }}>
+        <div style={{
+          height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 7, padding: '0 10px',
+          borderBottom: '1px solid var(--line)',
+        }}>
+          <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6, color: 'var(--dim)' }}>EXPLORER</span>
+          <span className="mono" style={{ fontSize: 10, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={root}>
+            {root.slice(root.lastIndexOf('/') + 1) || root}
+          </span>
+          <button
+            className="icon-btn"
+            title="Refresh tree"
+            onClick={() => setTreeKey(k => k + 1)}
+            style={{ width: 22, height: 22, borderRadius: 5, marginLeft: 'auto' }}
+          >
+            <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={12} stroke={1.8} />
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '5px 4px' }}>
+          <TreeLevel
+            key={treeKey}
+            dir={root}
+            depth={0}
+            expanded={expanded}
+            toggleDir={toggleDir}
+            openFile={setFile}
+            selected={file}
+            git={null}
+          />
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        {file ? (
+          <FileViewer
+            path={file}
+            gutter={gutter}
+            onToggleGutter={() => setGutter(g => (g === 'numbers' ? 'git' : 'numbers'))}
+            onClose={() => setFile(null)}
+            git={null}
+          />
+        ) : (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--dim)' }}>
+            Pick a file on the left to view it
           </div>
         )}
       </div>

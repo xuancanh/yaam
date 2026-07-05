@@ -9,6 +9,7 @@ import type { GitStatusResult } from '../../core/native'
 import { buildCfg, callApi, hasCreds } from '../../llm/client'
 import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
+import { FolderExplorer } from './FilesPane'
 
 // Fork/GitKraken-style git workbench for one session: a tree of changed files
 // on the left split into STAGED and CHANGES (stage/unstage per file or per
@@ -194,6 +195,9 @@ export function GitWorkbench({ cwd, worktree, footer }: {
   const settings = useConductorSelector(x => x.settings)
   const [repos, setRepos] = useState<string[]>([])
   const [repo, setRepo] = useState<string>(cwd ?? "")
+  /** the reviewed folder contains no git repository at all — fall back to a
+   *  plain folder browse (rich file viewer) instead of an empty diff view */
+  const [noRepo, setNoRepo] = useState(false)
   const [status, setStatus] = useState<GitStatusResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null)
@@ -222,7 +226,7 @@ export function GitWorkbench({ cwd, worktree, footer }: {
       if (!live) return
       setRepos(candidates)
       if (candidates.length) { setRepo(candidates[0]); void refresh(candidates[0]) }
-      else setError('no git repository found in this session\'s working folder')
+      else setNoRepo(true)
     })
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -345,6 +349,22 @@ export function GitWorkbench({ cwd, worktree, footer }: {
   }
 
   const repoName = (p: string) => p.slice(p.lastIndexOf('/') + 1) || p
+
+  // no repository anywhere under the reviewed folder: there is no diff to
+  // stage or commit, but the work is still reviewable — browse the whole
+  // folder with the same rich viewer the terminal/chat explorer uses
+  if (noRepo) {
+    return (
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '1px solid var(--line)', flexShrink: 0, fontSize: 10.5, color: 'var(--dim)' }}>
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cwd}</span>
+          <span style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--amber)' }}>not a git repository — browsing files</span>
+        </div>
+        <FolderExplorer root={cwd ?? '~'} />
+        {footer}
+      </div>
+    )
+  }
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
