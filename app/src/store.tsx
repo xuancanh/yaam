@@ -431,6 +431,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const keychainReadyRef = useRef<Set<string>>(new Set())
   const hydrated = useRef(false)
   const hydrateStarted = useRef(false)
+  // connect enabled MCP/skill integrations once hydration has actually finished.
+  // Set below (after connectMcp/refreshSkillCatalog exist) and invoked from the
+  // hydration effect — no fixed-delay timer racing disk/keychain load (finding #3).
+  const startIntegrationsRef = useRef<() => void>(() => {})
   useEffect(() => {
     if (hydrateStarted.current) return
     hydrateStarted.current = true
@@ -489,6 +493,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         console.error('[yaam] keychain resolve failed:', e)
       }
       hydrated.current = true
+      // restored state is fully applied — now connect enabled integrations
+      startIntegrationsRef.current()
     })()
   }, [appendTail, armResponseWatch, bumpSettle, clearNeeds])
 
@@ -935,14 +941,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     if (chatTranscriptsChanged(s, prev)) armReindex()
   }), [armReindex])
 
-  // connect enabled MCP servers shortly after launch (post-hydration)
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      for (const srv of stateRef.current.mcpServers) if (srv.enabled) void connectMcp(srv.id)
-      for (const reg of stateRef.current.skillRegistries) if (reg.enabled) void refreshSkillCatalog(reg.id)
-    }, 1500)
-    return () => window.clearTimeout(t)
-  }, [connectMcp, refreshSkillCatalog])
+  // connect enabled MCP servers + skill registries; invoked by the hydration
+  // effect the moment restored state is applied (gated on real completion, not a
+  // fixed 1.5s timer that could observe seed state on slow disk/keychain loads).
+  startIntegrationsRef.current = () => {
+    for (const srv of stateRef.current.mcpServers) if (srv.enabled) void connectMcp(srv.id)
+    for (const reg of stateRef.current.skillRegistries) if (reg.enabled) void refreshSkillCatalog(reg.id)
+  }
 
   const runChatMessage = useCallback((agentId: string, text: string) => runChatMessageTurn({
     stateRef, dispatch, busy: chatBusy, histories: chatHistories, mcpSessions: mcpSessionsRef,
