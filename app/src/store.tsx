@@ -16,7 +16,8 @@ import { createMonitorRuntime } from './domains/master/monitor-runtime'
 import type { MonitorRuntime } from './domains/master/monitor-runtime'
 import { createWatcherRuntime } from './domains/board/watcher-runtime'
 import type { WatcherRuntime } from './domains/board/watcher-runtime'
-import { runChatMessageTurn } from './domains/chat/runner'
+import { createChatRuntime } from './domains/chat/chat-runtime'
+import type { ChatRuntime } from './domains/chat/chat-runtime'
 import { runMasterLoop } from './domains/master/runner'
 import { useSettingsActions } from './domains/settings/actions'
 import { useBoardActions } from './domains/board/actions'
@@ -311,10 +312,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   runAddonAgentRef.current = runAddonAgent
 
   // ---- chat-mode sessions: Claude-Desktop-style agents living in panes ----
-  const chatHistories = useRef<Map<string, ApiMessage[]>>(new Map())
-  const chatBusy = useRef<Set<string>>(new Set())
-  // per-chat cancellation for in-flight replies (aborted when the chat is deleted)
-  const chatAborts = useRef(new AbortRegistry())
+  // The chat runtime owns per-chat history/busy/cancellation; created below once
+  // its ports exist. Declared here so disposeSessionRuntime can reach it.
+  const chatRef = useRef<ChatRuntime>(undefined)
   const { mcpSessions: mcpSessionsRef, skillCatalogs: skillCatalogsRef, connectMcp, refreshSkillCatalog } = useIntegrationRuntime(stateRef)
 
   // Tear down ALL per-session runtime state in one place: the xterm instance
@@ -325,9 +325,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     disposeTerminal(id)
     disposeSettle(id)
     monitorRef.current!.dispose(id) // cancel in-flight monitor turn + drop its registries
-    chatAborts.current.abort(id) // cancel any in-flight chat reply for this session
-    chatHistories.current.delete(id)
-    chatBusy.current.delete(id)
+    chatRef.current!.dispose(id) // cancel in-flight chat reply + drop its registries
     taskSessionsRef.current.delete(id)
   }, [disposeSettle])
 
@@ -344,10 +342,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     for (const reg of stateRef.current.skillRegistries) if (reg.enabled) void refreshSkillCatalog(reg.id)
   }
 
-  const runChatMessage = useCallback((agentId: string, text: string) => runChatMessageTurn({
-    stateRef, dispatch, busy: chatBusy, aborts: chatAborts.current, histories: chatHistories, mcpSessions: mcpSessionsRef,
-    skillCatalogs: skillCatalogsRef, pushChatLog, updateChatLog, flash, refreshSkillCatalog,
-  }, agentId, text), [flash, pushChatLog, refreshSkillCatalog, updateChatLog])
+  if (!chatRef.current) {
+    chatRef.current = createChatRuntime({
+      stateRef, dispatch, mcpSessions: mcpSessionsRef, skillCatalogs: skillCatalogsRef,
+      pushChatLog, updateChatLog, flash, refreshSkillCatalog,
+    })
+  }
+  const runChatMessage = chatRef.current.run
 
   // Run one lifecycle hook for each enabled addon without blocking the caller;
   // addons whose agent subscribes to the hook get woken with the event too.

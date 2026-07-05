@@ -15,10 +15,10 @@ import { isAbortError } from '../../core/abort-registry'
 export interface ChatCtx {
   stateRef: MutableRefObject<AppState>
   dispatch: (f: (s: AppState) => AppState) => void
-  busy: MutableRefObject<Set<string>>
+  busy: Set<string>
   /** per-chat cancellation — aborted when the chat is deleted */
   aborts: AbortRegistry
-  histories: MutableRefObject<Map<string, ApiMessage[]>>
+  histories: Map<string, ApiMessage[]>
   mcpSessions: MutableRefObject<Map<string, McpSession>>
   skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
   pushChatLog: (id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => void
@@ -45,15 +45,15 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     ctx.pushChatLog(agentId, { role: 'assistant', text: `“${chatType.name}” has no credentials — set an API key in Settings → Agent Types → Chat agents (or match the Master Brain provider to share its key).` })
     return
   }
-  if (ctx.busy.current.has(agentId)) {
+  if (ctx.busy.has(agentId)) {
     ctx.flash('Chat agent is still working on the previous message')
     return
   }
-  ctx.busy.current.add(agentId)
+  ctx.busy.add(agentId)
   ctx.pushChatLog(agentId, { role: 'user', text })
   ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'running' as const } : a)) }))
   try {
-    let history = ctx.histories.current.get(agentId)
+    let history = ctx.histories.get(agentId)
     if (!history) {
       // after a restart the private API history is gone — rebuild it from
       // the persisted visible transcript (tool traces excluded)
@@ -61,7 +61,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.text }))
       while (history.length && history[0].role !== 'user') history.shift()
-      ctx.histories.current.set(agentId, history)
+      ctx.histories.set(agentId, history)
     }
     const mcp = ctx.stateRef.current.mcpServers
       .filter(x => x.enabled)
@@ -174,7 +174,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     console.error('[yaam] chat turn failed:', e) // reaches the dev/webview log for debugging
     ctx.pushChatLog(agentId, { role: 'assistant', text: `Error: ${e instanceof Error ? e.message : String(e)}` })
   } finally {
-    ctx.busy.current.delete(agentId)
+    ctx.busy.delete(agentId)
     ctx.aborts.clear(agentId)
     ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
   }
