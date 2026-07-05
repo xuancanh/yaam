@@ -8,6 +8,7 @@ import { pickFile, pickFolder } from '../../core/native'
 import { PROVIDERS, providerFor } from '../../master'
 import { SHELLS } from '../../core/data'
 import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
+import { DraftInput, DraftTextarea } from '../../components/DraftInput'
 import { ToolsSection } from './ToolsView'
 import { availableCatalog, installMcpb, scanImportableMcpServers } from './mcp-market'
 import type { McpCandidate } from './mcp-market'
@@ -436,12 +437,12 @@ function SkillsSection() {
             {openId === sk.id && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '9px 0 4px 26px' }}>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <input value={sk.name} onChange={e => updateSkill(sk.id, { name: e.target.value.replace(/\s+/g, '-').toLowerCase() })} placeholder="name (agents load it by this)" style={{ ...FIELD_STYLE, width: 200 }} />
-                  <input value={sk.description} onChange={e => updateSkill(sk.id, { description: e.target.value })} placeholder="one-line description — agents pick skills by this" style={{ ...FIELD_STYLE, flex: 1 }} />
+                  <DraftInput value={sk.name} onCommit={v => updateSkill(sk.id, { name: v.replace(/\s+/g, '-').toLowerCase() })} placeholder="name (agents load it by this)" style={{ ...FIELD_STYLE, width: 200 }} />
+                  <DraftInput value={sk.description} onCommit={v => updateSkill(sk.id, { description: v })} placeholder="one-line description — agents pick skills by this" style={{ ...FIELD_STYLE, flex: 1 }} />
                 </div>
-                <textarea
+                <DraftTextarea
                   value={sk.body}
-                  onChange={e => updateSkill(sk.id, { body: e.target.value })}
+                  onCommit={v => updateSkill(sk.id, { body: v })}
                   placeholder="the instructions injected when a chat agent loads this skill"
                   rows={4}
                   style={{ ...FIELD_STYLE, resize: 'vertical', fontFamily: 'var(--font-sans)', lineHeight: 1.5 }}
@@ -498,12 +499,12 @@ function PersonasSection() {
             {openId === pe.id && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '9px 0 4px 26px' }}>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <input value={pe.name} onChange={e => updatePersona(pe.id, { name: e.target.value.replace(/\s+/g, '-').toLowerCase() })} placeholder="name" style={{ ...FIELD_STYLE, width: 200 }} />
-                  <input value={pe.description} onChange={e => updatePersona(pe.id, { description: e.target.value })} placeholder="one-line description (shown in the picker)" style={{ ...FIELD_STYLE, flex: 1 }} />
+                  <DraftInput value={pe.name} onCommit={v => updatePersona(pe.id, { name: v.replace(/\s+/g, '-').toLowerCase() })} placeholder="name" style={{ ...FIELD_STYLE, width: 200 }} />
+                  <DraftInput value={pe.description} onCommit={v => updatePersona(pe.id, { description: v })} placeholder="one-line description (shown in the picker)" style={{ ...FIELD_STYLE, flex: 1 }} />
                 </div>
-                <textarea
+                <DraftTextarea
                   value={pe.body}
-                  onChange={e => updatePersona(pe.id, { body: e.target.value })}
+                  onCommit={v => updatePersona(pe.id, { body: v })}
                   placeholder="the persona instructions appended to the chat agent's system prompt"
                   rows={4}
                   style={{ ...FIELD_STYLE, resize: 'vertical', fontFamily: 'var(--font-sans)', lineHeight: 1.5 }}
@@ -865,9 +866,9 @@ export function SettingsView() {
                     <div style={{ fontSize: 13.5, fontWeight: 600 }}>AWS region</div>
                     <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Region hosting the Bedrock inference profile.</div>
                   </div>
-                  <input
+                  <DraftInput
                     value={s.settings.awsRegion}
-                    onChange={e => updateSettings({ awsRegion: e.target.value })}
+                    onCommit={v => updateSettings({ awsRegion: v })}
                     placeholder="us-east-1"
                     style={{ ...FIELD_STYLE, width: 260 }}
                   />
@@ -879,9 +880,9 @@ export function SettingsView() {
                       Profile from ~/.aws/config (SSO profiles auto-refresh their tokens). Empty = default credential chain: env vars, default profile, instance role.
                     </div>
                   </div>
-                  <input
+                  <DraftInput
                     value={s.settings.awsProfile}
-                    onChange={e => updateSettings({ awsProfile: e.target.value })}
+                    onCommit={v => updateSettings({ awsProfile: v })}
                     placeholder="default"
                     style={{ ...FIELD_STYLE, width: 260 }}
                   />
@@ -897,9 +898,9 @@ export function SettingsView() {
                       credentials expire, then re-run automatically.
                     </div>
                   </div>
-                  <input
+                  <DraftInput
                     value={s.settings.credCmd}
-                    onChange={e => updateSettings({ credCmd: e.target.value })}
+                    onCommit={v => updateSettings({ credCmd: v })}
                     placeholder="claude default-credential-export"
                     style={{ ...FIELD_STYLE, width: 260 }}
                   />
@@ -911,9 +912,9 @@ export function SettingsView() {
                       Optional. Runs automatically when Bedrock rejects expired credentials, then the call retries — e.g. <span className="mono">aws sso login --profile work</span> or your corporate credential tool.
                     </div>
                   </div>
-                  <input
+                  <DraftInput
                     value={s.settings.awsRefreshCmd}
-                    onChange={e => updateSettings({ awsRefreshCmd: e.target.value })}
+                    onCommit={v => updateSettings({ awsRefreshCmd: v })}
                     placeholder="aws sso login --profile …"
                     style={{ ...FIELD_STYLE, width: 260 }}
                   />
@@ -926,9 +927,9 @@ export function SettingsView() {
                   <div style={{ fontSize: 13.5, fontWeight: 600 }}>Base URL</div>
                   <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>OpenAI-compatible endpoint root, e.g. http://localhost:11434/v1</div>
                 </div>
-                <input
+                <DraftInput
                   value={s.settings.baseUrl}
-                  onChange={e => updateSettings({ baseUrl: e.target.value })}
+                  onCommit={v => updateSettings({ baseUrl: v })}
                   placeholder="https://…/v1"
                   style={{ ...FIELD_STYLE, width: 260 }}
                 />
@@ -939,10 +940,10 @@ export function SettingsView() {
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Model</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Type any model id — suggestions per provider.</div>
               </div>
-              <input
+              <DraftInput
                 list="master-models"
                 value={s.settings.masterModel}
-                onChange={e => updateSettings({ masterModel: e.target.value })}
+                onCommit={v => updateSettings({ masterModel: v })}
                 placeholder="model id"
                 style={{ ...FIELD_STYLE, width: 260 }}
               />
@@ -957,10 +958,10 @@ export function SettingsView() {
                   Each session gets its own monitor LLM that watches output and only escalates digests to Master. Use a cheap model.
                 </div>
               </div>
-              <input
+              <DraftInput
                 list="master-models"
                 value={s.settings.monitorModel}
-                onChange={e => updateSettings({ monitorModel: e.target.value })}
+                onCommit={v => updateSettings({ monitorModel: v })}
                 placeholder="same as Master model"
                 style={{ ...FIELD_STYLE, width: 260 }}
               />
@@ -972,10 +973,10 @@ export function SettingsView() {
                     <div style={{ fontSize: 13.5, fontWeight: 600 }}>API key</div>
                     <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Stored locally in the app data folder. Leave empty if you use a credential command below.</div>
                   </div>
-                  <input
+                  <DraftInput
                     type="password"
                     value={s.settings.apiKey}
-                    onChange={e => updateSettings({ apiKey: e.target.value })}
+                    onCommit={v => updateSettings({ apiKey: v })}
                     placeholder={providerFor(s.settings.provider).keyHint}
                     style={{ ...FIELD_STYLE, width: 260 }}
                   />
@@ -990,9 +991,9 @@ export function SettingsView() {
                       credential expires, and re-runs automatically when the API rejects it, so short-lived tokens keep working.
                     </div>
                   </div>
-                  <input
+                  <DraftInput
                     value={s.settings.credCmd}
-                    onChange={e => updateSettings({ credCmd: e.target.value })}
+                    onCommit={v => updateSettings({ credCmd: v })}
                     placeholder="claude default-credential-export"
                     style={{ ...FIELD_STYLE, width: 260 }}
                   />
@@ -1026,9 +1027,9 @@ export function SettingsView() {
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Default working directory</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Prefilled in the new-session dialog.</div>
               </div>
-              <input
+              <DraftInput
                 value={s.settings.defaultCwd}
-                onChange={e => updateSettings({ defaultCwd: e.target.value })}
+                onCommit={v => updateSettings({ defaultCwd: v })}
                 placeholder="none"
                 style={{ ...FIELD_STYLE, width: 220 }}
               />
@@ -1106,16 +1107,16 @@ export function SettingsView() {
                     )}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 4, lineHeight: 1.45 }}>{t.desc}</div>
-                  <input
+                  <DraftInput
                     value={t.model}
-                    onChange={e => setAgentTypeCmd(t.id, e.target.value)}
+                    onCommit={v => setAgentTypeCmd(t.id, v)}
                     placeholder="launch command · e.g. claude"
                     title="Command used to launch this agent type"
                     style={{ ...FIELD_STYLE, width: '100%', marginTop: 8, padding: '5px 9px', fontSize: 11.5 }}
                   />
-                  <textarea
+                  <DraftTextarea
                     value={t.env ?? ''}
-                    onChange={e => updateAgentType(t.id, { env: e.target.value })}
+                    onCommit={v => updateAgentType(t.id, { env: v })}
                     placeholder={'environment · one per line\nANTHROPIC_MODEL=claude-sonnet-5\nHTTP_PROXY=…'}
                     rows={2}
                     title="Environment variables applied when launching this agent type"
