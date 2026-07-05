@@ -13,27 +13,29 @@ export interface ConfirmOptions {
   danger?: boolean
 }
 
-let openOverlay: HTMLElement | null = null
+let dismissOpen: (() => void) | null = null
 
 /** Ask the user to confirm a destructive action. Resolves false on Cancel,
  *  backdrop click, or Escape. Headless (no DOM — node tests) resolves true. */
 export function confirmAction(opts: ConfirmOptions): Promise<boolean> {
   if (typeof document === 'undefined') return Promise.resolve(true)
-  // a second request while one is open replaces it (never stack)
-  openOverlay?.remove()
+  // a second request while one is open cancels the first (never stack) —
+  // resolving it false so the replaced caller is not left hanging
+  dismissOpen?.()
 
   return new Promise<boolean>(resolve => {
     const overlay = document.createElement('div')
-    openOverlay = overlay
     overlay.style.cssText =
       'position:fixed;inset:0;background:rgba(4,5,8,.6);z-index:9999;display:flex;align-items:center;justify-content:center;'
 
     const done = (ok: boolean) => {
       overlay.remove()
-      if (openOverlay === overlay) openOverlay = null
+      if (dismissOpen === dismiss) dismissOpen = null
       document.removeEventListener('keydown', onKey, true)
       resolve(ok)
     }
+    const dismiss = () => done(false)
+    dismissOpen = dismiss
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.stopPropagation(); done(false) }
     }

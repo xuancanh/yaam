@@ -33,7 +33,7 @@ interface TreeRow {
   file?: FileRow
 }
 
-function buildTree(files: FileRow[]): TreeRow[] {
+export function buildTree(files: FileRow[]): TreeRow[] {
   const rows: TreeRow[] = []
   const seenDirs = new Set<string>()
   for (const f of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
@@ -51,7 +51,7 @@ function buildTree(files: FileRow[]): TreeRow[] {
 }
 
 /** split one unified diff into per-file chunks (for the all-files sections) */
-function splitUnifiedDiff(diff: string): { path: string; diff: string }[] {
+export function splitUnifiedDiff(diff: string): { path: string; diff: string }[] {
   const out: { path: string; diff: string }[] = []
   let current: { path: string; lines: string[] } | null = null
   for (const line of diff.split('\n')) {
