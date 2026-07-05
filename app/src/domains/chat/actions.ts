@@ -32,8 +32,14 @@ export interface ChatActions {
 }
 
 export function useChatActions(ctx: ChatActionsCtx): ChatActions {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createChatActions(ctx), [ctx.dispatch, ctx.stateRef, ctx.logEvent, ctx.runChatMessage, ctx.stopChatMessage, ctx.retryChatMessage, ctx.resetChatRuntime, ctx.skillCatalogs])
+}
+
+/** Plain (non-React) factory for the chat actions. */
+export function createChatActions(ctx: ChatActionsCtx): ChatActions {
   const { dispatch, stateRef } = ctx
-  return useMemo(() => ({
+  return {
     newChatSession: (name, cwd, chatTypeId, model, personaId, skillSourceIds) => {
       const id = mkId('a')
       const dir = (cwd ?? stateRef.current.settings.defaultCwd ?? '').trim()
@@ -95,5 +101,5 @@ export function useChatActions(ctx: ChatActionsCtx): ChatActions {
       }
       return out
     },
-  }), [dispatch, stateRef, ctx])
+  }
 }

@@ -48,8 +48,14 @@ export interface SettingsActions {
 }
 
 export function useSettingsActions(ctx: SettingsActionsCtx): SettingsActions {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createSettingsActions(ctx), [ctx.dispatch, ctx.later, ctx.connectMcp, ctx.refreshSkillCatalog, ctx.mcpSessions, ctx.skillCatalogs])
+}
+
+/** Plain (non-React) factory for the settings actions. */
+export function createSettingsActions(ctx: SettingsActionsCtx): SettingsActions {
   const { dispatch, later } = ctx
-  return useMemo(() => ({
+  return {
     toggleAgentType: id => dispatch(s => ({
       ...s,
       agentTypes: s.agentTypes.map(x => (x.id === id ? { ...x, enabled: !x.enabled } : x)),
@@ -188,5 +194,5 @@ export function useSettingsActions(ctx: SettingsActionsCtx): SettingsActions {
         ? { ...t, perm: PERM_ORDER[(PERM_ORDER.indexOf(t.perm) + 1) % PERM_ORDER.length] }
         : t),
     })),
-  }), [dispatch, later, ctx])
+  }
 }

@@ -49,9 +49,15 @@ export interface BoardActions {
 }
 
 export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createBoardActions(ctx), [ctx.dispatch, ctx.stateRef, ctx.dragId, ctx.later, ctx.flash, ctx.logEvent, ctx.fireAddonHook, ctx.spawnSessionForTask, ctx.startTaskViaWatcher, ctx.runWatcher, ctx.pushTaskChat, ctx.markUserStopped, ctx.disposeWatcher, ctx.taskSessions, ctx.port])
+}
+
+/** Plain (non-React) factory for the board/task actions. */
+export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
   const { dispatch, stateRef, dragId, later } = ctx
   const port = ctx.port ?? realSessionProcessPort
-  return useMemo(() => ({
+  return {
     startCardDrag: id => { dragId.current = id },
     enterCol: col => dispatch(s => (s.dragOverCol === col ? s : { ...s, dragOverCol: col })),
     dropTo: col => {
@@ -156,5 +162,5 @@ export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
       ctx.logEvent('edit', id, 'Requested changes on the diff')
       ctx.flash('Requested changes')
     },
-  }), [dispatch, stateRef, dragId, later, port, ctx])
+  }
 }

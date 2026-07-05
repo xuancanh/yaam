@@ -22,8 +22,14 @@ export interface SchedulesActions {
 }
 
 export function useSchedulesActions(ctx: SchedulesActionsCtx): SchedulesActions {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createSchedulesActions(ctx), [ctx.dispatch, ctx.flash, ctx.logEvent, ctx.launchFromTemplate])
+}
+
+/** Plain (non-React) factory for the schedules/template actions. */
+export function createSchedulesActions(ctx: SchedulesActionsCtx): SchedulesActions {
   const { dispatch } = ctx
-  return useMemo(() => ({
+  return {
     addTemplate: () => {
       const id = mkId('tpl')
       dispatch(s => ({
@@ -62,5 +68,5 @@ export function useSchedulesActions(ctx: SchedulesActionsCtx): SchedulesActions 
     },
     deleteCron: id => dispatch(s => ({ ...s, crons: s.crons.filter(c => c.id !== id) })),
     toggleCron: id => dispatch(s => ({ ...s, crons: s.crons.map(c => (c.id === id ? { ...c, on: !c.on } : c)) })),
-  }), [dispatch, ctx])
+  }
 }
