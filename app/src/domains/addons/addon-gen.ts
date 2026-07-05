@@ -2,9 +2,9 @@
 // gets the COMPLETE authoring context (formats, bridge protocol, API surface,
 // hooks, agents, theme, security rules), and submits a package that is
 // validated before install — validation errors are fed back for self-repair.
-import { parseAddonPackage } from '../addons'
-import { callApi } from './client'
-import type { ApiContentBlock, ApiMessage, LlmConfig } from './client'
+import { parseAddonPackage } from '../../addons'
+import { callApi } from '../../llm/client'
+import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
 
 const GEN_TOOL = [{
   name: 'submit_addon',

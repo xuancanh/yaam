@@ -1,7 +1,7 @@
 // Per-addon customization chat: a small dedicated LLM conversation that knows
 // one addon package and edits it via the update_addon tool.
-import { callApi } from './client'
-import type { ApiContentBlock, ApiMessage, LlmConfig } from './client'
+import { callApi } from '../../llm/client'
+import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
 
 const EDITOR_TOOLS = [
   {

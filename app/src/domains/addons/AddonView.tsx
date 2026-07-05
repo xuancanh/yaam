@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { useActions, useConductor } from '../store'
+import { useActions, useConductor } from '../../store'
 import { AddonSource } from './AddonSource'
-import { addonSnapshot } from '../addons'
-import type { Addon } from '../types'
-import { IC, Icon, MasterMark, ViewHeader } from './ui'
+import { addonSnapshot } from '../../addons'
+import type { Addon } from '../../types'
+import { IC, Icon, MasterMark, ViewHeader } from '../../components/ui'
 
 /** Host the scoped LLM customization conversation for one addon package. */
 function AddonChat({ addon }: { addon: Addon }) {

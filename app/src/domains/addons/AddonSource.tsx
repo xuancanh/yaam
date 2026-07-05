@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { highlight } from '../highlight'
-import { useActions } from '../store'
-import type { Addon } from '../types'
+import { highlight } from '../../highlight'
+import { useActions } from '../../store'
+import type { Addon } from '../../types'
 
 // ---------- editor-style code block ----------
 

@@ -2,10 +2,10 @@
 // mini-orchestrator (like Master and the task watchers), whose tools ARE the
 // addon's permission-scoped API. Hook events can wake it, and addon views can
 // chat with it over the RPC bridge (agent.wake returns the reply).
-import type { Addon } from '../types'
-import type { AddonApi } from '../addons'
-import { callApi } from './client'
-import type { ApiContentBlock, ApiMessage, LlmConfig } from './client'
+import type { Addon } from '../../types'
+import type { AddonApi } from '../../addons'
+import { callApi } from '../../llm/client'
+import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
 
 // The API surface projected as LLM tools. Each entry maps a tool call onto
 // the (permission-enforced) AddonApi — denied scopes surface as tool errors.

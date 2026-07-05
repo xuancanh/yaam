@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useActions, useConductor } from '../store'
-import { httpGetText, readTextFile } from '../native'
-import { ALL_PERMISSIONS } from '../addons'
-import type { Addon } from '../types'
-import { IC, Icon, Switch, ViewHeader } from './ui'
+import { useActions, useConductor } from '../../store'
+import { httpGetText, readTextFile } from '../../native'
+import { ALL_PERMISSIONS } from '../../addons'
+import type { Addon } from '../../types'
+import { IC, Icon, Switch, ViewHeader } from '../../components/ui'
 
 // VS-Code-marketplace-style addon manager: sidebar (installed + market from
 // every configured registry + registry management), detail pane, AI generator.
