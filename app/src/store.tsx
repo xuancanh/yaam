@@ -5,7 +5,7 @@ import type {
   Addon, AddonHookName, Agent, AgentTemplate, AppState, BoardTask, EscOption, EventType, LogLine,
   ChatMsg, NotifKind, PersistedState, TaskChatMsg,
 } from './core/types'
-import { defaultDetail, mkMemory, mkTools, PERM_ORDER } from './core/data'
+import { PERM_ORDER } from './core/data'
 import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
@@ -34,6 +34,7 @@ import { useWorkspaceActions } from './domains/workspace/actions'
 import { useShellActions } from './domains/shell/actions'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
+import { buildLaunch } from './domains/session/launch'
 import { buildHydration } from './infrastructure/persistence/hydrate'
 import { loadSnapshot } from './infrastructure/persistence/loaders'
 import { withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
@@ -792,44 +793,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // Create optimistic session state, spawn its PTY, and attach lifecycle tracking.
   const launchSession = useCallback((command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }): string | null => {
-    const trimmed = command.trim()
-    if (!trimmed) return null
-    const id = mkId('a')
-    const bin = trimmed.split(/\s+/)[0].split('/').pop() || trimmed
-    const REAL_COLORS = ['#7FD1FF', '#F5C451', '#3DDC97', '#FF9B9B', '#C77DFF', '#E8A87C']
-    const color = REAL_COLORS[Math.floor(Math.random() * REAL_COLORS.length)]
-    const dir = cwd.trim()
-    const launchType = stateRef.current.agentTypes.find(t => t.id === (typeId ?? '')) ?? typeForCommand(trimmed, stateRef.current.agentTypes)
-    // Deterministic Claude sessions: Claude Code honors `--session-id <uuid>`, so
-    // we mint the id ourselves and know it immediately — no fragile file
-    // detection. The flag goes only into the SPAWNED command (reusing an id
-    // errors "already in use"), while cmd stays clean for relaunch/resume.
-    // codex/opencode have no launch-time id flag, so they keep file detection.
-    let knownSessionId: string | undefined
-    let spawnCommand = trimmed
-    if (launchType?.probe === 'claude' && !/(^|\s)(--session-id|--resume|-r|--continue|-c)(\s|=|$)/.test(trimmed)) {
-      knownSessionId = crypto.randomUUID()
-      spawnCommand = trimmed.replace(/^(\s*\S+)/, `$1 --session-id ${knownSessionId}`)
-    }
-    const agent: Agent = {
-      id, name: nameHint || bin, short: (nameHint || bin).slice(0, 2).toUpperCase(), color,
-      repo: dir ? dir.split('/').pop() || dir : '~', branch: 'live',
-      status: 'running', model: trimmed, kind: 'real', cmd: trimmed, cwd: dir, launchedAt: Date.now(),
-      cliSessionId: knownSessionId,
-      typeId: typeId ?? typeForCommand(trimmed, stateRef.current.agentTypes)?.id,
-      workspaceId: workspaceId ?? stateRef.current.activeWorkspace,
-      ephemeral: opts?.ephemeral, autoArchive: opts?.autoArchive, templateId: opts?.templateId,
-      terminalShell: opts?.terminalShell,
-      memory: mkMemory(), tools: mkTools(),
-      log: [
-        { t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` },
-        // print-mode CLIs (claude -p) emit nothing until the turn completes —
-        // label the silence so a long run doesn't read as a hang
-        ...(opts?.ephemeral ? [{ t: 'sys' as const, x: 'one-shot run — output appears when the turn completes; this can take a while' }] : []),
-        ...(!dir ? [{ t: 'warn' as const, x: 'no working folder set — running in your home directory' }] : []),
-      ],
-      ...defaultDetail(), usageVersion: 1,
-    }
+    const plan = buildLaunch({ command, cwd, nameHint, typeId, workspaceId, opts }, stateRef.current.agentTypes, stateRef.current.activeWorkspace)
+    if (!plan) return null
+    const { agent, spawnCommand, knownSessionId, launchType } = plan
+    const id = agent.id
     dispatch(s => {
       const withAgent = { ...s, agents: s.agents.concat([agent]) }
       // background-workspace launches (cron) must not touch the active layout
@@ -838,8 +805,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     })
     getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
     // Claude's id is known up front; only codex/opencode need file detection.
-    if (!knownSessionId) probeCliSession(id, trimmed, dir, false)
-    native.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, dir || undefined, undefined, undefined, opts?.terminalShell).catch(err => {
+    if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', agent.cwd ?? '', false)
+    native.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, agent.cwd || undefined, undefined, undefined, opts?.terminalShell).catch(err => {
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
