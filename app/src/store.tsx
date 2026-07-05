@@ -16,10 +16,8 @@ import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS, addonSnapshot, dispatchAddonRpc
 import { runAddonEditorTurn } from './llm/addon-editor'
 import { runAddonAgentTurn } from './llm/addon-agent'
 import { generateAddonPackage } from './llm/addon-gen'
-import { runChatTurn } from './llm/chat-agent'
 import { fetchSkillRegistry } from './skills'
 import type { CatalogSkill } from './skills'
-import { buildChatCfg, callApi, chatTypeHasCreds } from './llm/client'
 import { mcpConnect } from './mcp'
 import type { McpSession } from './mcp'
 import { estimateLogUsage, estimateOutputUsage } from './usage'
@@ -27,6 +25,7 @@ import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
 import { runMonitorLoop } from './store/monitor-runner'
 import { runWatcherLoop } from './store/watcher-runner'
+import { runChatMessageTurn } from './store/chat-runner'
 import { reducer, withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './store/task-state'
 import type { LocatedTask } from './store/task-state'
@@ -1485,153 +1484,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(t)
   }, [connectMcp, refreshSkillCatalog])
 
-  const runChatMessage = useCallback(async (agentId: string, text: string) => {
-    const st = stateRef.current.settings
-    const agent = stateRef.current.agents.find(a => a.id === agentId)
-    if (!agent || agent.kind !== 'chat') return
-    const chatType = stateRef.current.chatAgentTypes.find(t => t.id === agent.chatTypeId)
-      ?? stateRef.current.chatAgentTypes.find(t => t.enabled)
-      ?? stateRef.current.chatAgentTypes[0]
-    if (!chatType) {
-      pushChatLog(agentId, { role: 'user', text })
-      pushChatLog(agentId, { role: 'assistant', text: 'No chat agent types configured — add one in Settings → Agent Types → Chat agents.' })
-      return
-    }
-    if (!chatTypeHasCreds(chatType, st)) {
-      pushChatLog(agentId, { role: 'user', text })
-      pushChatLog(agentId, { role: 'assistant', text: `“${chatType.name}” has no credentials — set an API key in Settings → Agent Types → Chat agents (or match the Master Brain provider to share its key).` })
-      return
-    }
-    if (chatBusy.current.has(agentId)) {
-      flash('Chat agent is still working on the previous message')
-      return
-    }
-    chatBusy.current.add(agentId)
-    pushChatLog(agentId, { role: 'user', text })
-    dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'running' as const } : a)) }))
-    try {
-      let history = chatHistories.current.get(agentId)
-      if (!history) {
-        // after a restart the private API history is gone — rebuild it from
-        // the persisted visible transcript (tool traces excluded)
-        history = (agent.chatLog ?? [])
-          .filter(m => m.role === 'user' || m.role === 'assistant')
-          .map(m => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.text }))
-        while (history.length && history[0].role !== 'user') history.shift()
-        chatHistories.current.set(agentId, history)
-      }
-      const mcp = stateRef.current.mcpServers
-        .filter(x => x.enabled)
-        .map(x => mcpSessionsRef.current.get(x.id))
-        .filter((x): x is McpSession => !!x)
-      // skill sources chosen at chat creation (default: local + enabled registries)
-      const sources = agent.skillSourceIds
-        ?? ['local', ...stateRef.current.skillRegistries.filter(r => r.enabled).map(r => r.id)]
-      const skills: CatalogSkill[] = []
-      if (sources.includes('local')) {
-        skills.push(...stateRef.current.skills.map(k => ({ name: k.name, description: k.description, body: k.body, source: 'local' })))
-      }
-      for (const reg of stateRef.current.skillRegistries.filter(r => sources.includes(r.id))) {
-        if (!skillCatalogsRef.current.has(reg.id)) await refreshSkillCatalog(reg.id)
-        skills.push(...(skillCatalogsRef.current.get(reg.id) ?? []))
-      }
-      const personaBody = stateRef.current.personas.find(pp => pp.id === agent.personaId)?.body
-      const persona = [chatType.systemPrompt, personaBody].filter(Boolean).join('\n\n')
-      // streaming: deltas grow one live assistant bubble; a tool round seals
-      // the current bubble; the final text replaces (or creates) it
-      let streamId: string | null = null
-      let acc = ''
-      let thinkId: string | null = null
-      let thinkAcc = ''
-      const appendBubble = (id: string, role: 'assistant' | 'thinking', text: string) => {
-        dispatch(s2 => ({
-          ...s2,
-          agents: s2.agents.map(a => a.id === agentId
-            ? { ...a, chatLog: [...(a.chatLog ?? []), { id, role, text, at: Date.now() }].slice(-200) }
-            : a),
-        }))
-      }
-      const seal = (finalText?: string) => {
-        if (streamId) {
-          if (finalText !== undefined && finalText !== acc) updateChatLog(agentId, streamId, finalText)
-          streamId = null
-          acc = ''
-        } else if (finalText !== undefined) {
-          pushChatLog(agentId, { role: 'assistant', text: finalText })
-        }
-      }
-      await runChatTurn(
-        buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
-        () => stateRef.current.agents.find(a => a.id === agentId),
-        skills,
-        mcp,
-        text,
-        history,
-        e => {
-          if (e.kind === 'delta') {
-            acc += e.text
-            if (!streamId) {
-              streamId = mkId('cm')
-              appendBubble(streamId, 'assistant', acc)
-            } else {
-              updateChatLog(agentId, streamId, acc)
-            }
-          } else if (e.kind === 'thinking') {
-            thinkAcc += e.text
-            if (!thinkId) {
-              thinkId = mkId('ct')
-              appendBubble(thinkId, 'thinking', thinkAcc)
-            } else {
-              updateChatLog(agentId, thinkId, thinkAcc)
-            }
-          } else if (e.kind === 'round') {
-            seal()
-            thinkId = null
-            thinkAcc = ''
-          } else if (e.kind === 'text') {
-            seal(e.text)
-            thinkId = null
-            thinkAcc = ''
-          } else {
-            pushChatLog(agentId, { role: 'tool', text: e.text })
-          }
-        },
-        persona || undefined,
-      )
-      seal()
-      // auto-title: after a successful turn, chats still carrying the default
-      // type name get a short LLM-derived title (a manual rename always wins)
-      if (stateRef.current.agents.find(a => a.id === agentId)?.nameIsDefault) {
-        void (async () => {
-          try {
-            const reply = (stateRef.current.agents.find(a => a.id === agentId)?.chatLog ?? [])
-              .filter(m => m.role === 'assistant').map(m => m.text).join(' ').slice(0, 400)
-            const res = await callApi(
-              buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
-              'You name chat conversations. Reply with ONLY a concise 2-5 word title for the conversation — no quotes, no trailing punctuation.',
-              [{ role: 'user', content: `Conversation so far:\nuser: ${text.slice(0, 600)}\nassistant: ${reply}\n\nName this conversation.` }],
-              [],
-            )
-            const title = res.content.filter(b => b.type === 'text').map(b => b.text).join(' ')
-              .trim().split('\n')[0].replace(/^["'“”]+|["'“”.]+$/g, '').slice(0, 60).trim()
-            if (!title) return
-            dispatch(s2 => ({
-              ...s2,
-              agents: s2.agents.map(a => a.id === agentId && a.nameIsDefault
-                ? { ...a, name: title, short: title.slice(0, 2).toUpperCase(), nameIsDefault: false }
-                : a),
-            }))
-          } catch { /* keep the default name */ }
-        })()
-      }
-    } catch (e) {
-      console.error('[yaam] chat turn failed:', e) // reaches the dev/webview log for debugging
-      pushChatLog(agentId, { role: 'assistant', text: `Error: ${e instanceof Error ? e.message : String(e)}` })
-    } finally {
-      chatBusy.current.delete(agentId)
-      dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
-    }
-  }, [flash, pushChatLog, refreshSkillCatalog, updateChatLog])
+  const runChatMessage = useCallback((agentId: string, text: string) => runChatMessageTurn({
+    stateRef, dispatch, busy: chatBusy, histories: chatHistories, mcpSessions: mcpSessionsRef,
+    skillCatalogs: skillCatalogsRef, pushChatLog, updateChatLog, flash, refreshSkillCatalog,
+  }, agentId, text), [flash, pushChatLog, refreshSkillCatalog, updateChatLog])
 
   // Run one lifecycle hook for each enabled addon without blocking the caller;
   // addons whose agent subscribes to the hook get woken with the event too.
