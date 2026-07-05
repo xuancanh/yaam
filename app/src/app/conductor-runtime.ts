@@ -28,6 +28,7 @@ import { createCommandRegistry } from './commands/registry'
 import { createDefaultPolicy } from './commands/policy'
 import { registerSessionCommands } from './commands/session-commands'
 import { registerBoardCommands } from './commands/board-commands'
+import { registerScheduleCommands } from './commands/schedule-commands'
 import { telemetry } from '../core/telemetry'
 
 /** Foundation the provider owns and shares with both the runtime and the actions. */
@@ -127,6 +128,7 @@ export function createAppRuntime(): AppRuntime {
   })
   registerSessionCommands(registry, { stateRef, markUserStopped: id => refs.userStoppedRef.current.add(id) })
   registerBoardCommands(registry, statePort, (hook, event) => refs.fireAddonHookRef.current(hook, event))
+  registerScheduleCommands(registry, statePort)
   const addonExec = (name: string, input: unknown, addonId: string) =>
     void registry.execute(name, input, { actor: { kind: 'addon', addonId } }).catch(() => {})
   const masterSendLine = (sid: string, text: string) =>

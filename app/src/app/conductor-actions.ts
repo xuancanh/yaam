@@ -86,7 +86,7 @@ export function createConductorActions(d: ConductorActionsDeps): ConductorAction
       runWatcher: d.runWatcher, pushTaskChat: d.pushTaskChat, markUserStopped: d.markUserStopped,
       disposeWatcher: d.disposeWatcher, taskSessions: d.taskSessions, execCommand: d.execCommand,
     }),
-    ...createSchedulesActions({ dispatch, flash: d.flash, logEvent: d.logEvent, launchFromTemplate: d.launchFromTemplate }),
+    ...createSchedulesActions({ dispatch, flash: d.flash, logEvent: d.logEvent, launchFromTemplate: d.launchFromTemplate, execCommand: d.execCommand }),
     ...createChatActions({
       dispatch, stateRef: d.stateRef, logEvent: d.logEvent, runChatMessage: d.runChatMessage,
       stopChatMessage: d.stopChatMessage, retryChatMessage: d.retryChatMessage,

@@ -9,6 +9,8 @@ export interface SchedulesActionsCtx {
   flash: (t: string) => void
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   launchFromTemplate: (templateId: string, task?: string) => string | null
+  /** application command registry entry point (routes schedule toggle/remove) */
+  execCommand?: <R = unknown>(name: string, input: unknown, ctx: { actor: { kind: 'user' } }) => Promise<R>
 }
 
 export interface SchedulesActions {
@@ -23,7 +25,7 @@ export interface SchedulesActions {
 
 export function useSchedulesActions(ctx: SchedulesActionsCtx): SchedulesActions {
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => createSchedulesActions(ctx), [ctx.dispatch, ctx.flash, ctx.logEvent, ctx.launchFromTemplate])
+  return useMemo(() => createSchedulesActions(ctx), [ctx.dispatch, ctx.flash, ctx.logEvent, ctx.launchFromTemplate, ctx.execCommand])
 }
 
 /** Plain (non-React) factory for the schedules/template actions. */
@@ -66,7 +68,13 @@ export function createSchedulesActions(ctx: SchedulesActionsCtx): SchedulesActio
       ctx.flash('Schedule created')
       ctx.logEvent('cron', null, `Created schedule ${cron.name}`)
     },
-    deleteCron: id => dispatch(s => ({ ...s, crons: s.crons.filter(c => c.id !== id) })),
-    toggleCron: id => dispatch(s => ({ ...s, crons: s.crons.map(c => (c.id === id ? { ...c, on: !c.on } : c)) })),
+    deleteCron: id => {
+      if (ctx.execCommand) void ctx.execCommand('remove_schedule', { id }, { actor: { kind: 'user' } })
+      else dispatch(s => ({ ...s, crons: s.crons.filter(c => c.id !== id) }))
+    },
+    toggleCron: id => {
+      if (ctx.execCommand) void ctx.execCommand('toggle_schedule', { id }, { actor: { kind: 'user' } })
+      else dispatch(s => ({ ...s, crons: s.crons.map(c => (c.id === id ? { ...c, on: !c.on } : c)) }))
+    },
   }
 }
