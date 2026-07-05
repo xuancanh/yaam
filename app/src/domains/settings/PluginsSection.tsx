@@ -38,7 +38,7 @@ function PluginRow({ p, installed, onInstall }: { p: PluginEntry; installed: str
  *  servers. Claude-Code-only parts (agents, hooks) are skipped. */
 export function PluginsSection() {
   const s = useConductorSelector(x => ({ settings: x.settings, skillRegistries: x.skillRegistries, mcpServers: x.mcpServers, personas: x.personas }), shallowEqual)
-  const { updateSettings, addSkillRegistry, addMcpServer, addPersona, updatePersona } = useActions()
+  const { updateSettings, addSkillRegistry, addMcpServer, addPersona, updatePersona, installAddonJson } = useActions()
   const registries = s.settings.pluginRegistries ?? [DEFAULT_PLUGIN_REGISTRY]
   const [open, setOpen] = useState<string | null>(null)
   const [plugins, setPlugins] = useState<PluginEntry[]>([])
@@ -89,10 +89,14 @@ export function PluginsSection() {
         updatePersona(addPersona(), pe)
         personas++
       }
+      // hooks arrive as a generated addon; its exec scope stays ungranted
+      // until the user enables it in Settings → Addons
+      if (res.hookAddonJson) installAddonJson(res.hookAddonJson)
       const parts = [
         regs ? `${regs} skill registr${regs > 1 ? 'ies' : 'y'}` : '',
         mcps ? `${mcps} MCP server${mcps > 1 ? 's' : ''}` : '',
         personas ? `${personas} persona${personas > 1 ? 's' : ''}` : '',
+        res.hookAddonJson ? 'hooks addon (grant exec to activate)' : '',
         res.skipped.length ? `skipped: ${res.skipped.join(', ')}` : '',
       ].filter(Boolean)
       setInstalled(cur => ({ ...cur, [p.name]: `installed — ${parts.join(' · ') || 'already present'}` }))

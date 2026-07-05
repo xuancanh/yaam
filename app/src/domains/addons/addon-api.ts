@@ -12,6 +12,7 @@ import { sendLineToSession } from '../session/command'
 import { humanizeCron } from '../schedules/cron'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { ACCENT } from '../../core/data'
+import { execCommand as runShellCommand } from '../../core/native'
 import * as native from '../../core/native'
 
 export interface AddonApiCtx {
@@ -52,6 +53,9 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
     flash: t => ctx.flash(String(t).slice(0, 80)),
     logEvent: t => ctx.logEvent(`[addon] ${String(t).slice(0, 120)}`),
     notify: (title, detail) => ctx.notify(String(title).slice(0, 80), String(detail).slice(0, 120)),
+    // permission-gated shell execution (the enforcement wrapper denies it
+    // unless the user granted the dangerous 'exec' scope to this addon)
+    exec: async (cmd, cwd) => await runShellCommand(String(cmd), cwd ? String(cwd) : undefined, 120_000),
     sessions: {
       readOutput: (sid, lines) => {
         const a = stateRef.current.agents.find(x => x.id === sid)

@@ -37,8 +37,63 @@ export interface PluginInstall {
   mcpServers: McpCandidate[]
   /** plugin agents/*.md translated into chat personas (system prompts) */
   personas: { name: string; description: string; body: string }[]
-  /** components we cannot represent in chat (hooks) */
+  /** plugin hooks/ translated into a YAAM addon package (JSON) whose hooks
+   *  run the plugin's commands via the permission-gated exec scope */
+  hookAddonJson?: string
+  /** components (or hook events) that could not be represented */
   skipped: string[]
+}
+
+/** Claude hook events YAAM can map onto its addon hook points. */
+const HOOK_EVENT_MAP: Record<string, 'onSessionExit' | 'onNeedsInput'> = {
+  Stop: 'onSessionExit',
+  SubagentStop: 'onSessionExit',
+  SessionEnd: 'onSessionExit',
+  Notification: 'onNeedsInput',
+}
+
+interface ClaudeHooksConfig {
+  hooks?: Record<string, { matcher?: string; hooks?: { type?: string; command?: string }[] }[]>
+}
+
+/** Translate a Claude plugin hooks config into a YAAM addon package. Mapped
+ *  events run the hook commands through api.exec (the event arrives as
+ *  YAAM_HOOK_EVENT json in the command's environment — an approximation of
+ *  Claude Code's stdin payload); unmappable events are reported back. */
+export function translateHooksToAddon(pluginName: string, cfg: ClaudeHooksConfig): { addonJson: string | null; unmapped: string[] } {
+  const byHook: Record<string, string[]> = {}
+  const unmapped: string[] = []
+  for (const [event, groups] of Object.entries(cfg.hooks ?? {})) {
+    const target = HOOK_EVENT_MAP[event]
+    const commands = (groups ?? []).flatMap(g => (g.hooks ?? [])
+      .filter(h => (h.type ?? 'command') === 'command' && h.command)
+      .map(h => h.command!))
+    if (!commands.length) continue
+    if (!target) {
+      unmapped.push(event)
+      continue
+    }
+    byHook[target] = (byHook[target] ?? []).concat(commands)
+  }
+  const entries = Object.entries(byHook)
+  if (!entries.length) return { addonJson: null, unmapped }
+  const body = (cmds: string[]) => [
+    // hook body runs in the addon sandbox; api.exec is the only machine access
+    `const payload = JSON.stringify(event).replace(/'/g, "'\\\\''")`,
+    `for (const cmd of ${JSON.stringify(cmds)}) {`,
+    `  const r = await api.exec("YAAM_HOOK_EVENT='" + payload + "' " + cmd)`,
+    `  if (r.code !== 0) api.logEvent('plugin hook "' + cmd.slice(0, 60) + '" exited ' + r.code)`,
+    `}`,
+  ].join('\n')
+  const addon = {
+    name: `${pluginName} hooks`,
+    version: '1.0.0',
+    icon: '⚓',
+    desc: `Lifecycle hooks from the Claude plugin “${pluginName}”, translated to YAAM events. Commands run via the exec permission — grant it in Settings → Addons to activate.`,
+    permissions: ['exec', 'ui'],
+    hooks: Object.fromEntries(entries.map(([hook, cmds]) => [hook, body(cmds)])),
+  }
+  return { addonJson: JSON.stringify(addon, null, 2), unmapped }
 }
 
 /** github.com/owner/repo[.git][/tree/ref[/path]] → location parts. */
@@ -142,7 +197,18 @@ export async function resolvePluginInstall(plugin: PluginEntry): Promise<PluginI
       out.skipped.push('agents (listing failed)')
     }
   }
-  if (has('hooks', 'dir') || has('hooks.json', 'file')) out.skipped.push('hooks (Claude Code lifecycle — not applicable)')
+  if (has('hooks', 'dir') || has('hooks.json', 'file')) {
+    try {
+      const rel = has('hooks.json', 'file') ? 'hooks.json' : 'hooks/hooks.json'
+      const cfg = JSON.parse(await httpGetText(rawUrl(l, rel))) as ClaudeHooksConfig
+      const { addonJson, unmapped } = translateHooksToAddon(plugin.name, cfg)
+      if (addonJson) out.hookAddonJson = addonJson
+      if (unmapped.length) out.skipped.push(`hook events without a YAAM equivalent: ${'$'}{unmapped.join(', ')}`)
+      if (!addonJson && !unmapped.length) out.skipped.push('hooks (config carried no commands)')
+    } catch {
+      out.skipped.push('hooks (config unreadable)')
+    }
+  }
   if (!out.skillRegistries.length && !out.mcpServers.length && !out.personas.length) {
     throw new Error('nothing chat-compatible found (no skills/, commands/, agents/, or .mcp.json)')
   }

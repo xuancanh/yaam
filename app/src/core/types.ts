@@ -506,7 +506,7 @@ export interface AddonAgent {
   on?: AddonHookName[]
 }
 
-export type AddonPermission = 'state:read' | 'sessions:send' | 'sessions:launch' | 'tasks' | 'schedules' | 'agent' | 'master:prompt' | 'ui' | 'storage'
+export type AddonPermission = 'state:read' | 'sessions:send' | 'sessions:launch' | 'tasks' | 'schedules' | 'agent' | 'master:prompt' | 'ui' | 'storage' | 'exec'
 
 export interface Addon {
   id: string

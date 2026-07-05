@@ -29,6 +29,8 @@ export interface AddonsActions {
   removeAddon: (id: string) => void
   toggleAddon: (id: string) => void
   toggleAddonGrant: (id: string, perm: AddonPermission) => void
+  /** install a package from an in-memory JSON string (plugin hook translation) */
+  installAddonJson: (json: string) => void
   installAddonFromFile: () => void
   installAddonFromFolder: () => void
   generateAddon: (prompt: string) => Promise<string>
@@ -62,6 +64,10 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
         ? { ...a, granted: a.granted.includes(perm) ? a.granted.filter(g => g !== perm) : a.granted.concat([perm]) }
         : a),
     })),
+
+    installAddonJson: json => {
+      installPackage(json, 'registry')
+    },
 
     installAddonFromFile: () => {
       void (async () => {

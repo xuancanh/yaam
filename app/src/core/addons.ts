@@ -28,6 +28,9 @@ export interface AddonApi {
   logEvent: (text: string) => void
   /** notification in the bell popover */
   notify: (title: string, detail: string) => void
+  /** run a shell command on the user's machine (translated Claude plugin
+   *  hooks live on this) — dangerous scope, never auto-granted */
+  exec: (cmd: string, cwd?: string) => Promise<{ code: number; output: string }>
   /** live session inspection & control */
   sessions: {
     /** latest terminal output (rendered screen for TUIs, log tail otherwise) */
@@ -83,12 +86,13 @@ export const ALL_PERMISSIONS: { id: AddonPermission; label: string }[] = [
   { id: 'master:prompt', label: "append directives to Master's system prompt" },
   { id: 'ui', label: 'notifications, toasts, focus, activity log' },
   { id: 'storage', label: 'private key-value storage' },
+  { id: 'exec', label: 'run shell commands on this machine (plugin hooks)' },
 ]
 
 /** Scopes that can act on the machine or steer LLMs — never auto-granted on
  *  install; the user turns them on per-addon in Settings. */
 export const DANGEROUS_PERMISSIONS: AddonPermission[] = [
-  'sessions:send', 'sessions:launch', 'tasks', 'schedules', 'agent', 'master:prompt',
+  'sessions:send', 'sessions:launch', 'tasks', 'schedules', 'agent', 'master:prompt', 'exec',
 ]
 
 /** Which permission each API method requires. */
@@ -107,6 +111,7 @@ export const METHOD_PERMISSION: Record<string, AddonPermission> = {
   'schedules.add': 'schedules', 'schedules.toggle': 'schedules', 'schedules.remove': 'schedules',
   'agent.wake': 'agent',
   'storage.get': 'storage', 'storage.set': 'storage',
+  exec: 'exec',
 }
 
 /** Wrap an API so every method checks the addon's granted scopes. */
@@ -128,6 +133,7 @@ export function enforcePermissions(api: AddonApi, granted: AddonPermission[]): A
     flash: guard('flash', api.flash),
     logEvent: guard('logEvent', api.logEvent),
     notify: guard('notify', api.notify),
+    exec: guard('exec', api.exec),
     sessions: {
       readOutput: guard('sessions.readOutput', api.sessions.readOutput),
       stop: guard('sessions.stop', api.sessions.stop),
