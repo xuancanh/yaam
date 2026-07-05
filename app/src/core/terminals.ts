@@ -196,16 +196,40 @@ export function repaintSession(id: string) {
 // corrupted". These sequences undo those modes WITHOUT clearing the main
 // buffer, so the session's scrollback survives.
 const MODE_RESTORE =
-  '\x1b[?1049l\x1b[?47l' + // leave the alternate screen (both variants)
   '\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l' + // mouse tracking off
   '\x1b[?2004l' + // bracketed paste off
   '\x1b[?1l' + // application cursor keys off
   '\x1b[?25h' + // cursor visible
   '\x1b[0m' // SGR attributes reset
 
-/** Undo the terminal modes a dead process left behind (scrollback kept). */
+/** Undo the terminal modes a dead process left behind (scrollback kept).
+ *
+ *  The alt-screen exit is deliberately conditional: xterm's `?1049l` handler
+ *  "restores" the cursor even when nothing was ever saved, which lands at the
+ *  top-left — the next process then overwrites (or clears) the preserved
+ *  history from row 0, leaving a mostly blank screen with only its own last
+ *  lines. So: leave the alt screen only when we are actually in it, and then
+ *  re-park the cursor just below the last real content line so new output
+ *  appends after the history. */
 export function restoreTerminalModes(id: string) {
-  entries.get(id)?.term.write(MODE_RESTORE)
+  const entry = entries.get(id)
+  if (!entry) return
+  const { term } = entry
+  if (term.buffer.active.type !== 'alternate') {
+    term.write(MODE_RESTORE) // modes only — the cursor is already where it belongs
+    return
+  }
+  term.write('\x1b[?1049l\x1b[?47l' + MODE_RESTORE, () => {
+    // the buffer switch has been processed — find where the normal-buffer
+    // content actually ends and put the cursor on the line after it
+    const buf = term.buffer.active
+    let last = buf.length - 1
+    while (last >= 0 && !(buf.getLine(last)?.translateToString(true) ?? '').trim()) last--
+    const base = Math.max(0, buf.length - term.rows)
+    const target = last - base + 2 // 1-based viewport row after the content
+    if (target <= term.rows) term.write(`\x1b[${Math.max(1, target)};1H`)
+    else term.write(`\x1b[${term.rows};1H\r\n`) // content fills the screen: scroll one line open
+  })
 }
 
 /** Full xterm reset (modes + buffers) — the clean slate before a respawn
