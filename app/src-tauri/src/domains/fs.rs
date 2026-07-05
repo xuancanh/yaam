@@ -4,7 +4,75 @@
 use crate::util::expand_tilde;
 use serde::Serialize;
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Authorize a workspace-scoped path at the privileged boundary. Lexical checks
+/// in the frontend are advisory only: a symlink under the workspace can point
+/// outside it while the lexical path still looks local. Here we canonicalize the
+/// real filesystem (resolving symlinks) and reject any target whose canonical
+/// location — or, for a not-yet-created file, its nearest existing ancestor —
+/// falls outside the canonical workspace root.
+///
+/// `root` must exist. `path` is taken relative to `root` unless absolute. The
+/// returned path is safe to open immediately (the check runs against the live
+/// filesystem right before use, shrinking the TOCTOU window).
+fn resolve_in_root(root: &str, path: &str) -> Result<PathBuf, String> {
+    let canon_root = std::fs::canonicalize(expand_tilde(root))
+        .map_err(|e| format!("workspace root unavailable: {e}"))?;
+    let raw = expand_tilde(path);
+    let target = if Path::new(&raw).is_absolute() {
+        PathBuf::from(&raw)
+    } else {
+        canon_root.join(&raw)
+    };
+
+    // Split into the longest existing ancestor (canonicalized, so symlinks are
+    // resolved to their real location) and the non-existing tail.
+    let mut ancestor = target.clone();
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let canon_ancestor = loop {
+        if let Ok(c) = std::fs::canonicalize(&ancestor) {
+            break c;
+        }
+        let file = ancestor
+            .file_name()
+            .ok_or_else(|| "invalid path".to_string())?
+            .to_os_string();
+        tail.push(file);
+        if !ancestor.pop() {
+            return Err("path has no existing ancestor".to_string());
+        }
+    };
+
+    // The non-existing tail cannot contain symlinks (it doesn't exist yet), but
+    // reject any `.`/`..` so it can't climb back out of the resolved base.
+    let mut resolved = canon_ancestor;
+    for comp in tail.iter().rev() {
+        if comp == ".." || comp == "." {
+            return Err("path may not contain '..'".to_string());
+        }
+        resolved.push(comp);
+    }
+
+    if !resolved.starts_with(&canon_root) {
+        return Err(format!(
+            "refusing to access a path outside the workspace root ({})",
+            canon_root.display()
+        ));
+    }
+    Ok(resolved)
+}
+
+/// Resolve `path` against an optional workspace `root`. With a root, the path is
+/// authorized + canonicalized (symlink-safe); without one, it is a trusted,
+/// user-driven access (file pane, skills) and only tilde-expanded.
+fn scoped_path(root: Option<&str>, path: &str) -> Result<PathBuf, String> {
+    match root {
+        Some(r) => resolve_in_root(r, path),
+        None => Ok(PathBuf::from(expand_tilde(path))),
+    }
+}
 
 #[derive(Serialize)]
 pub struct DirEntryInfo {
@@ -20,8 +88,8 @@ pub struct ExecResult {
 }
 
 /// List a directory with folders first and case-insensitive name ordering.
-fn list_dir_impl(path: &str) -> Result<Vec<DirEntryInfo>, String> {
-    let dir = expand_tilde(path);
+fn list_dir_impl(root: Option<&str>, path: &str) -> Result<Vec<DirEntryInfo>, String> {
+    let dir = scoped_path(root, path)?;
     let mut out: Vec<DirEntryInfo> = Vec::new();
     for entry in std::fs::read_dir(&dir)
         .map_err(|e| e.to_string())?
@@ -43,15 +111,16 @@ fn list_dir_impl(path: &str) -> Result<Vec<DirEntryInfo>, String> {
     Ok(out)
 }
 
-/// Read one UTF-8 text file after expanding its home-directory shorthand.
-fn read_text_impl(path: &str) -> Result<String, String> {
-    std::fs::read_to_string(expand_tilde(path)).map_err(|e| e.to_string())
+/// Read one UTF-8 text file, authorized against an optional workspace root.
+fn read_text_impl(root: Option<&str>, path: &str) -> Result<String, String> {
+    std::fs::read_to_string(scoped_path(root, path)?).map_err(|e| e.to_string())
 }
 
-/// Create or replace one file with UTF-8 text, creating parent directories.
-fn write_text_impl(path: &str, contents: &str) -> Result<(), String> {
-    let full = expand_tilde(path);
-    if let Some(parent) = std::path::Path::new(&full).parent() {
+/// Create or replace one file with UTF-8 text, creating parent directories,
+/// authorized against an optional workspace root.
+fn write_text_impl(root: Option<&str>, path: &str, contents: &str) -> Result<(), String> {
+    let full = scoped_path(root, path)?;
+    if let Some(parent) = full.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -183,18 +252,22 @@ async fn exec_command_impl(
 }
 
 #[tauri::command]
-pub fn list_dir(path: String) -> Result<Vec<DirEntryInfo>, String> {
-    list_dir_impl(&path)
+pub fn list_dir(path: String, root: Option<String>) -> Result<Vec<DirEntryInfo>, String> {
+    list_dir_impl(root.as_deref(), &path)
 }
 
 #[tauri::command]
-pub fn read_text_file(path: String) -> Result<String, String> {
-    read_text_impl(&path)
+pub fn read_text_file(path: String, root: Option<String>) -> Result<String, String> {
+    read_text_impl(root.as_deref(), &path)
 }
 
 #[tauri::command]
-pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    write_text_impl(&path, &contents)
+pub fn write_text_file(
+    path: String,
+    contents: String,
+    root: Option<String>,
+) -> Result<(), String> {
+    write_text_impl(root.as_deref(), &path, &contents)
 }
 
 #[tauri::command]
@@ -214,8 +287,8 @@ pub async fn exec_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        exec_command_impl, list_dir_impl, read_text_impl, run_credential_command_impl,
-        write_text_impl,
+        exec_command_impl, list_dir_impl, read_text_impl, resolve_in_root,
+        run_credential_command_impl, write_text_impl,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -250,9 +323,9 @@ mod tests {
         let file = dir.path().join("nested/path/note.txt");
         let path = file.to_string_lossy();
 
-        write_text_impl(&path, "hello 世界").unwrap();
+        write_text_impl(None, &path, "hello 世界").unwrap();
 
-        assert_eq!(read_text_impl(&path).unwrap(), "hello 世界");
+        assert_eq!(read_text_impl(None, &path).unwrap(), "hello 世界");
     }
 
     #[test]
@@ -263,7 +336,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("z-dir")).unwrap();
         std::fs::create_dir(dir.path().join("A-dir")).unwrap();
 
-        let entries = list_dir_impl(&dir.path().to_string_lossy()).unwrap();
+        let entries = list_dir_impl(None, &dir.path().to_string_lossy()).unwrap();
         let actual: Vec<_> = entries
             .iter()
             .map(|e| (e.name.as_str(), e.is_dir))
@@ -324,5 +397,86 @@ mod tests {
 
         assert_eq!(result.code, -1);
         assert!(result.output.contains("timed out"));
+    }
+
+    // ---- workspace scope authorization (resolve_in_root) ----
+
+    // canonicalize the temp dir up front: on macOS it lives under /var -> /private/var
+    fn canon(p: &Path) -> PathBuf {
+        std::fs::canonicalize(p).unwrap()
+    }
+
+    #[test]
+    fn scope_allows_a_relative_path_inside_the_root() {
+        let dir = TestDir::new("scope-ok");
+        let resolved = resolve_in_root(&dir.path().to_string_lossy(), "sub/file.txt").unwrap();
+        assert!(resolved.starts_with(canon(dir.path())));
+        assert!(resolved.ends_with("sub/file.txt"));
+    }
+
+    #[test]
+    fn scope_allows_a_nonexistent_target_whose_parent_is_inside_the_root() {
+        let dir = TestDir::new("scope-new");
+        // write should be allowed to create a brand-new nested file
+        write_text_impl(
+            Some(&dir.path().to_string_lossy()),
+            "deep/new/note.txt",
+            "hi",
+        )
+        .unwrap();
+        assert_eq!(
+            read_text_impl(Some(&dir.path().to_string_lossy()), "deep/new/note.txt").unwrap(),
+            "hi"
+        );
+    }
+
+    #[test]
+    fn scope_rejects_a_parent_traversal_escape() {
+        let dir = TestDir::new("scope-dotdot");
+        let err = resolve_in_root(&dir.path().to_string_lossy(), "../../etc/passwd").unwrap_err();
+        assert!(err.contains("outside the workspace root"));
+    }
+
+    #[test]
+    fn scope_rejects_an_absolute_path_outside_the_root() {
+        let dir = TestDir::new("scope-abs");
+        let err = resolve_in_root(&dir.path().to_string_lossy(), "/etc/hosts").unwrap_err();
+        assert!(err.contains("outside the workspace root"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scope_rejects_a_symlinked_file_pointing_outside_the_root() {
+        let outside = TestDir::new("scope-outside");
+        std::fs::write(outside.path().join("secret.txt"), "top secret").unwrap();
+        let root = TestDir::new("scope-symfile");
+        // a symlink INSIDE the workspace that points at a file OUTSIDE it
+        std::os::unix::fs::symlink(outside.path().join("secret.txt"), root.path().join("link.txt"))
+            .unwrap();
+
+        // lexically "link.txt" looks workspace-local, but it resolves outside
+        let err = read_text_impl(Some(&root.path().to_string_lossy()), "link.txt").unwrap_err();
+        assert!(err.contains("outside the workspace root"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scope_rejects_a_write_through_a_symlinked_directory() {
+        let outside = TestDir::new("scope-outdir");
+        let root = TestDir::new("scope-symdir");
+        // a symlinked directory inside the workspace pointing outside it
+        std::os::unix::fs::symlink(outside.path(), root.path().join("out")).unwrap();
+
+        // writing "out/pwned.txt" would land outside the workspace via the symlink
+        let err = write_text_impl(Some(&root.path().to_string_lossy()), "out/pwned.txt", "x")
+            .unwrap_err();
+        assert!(err.contains("outside the workspace root"));
+        assert!(!outside.path().join("pwned.txt").exists());
+    }
+
+    #[test]
+    fn scope_rejects_a_missing_root() {
+        let err = resolve_in_root("/no/such/workspace/root/here", "file.txt").unwrap_err();
+        assert!(err.contains("workspace root unavailable"));
     }
 }

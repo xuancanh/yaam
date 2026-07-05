@@ -131,18 +131,19 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
     case 'write_file': {
       if (input.content === undefined) throw new ToolError('write_file: "content" is required')
       const target = writePath()
-      await native.writeTextFile(target, str('content'))
+      // root is guaranteed by writePath(); Rust re-checks the canonical scope
+      await native.writeTextFile(target, str('content'), root)
       return `wrote ${str('content').length} chars to ${target}`
     }
     case 'edit_file': {
       const target = writePath()
-      const text = await native.readTextFile(target)
+      const text = await native.readTextFile(target, root)
       const oldStr = str('old_string')
       if (!oldStr) return 'old_string is required'
       const count = text.split(oldStr).length - 1
       if (count === 0) return 'old_string not found — read the file and match exactly (whitespace matters)'
       if (count > 1) return `old_string occurs ${count} times — add surrounding context to make it unique`
-      await native.writeTextFile(target, text.replace(oldStr, str('new_string')))
+      await native.writeTextFile(target, text.replace(oldStr, str('new_string')), root)
       return `edited ${target}`
     }
     case 'run_command': {

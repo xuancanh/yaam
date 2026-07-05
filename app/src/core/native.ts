@@ -179,14 +179,18 @@ export async function pickSavePath(defaultName: string): Promise<string | null> 
   return await saveDialog({ defaultPath: defaultName, filters: [{ name: 'YAAM addon', extensions: ['json'] }] })
 }
 
-/** Read a UTF-8 file through the native backend. */
-export async function readTextFile(path: string): Promise<string> {
-  return await invoke<string>('read_text_file', { path })
+/** Read a UTF-8 file through the native backend. When `root` is given, the
+ *  backend authorizes the path against that workspace root (symlink-safe). */
+export async function readTextFile(path: string, root?: string): Promise<string> {
+  return await invoke<string>('read_text_file', { path, root })
 }
 
-/** Write a UTF-8 file through the native backend. */
-export async function writeTextFile(path: string, contents: string): Promise<void> {
-  await invoke('write_text_file', { path, contents })
+/** Write a UTF-8 file through the native backend. When `root` is given, the
+ *  backend rejects a target that canonically escapes that workspace root — the
+ *  authoritative scope check, since a symlink under the root can point outside
+ *  it while the lexical path still looks workspace-local. */
+export async function writeTextFile(path: string, contents: string, root?: string): Promise<void> {
+  await invoke('write_text_file', { path, contents, root })
 }
 
 /** Run the configured credential command; returns trimmed stdout. */
