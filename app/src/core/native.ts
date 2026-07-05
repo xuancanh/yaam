@@ -174,9 +174,9 @@ export async function pickFile(): Promise<string | null> {
 }
 
 /** Ask the user for a native destination path for an exported file. */
-export async function pickSavePath(defaultName: string): Promise<string | null> {
+export async function pickSavePath(defaultName: string, extensions: string[] = ['json'], label = 'YAAM addon'): Promise<string | null> {
   if (!isTauri) return null
-  return await saveDialog({ defaultPath: defaultName, filters: [{ name: 'YAAM addon', extensions: ['json'] }] })
+  return await saveDialog({ defaultPath: defaultName, filters: [{ name: label, extensions }] })
 }
 
 /** Read a UTF-8 file through the native backend. When `root` is given, the

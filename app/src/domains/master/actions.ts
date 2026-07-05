@@ -23,8 +23,14 @@ export interface MasterActions {
 }
 
 export function useMasterActions(ctx: MasterActionsCtx): MasterActions {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createMasterActions(ctx), [ctx.stateRef, ctx.later, ctx.runMaster, ctx.toolApprovals])
+}
+
+/** Plain (non-React) factory for the Master chat actions. */
+export function createMasterActions(ctx: MasterActionsCtx): MasterActions {
   const { stateRef, later, runMaster, toolApprovals } = ctx
-  return useMemo(() => ({
+  return {
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
     send: () => {
@@ -70,5 +76,5 @@ export function useMasterActions(ctx: MasterActionsCtx): MasterActions {
           : `[the user denied "${pa.toolId}" — do not retry it; adjust your plan or ask the user]`)
       })
     },
-  }), [stateRef, later, runMaster, toolApprovals])
+  }
 }
