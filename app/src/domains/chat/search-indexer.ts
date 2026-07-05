@@ -12,6 +12,7 @@ import { dispatch, useAppStore } from '../../core/store'
 import { browserClock, type ClockPort, type Disposable, type StatePort } from '../../core/ports'
 import * as native from '../../core/native'
 import { chatTranscriptsChanged } from '../../infrastructure/persistence/subscribe'
+import { isChatSession } from '../session/session-kind'
 
 export interface ChatSearchIndexer {
   start: () => void
@@ -45,8 +46,8 @@ export function createChatSearchIndexer(
   let indexed: Map<string, string> | undefined
 
   const collect = (): ChatSearchDoc[] => state.get().agents
-    .filter(a => a.kind === 'chat')
-    .flatMap(a => (a.chatLog ?? [])
+    .filter(isChatSession)
+    .flatMap(a => a.chatLog
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => ({ chatId: a.id, msgId: m.id, role: m.role, text: `${a.name}\n${m.text}` })))
 
