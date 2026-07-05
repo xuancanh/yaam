@@ -8,6 +8,32 @@ import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
 import { DraftInput, DraftTextarea } from '../../components/DraftInput'
 import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
+
+/** One connect link with a copy button (transient ✓ feedback). */
+function ConnectLink({ label, url }: { label: string; url: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="mono" style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 11.5, wordBreak: 'break-all' }}>
+      <span style={{ color: 'var(--dim)', textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, flexShrink: 0 }}>{label}</span>
+      <span style={{ color: 'var(--accent)', userSelect: 'all', flex: 1, minWidth: 0 }}>{url}</span>
+      <button
+        className="icon-btn"
+        title="Copy link"
+        style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0, alignSelf: 'center', color: copied ? 'var(--green)' : undefined }}
+        onClick={() => {
+          void navigator.clipboard.writeText(url).then(() => {
+            setCopied(true)
+            window.setTimeout(() => setCopied(false), 1400)
+          })
+        }}
+      >
+        {copied
+          ? <Icon paths={['M5 13l4 4L19 7']} size={12} stroke={2} />
+          : <Icon paths={['M9 9h10v10H9z', 'M5 15V5h10']} size={12} stroke={1.7} />}
+      </button>
+    </div>
+  )
+}
 import { ToolsSection } from './ToolsView'
 import { McpSection } from './McpSection'
 import { PluginsSection } from './PluginsSection'
@@ -436,10 +462,7 @@ export function SettingsView() {
                     ? [{ label: 'public', url: `${s.settings.remotePublicUrl.trim().replace(/\/+$/, '')}/?t=${s.remoteInfo.token}` }]
                     : []
                   ).concat(s.remoteInfo.urls ?? []).map(u => (
-                    <div key={u.url} className="mono" style={{ fontSize: 11.5, wordBreak: 'break-all' }}>
-                      <span style={{ color: 'var(--dim)', textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, marginRight: 6 }}>{u.label}</span>
-                      <span style={{ color: 'var(--accent)', userSelect: 'all' }}>{u.url}</span>
-                    </div>
+                    <ConnectLink key={u.url} label={u.label} url={u.url} />
                   ))}
                 </div>
               ) : (
