@@ -6,7 +6,7 @@
 import type { MutableRefObject } from 'react'
 import type { Addon, AppState } from '../../core/types'
 import type { AddonApi } from '../../core/addons'
-import type { ApiMessage, MasterExec } from '../../master'
+import type { MasterExec } from '../../master'
 import { hasCreds, runMasterTurn } from '../../master'
 import { execAddonTool, parseAddonPackage } from '../../core/addons'
 import { mkId } from '../../shared/id'
@@ -24,8 +24,8 @@ export interface MasterCtx {
   lastEventRef: MutableRefObject<{ note: string; at: number } | null>
   toolApprovalsRef: MutableRefObject<Set<string>>
   userStoppedRef: MutableRefObject<Set<string>>
-  addonAgentHistories: MutableRefObject<Map<string, ApiMessage[]>>
-  addonEditorHistories: MutableRefObject<Map<string, ApiMessage[]>>
+  /** tear down an addon's runtime state (agent registries + editor history) on removal */
+  disposeAddon: (addonId: string) => void
   launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }) => string | null
   launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string) => string | null
   armResponseWatch: (id: string) => void
@@ -215,8 +215,7 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
     removeAddon: name => {
       const addon = stateRef.current.addons.find(a => a.name === name)
       if (!addon) return `no addon named ${name}`
-      ctx.addonAgentHistories.current.delete(addon.id)
-      ctx.addonEditorHistories.current.delete(addon.id)
+      ctx.disposeAddon(addon.id)
       dispatch(s2 => {
         const addonStorage = { ...s2.addonStorage }
         delete addonStorage[addon.id]

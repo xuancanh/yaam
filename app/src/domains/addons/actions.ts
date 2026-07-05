@@ -4,7 +4,6 @@
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { Addon, AddonPermission, AppState } from '../../core/types'
-import type { ApiMessage } from '../../master'
 import { buildCfg, hasCreds } from '../../master'
 import * as native from '../../core/native'
 import { dispatchAddonRpc, exportAddonPackage, loadAddonFolder } from '../../core/addons'
@@ -18,10 +17,8 @@ export interface AddonsActionsCtx {
   installPackage: (json: string, source: Addon['source']) => void
   sendAddonChat: (id: string, text: string) => void
   makeAddonApi: (addonId: string) => AddonApi
-  addonAgentHistories: MutableRefObject<Map<string, ApiMessage[]>>
-  addonEditorHistories: MutableRefObject<Map<string, ApiMessage[]>>
-  /** cancel an addon's in-flight agent turn (on removal) */
-  abortAgent: (addonId: string) => void
+  /** tear down an addon's runtime state (agent registries + editor history) on removal */
+  disposeAddon: (addonId: string) => void
 }
 
 export interface AddonsActions {
@@ -138,9 +135,7 @@ export function useAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
       })()
     },
     removeAddon: id => {
-      ctx.abortAgent(id) // cancel any in-flight addon-agent turn
-      ctx.addonAgentHistories.current.delete(id)
-      ctx.addonEditorHistories.current.delete(id)
+      ctx.disposeAddon(id) // cancel any in-flight agent turn + drop its registries + editor history
       dispatch(s => {
         const addonStorage = { ...s.addonStorage }
         delete addonStorage[id]

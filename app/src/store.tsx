@@ -4,11 +4,9 @@ import type { ReactNode } from 'react'
 import type {
   AddonHookName, LogLine, TaskChatMsg,
 } from './core/types'
-import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
 import { disposeTerminal } from './core/terminals'
 import { enforcePermissions, execAddonHook } from './core/addons'
-import { runAddonAgentTurn } from './domains/addons/addon-agent'
 import type { AddonApi } from './core/addons'
 import { ActionsCtx } from './core/context'
 import { dispatch, useAppStore } from './core/store'
@@ -22,6 +20,8 @@ import { createMasterRuntime } from './domains/master/master-runtime'
 import type { MasterRuntime } from './domains/master/master-runtime'
 import { useActivityService } from './domains/activity/service'
 import { useAddonRuntime } from './domains/addons/runtime'
+import { createAddonAgentRuntime } from './domains/addons/agent-runtime'
+import type { AddonAgentRuntime } from './domains/addons/agent-runtime'
 import { useIntegrationRuntime } from './domains/settings/integrations'
 import { useLaunchRuntime } from './domains/session/launch-runtime'
 import { useSessionAttention } from './domains/session/attention'
@@ -30,7 +30,6 @@ import { useChatSearchIndexer } from './domains/chat/search-indexer'
 import { useSessionExitHandler } from './domains/session/exit-handler'
 import { useSchedulerRuntime } from './domains/schedules/runtime'
 import { createAddonApi } from './domains/addons/addon-api'
-import { AbortRegistry, isAbortError } from './core/abort-registry'
 import { useSessionSettle } from './domains/session/use-settle'
 import { useHydration } from './infrastructure/persistence/hydrate-effect'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './domains/board/task-state'
@@ -266,41 +265,20 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [makeAddonApiRaw])
 
   // ---- per-addon LLM agents: an addon's own mini-Master, tools = its API ----
-  const addonAgentHistories = useRef<Map<string, ApiMessage[]>>(new Map())
+  // The agent runtime owns the per-addon history/busy/cancellation registries;
+  // the addon editor history is separate (shared with the editor runtime + removal).
   const addonEditorHistories = useRef<Map<string, ApiMessage[]>>(new Map())
-  const addonAgentBusy = useRef<Set<string>>(new Set())
-  // per-addon cancellation for in-flight agent turns (aborted when the addon is removed)
-  const addonAborts = useRef(new AbortRegistry())
-
-  const runAddonAgent = useCallback(async (addonId: string, note: string): Promise<string> => {
-    const st = stateRef.current.settings
-    const addon = stateRef.current.addons.find(a => a.id === addonId)
-    if (!addon?.agent) return 'this addon declares no agent'
-    if (!addon.enabled) return 'addon is disabled'
-    if (!(st.masterEnabled && hasCreds(st))) return 'no brain configured — enable LLM Master in Settings'
-    if (addonAgentBusy.current.has(addonId)) return 'agent is busy with a previous note — try again shortly'
-    addonAgentBusy.current.add(addonId)
-    try {
-      let history = addonAgentHistories.current.get(addonId)
-      if (!history) {
-        history = []
-        addonAgentHistories.current.set(addonId, history)
-      }
-      const reply = await runAddonAgentTurn(buildCfg(st, st.monitorModel || undefined), addon, note, history, makeAddonApi(addonId), addonAborts.current.signal(addonId))
-      return reply || '(acted without a reply)'
-    } catch (e) {
-      // the addon was removed mid-turn — stop quietly
-      if (isAbortError(e) || addonAborts.current.signal(addonId).aborted) return 'agent cancelled'
-      const msg = e instanceof Error ? e.message : String(e)
-      logEvent('escalate', null, `Addon agent "${addon.name}" error: ${msg}`)
-      return `agent error: ${msg}`
-    } finally {
-      addonAgentBusy.current.delete(addonId)
-      addonAborts.current.clear(addonId)
-    }
-  }, [logEvent, makeAddonApi])
-
+  const addonAgentRef = useRef<AddonAgentRuntime>(undefined)
+  if (!addonAgentRef.current) {
+    addonAgentRef.current = createAddonAgentRuntime({ stateRef, logEvent, makeAddonApi })
+  }
+  const runAddonAgent = addonAgentRef.current.run
   runAddonAgentRef.current = runAddonAgent
+  // Tear down an addon's runtime state (agent registries + editor history) on removal.
+  const disposeAddon = useCallback((id: string) => {
+    addonAgentRef.current!.dispose(id)
+    addonEditorHistories.current.delete(id)
+  }, [])
 
   // ---- chat-mode sessions: Claude-Desktop-style agents living in panes ----
   // The chat runtime owns per-chat history/busy/cancellation; created below once
@@ -366,7 +344,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   if (!masterRef.current) {
     masterRef.current = createMasterRuntime({
       stateRef, dispatch, toolApprovalsRef, userStoppedRef,
-      addonAgentHistories, addonEditorHistories, launchSession, launchFromTemplate, armResponseWatch,
+      disposeAddon, launchSession, launchFromTemplate, armResponseWatch,
       sessionScreenTail, logEvent, flash, applyAgentStatus, setNeedsInput, makeAddonApi,
     })
   }
@@ -407,8 +385,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     launchFromTemplate, runChatMessage,
     installPackage: addonRuntime.installPackage,
     sendAddonChat: (id: string, text: string) => { void addonRuntime.sendAddonChat(id, text) },
-    makeAddonApi, addonAgentHistories, addonEditorHistories,
-    abortAgent: (aid: string) => addonAborts.current.abort(aid),
+    makeAddonApi, disposeAddon,
     runMaster, disposeSessionRuntime, abortMaster: () => masterRef.current!.abort(),
     toolApprovals: toolApprovalsRef,
     armResponseWatch, clearFlagged, launchSession, probeCliSession, appendTail, clearNeeds, bumpSettle,

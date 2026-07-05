@@ -8,7 +8,6 @@ import type { MutableRefObject } from 'react'
 import type { AppState, EventType, NotifKind } from '../core/types'
 import type { McpSession } from '../core/mcp'
 import type { CatalogSkill } from '../core/skills'
-import type { ApiMessage } from '../master'
 import type { AddonApi } from '../core/addons'
 import type { ConductorActions } from './actions'
 import { dispatch } from '../core/store'
@@ -51,9 +50,7 @@ export interface ConductorActionsDeps {
   installPackage: (json: string, source: import('../core/types').Addon['source']) => void
   sendAddonChat: (id: string, text: string) => void
   makeAddonApi: (addonId: string) => AddonApi
-  addonAgentHistories: MutableRefObject<Map<string, ApiMessage[]>>
-  addonEditorHistories: MutableRefObject<Map<string, ApiMessage[]>>
-  abortAgent: (addonId: string) => void
+  disposeAddon: (addonId: string) => void
   // workspace / master
   runMaster: (note?: string) => void
   disposeSessionRuntime: (id: string) => void
@@ -85,8 +82,8 @@ export function useConductorActions(d: ConductorActionsDeps): ConductorActions {
   const chatActions = useChatActions(useMemo(() => ({ dispatch, stateRef: d.stateRef, logEvent: d.logEvent, runChatMessage: d.runChatMessage }), [d.stateRef, d.logEvent, d.runChatMessage]))
   const addonsActions = useAddonsActions(useMemo(() => ({
     dispatch, stateRef: d.stateRef, flash: d.flash, installPackage: d.installPackage, sendAddonChat: d.sendAddonChat,
-    makeAddonApi: d.makeAddonApi, addonAgentHistories: d.addonAgentHistories, addonEditorHistories: d.addonEditorHistories, abortAgent: d.abortAgent,
-  }), [d.stateRef, d.flash, d.installPackage, d.sendAddonChat, d.makeAddonApi, d.addonAgentHistories, d.addonEditorHistories, d.abortAgent]))
+    makeAddonApi: d.makeAddonApi, disposeAddon: d.disposeAddon,
+  }), [d.stateRef, d.flash, d.installPackage, d.sendAddonChat, d.makeAddonApi, d.disposeAddon]))
   const workspaceActions = useWorkspaceActions(useMemo(() => ({
     dispatch, stateRef: d.stateRef, later: d.later, flash: d.flash, runMaster: d.runMaster,
     markUserStopped: d.markUserStopped, disposeSessionRuntime: d.disposeSessionRuntime, abortMaster: d.abortMaster,
