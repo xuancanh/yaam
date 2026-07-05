@@ -12,7 +12,12 @@ export interface ChatLog {
 }
 
 export function useChatLog(): ChatLog {
-  return useMemo(() => ({
+  return useMemo(() => createChatLog(), [])
+}
+
+/** Plain (non-React) factory for the chat transcript mutations. */
+export function createChatLog(): ChatLog {
+  return {
     updateChatLog: (agentId, msgId, text) => {
       dispatch(s => ({
         ...s,
@@ -29,5 +34,5 @@ export function useChatLog(): ChatLog {
           : a),
       }))
     },
-  }), [])
+  }
 }

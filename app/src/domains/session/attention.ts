@@ -28,8 +28,14 @@ export interface SessionAttention {
 }
 
 export function useSessionAttention(ctx: SessionAttentionCtx): SessionAttention {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createSessionAttention(ctx), [ctx.stateRef, ctx.widOf, ctx.logEvent, ctx.notify, ctx.fireAddonHook])
+}
+
+/** Plain (non-React) factory for the attention/output helpers. */
+export function createSessionAttention(ctx: SessionAttentionCtx): SessionAttention {
   const { stateRef, widOf, logEvent, notify, fireAddonHook } = ctx
-  return useMemo(() => ({
+  return {
     // Prefer the rendered screen for TUI context and fall back to retained log lines.
     sessionScreenTail: (id: string): string => {
       const lines = isAltScreen(id)
@@ -107,5 +113,5 @@ export function useSessionAttention(ctx: SessionAttentionCtx): SessionAttention 
         }),
       }))
     },
-  }), [stateRef, widOf, logEvent, notify, fireAddonHook])
+  }
 }

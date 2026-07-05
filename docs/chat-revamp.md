@@ -57,6 +57,51 @@ audience). Mostly served by terminal sessions, but in chat they want:
 | Safety | honor-system prompt rules | per-chat permission mode: `ask` (default for command execution) / `auto`; approval bubble inline in the chat |
 | Long-turn visibility | "working…" spinner | live tool-trace group (collapsible), stop button, optional plan/progress line the agent maintains via a `set_status` tool |
 
+## Built-in tool set for local interaction
+
+Today's set (`list_dir`, `read_file`, `write_file`, `edit_file`, `run_command`,
+`load_skill`) forces the agent to shell out for everything else, which is slow,
+error-prone, and unreadable in the tool trail. Expanded set:
+
+**Find & search** (the biggest gap — agents currently `run_command: grep`):
+- `glob_files(pattern, path?)` — find files by name pattern, recursive.
+- `grep_files(pattern, path?, glob?)` — regex content search with file:line hits.
+
+**File management** (sandboxed to the working folder like writes; today the
+model falls back to `rm`/`mv` in run_command which bypasses the write sandbox):
+- `create_dir(path)`, `move_path(from, to)`, `copy_path(from, to)`,
+  `delete_path(path)` — delete asks for approval in `ask` mode.
+
+**Documents & media** (working-user essentials):
+- `read_file` learns to extract text from PDF / docx / xlsx / pptx instead of
+  failing with "not UTF-8"; images become vision blocks (with cut 2's plumbing).
+
+**Research & information**:
+- `web_search(query)` — current-facts search (DuckDuckGo HTML endpoint via the
+  CORS-free Tauri HTTP plugin; no API key required).
+- `fetch_url(url)` — trimmed page text; `http_request(method, url, headers, body)`
+  for APIs (advanced; body size capped).
+- a built-in **deep-research skill** (multi-source fact-checking: search → fetch
+  several sources → cross-check → cite) seeded into the local skill list so it
+  shows up in the slash menu out of the box.
+
+**Application control** (Cowork-style, staged by cost):
+- `run_applescript(script)` — native app control on macOS (Finder, Mail, Safari,
+  Terminal…) via `osascript`; approval-gated in `ask` mode. Windows/Linux
+  equivalents (PowerShell / xdotool) can follow the same tool shape later.
+- Chrome / web apps: ship a **Chrome DevTools MCP** entry in the curated
+  marketplace (works once stdio MCP transport lands) — driving the DOM beats
+  clicking pixels.
+- Full screenshot-based computer use: deferred — needs screen-capture plumbing,
+  a vision loop, and OS permissions; revisit after the above two prove demand.
+
+**Progress**:
+- `set_status(text)` — one-line "what I'm doing now" surfaced in the chat header
+  during long turns (Cowork-style visibility, cut 7).
+
+Deliberately *not* tools: git (run_command is fine and terminal sessions own git
+UX), browser automation (out of scope), sub-agents (Master already orchestrates).
+
 ## What Claude Cowork offers vs what YAAM needs
 
 Cowork = autonomous multi-step knowledge work on local files with human
@@ -75,7 +120,9 @@ Feature-by-feature assessment:
   equivalent.
 - **Scheduled/background agents** — *already have*: schedules + kanban board +
   watcher runner cover this; not part of the chat revamp.
-- **Computer/screen use** — *skip*: out of scope for a PTY-orchestration app.
+- **Application control** — *adopt in stages*: `run_applescript` for native macOS
+  apps now; Chrome DevTools MCP via the marketplace for web apps; pixel-level
+  computer use deferred.
 
 ## Implementation cuts (each independently shippable)
 
