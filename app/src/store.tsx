@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
   Addon, AddonHookName, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
@@ -22,7 +22,8 @@ import { mcpConnect } from './mcp'
 import type { McpSession } from './mcp'
 import { estimateLogUsage, estimateOutputUsage } from './usage'
 import type { AddonApi } from './addons'
-import { ActionsCtx, StateCtx } from './context'
+import { ActionsCtx, StateCtx, StoreCtx } from './context'
+import type { ConductorStore } from './context'
 import { runMonitorLoop } from './store/monitor-runner'
 import { runWatcherLoop } from './store/watcher-runner'
 import { runChatMessageTurn } from './store/chat-runner'
@@ -181,6 +182,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const dragId = useRef<string | null>(null)
   const stateRef = useRef(state)
   stateRef.current = state
+
+  // External-store bridge (finding #3): selector consumers subscribe here and
+  // re-render only when their slice changes. getSnapshot reads the render-synced
+  // stateRef; subscribers are notified after each committed state change.
+  const subscribersRef = useRef(new Set<() => void>())
+  const conductorStore = useRef<ConductorStore>({
+    subscribe: cb => { subscribersRef.current.add(cb); return () => { subscribersRef.current.delete(cb) } },
+    getSnapshot: () => stateRef.current,
+  }).current
+  useEffect(() => { for (const cb of subscribersRef.current) cb() }, [state])
 
   // set by the Master/monitor runners below; refs avoid declaration cycles
   const masterEventRef = useRef<(note: string, agentId?: string) => void>(() => {})
@@ -2639,24 +2650,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <StateCtx.Provider value={state}>
-      <ActionsCtx.Provider value={actions}>{children}</ActionsCtx.Provider>
-    </StateCtx.Provider>
+    <StoreCtx.Provider value={conductorStore}>
+      <StateCtx.Provider value={state}>
+        <ActionsCtx.Provider value={actions}>{children}</ActionsCtx.Provider>
+      </StateCtx.Provider>
+    </StoreCtx.Provider>
   )
 }
 
-/** Read the current AppState and fail fast when rendered outside the provider. */
-export function useConductor(): AppState {
-  const s = useContext(StateCtx)
-  if (!s) throw new Error('useConductor outside provider')
-  return s
-}
-
-/** Read the stable action surface and fail fast outside the provider. */
-export function useActions(): ConductorActions {
-  const a = useContext(ActionsCtx)
-  if (!a) throw new Error('useActions outside provider')
-  return a
-}
+export { useConductor, useConductorSelector, useActions } from './store/hooks'
 
 export type { LogLine }
