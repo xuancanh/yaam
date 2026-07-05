@@ -7,12 +7,12 @@ import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AgentTemplate, AppState, EventType, TaskChatMsg } from '../../core/types'
 import { dispatch } from '../../core/store'
-import * as native from '../../core/native'
-import { getTerminal } from '../../core/terminals'
 import { hasCreds } from '../../master'
 import { buildLaunch } from './launch'
 import { focusSessionIn } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
+import { realSessionProcessPort } from './ports'
+import type { SessionProcessPort } from './ports'
 import { buildTemplateCommand } from '../schedules/template-command'
 import { taskContract, taskWorkText } from '../board/task-prompt'
 import { findTaskInState, updateLocatedTask } from '../board/task-state'
@@ -29,6 +29,8 @@ export interface LaunchRuntimeCtx {
   pushTaskChat: (taskId: string, role: TaskChatMsg['role'], text: string) => void
   runWatcher: (taskId: string, note: string) => Promise<void> | void
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
+  /** native PTY + terminal capability; defaults to the real IPC-backed port */
+  port?: SessionProcessPort
 }
 
 export interface LaunchRuntime {
@@ -41,13 +43,22 @@ export interface LaunchRuntime {
 }
 
 export function useLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
+  const { stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch, pushTaskChat, runWatcher, taskSessions, port } = ctx
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createLaunchRuntime(ctx), [stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch, pushTaskChat, runWatcher, taskSessions, port])
+}
+
+/** The launch runtime as a plain factory (no React), so it can be unit-tested
+ *  with a fake SessionProcessPort and the real store. */
+export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
   const { stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch, pushTaskChat, runWatcher, taskSessions } = ctx
-  return useMemo(() => {
+  const port = ctx.port ?? realSessionProcessPort
+  {
     // Poll native session files until the launched CLI's resume id is discoverable.
     const probeCliSession = (id: string, command: string, cwd: string, isResume: boolean) => {
       const probeType = typeForCommand(command, stateRef.current.agentTypes)
         ?? typeForCommand(stateRef.current.agents.find(a => a.id === id)?.cmd ?? '', stateRef.current.agentTypes)
-      if (!probeType?.probe || !native.isTauri) return
+      if (!probeType?.probe || !port.isTauri) return
       if (!isResume && /--resume|resume |--continue/.test(command)) return
       const spawnedAt = Date.now()
       // Probe repeatedly because CLIs create their resume files after process start.
@@ -60,7 +71,7 @@ export function useLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         const exclude = stateRef.current.agents
           .filter(a => a.id !== id && a.cliSessionId)
           .map(a => a.cliSessionId!)
-        native.detectCliSession(probeType.probe!, cwd || undefined, spawnedAt, exclude).then(sid => {
+        port.detectCliSession(probeType.probe!, cwd || undefined, spawnedAt, exclude).then(sid => {
           if (!sid || sid === stateRef.current.agents.find(a => a.id === id)?.cliSessionId) return
           dispatch(s2 => ({
             ...s2,
@@ -87,10 +98,10 @@ export function useLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         if (agent.workspaceId !== s.activeWorkspace) return withAgent
         return { ...focusSessionIn(withAgent, id), newSessionOpen: false }
       })
-      getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
+      port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
       // Claude's id is known up front; only codex/opencode need file detection.
       if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', agent.cwd ?? '', false)
-      native.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, agent.cwd || undefined, undefined, undefined, opts?.terminalShell).catch(err => {
+      port.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, agent.cwd || undefined, undefined, undefined, opts?.terminalShell).catch(err => {
         dispatch(s => ({
           ...s,
           agents: s.agents.map(a => a.id === id
@@ -203,5 +214,5 @@ export function useLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
     }
 
     return { probeCliSession, launchSession, launchFromTemplate, spawnTaskSession, spawnSessionForTask, startTaskViaWatcher }
-  }, [stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch, pushTaskChat, runWatcher, taskSessions])
+  }
 }
