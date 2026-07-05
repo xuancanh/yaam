@@ -9,11 +9,15 @@ import type { CatalogSkill } from '../../core/skills'
 import { buildChatCfg, callApi, chatTypeHasCreds } from '../../llm/client'
 import { runChatTurn } from './agent'
 import { mkId } from '../../shared/id'
+import type { AbortRegistry } from '../../core/abort-registry'
+import { isAbortError } from '../../core/abort-registry'
 
 export interface ChatCtx {
   stateRef: MutableRefObject<AppState>
   dispatch: (f: (s: AppState) => AppState) => void
   busy: MutableRefObject<Set<string>>
+  /** per-chat cancellation — aborted when the chat is deleted */
+  aborts: AbortRegistry
   histories: MutableRefObject<Map<string, ApiMessage[]>>
   mcpSessions: MutableRefObject<Map<string, McpSession>>
   skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
@@ -136,6 +140,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
         }
       },
       persona || undefined,
+      ctx.aborts.signal(agentId),
     )
     seal()
     // auto-title: after a successful turn, chats still carrying the default
@@ -164,10 +169,13 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       })()
     }
   } catch (e) {
+    // the chat was deleted mid-reply — stop quietly, don't push an error bubble
+    if (isAbortError(e) || ctx.aborts.signal(agentId).aborted) return
     console.error('[yaam] chat turn failed:', e) // reaches the dev/webview log for debugging
     ctx.pushChatLog(agentId, { role: 'assistant', text: `Error: ${e instanceof Error ? e.message : String(e)}` })
   } finally {
     ctx.busy.current.delete(agentId)
+    ctx.aborts.clear(agentId)
     ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
   }
 }

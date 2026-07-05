@@ -341,7 +341,7 @@ async function consumeSse(res: Response, onData: (data: string) => void): Promis
 }
 
 /** Streaming Anthropic Messages call: text deltas flow through onDelta. */
-async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta): Promise<ApiResponse> {
+async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta, signal?: AbortSignal): Promise<ApiResponse> {
   const anthropicBase = (cfg.provider.id === 'anthropic-compat' ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
   const send = async (key: string) => doFetch(`${anthropicBase}/v1/messages`, {
     method: 'POST',
@@ -353,6 +353,7 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({ model: cfg.model, max_tokens: 8192, temperature: 0.2, system, messages, tools, stream: true }),
+    signal,
   })
   let res = await send(await resolveKey(cfg))
   if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
@@ -406,7 +407,7 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
 }
 
 /** Streaming OpenAI chat-completions call: content deltas flow through onDelta. */
-async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta): Promise<ApiResponse> {
+async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta, signal?: AbortSignal): Promise<ApiResponse> {
   const base = (cfg.provider.models.length === 0 && cfg.baseUrl ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
   if (!base) throw new Error('custom provider needs a base URL')
   const send = async (key: string) => doFetch(`${base}/chat/completions`, {
@@ -424,6 +425,7 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
       messages: toOpenAiMessages(system, messages),
       tools: (tools as Array<{ name: string; description: string; input_schema: unknown }>).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
     }),
+    signal,
   })
   let res = await send(await resolveKey(cfg))
   if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
@@ -475,11 +477,11 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
 /** Streaming variant of callApi: text deltas arrive through onDelta as the
  *  model produces them. Bedrock's invoke bridge cannot stream — it falls back
  *  to the buffered call (onDelta simply never fires). */
-export function callApiStream(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta): Promise<ApiResponse> {
-  if (cfg.provider.id === 'bedrock') return callAnthropic(cfg, system, messages, tools)
+export function callApiStream(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta, signal?: AbortSignal): Promise<ApiResponse> {
+  if (cfg.provider.id === 'bedrock') return callAnthropic(cfg, system, messages, tools, signal)
   return cfg.provider.protocol === 'anthropic'
-    ? streamAnthropic(cfg, system, messages, tools, onDelta)
-    : streamOpenAi(cfg, system, messages, tools, onDelta)
+    ? streamAnthropic(cfg, system, messages, tools, onDelta, signal)
+    : streamOpenAi(cfg, system, messages, tools, onDelta, signal)
 }
 
 /** Whether the settings hold usable credentials for the chosen provider.

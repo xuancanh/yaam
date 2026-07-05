@@ -761,6 +761,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // ---- chat-mode sessions: Claude-Desktop-style agents living in panes ----
   const chatHistories = useRef<Map<string, ApiMessage[]>>(new Map())
   const chatBusy = useRef<Set<string>>(new Set())
+  // per-chat cancellation for in-flight replies (aborted when the chat is deleted)
+  const chatAborts = useRef(new AbortRegistry())
   const mcpSessionsRef = useRef<Map<string, McpSession>>(new Map())
 
   // Tear down ALL per-session runtime state in one place: the xterm instance
@@ -771,6 +773,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     disposeTerminal(id)
     disposeSettle(id)
     monitorAborts.current.abort(id) // cancel any in-flight monitor turn for this session
+    chatAborts.current.abort(id) // cancel any in-flight chat reply for this session
     monitorHistories.current.delete(id)
     monitorBusy.current.delete(id)
     monitorQueue.current.delete(id)
@@ -874,7 +877,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }
 
   const runChatMessage = useCallback((agentId: string, text: string) => runChatMessageTurn({
-    stateRef, dispatch, busy: chatBusy, histories: chatHistories, mcpSessions: mcpSessionsRef,
+    stateRef, dispatch, busy: chatBusy, aborts: chatAborts.current, histories: chatHistories, mcpSessions: mcpSessionsRef,
     skillCatalogs: skillCatalogsRef, pushChatLog, updateChatLog, flash, refreshSkillCatalog,
   }, agentId, text), [flash, pushChatLog, refreshSkillCatalog, updateChatLog])
 

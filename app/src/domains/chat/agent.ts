@@ -193,6 +193,7 @@ export async function runChatTurn(
   history: ApiMessage[],
   onEvent: (e: ChatTurnEvent) => void,
   persona?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   history.push({ role: 'user', content: userText })
   const tools = [...builtinTools(skills), ...mcpToolDefs(mcp)]
@@ -200,7 +201,7 @@ export async function runChatTurn(
     const agent = getAgent()
     if (!agent) return
     const res = await callApiStream(cfg, chatSystem(agent, skills, mcp, persona), history, tools,
-      (d, ch) => onEvent({ kind: ch === 'thinking' ? 'thinking' : 'delta', text: d }))
+      (d, ch) => onEvent({ kind: ch === 'thinking' ? 'thinking' : 'delta', text: d }), signal)
     if (res.stop_reason !== 'tool_use') {
       const text = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
       history.push({ role: 'assistant', content: text || '(ok)' })
