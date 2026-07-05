@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:mobile": "vite build -c vite.mobile.config.ts && cp dist-mobile/mobile.html src-tauri/src/domains/remote-app.html",
     "lint": "oxlint",
     "tauri": "tauri",
     "preview": "vite preview",
@@ -39,6 +40,7 @@
     "oxlint": "^1.71.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
+    "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^4.1.9"
   }
 }

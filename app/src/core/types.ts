@@ -405,6 +405,12 @@ export interface OrchestrationSettings {
   chatListWidth?: number
   /** phone remote companion: LAN server for fleet status + approvals */
   remoteEnabled?: boolean
+  /** devices that completed the pairing handshake (token minted on explicit
+   *  desktop approval); re-hydrated into the server on every start */
+  remoteDevices?: { id: string; name: string; token: string; at: number }[]
+  /** optional public base URL (Cloudflare Tunnel, Tailscale MagicDNS, …) shown
+   *  as the connect link instead of the raw interface IPs */
+  remotePublicUrl?: string
 }
 
 export type BoardCol = 'backlog' | 'progress' | 'review' | 'done' | 'failed'
@@ -664,7 +670,7 @@ export interface AppState {
   newSessionOpen: boolean
   masterBusy: boolean
   /** phone remote companion server, when running (transient — not persisted) */
-  remoteInfo?: { url: string; token: string } | null
+  remoteInfo?: { url: string; token: string; urls: { label: string; url: string }[] } | null
   /** in-flight watcher reply text per task, streamed into the task chat
    *  (transient — cleared when the turn completes) */
   taskStreams?: Record<string, string>

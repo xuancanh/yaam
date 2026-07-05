@@ -299,15 +299,47 @@ export function SettingsView() {
                 onToggle={() => updateSettings({ osNotifications: s.settings.osNotifications === false })}
               />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>
+            <div style={{ display: 'flex', gap: 14, padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Phone remote</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
-                  Serve a token-protected companion page on your local network: watch sessions and tasks, answer escalations, and approve ask-mode tool calls from your phone. Approvals are the only action the remote can take — execution and credentials never leave this machine.
+                  Serve the mobile companion app on your network: work with tasks, chats, and sessions from your phone. Every device must be paired — connecting needs the link's token AND an explicit approval on this desktop. Commands run through the same action paths as the UI; execution and credentials never leave this machine. Works over Tailscale/WireGuard (each interface gets its own link) and behind a Cloudflare Tunnel via the public URL below.
                 </div>
                 {s.settings.remoteEnabled && s.remoteInfo && (
-                  <div className="mono" style={{ fontSize: 12, color: 'var(--accent)', marginTop: 6, userSelect: 'all', wordBreak: 'break-all' }}>
-                    {s.remoteInfo.url}
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {(s.settings.remotePublicUrl?.trim()
+                      ? [{ label: 'public', url: `${s.settings.remotePublicUrl.trim().replace(/\/+$/, '')}/?t=${s.remoteInfo.token}` }]
+                      : []
+                    ).concat(s.remoteInfo.urls ?? []).map(u => (
+                      <div key={u.url} className="mono" style={{ fontSize: 11.5, wordBreak: 'break-all' }}>
+                        <span style={{ color: 'var(--dim)', textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, marginRight: 6 }}>{u.label}</span>
+                        <span style={{ color: 'var(--accent)', userSelect: 'all' }}>{u.url}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {s.settings.remoteEnabled && (
+                  <input
+                    defaultValue={s.settings.remotePublicUrl ?? ''}
+                    placeholder="Public base URL (Cloudflare Tunnel / MagicDNS) — optional"
+                    onBlur={e => updateSettings({ remotePublicUrl: e.target.value.trim() })}
+                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 8 }}
+                  />
+                )}
+                {(s.settings.remoteDevices ?? []).length > 0 && (
+                  <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {(s.settings.remoteDevices ?? []).map(d => (
+                      <span key={d.id} className="mono" style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 99, border: '1px solid var(--line2)', color: 'var(--text2)' }}>
+                        📱 {d.name || d.id.slice(0, 8)}
+                        <button
+                          title="Revoke this device — it must pair again to reconnect"
+                          onClick={() => updateSettings({ remoteDevices: (s.settings.remoteDevices ?? []).filter(x => x.id !== d.id) })}
+                          style={{ background: 'none', border: 'none', color: 'var(--red-soft)', cursor: 'pointer', fontSize: 12, padding: 0 }}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>
