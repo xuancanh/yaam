@@ -8,7 +8,7 @@ import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import { buildChatCfg, callApi, chatTypeHasCreds } from '../../llm/client'
 import { runChatTurn } from './agent'
-import { mkId } from '../../core/state-lib'
+import { mkId } from '../../shared/id'
 
 export interface ChatCtx {
   stateRef: MutableRefObject<AppState>

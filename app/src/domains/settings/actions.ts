@@ -7,7 +7,7 @@ import type { MutableRefObject } from 'react'
 import type { AppState } from '../../core/types'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
-import { mkId } from '../../core/state-lib'
+import { mkId } from '../../shared/id'
 import { PERM_ORDER } from '../../core/data'
 import type { ConductorActions } from '../../app/actions'
 

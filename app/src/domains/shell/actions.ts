@@ -4,7 +4,7 @@
 // store. Composed into the provider's action surface.
 import { useMemo } from 'react'
 import { dispatch } from '../../core/store'
-import { focusSessionIn } from '../../core/state-lib'
+import { focusSessionIn } from '../session/layout-state'
 import type { ConductorActions } from '../../app/actions'
 
 type ShellActions = Pick<ConductorActions,

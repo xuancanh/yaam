@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useConductorSelector, shallowEqual, useActions } from '../../store'
-import { buildTemplateCommand } from '../../core/state-lib'
+import { buildTemplateCommand } from './template-command'
 import type { AgentTemplate, TemplateApproval, TemplateMode } from '../../core/types'
 import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
 

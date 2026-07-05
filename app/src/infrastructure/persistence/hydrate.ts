@@ -6,7 +6,8 @@ import type { AppState, Agent, Addon, BoardTask, PersistedState } from '../../co
 import { ALL_PERMISSIONS } from '../../core/addons'
 import { mkMemory, mkTools } from '../../core/data'
 import { estimateLogUsage } from '../../core/usage'
-import { mkId, groupsFromLegacy } from '../../core/state-lib'
+import { mkId } from '../../shared/id'
+import { groupsFromLegacy } from '../../domains/session/layout-state'
 import { inferLegacyTerminalShell } from '../../store/state-helpers'
 
 export interface HydrationOutcome {

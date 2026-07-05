@@ -11,10 +11,10 @@ import type { LocatedTask } from '../board/task-state'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { hasCreds } from '../../master'
 import { dispatch } from '../../core/store'
+import { activeGroupOf } from './layout-state'
 import {
-  activeGroupOf, detectPrompt, extractOptions,
-  QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
-} from '../../core/state-lib'
+  detectPrompt, extractOptions, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
+} from './prompt-detection'
 
 export interface SettleDeps {
   stateRef: MutableRefObject<AppState>

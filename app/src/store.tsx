@@ -45,13 +45,15 @@ import type { ConductorActions } from './app/actions'
 
 
 
-import {
-  activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, focusSessionIn,
-  mkGroup, mkId, removeFromGroups, selectMainState, selectSession,
-  sendLineToSession, spawnAgentProcess, taskContract, taskWorkText, typeForCommand,
-} from './core/state-lib'
+import { mkId } from './shared/id'
+import { selectMainState, selectSession } from './infrastructure/persistence/schema'
+import { cronMatches } from './domains/schedules/cron'
+import { buildTemplateCommand } from './domains/schedules/template-command'
+import { activeGroupOf, focusSessionIn, mkGroup, removeFromGroups } from './domains/session/layout-state'
+import { envPrefix, sendLineToSession, spawnAgentProcess, typeForCommand } from './domains/session/command'
+import { taskContract, taskWorkText } from './domains/board/task-prompt'
 
-export { cronMatches, humanizeCron } from './core/state-lib'
+export { cronMatches, humanizeCron } from './domains/schedules/cron'
 
 /** Own the complete app state, native/LLM effects, and action surface for the UI. */
 export function ConductorProvider({ children }: { children: ReactNode }) {

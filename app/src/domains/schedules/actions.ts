@@ -2,7 +2,7 @@
 // create/delete. Composed into the provider's action surface.
 import { useMemo } from 'react'
 import type { AppState, EventType } from '../../core/types'
-import { mkId } from '../../core/state-lib'
+import { mkId } from '../../shared/id'
 import type { ConductorActions } from '../../app/actions'
 
 export interface SchedulesActionsCtx {

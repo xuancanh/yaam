@@ -9,7 +9,7 @@ import { buildCfg, hasCreds } from '../../master'
 import { runWatcherTurn } from './watcher'
 import type { WatcherExec } from './watcher'
 import { isAltScreen, readScreen } from '../../core/terminals'
-import { sendLineToSession } from '../../core/state-lib'
+import { sendLineToSession } from '../session/command'
 import { findTaskInState, updateLocatedTask } from './task-state'
 
 export interface WatcherCtx {

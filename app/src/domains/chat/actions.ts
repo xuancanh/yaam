@@ -4,7 +4,7 @@
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { Agent, AppState, EventType } from '../../core/types'
-import { mkId } from '../../core/state-lib'
+import { mkId } from '../../shared/id'
 import { defaultDetail, mkMemory, mkTools } from '../../core/data'
 import type { ConductorActions } from '../../app/actions'
 
