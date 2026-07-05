@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
   AddonHookName, BoardTask, LogLine,
-  ChatMsg, PersistedState, TaskChatMsg,
+  PersistedState, TaskChatMsg,
 } from './core/types'
 import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
@@ -35,6 +35,8 @@ import { useAddonRuntime } from './domains/addons/runtime'
 import { useIntegrationRuntime } from './domains/settings/integrations'
 import { useLaunchRuntime } from './domains/session/launch-runtime'
 import { useSessionAttention } from './domains/session/attention'
+import { useChatLog } from './domains/chat/log'
+import { useChatSearchIndexer } from './domains/chat/search-indexer'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
@@ -49,7 +51,6 @@ import type { ConductorActions } from './app/actions'
 
 
 import { mkId } from './shared/id'
-import { chatTranscriptsChanged } from './infrastructure/persistence/subscribe'
 import { createPersistenceRuntime } from './infrastructure/persistence/runtime'
 import type { PersistenceRuntime } from './infrastructure/persistence/runtime'
 import { collectDueSchedules, collectDueTasks } from './domains/schedules/due'
@@ -510,43 +511,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [disposeSettle])
 
   // Replace the text of one existing chat message (streaming updates).
-  const updateChatLog = useCallback((agentId: string, msgId: string, text: string) => {
-    dispatch(s => ({
-      ...s,
-      agents: s.agents.map(a => a.id === agentId
-        ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, text } : m)) }
-        : a),
-    }))
-  }, [])
-
-  // Append one visible message to a chat session's persisted transcript.
-  const pushChatLog = useCallback((id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => {
-    dispatch(s => ({
-      ...s,
-      agents: s.agents.map(a => a.id === id
-        ? { ...a, chatLog: [...(a.chatLog ?? []), { id: mkId('cm'), at: Date.now(), ...msg }].slice(-200) }
-        : a),
-    }))
-  }, [])
-
-  // keep the embedded search index in sync with chat transcripts (debounced).
-  // Subscribes to the store but only re-arms when a chat transcript actually
-  // changes — unrelated PTY output no longer schedules a full reindex.
-  const reindexTimer = useRef<number | undefined>(undefined)
-  const armReindex = useCallback(() => {
-    if (reindexTimer.current) window.clearTimeout(reindexTimer.current)
-    reindexTimer.current = window.setTimeout(() => {
-      const docs = stateRef.current.agents
-        .filter(a => a.kind === 'chat')
-        .flatMap(a => (a.chatLog ?? [])
-          .filter(m => m.role === 'user' || m.role === 'assistant')
-          .map(m => ({ chatId: a.id, msgId: m.id, role: m.role, text: `${a.name}\n${m.text}` })))
-      void native.chatSearchReindex(docs).catch(() => {})
-    }, 1500)
-  }, [])
-  useEffect(() => useAppStore.subscribe((s, prev) => {
-    if (chatTranscriptsChanged(s, prev)) armReindex()
-  }), [armReindex])
+  const { updateChatLog, pushChatLog } = useChatLog()
+  // keep the embedded chat search index in sync with transcripts (self-contained)
+  useChatSearchIndexer(stateRef)
 
   // connect enabled MCP servers + skill registries; invoked by the hydration
   // effect the moment restored state is applied (gated on real completion, not a
