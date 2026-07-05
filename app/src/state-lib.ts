@@ -7,11 +7,15 @@ import type { AgentTemplate, AgentType, AppState, EscOption, MainPartition, TabG
  *  Hydration stays defensive per-field, so most additions don't require a bump. */
 export const SCHEMA_VERSION = 1
 
-/** One session's persisted form: the agent with its output tail capped. Each
- *  session is written to its own file (`sessions/<id>.json`) so a terminal line
- *  or chat token rewrites only that session, not one monolithic sessions blob. */
+/** One session's persisted form: the agent's DURABLE config + output tail
+ *  (capped). Runtime-only status (`status`, `escReason`) is dropped — hydration
+ *  always restores sessions as idle, so persisting it just wrote dead state and
+ *  mixed runtime with configuration. Each session is written to its own file
+ *  (`sessions/<id>.json`) so a terminal line rewrites only that session. */
 export function selectSession(a: AppState['agents'][number]) {
-  return { schemaVersion: SCHEMA_VERSION, agent: { ...a, log: a.log.slice(-200) } }
+  const { status: _status, escReason: _escReason, ...durable } = a
+  void _status; void _escReason
+  return { schemaVersion: SCHEMA_VERSION, agent: { ...durable, log: a.log.slice(-200) } }
 }
 
 /** The low-churn main partition: everything durable except `agents`. Config

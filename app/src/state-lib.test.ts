@@ -74,10 +74,13 @@ describe('persistence selectors', () => {
     expect(main.messages!.length).toBe(60)
     expect(main.events!.length).toBe(60)
   })
-  it('selectSession wraps one agent and caps its log to 200 lines', () => {
-    const agent = { id: 'a1', log: Array.from({ length: 500 }, (_, i) => ({ t: 'out', x: `${i}` })) } as unknown as AppState['agents'][number]
+  it('selectSession wraps one agent, caps its log, and drops runtime status', () => {
+    const agent = { id: 'a1', status: 'running', escReason: 'prompt', cmd: 'claude', log: Array.from({ length: 500 }, (_, i) => ({ t: 'out', x: `${i}` })) } as unknown as AppState['agents'][number]
     const out = selectSession(agent)
     expect(out.agent.id).toBe('a1')
+    expect((out.agent as Record<string, unknown>).cmd).toBe('claude') // durable config kept
+    expect('status' in out.agent).toBe(false) // runtime status dropped
+    expect('escReason' in out.agent).toBe(false)
     expect(out.agent.log.length).toBe(200)
     expect(out.agent.log[199].x).toBe('499') // keeps the tail
   })
