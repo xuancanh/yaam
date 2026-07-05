@@ -45,11 +45,16 @@ app/                     Tauri app (the whole product)
       addon-editor.ts    per-addon "Customize" chat harness
     components/          views + workspace/ (Pane, TerminalPane, FilesPane, NewSessionDialog, Divider)
   src-tauri/
-    src/
-      sessions.rs        PTY spawn/io/kill, exec_command, CLI session-id detection, git, fs, state file
-      chatsearch.rs      tantivy full-text index over chat transcripts
-      bedrock.rs         AWS Bedrock InvokeModel bridge + credential parsing/caching
-      lib.rs             command registration (invoke_handler)
+    src/                 two layers — core/ (logic + state) and commands/ (IPC)
+      lib.rs             composition root: modules, managed state, invoke_handler
+      setup.rs           one-time startup (dock icon, logging)
+      core/pty.rs        SessionManager PTY engine (spawn/io/kill/exit reaping)
+      core/detect.rs     CLI session-id detection (claude/codex/opencode)
+      core/persistence.rs atomic writes, main partition + per-session files
+      core/git.rs, core/fs.rs   git inspection; fs + timeout-bounded exec
+      core/search.rs     tantivy full-text index over chat transcripts
+      core/bedrock.rs    AWS Bedrock InvokeModel bridge + credential parsing/caching
+      commands/*.rs      thin #[tauri::command] handlers by domain → core
     capabilities/default.json   Tauri ACL permissions
     tauri.conf.json      productName YAAM, identifier dev.yaam.conductor (kept for state compat)
     icons/               app icons, generated from app/app-icon.svg via `tauri icon`
@@ -99,14 +104,20 @@ side effect outside `dispatch`, and Master events dedupe on a 10s window.
 the hot-reloaded store recreates context identity on HMR and blanks the app
 ("useConductor outside provider"). Keep them in the stable module.
 
-**Persistence + migrations.** State is saved (debounced 800ms + `beforeunload`
-flush) to `conductor-state.json` via the Rust `save_state` command, and hydrated
-on launch. When you add a new persisted top-level field, you MUST:
+**Persistence + migrations.** State is written through ONE selector per
+partition (`state-lib.ts`): `selectMainState` → the low-churn main blob
+(`conductor-state.json`), and `selectSession` → one file per session
+(`sessions/<id>.json`, diff-written so a terminal line rewrites only that
+session). Both the debounced 800ms writer and the `beforeunload` flush go
+through those selectors, so the on-disk shape can't drift. Rust writes are
+atomic (temp + fsync + rename + `.bak`) and hydration recovers from the backup.
+When you add a new persisted top-level field, you MUST:
 1. add it to `PersistedState` and `AppState` in `types.ts`,
 2. seed it in `data.ts` `seedState()`,
-3. hydrate it defensively: `field: p.field ?? s.field ?? <empty>` (line ~612),
-4. include it in BOTH persistence writers (debounced effect ~679 and the
-   `beforeunload` flush ~711) and the effect dep array,
+3. hydrate it defensively: `field: p.field ?? s.field ?? <empty>`,
+4. add it to the matching selector — `selectMainState` for a normal durable
+   field (its debounced effect's dep array too), or `selectSession` if it lives
+   on an agent,
 5. **guard every read with `?? []` / `?? {}`** — existing users have saved states
    that predate your field. (The templates crash was exactly this: a saved state
    without `templates` made `s.templates.find` throw. See commit 7edf98a.)
@@ -131,7 +142,7 @@ Tauri http plugin to dodge CORS.
   command whose stdout yields the key/token; parsed, cached until its stated
   expiry, and re-run on 401/403. Bedrock parses AWS credential JSON
   (`aws configure export-credentials` shape, nested `Credentials`, or `AWS_*`
-  env lines) in `bedrock.rs`, with an optional refresh command (`aws sso login`).
+  env lines) in `core/bedrock.rs`, with an optional refresh command (`aws sso login`).
 - **Master harness** (`llm/master.ts`): tool loop capped at 10 iters, temperature
   0.2, with an **integrity check** — if the model claims it took an action but
   called no tool, the turn is retried. Master must actually drive terminals via
@@ -155,7 +166,7 @@ Tauri http plugin to dodge CORS.
   args (`incompleteArgs`) are refused, not run with `{}`. Streaming routes a
   thinking channel separate from the answer (rendered as a collapsible block);
   thinking is kept out of replayed API history. Excluded from workspace
-  tabs/groups/overview; transcripts feed the tantivy index (`chatsearch.rs`) and
+  tabs/groups/overview; transcripts feed the tantivy index (`core/search.rs`) and
   chats auto-title after the first turn unless renamed.
 - **Addon agents** (`llm/addon-agent.ts`): optional per-addon harness whose tools
   are the addon's permission-scoped API; woken by subscribed hooks or `agent.wake`.

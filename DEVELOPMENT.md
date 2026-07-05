@@ -45,11 +45,18 @@ app/src/
                        addon-agent.ts addon mini-Masters; addon-editor/-gen
   components/        application views and workspace UI (ChatView, ChatPane,
                      Board, AddonsView, SettingsView, workspace/ pane grid)
-app/src-tauri/src/
-  sessions.rs        PTYs, process events, exec_command, git/fs, atomic state file
-  chatsearch.rs      tantivy in-RAM full-text chat index
-  bedrock.rs         Bedrock invocation and AWS credential handling
-  lib.rs             Tauri command registration and managed state
+app/src-tauri/src/    two layers: core (logic + state) and commands (IPC)
+  lib.rs             composition root: module tree, managed state, command registry
+  setup.rs           one-time startup (dock icon, logging)
+  core/              domain logic + managed state, independent of the IPC boundary
+    pty.rs           SessionManager PTY engine (spawn/io/kill/exit reaping)
+    detect.rs        CLI session-id detection (claude/codex/opencode)
+    persistence.rs   atomic writes, main partition + per-session files
+    git.rs / fs.rs   git inspection; filesystem + timeout-bounded exec
+    search.rs        tantivy in-RAM full-text chat index
+    bedrock.rs       Bedrock invocation + AWS credential parsing/caching
+    util.rs          shared helpers (expand_tilde)
+  commands/          thin #[tauri::command] handlers by domain, delegating to core
 docs/addons.md        addon package, permission, RPC, and lifecycle reference
 registry/             built-in addon registry and example packages
 design/               historical design prototype; not runtime code
@@ -63,7 +70,7 @@ The desktop process has three layers:
 2. The Tauri bridge exposes typed commands in `native.ts`. Rust owns real PTYs, process lifecycle, filesystem/git access, persisted state, and Bedrock requests.
 3. The LLM layer adapts Anthropic Messages, OpenAI-compatible chat completions, and Bedrock to one internal message/tool shape, with SSE streaming (`callApiStream`) and a reasoning channel that separates thinking from answer text. Several agent kinds share this layer: Master coordinates PTY sessions, per-session monitors summarize terminal state, per-task watchers own kanban progress, chat agents act on the filesystem in-app, and addon agents are permission-scoped mini-Masters.
 
-Agents carry a `kind` (`real` PTY session or `chat` in-app agent). Chat agents run an in-app tool loop (`llm/chat-agent.ts`) with built-in file/exec tools plus tools from connected MCP servers (`mcp.ts`) and loadable skills (`skills.ts`); their file writes are sandboxed to the chat's working folder. Chat transcripts are indexed for full-text search by `chatsearch.rs` (tantivy), reindexed from the frontend on a debounce.
+Agents carry a `kind` (`real` PTY session or `chat` in-app agent). Chat agents run an in-app tool loop (`llm/chat-agent.ts`) with built-in file/exec tools plus tools from connected MCP servers (`mcp.ts`) and loadable skills (`skills.ts`); their file writes are sandboxed to the chat's working folder. Chat transcripts are indexed for full-text search by `core/search.rs` (tantivy), reindexed from the frontend on a debounce.
 
 `store.tsx` is intentionally the integration point. `stateRef.current` mirrors reducer state for asynchronous callbacks. Refs such as `masterEventRef`, `onSettleRef`, and `runWatcherRef` break callback declaration cycles without moving side effects into the reducer.
 
