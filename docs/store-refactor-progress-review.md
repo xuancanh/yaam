@@ -1,5 +1,37 @@
 # Store refactor progress review and remaining plan
 
+> **Status addendum (2026-07-05).** Much of this review has since been executed.
+> `store.tsx` is now a 73-line composition root that does **not** subscribe to the
+> whole store; the runtime moved into `app/conductor-runtime.ts` (a 55-line
+> coordinator composing four domain sub-hooks under `app/runtime/`:
+> `session`, `addon`, `chat`, `master`, sharing a `RuntimeRefs` bundle). Concretely:
+>
+> - **#1 provider hot subscription — done.** `stateRef` is mirrored via
+>   `useAppStore.subscribe`; no `useConductor()` remains in any production component
+>   (AddonView, the last one, now reads its iframe snapshot from `getState()`).
+> - **#5 domain action contracts — done.** Each domain exports its own interface;
+>   `app/actions.ts` composes them. No domain imports the app-wide contract.
+> - **#6 `core/state-lib.ts` barrel — done.** Deleted; zero consumers.
+> - **#8 task-launch duplication — done.** The scheduler calls the one canonical
+>   `spawnTaskSession`; `collectDueSchedules`/`collectDueTasks` are pure + tested.
+> - **#9 runtime ownership — largely done.** Monitor/watcher/chat/master/addon-agent
+>   are non-React factories owning their own maps + `dispose(key)`, backed by
+>   `AbortRegistry`.
+> - **#11 chat indexing — done.** The indexer subscribes directly and re-arms only
+>   on `chatTranscriptsChanged`.
+> - **#7 session-exit coordinator — partial.** `classifyExit` (pure) **and** the
+>   effectful fan-out (`coordinateSessionExit`, ports-injected + tested) are
+>   extracted. A full `SessionController` over native/terminal ports is not yet done.
+> - **#12 orchestration tests — partial.** Added `exit-handler.test.ts` (8 cases).
+>   Still missing: launch-failure rollback, delete/workspace-delete cleanup,
+>   cancellation-on-delete, boot readiness.
+>
+> Still open / deliberately deferred: **#3** explicit `BootStatus` lifecycle,
+> **#4** `beforeunload`→Tauri-close hardening, **#7** full `SessionController`,
+> **#10** capability ports (the launch runtime still imports `native`/`getTerminal`
+> directly — a prerequisite for the launch-failure test). The original review text
+> below is preserved for the target architecture.
+
 Reviewed on 2026-07-04 against commit `c8f6981` plus the active selector-migration
 changes in the working tree.
 
