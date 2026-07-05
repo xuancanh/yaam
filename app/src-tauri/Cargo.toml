@@ -35,6 +35,7 @@ tantivy = "0.22.1"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 notify = "8.2.0"
 tauri-plugin-notification = "2.3.3"
+tiny_http = "0.12.0"
 
 # dev-mode dock icon (bare binary, no .app bundle): set NSApplication's icon at runtime
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -34,7 +34,7 @@ const SETTINGS_TABS = [
 type SettingsTab = (typeof SETTINGS_TABS)[number][0]
 
 export function SettingsView() {
-  const s = useConductorSelector(x => ({ settings: x.settings, agentTypes: x.agentTypes }), shallowEqual)
+  const s = useConductorSelector(x => ({ settings: x.settings, agentTypes: x.agentTypes, remoteInfo: x.remoteInfo }), shallowEqual)
   const { toggleSetting, toggleAgentType, updateSettings, setAgentTypeCmd, updateAgentType, addAgentType, deleteAgentType } = useActions()
   const [tab, setTab] = useState<SettingsTab>('general')
   const [chatTab, setChatTab] = useState<'agents' | 'personas' | 'skills'>('agents')
@@ -297,6 +297,23 @@ export function SettingsView() {
               <Switch
                 on={s.settings.osNotifications !== false}
                 onToggle={() => updateSettings({ osNotifications: s.settings.osNotifications === false })}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Phone remote</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
+                  Serve a token-protected companion page on your local network: watch sessions and tasks, answer escalations, and approve ask-mode tool calls from your phone. Approvals are the only action the remote can take — execution and credentials never leave this machine.
+                </div>
+                {s.settings.remoteEnabled && s.remoteInfo && (
+                  <div className="mono" style={{ fontSize: 12, color: 'var(--accent)', marginTop: 6, userSelect: 'all', wordBreak: 'break-all' }}>
+                    {s.remoteInfo.url}
+                  </div>
+                )}
+              </div>
+              <Switch
+                on={s.settings.remoteEnabled === true}
+                onToggle={() => updateSettings({ remoteEnabled: !s.settings.remoteEnabled })}
               />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>

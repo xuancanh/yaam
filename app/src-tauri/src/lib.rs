@@ -6,6 +6,7 @@ mod util;
 
 use domains::bedrock::BedrockState;
 use domains::mcp::McpManager;
+use domains::remote::RemoteManager;
 use domains::search::ChatSearchState;
 use domains::session::SessionManager;
 use domains::watch::WatchManager;
@@ -31,6 +32,7 @@ pub fn run() {
         .manage(BedrockState::default())
         .manage(ChatSearchState::default())
         .manage(McpManager::default())
+        .manage(RemoteManager::default())
         .manage(WatchManager::default())
         .invoke_handler(tauri::generate_handler![
             domains::session::spawn_session,
@@ -69,6 +71,10 @@ pub fn run() {
             domains::mcp::mcp_stdio_request,
             domains::mcp::mcp_stdio_notify,
             domains::mcp::mcp_stdio_stop,
+            domains::remote::remote_start,
+            domains::remote::remote_stop,
+            domains::remote::remote_publish,
+            domains::remote::remote_take_decisions,
             domains::search::chat_search_reindex,
             domains::search::chat_search_upsert,
             domains::search::chat_search_remove,

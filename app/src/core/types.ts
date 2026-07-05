@@ -403,6 +403,8 @@ export interface OrchestrationSettings {
   sidebarHidden?: boolean
   /** Chat view conversation-list width (px, drag-resizable) */
   chatListWidth?: number
+  /** phone remote companion: LAN server for fleet status + approvals */
+  remoteEnabled?: boolean
 }
 
 export type BoardCol = 'backlog' | 'progress' | 'review' | 'done' | 'failed'
@@ -661,6 +663,8 @@ export interface AppState {
   notifOpen: boolean
   newSessionOpen: boolean
   masterBusy: boolean
+  /** phone remote companion server, when running (transient — not persisted) */
+  remoteInfo?: { url: string; token: string } | null
   dragOverCol: BoardCol | null
   addons: Addon[]
   activeAddon: string | null
