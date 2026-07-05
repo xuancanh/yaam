@@ -35,6 +35,8 @@ export interface RemoteSnapshot {
     cost: number
     kind: string
     repo: string
+    /** working folder — the mobile files/git browsing root */
+    cwd: string
     /** serialized ANSI terminal buffer (xterm serialize addon) — the mobile
      *  app replays it into its own xterm for pixel-faithful rendering */
     term: string
@@ -108,6 +110,7 @@ export function buildRemoteSnapshot(
         cost: a.cost,
         kind: a.kind ?? 'real',
         repo: a.repo,
+        cwd: a.worktree?.workdir ?? a.cwd ?? '',
         ...(() => { const t = readTerm(a.id); return { term: t.data, cols: t.cols } })(),
       })),
     tasks: s.tasks

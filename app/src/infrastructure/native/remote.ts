@@ -79,6 +79,12 @@ export async function remoteDenyPair(deviceId: string): Promise<void> {
   await invoke('remote_deny_pair', { deviceId })
 }
 
+/** Answer an rpc request (fs/git browsing) — the phone polls /api/rpc for it. */
+export async function remoteRespond(id: string, json: string): Promise<void> {
+  if (!isTauri) return
+  await invoke('remote_respond', { id, json })
+}
+
 /** Hydrate the server's paired-device set from the persisted settings copy. */
 export async function remoteSetDevices(devices: RemotePairedDevice[]): Promise<void> {
   if (!isTauri) return

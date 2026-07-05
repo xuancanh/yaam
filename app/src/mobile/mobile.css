@@ -175,3 +175,18 @@ button.card.sel { border-color: rgba(245, 196, 81, .45); background: var(--panel
 .spinner { margin: 0 auto; width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .crit { display: flex; gap: 7px; font-size: 12.5px; color: var(--text2); margin-top: 4px; align-items: baseline; }
+
+/* ── session sub-tabs, file browser, diffs ── */
+.subtabs { display: flex; gap: 6px; margin: 12px 0 10px; }
+.subtabs button {
+  background: none; border: 1px solid var(--line2); border-radius: 99px; color: var(--dim);
+  padding: 4px 12px; font-size: 10px; font-weight: 700; letter-spacing: .5px; font-family: var(--font-mono);
+}
+.subtabs button.on { color: var(--accent); border-color: rgba(245, 196, 81, .45); background: var(--hover); }
+.card.slim { padding: 8px 12px; margin-bottom: 6px; border-radius: 10px; }
+.crumbs { font-size: 11px; color: var(--dim); margin-bottom: 8px; overflow-x: auto; white-space: nowrap; }
+.crumbs button { background: none; border: none; color: var(--accent); padding: 0; font-size: 11px; font-family: var(--font-mono); }
+.filetext {
+  background: var(--bg3); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 12px; font-size: 11px; line-height: 1.5; overflow-x: auto; color: var(--text2);
+}

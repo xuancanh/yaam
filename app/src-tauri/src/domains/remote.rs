@@ -64,6 +64,8 @@ pub struct RemoteShared {
     pending: Mutex<Vec<PairRequest>>,
     /// bumped on every publish — SSE subscribers wake and resend the snapshot
     snap_tx: tokio::sync::watch::Sender<u64>,
+    /// rpc answers keyed by request id (fs/git browsing) — small and capped
+    responses: Mutex<HashMap<String, String>>,
 }
 
 impl Default for RemoteShared {
@@ -75,6 +77,7 @@ impl Default for RemoteShared {
             devices: Mutex::new(HashMap::new()),
             pending: Mutex::new(Vec::new()),
             snap_tx: tokio::sync::watch::channel(0).0,
+            responses: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -264,6 +267,18 @@ async fn state(State(s): Shared, Query(q): Query<AuthQuery>) -> (StatusCode, Str
     (StatusCode::OK, if snap.is_empty() { "{}".into() } else { snap })
 }
 
+/// One-shot rpc result pickup: the phone polls with its request id until the
+/// desktop answered via remote_respond; the answer is consumed on read.
+async fn rpc_result(State(s): Shared, Query(q): Query<AuthQuery>) -> (StatusCode, String) {
+    if !check_device(&s, &q) {
+        return (StatusCode::FORBIDDEN, "{\"error\":\"not paired\"}".into());
+    }
+    match s.responses.lock().unwrap().remove(&q.id) {
+        Some(json) => (StatusCode::OK, format!("{{\"ready\":true,\"json\":{json}}}")),
+        None => (StatusCode::OK, "{\"ready\":false}".into()),
+    }
+}
+
 async fn command(State(s): Shared, Query(q): Query<AuthQuery>, Json(cmd): Json<RemoteCommand>) -> (StatusCode, Json<serde_json::Value>) {
     if !check_device(&s, &q) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "not paired" })));
@@ -317,6 +332,7 @@ fn router(shared: Arc<RemoteShared>) -> Router {
         .route("/api/stream", get(stream_state))
         .route("/api/term", get(stream_term))
         .route("/api/command", post(command))
+        .route("/api/rpc", get(rpc_result))
         .fallback(get(app_page))
         .with_state(shared)
 }
@@ -441,6 +457,19 @@ pub fn remote_approve_pair(state: tauri::State<'_, RemoteManager>, device_id: St
 #[tauri::command]
 pub fn remote_deny_pair(state: tauri::State<'_, RemoteManager>, device_id: String) {
     state.shared.pending.lock().unwrap().retain(|p| p.id != device_id);
+}
+
+const MAX_RESPONSES: usize = 50;
+
+/// Desktop answers an rpc request (fs/git browsing computed via its native
+/// adapters); the phone picks it up from /api/rpc. `json` must be valid JSON.
+#[tauri::command]
+pub fn remote_respond(state: tauri::State<'_, RemoteManager>, id: String, json: String) {
+    let mut map = state.shared.responses.lock().unwrap();
+    if map.len() >= MAX_RESPONSES {
+        map.clear(); // stale pile-up — rpc answers are ephemeral by design
+    }
+    map.insert(id, json);
 }
 
 /// Hydrate the paired-device set (frontend persists it in settings); anything
@@ -571,6 +600,33 @@ mod tests {
         assert_eq!(classify_ip("utun2", &Ipv4Addr::new(172, 16, 0, 5)), Some("lan"), "private beats vpn naming");
         assert_eq!(classify_ip("lo0", &Ipv4Addr::new(127, 0, 0, 1)), None);
         assert_eq!(classify_ip("en0", &Ipv4Addr::new(169, 254, 1, 1)), None, "link-local is unreachable");
+    }
+
+    #[tokio::test]
+    async fn rpc_results_are_auth_gated_and_consumed_on_read() {
+        let s = shared_with("base");
+        s.devices.lock().unwrap().insert(
+            "dev1".into(),
+            PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
+        );
+        s.responses.lock().unwrap().insert("req1".into(), "{\"entries\":[]}".into());
+        // wrong device token → 403, answer NOT consumed
+        let mut q403 = q("base", "guess", "");
+        q403.id = "req1".into();
+        let (code, _) = rpc_result(State(s.clone()), Query(q403)).await;
+        assert_eq!(code, StatusCode::FORBIDDEN);
+        assert!(s.responses.lock().unwrap().contains_key("req1"));
+        // paired device reads it once
+        let mut qok = q("base", "devtok", "");
+        qok.id = "req1".into();
+        let (code, body) = rpc_result(State(s.clone()), Query(qok)).await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(body.contains("\"ready\":true"));
+        assert!(body.contains("entries"));
+        let mut qagain = q("base", "devtok", "");
+        qagain.id = "req1".into();
+        let (_, body) = rpc_result(State(s.clone()), Query(qagain)).await;
+        assert!(body.contains("\"ready\":false"), "consumed on first read");
     }
 
     #[test]

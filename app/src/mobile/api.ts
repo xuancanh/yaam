@@ -122,4 +122,23 @@ export async function sendCommand(cmd: CommandInput): Promise<void> {
   await postJson('/api/command', { agent_id: '', text: '', ok: false, ...cmd }, { d: deviceToken() })
 }
 
+/** Request/response bridge: queue an rpc command (fs/git browsing), then
+ *  poll for the desktop's answer. Rejects on timeout or an error payload. */
+export async function rpc<T>(kind: string, payload: string, timeoutMs = 15_000): Promise<T> {
+  const id = `rpc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  await sendCommand({ kind, id, text: payload })
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 350))
+    const res = await fetch(apiUrl('/api/rpc', { d: deviceToken(), id }))
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const body = (await res.json()) as { ready: boolean; json?: T & { error?: string } }
+    if (body.ready && body.json) {
+      if (body.json.error) throw new Error(body.json.error)
+      return body.json
+    }
+  }
+  throw new Error('the desktop did not answer in time')
+}
+
 export type { RemoteSnapshot }

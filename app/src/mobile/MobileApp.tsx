@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Markdown } from '../components/Markdown'
 import { TerminalView } from './TerminalView'
+import { FilesBrowser, GitReview } from './FilesGit'
 import type { RemoteSnapshot } from '../domains/remote/snapshot'
 import {
   deviceToken, fetchState, forgetPairing, pairingStatus, ping, requestPairing, sendCommand, streamUrl, urlToken,
@@ -185,6 +186,7 @@ function ChatDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
 }
 
 function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
+  const [view, setView] = useState<'term' | 'files' | 'git'>('term')
   const s = snap.sessions.find(x => x.id === id)
   if (!s) return <div className="empty">This session is gone.</div>
   const live = s.status === 'running' || s.status === 'needs'
@@ -199,15 +201,27 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
         {s.task && <div className="meta">task · {s.task}</div>}
         {s.summary && <div className="meta" style={{ whiteSpace: 'normal' }}>{s.summary}</div>}
         {s.actionNeeded && <div className="warn">⚠ {s.actionNeeded}</div>}
-        <div className="section">TERMINAL</div>
-        <TerminalView sessionId={s.id} data={s.term} cols={s.cols} />
-        <div className="btnrow">
-          {live
-            ? <button className="btn danger" onClick={() => void sendCommand({ kind: 'session_stop', id: s.id })}>Stop session</button>
-            : <button className="btn primary" onClick={() => void sendCommand({ kind: 'session_resume', id: s.id })}>Resume session</button>}
+        <div className="subtabs">
+          {(['term', 'files', 'git'] as const).map(v => (
+            <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
+              {v === 'term' ? 'TERMINAL' : v === 'files' ? 'FILES' : 'CHANGES'}
+            </button>
+          ))}
         </div>
+        {view === 'term' && (
+          <>
+            <TerminalView sessionId={s.id} data={s.term} cols={s.cols} />
+            <div className="btnrow">
+              {live
+                ? <button className="btn danger" onClick={() => void sendCommand({ kind: 'session_stop', id: s.id })}>Stop session</button>
+                : <button className="btn primary" onClick={() => void sendCommand({ kind: 'session_resume', id: s.id })}>Resume session</button>}
+            </div>
+          </>
+        )}
+        {view === 'files' && (s.cwd ? <FilesBrowser root={s.cwd} /> : <div className="empty">No working folder.</div>)}
+        {view === 'git' && (s.cwd ? <GitReview root={s.cwd} /> : <div className="empty">No working folder.</div>)}
       </div>
-      {live && <Composer placeholder="Type into the terminal…" onSend={text => void sendCommand({ kind: 'session_input', id: s.id, text })} />}
+      {live && view === 'term' && <Composer placeholder="Type into the terminal…" onSend={text => void sendCommand({ kind: 'session_input', id: s.id, text })} />}
     </>
   )
 }

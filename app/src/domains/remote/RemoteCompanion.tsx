@@ -7,7 +7,8 @@ import { useEffect, useRef } from 'react'
 import { dispatch, useAppStore } from '../../core/store'
 import { useActions, useConductorSelector } from '../../store'
 import {
-  remoteApprovePair, remoteDenyPair, remotePendingPairs, remotePublish,
+  gitFileDiffSide, gitStatus, listDir, readTextFile,
+  remoteApprovePair, remoteDenyPair, remotePendingPairs, remotePublish, remoteRespond,
   remoteSetDevices, remoteStart, remoteStop, remoteTakeCommands,
 } from '../../core/native'
 import type { RemoteCommand } from '../../core/native'
@@ -18,11 +19,66 @@ import { buildRemoteSnapshot } from './snapshot'
 // short debounce: chat deltas land in the store per animation frame, and the
 // SSE stream pushes every publish — this is the streaming granularity remotes see
 const PUBLISH_DEBOUNCE_MS = 300
-const POLL_MS = 2000
+const POLL_MS = 800 // command/pairing drain — rpc browsing rides this loop
 
 /** One session's terminal, serialized with colors/layout for the mobile xterm. */
 function termFor(id: string): { data: string; cols: number } {
   return { data: serializeScreen(id), cols: terminalSize(id)?.cols ?? 80 }
+}
+
+/** Paths a paired phone may browse: anything under a live session's working
+ *  folder (incl. worktree mirrors) — the same scope the mobile UI offers. */
+function pathAllowed(path: string): boolean {
+  if (!path.startsWith('/')) return false
+  const roots = useAppStore.getState().agents
+    .filter(a => !a.archived)
+    .flatMap(a => [a.cwd, a.worktree?.workdir, a.worktree?.root])
+    .filter((p): p is string => !!p)
+  return roots.some(r => path === r || path.startsWith(`${r.replace(/\/+$/, '')}/`))
+}
+
+const RPC_READ_CAP = 200_000
+
+/** fs/git browsing computed on the desktop with its normal native adapters;
+ *  the answer lands in the server's response store for the phone to pick up. */
+async function answerRpc(kind: string, requestId: string, payload: string): Promise<void> {
+  const respond = (v: unknown) => remoteRespond(requestId, JSON.stringify(v))
+  try {
+    switch (kind) {
+      case 'rpc_fs_list': {
+        if (!pathAllowed(payload)) return await respond({ error: 'path outside session folders' })
+        const entries = await listDir(payload)
+        return await respond({ entries: entries.map(e => ({ name: e.name, path: e.path, isDir: e.isDir })) })
+      }
+      case 'rpc_fs_read': {
+        if (!pathAllowed(payload)) return await respond({ error: 'path outside session folders' })
+        const text = await readTextFile(payload)
+        return await respond({ text: text.length > RPC_READ_CAP ? `${text.slice(0, RPC_READ_CAP)}\n… (truncated)` : text })
+      }
+      case 'rpc_git_status': {
+        if (!pathAllowed(payload)) return await respond({ error: 'path outside session folders' })
+        const st = await gitStatus(payload)
+        return await respond({ root: st.root, branch: st.branch, files: st.files.map(f => ({ path: f.path, status: f.status, index: f.index, work: f.work })) })
+      }
+      case 'rpc_git_diff': {
+        const req = JSON.parse(payload) as { root: string; path: string; staged: boolean }
+        // a repo root may sit ABOVE the session cwd — accept ancestors of
+        // allowed folders too (the root came from our own rpc_git_status)
+        const roots = useAppStore.getState().agents
+          .filter(a => !a.archived)
+          .flatMap(a => [a.cwd, a.worktree?.workdir, a.worktree?.root])
+          .filter((p): p is string => !!p)
+        const base = req.root.replace(/\/+$/, '')
+        const ok = base.startsWith('/') && roots.some(r => r === base || r.startsWith(`${base}/`) || base.startsWith(`${r.replace(/\/+$/, '')}/`))
+        if (!ok) return await respond({ error: 'path outside session folders' })
+        return await respond({ diff: await gitFileDiffSide(req.root, req.path, req.staged) })
+      }
+      default:
+        return await respond({ error: `unknown rpc ${kind}` })
+    }
+  } catch (e) {
+    await respond({ error: e instanceof Error ? e.message : String(e) }).catch(() => {})
+  }
 }
 
 export function RemoteCompanion() {
@@ -77,6 +133,7 @@ export function RemoteCompanion() {
     })
 
     const applyCommand = (c: RemoteCommand) => {
+      if (c.kind.startsWith('rpc_')) { void answerRpc(c.kind, c.id, c.text); return }
       const a = actionsRef.current
       switch (c.kind) {
         case 'chat_send': return a.sendChatMessage(c.id, c.text)

@@ -80,6 +80,7 @@ pub fn run() {
             domains::remote::remote_approve_pair,
             domains::remote::remote_deny_pair,
             domains::remote::remote_set_devices,
+            domains::remote::remote_respond,
             domains::search::chat_search_reindex,
             domains::search::chat_search_upsert,
             domains::search::chat_search_remove,
