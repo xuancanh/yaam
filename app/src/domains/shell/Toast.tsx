@@ -1,10 +1,22 @@
+import { useEffect } from 'react'
 import { useConductorSelector } from '../../store'
+import { dispatch } from '../../core/store'
 
 /** Display the current transient store toast when one is active. Subscribes to
  *  only `state.toast`, so it isn't re-rendered by unrelated updates (e.g. every
- *  terminal output line). */
+ *  terminal output line). Owns auto-dismissal for every toast source (flash and
+ *  the system messages set directly via dispatch), so no toast can get stuck. */
 export function Toast() {
   const toast = useConductorSelector(s => s.toast)
+  useEffect(() => {
+    if (!toast) return
+    // errors linger a little longer so they can be read before clearing
+    const isError = /unreadable|could not save|failed|error/i.test(toast)
+    const t = window.setTimeout(() => {
+      dispatch(s => (s.toast === toast ? { ...s, toast: null } : s))
+    }, isError ? 6000 : 2600)
+    return () => window.clearTimeout(t)
+  }, [toast])
   if (!toast) return null
   return (
     <div style={{
