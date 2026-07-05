@@ -24,24 +24,31 @@
 >   extracted. The session action surface (launch/resume/stop/archive/unarchive/
 >   delete/send/answerPrompt) is now port-backed and tested — the substance of a
 >   `SessionController` — though not yet unified into one named interface.
-> - **#10 capability ports — largely done for the session domain.** Introduced
+> - **#10 capability ports — done for all action modules.** Introduced
 >   `domains/session/ports.ts` (`SessionProcessPort`: spawn/kill/remove/write/
->   sendLine/detect/attachTerminal+writeln/disposeTerminal). The launch runtime,
->   session actions, prompt actions, and the exit fan-out all drive native/xterm
->   only through the port (the only remaining wholesale `native` use is the
->   `onSessionExit` subscription, which is the native boundary by design). Board/
->   workspace/addon action modules are not yet audited for the same treatment.
-> - **#12 orchestration tests — substantially expanded** (91 → 115). Added
+>   sendLine/detect/attachTerminal+writeln/disposeTerminal) and
+>   `domains/addons/ports.ts` (`PackageIoPort`: file/folder/save pickers, text
+>   read/write, http fetch). The launch runtime, session actions, prompt actions,
+>   the exit fan-out, and board + workspace session-teardown all drive native/xterm
+>   only through `SessionProcessPort`; addon install/export goes through
+>   `PackageIoPort`. **No domain action module imports `core/native` or
+>   `core/terminals` wholesale.** The only remaining wholesale `native` use in the
+>   session domain is the `onSessionExit` subscription (the native boundary by design).
+> - **#12 orchestration tests — substantially expanded** (91 → 122). Added
 >   `exit-handler.test.ts` (fan-out), `launch-runtime.test.ts` (incl. launch-failure
 >   rollback), `actions.test.ts` (archive/delete/stop/resume/unarchive cleanup +
->   task-unbind), `prompt-actions.test.ts`. Still missing: workspace-delete cascade,
->   in-flight cancellation-on-delete, boot readiness.
+>   task-unbind), `prompt-actions.test.ts`, `workspace/actions.test.ts`
+>   (workspace-delete cascade), `addons/actions.test.ts` (install/export IO). The
+>   keyed runtimes wire `dispose(key)`→`AbortRegistry.abort(key)` and the delete
+>   paths call those disposers (tested), so cancellation-on-delete is covered at the
+>   wiring level; proving abort propagates into a live LLM loop still needs
+>   runner-injection. Boot-readiness testing waits on #3.
 >
 > Still open / deliberately deferred: **#3** explicit `BootStatus` lifecycle,
 > **#4** `beforeunload`→Tauri-close hardening, **#7** unifying the port-backed
-> session actions into one named `SessionController`, **#10** applying the same
-> port treatment to board/workspace/addon action modules. The original review text
-> below is preserved for the target architecture.
+> session actions into one named `SessionController` interface (the substance —
+> port-backed, testable lifecycle — is done). The original review text below is
+> preserved for the target architecture.
 
 Reviewed on 2026-07-04 against commit `c8f6981` plus the active selector-migration
 changes in the working tree.
