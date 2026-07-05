@@ -25,6 +25,8 @@ export interface BoardActionsCtx {
   markUserStopped: (id: string) => void
   watcherHistories: MutableRefObject<Map<string, ApiMessage[]>>
   watcherQueue: MutableRefObject<Map<string, string[]>>
+  /** cancel a task's in-flight watcher turn (on delete) */
+  abortWatcher: (taskId: string) => void
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
 }
 
@@ -122,6 +124,7 @@ export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
       tasks: s.tasks.map(t => (t.id === id ? { ...t, title: title.trim() || t.title } : t)),
     })),
     deleteTask: id => {
+      ctx.abortWatcher(id) // cancel any in-flight watcher turn for this task
       ctx.watcherHistories.current.delete(id)
       ctx.watcherQueue.current.delete(id)
       for (const [sessionId, binding] of ctx.taskSessions.current) {

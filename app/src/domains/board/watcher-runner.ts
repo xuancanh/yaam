@@ -11,6 +11,8 @@ import type { WatcherExec } from './watcher'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { sendLineToSession } from '../session/command'
 import { findTaskInState, updateLocatedTask } from './task-state'
+import type { AbortRegistry } from '../../core/abort-registry'
+import { isAbortError } from '../../core/abort-registry'
 
 export interface WatcherCtx {
   stateRef: MutableRefObject<AppState>
@@ -18,6 +20,8 @@ export interface WatcherCtx {
   histories: MutableRefObject<Map<string, ApiMessage[]>>
   busy: MutableRefObject<Set<string>>
   queue: MutableRefObject<Map<string, string[]>>
+  /** per-task cancellation — aborted when the task is deleted */
+  aborts: AbortRegistry
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
   applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
   pushTaskChat: (taskId: string, role: TaskChatMsg['role'], text: string) => void
@@ -134,9 +138,11 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
         },
       }
       try {
-        const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec)
+        const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec, ctx.aborts.signal(taskId))
         if (reply) ctx.pushTaskChat(taskId, 'watcher', reply)
       } catch (e) {
+        // the task was deleted mid-turn — stop quietly, don't report an error
+        if (isAbortError(e) || ctx.aborts.signal(taskId).aborted) { pending = []; break }
         ctx.logEvent('escalate', null, `Watcher error: ${e instanceof Error ? e.message : String(e)}`)
       }
       pending = ctx.queue.current.get(taskId) ?? []
@@ -144,5 +150,6 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
     }
   } finally {
     ctx.busy.current.delete(taskId)
+    ctx.aborts.clear(taskId)
   }
 }

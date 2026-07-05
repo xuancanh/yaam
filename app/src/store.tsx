@@ -236,6 +236,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const watcherHistories = useRef<Map<string, ApiMessage[]>>(new Map())
   const watcherBusy = useRef<Set<string>>(new Set())
   const watcherQueue = useRef<Map<string, string[]>>(new Map())
+  // per-task cancellation for in-flight watcher turns (aborted on task delete)
+  const watcherAborts = useRef(new AbortRegistry())
   const runWatcherRef = useRef<(taskId: string, note: string) => void>(() => {})
   // Set synchronously when a task launches a session. This closes the small
   // gap before React commits task.agentId, during which a fast one-shot can exit.
@@ -262,6 +264,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // Serialize watcher turns per task and drain notes that arrive while one is running.
   const runWatcher = useCallback((taskId: string, note: string) => runWatcherLoop({
     stateRef, dispatch, histories: watcherHistories, busy: watcherBusy, queue: watcherQueue,
+    aborts: watcherAborts.current,
     taskSessions: taskSessionsRef, applyAgentStatus, pushTaskChat, logEvent, notify,
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
     spawnTaskSession: (id, extra) => spawnTaskSessionRef.current(id, extra),
@@ -1119,7 +1122,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
     spawnSessionForTask, startTaskViaWatcher, runWatcher, pushTaskChat,
     markUserStopped: (id: string) => userStoppedRef.current.add(id),
-    watcherHistories, watcherQueue, taskSessions: taskSessionsRef,
+    watcherHistories, watcherQueue, abortWatcher: (tid: string) => watcherAborts.current.abort(tid), taskSessions: taskSessionsRef,
   }), [later, flash, spawnSessionForTask, startTaskViaWatcher, runWatcher, pushTaskChat]))
   const schedulesActions = useSchedulesActions(useMemo(() => ({ dispatch, flash, logEvent, launchFromTemplate }), [flash, logEvent, launchFromTemplate]))
   const chatActions = useChatActions(useMemo(() => ({ dispatch, stateRef, logEvent, runChatMessage }), [logEvent, runChatMessage]))

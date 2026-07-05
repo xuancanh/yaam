@@ -184,13 +184,14 @@ export async function runWatcherTurn(
   note: string,
   history: ApiMessage[],
   exec: WatcherExec,
+  signal?: AbortSignal,
 ): Promise<string> {
   history.push({ role: 'user', content: note })
   let reply = ''
   for (let i = 0; i < 5; i++) {
     const task = getTask()
     if (!task) break
-    const res = await callApi(cfg, watcherSystem(task, getAgents()), history, WATCHER_TOOLS)
+    const res = await callApi(cfg, watcherSystem(task, getAgents()), history, WATCHER_TOOLS, signal)
     if (res.stop_reason !== 'tool_use') {
       reply = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
       history.push({ role: 'assistant', content: reply || '(ok)' })
