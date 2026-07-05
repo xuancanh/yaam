@@ -5,7 +5,8 @@ import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AppState, EventType } from '../../core/types'
 import { dispatch } from '../../core/store'
-import * as native from '../../core/native'
+import { realSessionProcessPort } from './ports'
+import type { SessionProcessPort } from './ports'
 
 export interface PromptActionsCtx {
   stateRef: MutableRefObject<AppState>
@@ -13,6 +14,8 @@ export interface PromptActionsCtx {
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   armResponseWatch: (id: string) => void
   clearFlagged: (id: string) => void
+  /** native PTY capability; defaults to the real IPC-backed port */
+  port?: SessionProcessPort
 }
 
 export interface SessionPromptActions {
@@ -22,8 +25,15 @@ export interface SessionPromptActions {
 }
 
 export function useSessionPromptActions(ctx: PromptActionsCtx): SessionPromptActions {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createSessionPromptActions(ctx), [ctx.stateRef, ctx.flash, ctx.logEvent, ctx.armResponseWatch, ctx.clearFlagged, ctx.port])
+}
+
+/** The prompt-answer actions as a plain factory (no React), for unit testing. */
+export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPromptActions {
   const { stateRef, flash, logEvent, armResponseWatch, clearFlagged } = ctx
-  return useMemo(() => ({
+  const port = ctx.port ?? realSessionProcessPort
+  return {
     answerPrompt: (aid, num) => {
       const st = stateRef.current
       const agent = st.agents.find(a => a.id === aid)
@@ -34,8 +44,8 @@ export function useSessionPromptActions(ctx: PromptActionsCtx): SessionPromptAct
       if (!target) return
       const delta = num - (esc.cursorNum ?? 1)
       const moves = delta > 0 ? '\x1b[B'.repeat(delta) : '\x1b[A'.repeat(-delta)
-      if (moves) native.writeSession(aid, moves).catch(() => {})
-      window.setTimeout(() => { native.writeSession(aid, '\r').catch(() => {}) }, 200)
+      if (moves) port.writeSession(aid, moves).catch(() => {})
+      window.setTimeout(() => { port.writeSession(aid, '\r').catch(() => {}) }, 200)
       clearFlagged(aid)
       dispatch(s => ({
         ...s,
@@ -54,7 +64,7 @@ export function useSessionPromptActions(ctx: PromptActionsCtx): SessionPromptAct
     approve: aid => {
       const agent = stateRef.current.agents.find(a => a.id === aid)
       // answer the prompt: Enter accepts the default / highlighted option
-      if (agent?.kind === 'real') native.writeSession(aid, '\r').catch(() => {})
+      if (agent?.kind === 'real') port.writeSession(aid, '\r').catch(() => {})
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === aid
@@ -69,7 +79,7 @@ export function useSessionPromptActions(ctx: PromptActionsCtx): SessionPromptAct
     deny: aid => {
       const agent = stateRef.current.agents.find(a => a.id === aid)
       // Escape cancels the prompt
-      if (agent?.kind === 'real') native.writeSession(aid, '\x1b').catch(() => {})
+      if (agent?.kind === 'real') port.writeSession(aid, '\x1b').catch(() => {})
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === aid
@@ -80,5 +90,5 @@ export function useSessionPromptActions(ctx: PromptActionsCtx): SessionPromptAct
       flash(`Denied — prompt cancelled`)
       logEvent('escalate', aid, 'Denied · prompt cancelled')
     },
-  }), [stateRef, flash, logEvent, armResponseWatch, clearFlagged])
+  }
 }
