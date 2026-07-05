@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  Addon, AddonHookName, AgentTemplate, AppState, BoardTask, EscOption, EventType, LogLine,
-  ChatMsg, NotifKind, PersistedState, TaskChatMsg,
+  Addon, AddonHookName, AgentTemplate, BoardTask, EscOption, LogLine,
+  ChatMsg, PersistedState, TaskChatMsg,
 } from './core/types'
 import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
@@ -36,6 +36,7 @@ import { useSessionConfigActions } from './domains/session/config-actions'
 import { useSessionPromptActions } from './domains/session/prompt-actions'
 import { useMasterActions } from './domains/master/actions'
 import { useSessionActions } from './domains/session/actions'
+import { useActivityService } from './domains/activity/service'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
@@ -112,42 +113,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // events/notifications land in the OWNING workspace (sessions in background
   // workspaces keep reporting into their own stash)
-  // Resolve the workspace that should own an event associated with a session.
-  const widOf = useCallback((s: AppState, agentId: string | null): string => {
-    if (!agentId) return s.activeWorkspace
-    const agent = s.agents.find(a => a.id === agentId)
-    return agent?.workspaceId && (s.workspaces.some(w => w.id === agent.workspaceId))
-      ? agent.workspaceId
-      : s.activeWorkspace
-  }, [])
-
-  // Append an activity item to the owning active or background workspace.
-  const logEvent = useCallback((type: EventType, agentId: string | null, text: string) => {
-    const item = { id: mkId('e'), type, agentId, text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
-    dispatch(s => {
-      const wid = widOf(s, agentId)
-      if (wid === s.activeWorkspace) return { ...s, events: [item].concat(s.events).slice(0, 200) }
-      const d = s.workspaceData[wid]
-      if (!d) return s
-      return { ...s, workspaceData: { ...s.workspaceData, [wid]: { ...d, events: [item].concat(d.events).slice(0, 200) } } }
-    })
-  }, [widOf])
-
-  // Add a notification to the correct workspace and request native attention.
-  const notify = useCallback((kind: NotifKind, title: string, detail: string, agentId: string | null) => {
-    const item = {
-      id: mkId('n'), kind, title, detail,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      read: false, agentId,
-    }
-    dispatch(s => {
-      const wid = widOf(s, agentId)
-      if (wid === s.activeWorkspace) return { ...s, notifications: [item].concat(s.notifications).slice(0, 30) }
-      const d = s.workspaceData[wid]
-      if (!d) return s
-      return { ...s, workspaceData: { ...s.workspaceData, [wid]: { ...d, notifications: [item].concat(d.notifications).slice(0, 30) } } }
-    })
-  }, [widOf])
+  const { widOf, logEvent, notify } = useActivityService()
 
   // Agents → Master / user leg. We never react to individual lines: each
   // session has a settle watcher, and only once output has been quiet for a
