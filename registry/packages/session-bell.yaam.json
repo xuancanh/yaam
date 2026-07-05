@@ -28,6 +28,7 @@
   "permissions": [
     "state:read",
     "sessions:send",
+    "master:prompt",
     "ui"
   ]
 }

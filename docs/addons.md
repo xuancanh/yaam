@@ -186,19 +186,30 @@ three entry points.
 | `tasks` | `tasks.add/update/rename/move/remove/start/restart/chat` |
 | `schedules` | `schedules.add/toggle/remove` |
 | `agent` | `agent.wake` (runs the addon's own LLM agent — spends API tokens) |
+| `master:prompt` | lets `masterPromptAppend` inject into Master's system prompt |
 | `ui` | `flash`, `notify`, `logEvent`, `focusSession` |
 | `storage` | `storage.get/set` |
 
+Scopes split into **low-risk** (`state:read`, `ui`, `storage`) and **dangerous**
+— those that act on the machine or steer LLMs (`sessions:send`,
+`sessions:launch`, `tasks`, `schedules`, `agent`, `master:prompt`).
+
 Grant lifecycle:
 
-- **Fresh install** (file/URL/registry): requested scopes are granted, visible
-  immediately for review/revocation.
+- **Fresh install** (file/URL/registry): only the low-risk scopes are
+  auto-granted; dangerous scopes start **off** and must be enabled per-addon in
+  Settings → Addons. The install toast names what was withheld.
 - **Upgrade** (same name): the user's existing grant choices are kept
   (intersected with the new request set) — an update can't silently gain
   scopes the user revoked.
-- **Master-built** (`create_addon`): granted as declared — the user asked for it.
-- **Legacy** (pre-permission packages): grandfathered with full grants,
-  revocable.
+- **Master-built** (`create_addon`): granted as declared — the user asked
+  Master to build it (still intersected with the declared scope list on edit).
+- **Legacy** (pre-permission packages): treated as requesting every scope, but
+  the same fresh-install rule applies — dangerous scopes stay off until granted.
+
+`masterPromptAppend` only takes effect while the addon holds `master:prompt`;
+state snapshots are pushed to a view only while its addon holds `state:read`;
+and a disabled addon has an empty grant set (no RPC, tools, or hooks run).
 
 An ungranted call throws / RPC-rejects with:
 `permission "<scope>" not granted to this addon (Settings → Addons)`.
@@ -369,8 +380,10 @@ Handler contract:
   addon's hook runs independently and failures are contained (logged to the
   Activity feed as `addon "<name>" <hook> failed: …`).
 - `masterPromptAppend` — plain text appended to Master's system prompt under
-  an `ADDON DIRECTIVES` section while the addon is enabled. This is the
-  sanctioned way to change Master's behavior (tone, policies, extra duties).
+  an `ADDON DIRECTIVES` section while the addon is enabled **and holds the
+  `master:prompt` scope**. This is the sanctioned way to change Master's
+  behavior (tone, policies, extra duties); because it can steer Master into
+  invoking session/shell tools, it is gated behind its own dangerous scope.
 
 ---
 
