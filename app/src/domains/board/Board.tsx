@@ -6,6 +6,7 @@ import type { Agent, BoardCol, BoardTask, TaskChatMsg } from '../../core/types'
 import { IC, Icon, ViewHeader } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
 import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from './TaskSpecForm'
+import { ReviewPanel } from './ReviewPanel'
 
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
@@ -331,7 +332,7 @@ function SchedulePopover({ card, onClose }: { card: BoardTask; onClose: () => vo
 }
 
 /** Render a draggable task summary with worker and watcher status. */
-function Card({ card, agent, onOpen }: { card: BoardTask; agent: Agent | null; onOpen: () => void }) {
+function Card({ card, agent, onOpen, onReview }: { card: BoardTask; agent: Agent | null; onOpen: () => void; onReview: () => void }) {
   const s = useConductorSelector(x => ({ templates: x.templates }), shallowEqual)
   const { startCardDrag, deleteTask, startTask } = useActions()
   const [scheduling, setScheduling] = useState(false)
@@ -417,6 +418,19 @@ function Card({ card, agent, onOpen }: { card: BoardTask; agent: Agent | null; o
           {unread > 0 && <span title="chat messages">💬 {unread}</span>}
         </span>
       </div>
+      {card.col === 'review' && (
+        <button
+          title="Review the changes: diff, approve & merge, or request changes"
+          onClick={e => { e.stopPropagation(); onReview() }}
+          style={{
+            width: '100%', marginTop: 9, padding: '6px 0', borderRadius: 8, cursor: 'pointer',
+            background: 'rgba(255,176,32,.1)', border: '1px solid rgba(255,176,32,.4)',
+            color: 'var(--amber)', fontSize: 11.5, fontWeight: 600,
+          }}
+        >
+          Review changes{agent?.worktree ? ' · worktree' : ''}
+        </button>
+      )}
       {scheduling && <SchedulePopover card={card} onClose={() => setScheduling(false)} />}
     </div>
   )
@@ -436,6 +450,7 @@ export function Board() {
   const { enterCol, dropTo } = useActions()
   const [creating, setCreating] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+  const [reviewTaskId, setReviewTaskId] = useState<string | null>(null)
   const byId = new Map(s.agents.map(a => [a.id, a]))
   const openTask = openTaskId ? s.tasks.find(t => t.id === openTaskId) : undefined
 
@@ -481,6 +496,7 @@ export function Board() {
                     card={card}
                     agent={card.agentId ? byId.get(card.agentId) || null : null}
                     onOpen={() => setOpenTaskId(card.id)}
+                    onReview={() => setReviewTaskId(card.id)}
                   />
                 ))}
               </div>
@@ -489,6 +505,10 @@ export function Board() {
         })}
       </div>
       {creating && <NewTaskDialog onClose={() => setCreating(false)} />}
+      {(() => {
+        const reviewTask = reviewTaskId ? s.tasks.find(t => t.id === reviewTaskId) : undefined
+        return reviewTask ? <ReviewPanel task={reviewTask} onClose={() => setReviewTaskId(null)} /> : null
+      })()}
       {openTask && (
         <TaskDrawer
           task={openTask}

@@ -6,6 +6,7 @@ import type { MutableRefObject } from 'react'
 import type { AppState, BoardCol, BoardTask } from '../../core/types'
 import { buildCfg, hasCreds } from '../../master'
 import { mkId } from '../../shared/id'
+import { worktreeMerge, worktreeRemove } from '../../core/native'
 import { realSessionProcessPort } from '../session/ports'
 import type { SessionProcessPort } from '../session/ports'
 import { draftTaskSpec } from './watcher'
@@ -48,6 +49,11 @@ export interface BoardActions {
   scheduleTask: (taskId: string, at: number | null, templateId?: string | null) => void
   approveDiff: (id: string) => void
   requestChanges: (id: string) => void
+  /** review queue: merge the task's worktree back (when isolated) and move to
+   *  done. Resolves to '' on success or a human-readable failure summary. */
+  approveTaskReview: (taskId: string) => Promise<string>
+  /** review queue: bounce the task to progress with the reviewer's comment */
+  rejectTaskReview: (taskId: string, comment: string) => void
 }
 
 export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
@@ -177,6 +183,55 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
       dispatch(s => ({ ...s, drawer: null }))
       ctx.logEvent('edit', id, 'Requested changes on the diff')
       ctx.flash('Requested changes')
+    },
+
+    approveTaskReview: async taskId => {
+      const st = stateRef.current
+      const task = st.tasks.find(t => t.id === taskId)
+      if (!task) return 'task not found'
+      const wt = (task.agentIds ?? [])
+        .map(aid => st.agents.find(a => a.id === aid)?.worktree)
+        .find(Boolean)
+      if (wt) {
+        const results = await worktreeMerge(wt.root, `yaam: ${task.title.slice(0, 60)}`).catch(e => [
+          { name: 'worktree', status: 'error', detail: e instanceof Error ? e.message : String(e) },
+        ])
+        const summary = results.map(r => `${r.name}: ${r.status}${r.detail ? ` — ${r.detail}` : ''}`).join('\n')
+        if (results.some(r => r.status === 'error')) {
+          ctx.pushTaskChat(taskId, 'system', `Merge failed; the task stays in review.\n${summary}`)
+          return summary
+        }
+        await worktreeRemove(wt.root).catch(() => {})
+        // the mirror is gone — follow-up sessions must not try to re-enter it
+        dispatch(s => ({
+          ...s,
+          agents: s.agents.map(a => (task.agentIds ?? []).includes(a.id) ? { ...a, worktree: undefined } : a),
+        }))
+        ctx.pushTaskChat(taskId, 'system', `Review approved — merged back into the original checkout.\n${summary}`)
+      } else {
+        ctx.pushTaskChat(taskId, 'system', 'Review approved (no worktree — changes were made in place).')
+      }
+      dispatch(s => ({
+        ...s,
+        tasks: s.tasks.map(t => (t.id === taskId ? { ...t, col: 'done' as const, awaitingUser: false } : t)),
+      }))
+      ctx.logEvent('done', task.agentId, `Approved review for “${task.title.slice(0, 48)}”`)
+      ctx.flash('Approved & merged')
+      return ''
+    },
+
+    rejectTaskReview: (taskId, comment) => {
+      const note = comment.trim() || 'Changes requested (no comment given).'
+      ctx.pushTaskChat(taskId, 'user', `Review — changes requested: ${note}`)
+      dispatch(s => ({
+        ...s,
+        tasks: s.tasks.map(t => (t.id === taskId ? { ...t, col: 'progress' as const, awaitingUser: false } : t)),
+      }))
+      void ctx.runWatcher(taskId,
+        `[review] The user reviewed this task's changes and requested changes: ${note}. ` +
+        'Relaunch a session (or instruct the current one) to address the feedback, then move the task back to review when done.')
+      ctx.logEvent('edit', null, `Requested changes on “${stateRef.current.tasks.find(t => t.id === taskId)?.title.slice(0, 48) ?? taskId}”`)
+      ctx.flash('Changes requested — watcher notified')
     },
   }
 }
