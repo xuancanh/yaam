@@ -1,7 +1,7 @@
-import { useActions, useConductor } from '../store'
-import { hexToRgba, ACCENT } from '../data'
-import type { View } from '../types'
-import { IC, Icon, MasterMark } from './ui'
+import { useActions, useConductor } from '../../store'
+import { hexToRgba, ACCENT } from '../../data'
+import type { View } from '../../types'
+import { IC, Icon, MasterMark } from '../../components/ui'
 
 const NAV: Array<{ id: View; label: string; paths: string[] }> = [
   { id: 'workspace', label: 'Work', paths: ['M3 5.5h18v13H3z', 'M9.5 5.5v13'] },

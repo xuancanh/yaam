@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useActions, useConductor } from '../store'
-import { DIFF_BG, DIFF_COLORS, LOG_COLORS } from '../data'
-import { gitDiff, isTauri } from '../native'
-import type { Agent, DiffFile } from '../types'
-import { AgentAvatar, EditableName, IC, Icon } from './ui'
+import { useActions, useConductor } from '../../store'
+import { DIFF_BG, DIFF_COLORS, LOG_COLORS } from '../../data'
+import { gitDiff, isTauri } from '../../native'
+import type { Agent, DiffFile } from '../../types'
+import { AgentAvatar, EditableName, IC, Icon } from '../../components/ui'
 
 /** Parse `git diff` unified output into per-file hunk lists (capped for display). */
 /** Convert a unified git diff into the drawer's per-file line model. */

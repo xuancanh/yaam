@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { KeyboardEvent } from 'react'
-import { useActions, useConductor } from '../store'
-import type { View } from '../types'
-import { Icon } from './ui'
+import { useActions, useConductor } from '../../store'
+import type { View } from '../../types'
+import { Icon } from '../../components/ui'
 
 const ICONS: Record<string, string[]> = {
   route: ['M4 6h9', 'M4 18h6', 'M13 6l3 3-3 3', 'M20 6v12'],

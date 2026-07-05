@@ -1,6 +1,6 @@
-import { useConductor } from '../store'
-import { EVENT_COLORS, hexToRgba } from '../data'
-import { ViewHeader } from './ui'
+import { useConductor } from '../../store'
+import { EVENT_COLORS, hexToRgba } from '../../data'
+import { ViewHeader } from '../../components/ui'
 
 /** Render the active workspace's reverse-chronological activity feed. */
 export function Timeline() {

@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useActions, useConductor } from '../store'
-import { NOTIF_COLORS, hexToRgba } from '../data'
-import { EditableName, IC, Icon, MasterMark } from './ui'
+import { useActions, useConductor } from '../../store'
+import { NOTIF_COLORS, hexToRgba } from '../../data'
+import { EditableName, IC, Icon, MasterMark } from '../../components/ui'
 
 /** Switch, create, rename, and delete workspace-scoped state pools. */
 function WorkspaceSwitcher() {

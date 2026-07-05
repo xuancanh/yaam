@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useConductor } from '../store'
-import { ESTIMATED_OUTPUT_COST_PER_KTOK, formatEstimatedTokens } from '../usage'
+import { useConductor } from '../../store'
+import { ESTIMATED_OUTPUT_COST_PER_KTOK, formatEstimatedTokens } from '../../usage'
 
 /** Render one aggregate usage metric with its explanatory subtitle. */
 function StatCard({ label, value, sub, valueColor }: { label: string; value: string; sub: string; valueColor?: string }) {

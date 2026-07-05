@@ -1,6 +1,6 @@
-import { useActions, useConductor } from '../store'
-import { formatEstimatedTokens } from '../usage'
-import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from './ui'
+import { useActions, useConductor } from '../../store'
+import { formatEstimatedTokens } from '../../usage'
+import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from '../../components/ui'
 import { UsageSummary } from './UsageSummary'
 
 /** Compact inline token/cost readout with a slim budget bar for one agent row. */
