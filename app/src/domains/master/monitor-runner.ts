@@ -8,7 +8,7 @@ import type { ApiMessage } from '../../master'
 import { buildCfg, hasCreds } from '../../master'
 import { runMonitorTurn } from '../../monitor'
 import type { MonitorExec } from '../../monitor'
-import { isAltScreen, readScreen } from '../../terminals'
+import { isAltScreen, readScreen } from '../../core/terminals'
 import { extractOptions } from '../../state-lib'
 
 export interface MonitorCtx {

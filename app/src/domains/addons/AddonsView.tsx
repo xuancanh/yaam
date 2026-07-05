@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useActions, useConductor } from '../../store'
-import { httpGetText, readTextFile } from '../../native'
-import { ALL_PERMISSIONS } from '../../addons'
+import { httpGetText, readTextFile } from '../../core/native'
+import { ALL_PERMISSIONS } from '../../core/addons'
 import type { Addon } from '../../types'
 import { IC, Icon, Switch, ViewHeader } from '../../components/ui'
 

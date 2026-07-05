@@ -1,5 +1,5 @@
 import { useActions, useConductor } from '../../store'
-import { formatEstimatedTokens } from '../../usage'
+import { formatEstimatedTokens } from '../../core/usage'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from '../../components/ui'
 import { UsageSummary } from './UsageSummary'
 

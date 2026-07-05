@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { fitTerminal, getTerminal } from '../../terminals'
+import { fitTerminal, getTerminal } from '../../core/terminals'
 import type { Agent } from '../../types'
 
 /** Attach a session's registry-owned xterm instance to the current pane DOM. */

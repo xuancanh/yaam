@@ -5,13 +5,13 @@
 // in `ctx`.
 import type { MutableRefObject } from 'react'
 import type { Addon, AppState } from '../../types'
-import type { AddonApi } from '../../addons'
+import type { AddonApi } from '../../core/addons'
 import type { ApiMessage, MasterExec } from '../../master'
 import { hasCreds, runMasterTurn } from '../../master'
-import { execAddonTool, parseAddonPackage } from '../../addons'
+import { execAddonTool, parseAddonPackage } from '../../core/addons'
 import { humanizeCron, KEYMAP, mkId, sendLineToSession, wait } from '../../state-lib'
 import { PERM_ORDER, SHELLS } from '../../data'
-import * as native from '../../native'
+import * as native from '../../core/native'
 
 export interface MasterCtx {
   stateRef: MutableRefObject<AppState>

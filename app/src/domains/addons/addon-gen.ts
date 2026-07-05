@@ -2,7 +2,7 @@
 // gets the COMPLETE authoring context (formats, bridge protocol, API surface,
 // hooks, agents, theme, security rules), and submits a package that is
 // validated before install — validation errors are fed back for self-repair.
-import { parseAddonPackage } from '../../addons'
+import { parseAddonPackage } from '../../core/addons'
 import { callApi } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
 

@@ -2,7 +2,7 @@
 import type { AppState } from '../../types'
 import { buildCfg, callApi } from '../../llm/client'
 import { runTool, TOOLS } from './tools'
-import { addonToolDefs } from '../../addons'
+import { addonToolDefs } from '../../core/addons'
 import type { MasterExec } from './tools'
 import { chatHistory, systemPrompt } from './prompt'
 

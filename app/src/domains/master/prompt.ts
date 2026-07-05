@@ -1,7 +1,7 @@
 // Master's system prompt: role, rules, and the serialized app state.
 import type { AppState } from '../../types'
 import type { ApiMessage } from '../../llm/client'
-import { addonPromptAppends } from '../../addons'
+import { addonPromptAppends } from '../../core/addons'
 
 /** Serialize the bounded live app state that Master needs for one decision. */
 function describeState(s: AppState): string {

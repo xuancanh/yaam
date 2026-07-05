@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useActions, useConductor } from '../../store'
 import { DIFF_BG, DIFF_COLORS, LOG_COLORS } from '../../data'
-import { gitDiff, isTauri } from '../../native'
+import { gitDiff, isTauri } from '../../core/native'
 import type { Agent, DiffFile } from '../../types'
 import { AgentAvatar, EditableName, IC, Icon } from '../../components/ui'
 

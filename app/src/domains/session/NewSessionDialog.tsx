@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useActions, useConductor } from '../../store'
-import { isTauri, pickFolder } from '../../native'
+import { isTauri, pickFolder } from '../../core/native'
 import { SHELLS } from '../../data'
 
 const FIELD_STYLE = {

@@ -1,7 +1,7 @@
 // LLM providers and protocol adapters (Anthropic Messages / OpenAI-compatible
 // chat completions). HTTP goes through the Tauri backend to avoid CORS.
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
-import { bedrockInvoke, isTauri, runCredentialCommand } from '../native'
+import { bedrockInvoke, isTauri, runCredentialCommand } from '../core/native'
 import type { AppState } from '../types'
 
 /** Select Tauri HTTP on desktop and the browser fetch implementation in web previews. */

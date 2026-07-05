@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useActions, useConductor } from '../../store'
 import { AddonSource } from './AddonSource'
-import { addonSnapshot } from '../../addons'
+import { addonSnapshot } from '../../core/addons'
 import type { Addon } from '../../types'
 import { IC, Icon, MasterMark, ViewHeader } from '../../components/ui'
 

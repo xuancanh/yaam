@@ -8,7 +8,7 @@ import type { ApiMessage } from '../../master'
 import { buildCfg, hasCreds } from '../../master'
 import { runWatcherTurn } from './watcher'
 import type { WatcherExec } from './watcher'
-import { isAltScreen, readScreen } from '../../terminals'
+import { isAltScreen, readScreen } from '../../core/terminals'
 import { sendLineToSession } from '../../state-lib'
 import { findTaskInState, updateLocatedTask } from './task-state'
 

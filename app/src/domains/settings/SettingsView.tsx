@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useActions, useConductor } from '../../store'
 import { hexToRgba } from '../../data'
-import { pickFolder } from '../../native'
+import { pickFolder } from '../../core/native'
 import { PROVIDERS, providerFor } from '../../master'
 import { SHELLS } from '../../data'
 import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'

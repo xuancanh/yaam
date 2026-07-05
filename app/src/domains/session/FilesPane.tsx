@@ -4,9 +4,9 @@
 // files are tinted in the tree and the viewer's gutter can switch from line
 // numbers to change markers (green = new, amber = modified, red = deletion).
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { highlight, langForFile } from '../../highlight'
-import { gitFileDiff, gitStatus, listDir, readTextFile } from '../../native'
-import type { DirEntryInfo } from '../../native'
+import { highlight, langForFile } from '../../core/highlight'
+import { gitFileDiff, gitStatus, listDir, readTextFile } from '../../core/native'
+import type { DirEntryInfo } from '../../core/native'
 import type { Agent } from '../../types'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'

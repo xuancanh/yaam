@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { highlight } from '../../highlight'
+import { highlight } from '../../core/highlight'
 import { useActions } from '../../store'
 import type { Addon } from '../../types'
 

@@ -3,13 +3,13 @@
 // addon's own agent, and private storage. A pure factory — the provider wraps
 // the result with enforcePermissions for the addon's granted scopes.
 import type { MutableRefObject } from 'react'
-import type { AddonApi } from '../../addons'
-import { addonSnapshot } from '../../addons'
+import type { AddonApi } from '../../core/addons'
+import { addonSnapshot } from '../../core/addons'
 import type { AppState, BoardCol, TaskChatMsg } from '../../types'
 import { focusSessionIn, humanizeCron, mkId, sendLineToSession } from '../../state-lib'
-import { isAltScreen, readScreen } from '../../terminals'
+import { isAltScreen, readScreen } from '../../core/terminals'
 import { ACCENT } from '../../data'
-import * as native from '../../native'
+import * as native from '../../core/native'
 
 export interface AddonApiCtx {
   stateRef: MutableRefObject<AppState>
