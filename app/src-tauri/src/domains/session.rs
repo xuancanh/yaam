@@ -151,15 +151,25 @@ impl SessionManager {
         let generation = self
             .next_generation
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.sessions.lock().unwrap().insert(
-            id.clone(),
-            SessionHandle {
-                master: pair.master,
-                writer,
-                killer,
-                generation,
-            },
-        );
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            // Reusing a live id: explicitly shut the old process down first.
+            // Merely dropping the replaced handle leaks the child (dropping the
+            // killer does not terminate it). The exit reaper for the old
+            // generation then sees the newer handle and stays quiet.
+            if let Some(mut old) = sessions.remove(&id) {
+                let _ = old.killer.kill();
+            }
+            sessions.insert(
+                id.clone(),
+                SessionHandle {
+                    master: pair.master,
+                    writer,
+                    killer,
+                    generation,
+                },
+            );
+        }
 
         // stream raw PTY output to the frontend
         let app_out = app.clone();
