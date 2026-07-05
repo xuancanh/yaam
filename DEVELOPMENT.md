@@ -27,36 +27,31 @@ Use `cargo test` for the Rust unit tests (Bedrock credential parser, session lau
 ## Repository map
 
 ```text
-app/src/
-  store.tsx          state owner, actions, effects, persistence, orchestration
-  state-lib.ts       pure state/command/cron helpers
-  context.ts         stable React context identities; do not move into store.tsx
-  terminals.ts       module-level xterm registry and screen inspection
+app/src/               feature code in domains/, shared core at the root
+  App.tsx            composition root
+  store.tsx          state owner: shared refs/effects/persistence + the actions object
+  store/             hooks (useConductor/useConductorSelector/useActions), state-helpers, secrets
+  state-lib.ts       pure state/command/cron helpers + persistence selectors
+  types.ts data.ts   central types; seedState + static catalogs
+  context.ts         stable React contexts (State/Actions/Store); do not move into store.tsx
   native.ts          typed frontend wrappers around Tauri commands/events
-  mcp.ts             streamable-HTTP MCP client (initialize, tools list/call)
-  skills.ts          skill-registry fetchers (GitHub tree + local folders)
-  addons.ts          addon runtime: package parse, permissions, folder format
-  llm/               provider adapters and agent harnesses:
-                       client.ts      providers/protocols + SSE streaming
-                       master*.ts     Master harness, tools, prompt
-                       monitor.ts     per-session status monitors
-                       watcher.ts     per-task kanban watchers
-                       chat-agent.ts  in-app chat agents (files/exec/skills/MCP)
-                       addon-agent.ts addon mini-Masters; addon-editor/-gen
-  components/        application views and workspace UI (ChatView, ChatPane,
-                     Board, AddonsView, SettingsView, workspace/ pane grid)
-app/src-tauri/src/    two layers: core (logic + state) and commands (IPC)
+  terminals.ts       module-level xterm registry + screen inspection (shared runtime service)
+  mcp.ts skills.ts   MCP client; skill-registry fetchers
+  addons.ts          shared addon contract (AddonApi, permissions, snapshot, parse)
+  llm/client.ts      shared LLM core: providers/protocols + SSE streaming
+  master.ts monitor.ts  compatibility barrels (llm/client + domains/master/*)
+  components/        shared UI primitives only: ui.tsx, Markdown.tsx
+  domains/           each owns its view + components + logic (runner) + actions:
+    session/ chat/ board/ master/ addons/ settings/ schedules/ shell/
+app/src-tauri/src/    backend domains (state + logic + command boundary + tests per module)
   lib.rs             composition root: module tree, managed state, command registry
-  setup.rs           one-time startup (dock icon, logging)
-  core/              domain logic + managed state, independent of the IPC boundary
-    pty.rs           SessionManager PTY engine (spawn/io/kill/exit reaping)
-    detect.rs        CLI session-id detection (claude/codex/opencode)
-    persistence.rs   atomic writes, main partition + per-session files
-    git.rs / fs.rs   git inspection; filesystem + timeout-bounded exec
-    search.rs        tantivy in-RAM full-text chat index
-    bedrock.rs       Bedrock invocation + AWS credential parsing/caching
-    util.rs          shared helpers (expand_tilde)
-  commands/          thin #[tauri::command] handlers by domain, delegating to core
+  setup.rs util.rs   one-time startup; shared helpers
+  domains/session.rs PTY engine + CLI session-id detection
+  domains/state.rs   atomic persistence: main partition + per-session files
+  domains/git.rs fs.rs  git inspection; filesystem + timeout-bounded exec
+  domains/search.rs  tantivy in-RAM full-text chat index
+  domains/bedrock.rs Bedrock invocation + AWS credential parsing/caching
+  domains/secrets.rs OS-keychain credential storage
 docs/addons.md        addon package, permission, RPC, and lifecycle reference
 registry/             built-in addon registry and example packages
 design/               historical design prototype; not runtime code

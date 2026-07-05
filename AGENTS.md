@@ -20,41 +20,44 @@ only escalates digests to Master, so Master isn't spammed by raw terminal noise.
 
 ```
 app/                     Tauri app (the whole product)
-  src/                   React frontend
-    store.tsx            central provider: all actions, effects, persistence, LLM runners (~1900 lines)
+  src/                   React frontend — feature code lives in domains/, shared core at the root
+    store.tsx            central provider: shared refs/effects/persistence + the actions object
+    store/               store internals: hooks (useConductor/useConductorSelector/useActions),
+                         state-helpers, secrets (keychain redaction), + tests
     state-lib.ts         pure helpers (cron, command building, workspace scoping, PTY line send)
     types.ts             all TypeScript types (AppState, Agent, AgentTemplate, Cron, …)
     data.ts              seedState() + static catalogs (agent types, tools, colors)
     native.ts            Tauri bridge (invoke wrappers); no-ops in plain browser
-    terminals.ts         module-level xterm.js registry + ANSI/screen helpers
-    context.ts           StateCtx/ActionsCtx (kept in a stable module — HMR fix, do not move)
-    highlight.ts         shared regex syntax highlighter (AddonSource + FilesPane)
-    addons.ts            addon runtime: package parse/validate, permission model, RPC
-    master.ts            barrel re-exporting src/llm/*
-    mcp.ts               streamable-HTTP MCP client (initialize / tools list+call)
-    llm/
-      client.ts          provider defs + protocol adapters (Anthropic Messages / OpenAI chat / Bedrock) + SSE streaming (callApiStream)
-      master.ts          runMasterTurn: tool loop + integrity check
-      master-tools.ts    Master tool defs (TOOLS) + MasterExec interface + runTool dispatch
-      master-prompt.ts   systemPrompt(state) + chat history builder
-      monitor.ts         per-session monitor harness
-      watcher.ts         per-task watcher harness (kanban "mini-Master") + task-spec drafting
-      chat-agent.ts      chat-mode session harness (files/exec/skills/MCP tools, streaming)
-      addon-agent.ts     per-addon agent harness (tools = the addon's scoped API)
-      addon-gen.ts       "✦ Generate" addon authoring harness (full context + self-repair)
-      addon-editor.ts    per-addon "Customize" chat harness
-    components/          views + workspace/ (Pane, TerminalPane, FilesPane, NewSessionDialog, Divider)
+    terminals.ts         module-level xterm.js registry + ANSI/screen helpers (shared runtime service)
+    context.ts           StateCtx/ActionsCtx/StoreCtx (stable module — HMR fix, do not move)
+    highlight.ts         shared regex syntax highlighter
+    addons.ts            shared addon contract: AddonApi type, permissions, snapshot, package parse
+    mcp.ts               streamable-HTTP MCP client
+    master.ts / monitor.ts  compatibility barrels re-exporting llm/client + domains/master/*
+    llm/client.ts        shared LLM core: provider defs + protocol adapters + SSE streaming
+    components/          shared UI primitives only: ui.tsx, Markdown.tsx
+    domains/             feature domains — each owns its view, components, logic (runner), actions:
+      session/           terminal-session UI: Workspace, Pane, TerminalPane, FilesPane, NewSessionDialog
+      chat/              ChatView, ChatPane, runner, agent (in-app chat agents)
+      board/             Board + TaskSpecForm, watcher-runner + watcher, task-state (kanban)
+      master/            Sidebar, runner + monitor-runner, master/tools/prompt/monitor harnesses
+      addons/            AddonsView/AddonView/AddonSource, addon-api, addon-agent/editor/gen
+      settings/          SettingsView, ToolsView
+      schedules/         Schedules, TemplatesView
+      shell/             app chrome + top-level views: TitleBar, IconRail, CommandPalette,
+                         Overview, Timeline, Drawer, SlideOver, Toast, UsageSummary
+    App.tsx              composition root (mounts the shell + the active domain view)
   src-tauri/
-    src/                 two layers — core/ (logic + state) and commands/ (IPC)
+    src/                 backend domains — each module keeps its managed state,
+                         logic, #[tauri::command] boundary, and tests together
       lib.rs             composition root: modules, managed state, invoke_handler
-      setup.rs           one-time startup (dock icon, logging)
-      core/pty.rs        SessionManager PTY engine (spawn/io/kill/exit reaping)
-      core/detect.rs     CLI session-id detection (claude/codex/opencode)
-      core/persistence.rs atomic writes, main partition + per-session files
-      core/git.rs, core/fs.rs   git inspection; fs + timeout-bounded exec
-      core/search.rs     tantivy full-text index over chat transcripts
-      core/bedrock.rs    AWS Bedrock InvokeModel bridge + credential parsing/caching
-      commands/*.rs      thin #[tauri::command] handlers by domain → core
+      setup.rs           one-time startup (dock icon, logging); util.rs shared helpers
+      domains/session.rs SessionManager PTY engine + CLI session-id detection
+      domains/state.rs   atomic persistence: main partition + per-session files
+      domains/git.rs, domains/fs.rs   git inspection; fs + timeout-bounded exec
+      domains/search.rs  tantivy full-text index over chat transcripts
+      domains/bedrock.rs AWS Bedrock InvokeModel bridge + credential parsing/caching
+      domains/secrets.rs OS-keychain credential storage (keyring)
     capabilities/default.json   Tauri ACL permissions
     tauri.conf.json      productName YAAM, identifier dev.yaam.conductor (kept for state compat)
     icons/               app icons, generated from app/app-icon.svg via `tauri icon`
@@ -143,22 +146,22 @@ Tauri http plugin to dodge CORS.
   expiry, and re-run on 401/403. Bedrock parses AWS credential JSON
   (`aws configure export-credentials` shape, nested `Credentials`, or `AWS_*`
   env lines) in `core/bedrock.rs`, with an optional refresh command (`aws sso login`).
-- **Master harness** (`llm/master.ts`): tool loop capped at 10 iters, temperature
+- **Master harness** (`domains/master/master.ts`): tool loop capped at 10 iters, temperature
   0.2, with an **integrity check** — if the model claims it took an action but
   called no tool, the turn is retried. Master must actually drive terminals via
   the `press_keys` / `send_to_session` tools; the no-narration prompt rules and
   the integrity check exist to stop hallucinated "I did X" replies.
-- **Monitors** (`llm/monitor.ts`): one per session, private capped history, only
+- **Monitors** (`domains/master/monitor.ts`): one per session, private capped history, only
   `report_to_master` surfaces a digest to Master. Sessions bound to a board task
   bypass the generic monitor — their task's **watcher** is the monitor.
-- **Task watchers** (`llm/watcher.ts`): one per kanban task — a mini-Master that
+- **Task watchers** (`domains/board/watcher.ts`): one per kanban task — a mini-Master that
   owns spawning (always ONE-SHOT sessions; can run several), verifies acceptance
   criteria against `check_session` ground truth, moves the card, and chats with
   the user in the card thread. Invariants live in the memory notes: task sessions
   are always ephemeral; template schedules always create board tasks; templates
   themselves stay purpose-neutral (the spawn path layers `taskWorkText` into
   `{task}` and appends the criteria/goal contract after the composed prompt).
-- **Chat agents** (`llm/chat-agent.ts`): Chat-view sessions (`Agent.kind==='chat'`,
+- **Chat agents** (`domains/chat/agent.ts`): Chat-view sessions (`Agent.kind==='chat'`,
   no PTY) with file/exec/skill/MCP tools and streaming; per-type provider config
   (`chatAgentTypes`, `buildChatCfg`), per-session model, optional persona
   (`personas`) and chosen skill sources (`skills.ts` registries + local `skills`).
@@ -168,7 +171,7 @@ Tauri http plugin to dodge CORS.
   thinking is kept out of replayed API history. Excluded from workspace
   tabs/groups/overview; transcripts feed the tantivy index (`core/search.rs`) and
   chats auto-title after the first turn unless renamed.
-- **Addon agents** (`llm/addon-agent.ts`): optional per-addon harness whose tools
+- **Addon agents** (`domains/addons/addon-agent.ts`): optional per-addon harness whose tools
   are the addon's permission-scoped API; woken by subscribed hooks or `agent.wake`.
 
 ## Settle / detection pipeline (subtle — don't casually change)
