@@ -10,7 +10,7 @@ import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './core/terminals'
-import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS, enforcePermissions, execAddonHook, exportAddonPackage, parseAddonPackage } from './core/addons'
+import { DANGEROUS_PERMISSIONS, enforcePermissions, execAddonHook, exportAddonPackage, parseAddonPackage } from './core/addons'
 import { runAddonEditorTurn } from './domains/addons/addon-editor'
 import { runAddonAgentTurn } from './domains/addons/addon-agent'
 import { fetchSkillRegistry } from './core/skills'
@@ -34,6 +34,8 @@ import { useWorkspaceActions } from './domains/workspace/actions'
 import { useShellActions } from './domains/shell/actions'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
+import { buildHydration } from './infrastructure/persistence/hydrate'
+import { loadSnapshot } from './infrastructure/persistence/loaders'
 import { withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './domains/board/task-state'
 import type { LocatedTask } from './domains/board/task-state'
@@ -43,7 +45,7 @@ import type { ConductorActions } from './app/actions'
 
 import {
   PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
-  activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, groupsFromLegacy,
+  activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn,
   mkGroup, mkId, removeFromGroups, selectMainState, selectSession,
   sendLineToSession, spawnAgentProcess, taskContract, taskWorkText, typeForCommand,
 } from './core/state-lib'
@@ -601,120 +603,11 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (hydrateStarted.current) return
     hydrateStarted.current = true
-    // Apply one merged snapshot; throws if it is not usable so the caller can
-    // fall back / start fresh.
+    // Apply one merged snapshot: dispatch the pure hydration result, then rebuild
+    // terminals. Throws if not usable so the caller can fall back / start fresh.
     const hydrateFrom = (p: Partial<PersistedState>) => {
-          const workspaces = p.workspaces?.length ? p.workspaces : [{ id: 'ws-default', name: 'Default' }]
-          const activeWorkspace = p.activeWorkspace && workspaces.some(w => w.id === p.activeWorkspace)
-            ? p.activeWorkspace
-            : workspaces[0].id
-          const restoredAgents: Agent[] = (p.agents ?? [])
-            .filter(a => (a.kind === 'real' && a.cmd) || a.kind === 'chat')
-            .map(a => {
-              const log = (a.log ?? []).slice(-200)
-              const usage = a.usageVersion === 1 ? { used: a.used, cost: a.cost } : estimateLogUsage(log)
-              // a chat persisted while running (or with an unanswered user
-              // message) died mid-reply — say so instead of a silent gap
-              const lastChat = (a.chatLog ?? [])[(a.chatLog ?? []).length - 1]
-              const interrupted = a.kind === 'chat'
-                && (a.status === 'running' || lastChat?.role === 'user' || lastChat?.role === 'thinking')
-              const chatLog = interrupted
-                ? [...(a.chatLog ?? []), { id: mkId('cm'), role: 'assistant' as const, text: '*(interrupted — the app closed mid-reply; send a message to continue)*', at: Date.now() }]
-                : a.chatLog
-              return {
-                ...a,
-                ...(chatLog ? { chatLog } : {}),
-                ...usage,
-                usageVersion: 1 as const,
-                tools: a.tools ?? mkTools(),
-                memory: a.memory ?? mkMemory(),
-                status: 'idle' as const,
-                escReason: undefined,
-                terminalShell: a.terminalShell ?? inferLegacyTerminalShell(a.cmd),
-                workspaceId: a.workspaceId && workspaces.some(w => w.id === a.workspaceId) ? a.workspaceId : activeWorkspace,
-                log,
-              }
-            })
-          const ids = new Set(restoredAgents.filter(a => a.kind !== 'chat').map(a => a.id))
-          // tab groups: invalid/duplicate/chat ids become empty slots (a session
-          // may live in only one group; chats live in the Chat view), slots
-          // capped at 4, fully-empty groups dropped
-          const seenFocus = new Set<string>()
-          const rawGroups = p.groups ?? groupsFromLegacy(p).groups
-          const groups = rawGroups
-            .map(g => ({
-              ...g,
-              slots: g.slots.slice(0, 4).map(id => {
-                if (!id || !ids.has(id) || seenFocus.has(id)) return null
-                seenFocus.add(id)
-                return id
-              }),
-            }))
-            .filter(g => g.slots.some(Boolean))
-            .map(g => ({
-              ...g,
-              activePane: Math.max(0, Math.min(g.activePane ?? 0, g.slots.length - 1)),
-              maximizedPane: null,
-              splits: g.splits ?? { row: 0.5, cols: [0.5, 0.5] },
-              stacked: g.stacked ?? false,
-            }))
-          const activeGroup = p.activeGroup && groups.some(g => g.id === p.activeGroup)
-            ? p.activeGroup
-            : groups[0]?.id ?? null
-          // the Routed column was removed — tasks parked there go back to Backlog
-          const migrateCols = (tasks: BoardTask[]) =>
-            tasks.map(t => ((t.col as string) === 'routed' ? { ...t, col: 'backlog' as const } : t))
-          const workspaceData = Object.fromEntries(Object.entries(p.workspaceData ?? {}).map(([wid, d]) =>
-            [wid, {
-              ...d,
-              tasks: migrateCols(d.tasks ?? []),
-              crons: d.crons ?? [], messages: d.messages ?? [], events: d.events ?? [],
-              notifications: d.notifications ?? [], minimizedIds: d.minimizedIds ?? [],
-              pendingMasterNotes: d.pendingMasterNotes ?? [],
-            }]))
-          dispatch(s => ({
-            ...s,
-            tasks: migrateCols(p.tasks ?? s.tasks),
-            crons: p.crons ?? s.crons,
-            settings: { ...s.settings, ...(p.settings || {}) },
-            toolsCatalog: p.toolsCatalog?.some(t => t.id === 'launch_session')
-              ? p.toolsCatalog.concat(s.toolsCatalog.filter(seed => !p.toolsCatalog!.some(t => t.id === seed.id)))
-              : s.toolsCatalog,
-            agentTypes: p.agentTypes
-              ? s.agentTypes
-                  .map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, resumeFallbackCmd: t.resumeFallbackCmd, probe: t.probe } as typeof t))
-                  .concat(p.agentTypes.filter(x => x.custom && !s.agentTypes.some(t => t.id === x.id)))
-              : s.agentTypes,
-            templates: p.templates ?? s.templates ?? [],
-            mcpServers: p.mcpServers ?? s.mcpServers,
-            skills: p.skills ?? s.skills,
-            personas: p.personas ?? s.personas,
-            skillRegistries: p.skillRegistries ?? s.skillRegistries,
-            chatAgentTypes: p.chatAgentTypes ?? s.chatAgentTypes,
-            agents: restoredAgents.length ? restoredAgents : s.agents,
-            groups,
-            activeGroup,
-            minimizedIds: (p.minimizedIds ?? []).filter(id => ids.has(id)),
-            workspaces,
-            activeWorkspace,
-            workspaceData,
-            addonStorage: p.addonStorage ?? {},
-            addons: (p.addons ?? s.addons).map(a => {
-              const partial = a as Partial<Addon>
-              const permissions = partial.permissions ?? ALL_PERMISSIONS.map(x => x.id)
-              return {
-                ...a,
-                version: partial.version ?? '1.0.0',
-                enabled: partial.enabled ?? true,
-                source: partial.source ?? 'master' as const,
-                permissions,
-                granted: partial.granted ?? permissions,
-              }
-            }),
-            messages: p.messages?.length ? p.messages : s.messages,
-            events: p.events ?? s.events,
-            notifications: p.notifications ?? s.notifications,
-          }))
+          const { next, restoredAgents } = buildHydration(p, stateRef.current)
+          dispatch(() => next)
           // rebuild each restored session's terminal with its saved tail, and
           // reattach to PTYs that are still alive in the backend (webview reload)
           native.liveSessions().then(liveIds => {
@@ -740,57 +633,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             }
           }).catch(() => {})
     }
-    // Parse the main partition, recovering from its backup if the primary is
-    // unparseable (rethrows if the backup is bad too).
-    const parseMain = async (): Promise<Partial<PersistedState>> => {
-      const raw = await native.loadStateFile()
-      if (!raw) return {}
-      try {
-        return JSON.parse(raw) as Partial<PersistedState>
-      } catch (e) {
-        console.error('[yaam] main state unreadable — trying backup:', e)
-        const bak = await native.loadStateBackup()
-        if (!bak) throw e
-        const parsed = JSON.parse(bak) as Partial<PersistedState>
-        dispatch(s => ({ ...s, toast: 'Restored from backup — the main state file was unreadable' }))
-        return parsed
-      }
-    }
-    // Load sessions: prefer one-file-per-session, then the legacy single
-    // sessions.json partition, then the even older agents embedded in main.
-    // A bad/absent source just means fewer restored sessions.
-    const parseSessionAgents = async (): Promise<Agent[] | undefined> => {
-      try {
-        const files = await native.loadSessions()
-        if (files.length) {
-          const agents: Agent[] = []
-          for (const raw of files) {
-            try {
-              const parsed = JSON.parse(raw) as { agent?: Agent }
-              if (parsed.agent) agents.push(parsed.agent)
-            } catch (e) {
-              console.error('[yaam] a session file was unreadable — skipping:', e)
-            }
-          }
-          if (agents.length) return agents
-        }
-      } catch (e) {
-        console.error('[yaam] loading session files failed:', e)
-      }
-      try {
-        const raw = await native.loadPartition('sessions')
-        if (raw) return (JSON.parse(raw) as Partial<PersistedState>).agents
-      } catch (e) {
-        console.error('[yaam] legacy sessions partition unreadable — ignoring:', e)
-      }
-      return undefined
-    }
     void (async () => {
       try {
-        const [main, sessionAgents] = await Promise.all([parseMain(), parseSessionAgents()])
-        // agents live in the sessions partition now; legacy saves embed them in main
-        const merged: Partial<PersistedState> = { ...main, agents: sessionAgents ?? main.agents }
-        if (Object.keys(main).length || merged.agents?.length) hydrateFrom(merged)
+        const { merged, usedBackup } = await loadSnapshot()
+        if (usedBackup) dispatch(s => ({ ...s, toast: 'Restored from backup — the main state file was unreadable' }))
+        // start-fresh unless there is something worth restoring
+        if (Object.keys(merged).some(k => k !== 'agents') || merged.agents?.length) hydrateFrom(merged)
       } catch (e) {
         console.error('[yaam] hydration failed — starting fresh:', e)
         dispatch(s => ({ ...s, toast: 'Saved state was unreadable — starting fresh' }))
