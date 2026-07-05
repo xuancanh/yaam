@@ -462,6 +462,29 @@ RULES
 - Keep replies concise markdown. Reference files as \`path:line\`. When a skill is relevant to the request, load it before answering.${persona?.trim() ? `\n\nPERSONA (set by the user for this agent type)\n${persona.trim()}` : ''}`
 }
 
+/** Replace image blocks in the history with text placeholders (for models
+ *  without vision, whose APIs reject multimodal content outright). Returns
+ *  true when anything was stripped; all-text arrays flatten back to strings. */
+export function stripImagesFromHistory(history: ApiMessage[]): boolean {
+  let stripped = false
+  for (let i = 0; i < history.length; i++) {
+    const m = history[i]
+    if (!Array.isArray(m.content)) continue
+    const blocks = m.content as ApiContentBlock[]
+    if (!blocks.some(b => b.type === 'image')) continue
+    stripped = true
+    const replaced = blocks.map(b => b.type === 'image'
+      ? { type: 'text', text: '[attached image omitted — this model does not accept images]' }
+      : b)
+    const allText = replaced.every(b => b.type === 'text')
+    history[i] = {
+      ...m,
+      content: allText ? replaced.map(b => b.text ?? '').join('\n\n') : replaced,
+    }
+  }
+  return stripped
+}
+
 /**
  * One chat turn. `history` is the session's persistent API conversation
  * (mutated in place, capped). Tool traces and the final reply stream through
@@ -492,8 +515,23 @@ export async function runChatTurn(
   for (let i = 0; i < 24; i++) {
     const agent = getAgent()
     if (!agent) return
-    const res = await callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory), history, tools,
+    const stream = () => callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory), history, tools,
       (d, ch) => onEvent({ kind: ch === 'thinking' ? 'thinking' : 'delta', text: d }), signal)
+    let res: Awaited<ReturnType<typeof callApiStream>>
+    try {
+      res = await stream()
+    } catch (e) {
+      // models without vision reject multimodal content outright (e.g.
+      // "unknown variant `image_url`, expected `text`") — swap the images for
+      // text notes and retry once instead of failing the whole turn
+      const msg = e instanceof Error ? e.message : String(e)
+      if (/image/i.test(msg) && stripImagesFromHistory(history)) {
+        onEvent({ kind: 'tool', text: 'this model rejected image input — retrying with images omitted' })
+        res = await stream()
+      } else {
+        throw e
+      }
+    }
     if (res.stop_reason !== 'tool_use') {
       const text = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
       history.push({ role: 'assistant', content: text || '(ok)' })

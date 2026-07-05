@@ -401,6 +401,8 @@ export interface OrchestrationSettings {
   sidebarWidth?: number
   /** Master chat panel collapsed to a slim rail */
   sidebarHidden?: boolean
+  /** Chat view conversation-list width (px, drag-resizable) */
+  chatListWidth?: number
 }
 
 export type BoardCol = 'backlog' | 'progress' | 'review' | 'done' | 'failed'

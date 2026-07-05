@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { chatSearch, isTauri, pickFolder } from '../../core/native'
 import type { ChatSearchHit } from '../../core/native'
@@ -147,8 +148,26 @@ function MemoryEditor({ workspaceId, onClose }: { workspaceId: string; onClose: 
 }
 
 export function ChatView() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId, activeWorkspace: x.activeWorkspace }), shallowEqual)
-  const { openChat, deleteSession, renameSession, setChatPermMode } = useActions()
+  const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId, activeWorkspace: x.activeWorkspace, settings: x.settings }), shallowEqual)
+  const { openChat, deleteSession, renameSession, setChatPermMode, updateSettings } = useActions()
+  // drag-resizable conversation list (persisted like the Master sidebar)
+  const listWidth = Math.max(220, Math.min(520, s.settings.chatListWidth ?? 300))
+  const startListResize = (e: ReactPointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = listWidth
+    const move = (ev: PointerEvent) => {
+      updateSettings({ chatListWidth: Math.max(220, Math.min(520, startW + ev.clientX - startX)) })
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      document.body.style.cursor = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<ChatSearchHit[] | null>(null)
   const [creating, setCreating] = useState(false)
@@ -194,7 +213,12 @@ export function ChatView() {
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-      <div style={{ width: 300, flexShrink: 0, borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--panel)' }}>
+      <div style={{ width: listWidth, flexShrink: 0, borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--panel)', position: 'relative' }}>
+        <div
+          onPointerDown={startListResize}
+          title="Drag to resize"
+          style={{ position: 'absolute', top: 0, right: -3, bottom: 0, width: 7, cursor: 'col-resize', zIndex: 5 }}
+        />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px 8px' }}>
           <span className="grotesk" style={{ fontSize: 14.5, fontWeight: 600, flex: 1 }}>Chats</span>
           <button

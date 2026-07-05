@@ -139,27 +139,41 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove }: { m: ChatMsg; l
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1200)
   }
+  // ChatGPT-style: only the USER's messages are bubbles; the assistant's
+  // replies flow full-width on the page background like a document
+  if (user) {
+    return (
+      <div
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{ display: 'flex', flexShrink: 0, alignItems: 'flex-end', gap: 4, justifyContent: 'flex-end', padding: '0 4px' }}
+      >
+        {hover && <HoverBtn title={copied ? 'Copied!' : 'Copy message'} paths={COPY_IC} onClick={copy} />}
+        <div style={{
+          maxWidth: '78%', minWidth: 0, borderRadius: 14, padding: 'var(--bubble-pad)', fontSize: 'var(--chat-font)', lineHeight: 1.55,
+          background: hexToRgba(ACCENT, 0.13),
+          border: `1px solid ${hexToRgba(ACCENT, 0.28)}`,
+          color: 'var(--text)', overflowWrap: 'break-word',
+        }}>
+          <Markdown text={m.text} />
+        </div>
+      </div>
+    )
+  }
   return (
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      style={{ display: 'flex', flexShrink: 0, alignItems: 'flex-end', gap: 4, justifyContent: user ? 'flex-end' : 'flex-start', padding: '0 4px' }}
+      style={{ flexShrink: 0, minWidth: 0, padding: '2px 4px', animation: 'cfade .18s ease-out both' }}
     >
-      {user && hover && <HoverBtn title="Copy message" paths={COPY_IC} onClick={copy} />}
-      <div style={{
-        maxWidth: '88%', minWidth: 0, borderRadius: 11, padding: 'var(--bubble-pad)', fontSize: 'var(--chat-font)', lineHeight: 1.55,
-        background: user ? hexToRgba(ACCENT, 0.13) : 'var(--panel2)',
-        border: `1px solid ${user ? hexToRgba(ACCENT, 0.28) : 'var(--line2)'}`,
-        color: 'var(--text)', overflowWrap: 'break-word',
-      }}>
+      <div style={{ fontSize: 'var(--chat-font)', lineHeight: 1.6, color: 'var(--text)', overflowWrap: 'break-word' }}>
         <Markdown text={m.text} />
+        {live && <span className="stream-caret" />}
       </div>
-      {!user && hover && (
-        <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-          <HoverBtn title={copied ? 'Copied!' : 'Copy message'} paths={COPY_IC} onClick={copy} />
-          {canRetry && onRetry && <HoverBtn title="Retry — regenerate from the last message" paths={RETRY_IC} onClick={onRetry} />}
-        </div>
-      )}
+      <div style={{ display: 'flex', gap: 2, marginTop: 4, height: 22, opacity: hover && !live ? 1 : 0, transition: 'opacity .12s' }}>
+        <HoverBtn title={copied ? 'Copied!' : 'Copy message'} paths={COPY_IC} onClick={copy} />
+        {canRetry && onRetry && <HoverBtn title="Retry — regenerate from the last message" paths={RETRY_IC} onClick={onRetry} />}
+      </div>
     </div>
   )
 }
@@ -339,26 +353,30 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg2)' }}>
-      <div ref={scrollRef} style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '14px 10px', display: 'flex', flexDirection: 'column', gap: 'var(--chat-gap)' }}>
-        {log.map((m, i) => (
-          <Bubble
-            key={m.id}
-            m={m}
-            live={busy && i === log.length - 1}
-            canRetry={m.id === lastAssistantId && hasUserMsg}
-            onRetry={() => retryChat(agent.id)}
-            busy={busy}
-            onApprove={(msgId, ok) => approveChatTool(agent.id, msgId, ok)}
-          />
-        ))}
-        {busy && (
-          <div style={{ display: 'flex', flexShrink: 0, alignItems: 'center', gap: 8, padding: '2px 10px' }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', animation: 'cpulse 0.9s ease-in-out infinite' }} />
-            <span style={{ fontSize: 11.5, color: 'var(--mut)' }}>working…</span>
-          </div>
-        )}
+      <div ref={scrollRef} style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '16px 36px' }}>
+        {/* ChatGPT-style readable column: content centered at a comfortable width */}
+        <div style={{ maxWidth: 860, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--chat-gap)' }}>
+          {log.map((m, i) => (
+            <Bubble
+              key={m.id}
+              m={m}
+              live={busy && i === log.length - 1}
+              canRetry={m.id === lastAssistantId && hasUserMsg}
+              onRetry={() => retryChat(agent.id)}
+              busy={busy}
+              onApprove={(msgId, ok) => approveChatTool(agent.id, msgId, ok)}
+            />
+          ))}
+          {busy && log[log.length - 1]?.role !== 'assistant' && (
+            <div style={{ display: 'flex', flexShrink: 0, alignItems: 'center', gap: 9, padding: '4px 4px' }}>
+              <span className="typing-dots"><span /><span /><span /></span>
+              <span style={{ fontSize: 11.5, color: 'var(--mut)' }}>working…</span>
+            </div>
+          )}
+        </div>
       </div>
-      <div style={{ borderTop: '1px solid var(--line)', padding: '10px 12px', flexShrink: 0 }}>
+      <div style={{ borderTop: '1px solid var(--line)', padding: '10px 36px', flexShrink: 0 }}>
+        <div style={{ maxWidth: 860, margin: '0 auto' }}>
         {queue.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 7 }}>
             {queue.map((q, i) => (
@@ -456,6 +474,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
               </button>
             )}
           </div>
+        </div>
         </div>
       </div>
     </div>
