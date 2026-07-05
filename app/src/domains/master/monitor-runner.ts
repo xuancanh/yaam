@@ -16,9 +16,9 @@ import { isAbortError } from '../../core/abort-registry'
 export interface MonitorCtx {
   stateRef: MutableRefObject<AppState>
   dispatch: (f: (s: AppState) => AppState) => void
-  histories: MutableRefObject<Map<string, ApiMessage[]>>
-  busy: MutableRefObject<Set<string>>
-  queue: MutableRefObject<Map<string, string>>
+  histories: Map<string, ApiMessage[]>
+  busy: Set<string>
+  queue: Map<string, string>
   /** per-session cancellation — aborted when the session is disposed */
   aborts: AbortRegistry
   applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
@@ -32,11 +32,11 @@ export interface MonitorCtx {
 export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) {
   const st = ctx.stateRef.current.settings
   if (!(st.masterEnabled && hasCreds(st) && st.followMode)) return
-  if (ctx.busy.current.has(id)) {
-    ctx.queue.current.set(id, note)
+  if (ctx.busy.has(id)) {
+    ctx.queue.set(id, note)
     return
   }
-  ctx.busy.current.add(id)
+  ctx.busy.add(id)
   try {
     let pending: string | undefined = note
     while (pending !== undefined) {
@@ -44,10 +44,10 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
       pending = undefined
       const agent = ctx.stateRef.current.agents.find(a => a.id === id)
       if (!agent) break
-      let history = ctx.histories.current.get(id)
+      let history = ctx.histories.get(id)
       if (!history) {
         history = []
-        ctx.histories.current.set(id, history)
+        ctx.histories.set(id, history)
       }
       const exec: MonitorExec = {
         updateStatus: (task, summary, actionNeeded) => {
@@ -83,11 +83,11 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
         if (isAbortError(e) || ctx.aborts.signal(id).aborted) { pending = undefined; break }
         ctx.logEvent('escalate', id, `Monitor error: ${e instanceof Error ? e.message : String(e)}`)
       }
-      pending = ctx.queue.current.get(id)
-      ctx.queue.current.delete(id)
+      pending = ctx.queue.get(id)
+      ctx.queue.delete(id)
     }
   } finally {
-    ctx.busy.current.delete(id)
+    ctx.busy.delete(id)
     ctx.aborts.clear(id)
   }
 }

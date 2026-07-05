@@ -12,7 +12,8 @@ import { runAddonAgentTurn } from './domains/addons/addon-agent'
 import type { AddonApi } from './core/addons'
 import { ActionsCtx } from './core/context'
 import { dispatch, useAppStore } from './core/store'
-import { runMonitorLoop } from './domains/master/monitor-runner'
+import { createMonitorRuntime } from './domains/master/monitor-runtime'
+import type { MonitorRuntime } from './domains/master/monitor-runtime'
 import { runWatcherLoop } from './domains/board/watcher-runner'
 import { runChatMessageTurn } from './domains/chat/runner'
 import { runMasterLoop } from './domains/master/runner'
@@ -121,22 +122,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const toolApprovalsRef = useRef<Set<string>>(new Set())
 
   // shared by Master's update_agent_status tool and the per-session monitors
-  // Per-session monitor LLMs: private history + serialized turns per session.
-  // They digest terminal output locally; Master only sees report_to_master.
-  const monitorHistories = useRef<Map<string, ApiMessage[]>>(new Map())
-  const monitorBusy = useRef<Set<string>>(new Set())
-  const monitorQueue = useRef<Map<string, string>>(new Map())
-  // per-session cancellation for in-flight monitor turns (aborted on dispose)
-  const monitorAborts = useRef(new AbortRegistry())
-
-  // Serialize private monitor turns per session (loop body in store/monitor-runner).
-  const runMonitor = useCallback((id: string, note: string) => runMonitorLoop({
-    stateRef, dispatch, histories: monitorHistories, busy: monitorBusy, queue: monitorQueue,
-    aborts: monitorAborts.current,
-    applyAgentStatus, setNeedsInput, logEvent, notify,
-    masterEvent: (n, a) => masterEventRef.current(n, a),
-  }, id, note), [applyAgentStatus, logEvent, notify, setNeedsInput])
-
+  // Per-session monitor LLMs: the runtime owns their private history/busy/queue/
+  // cancellation registries and disposal (domains/master/monitor-runtime).
+  const monitorRef = useRef<MonitorRuntime>(undefined)
+  if (!monitorRef.current) {
+    monitorRef.current = createMonitorRuntime({
+      stateRef, dispatch, applyAgentStatus, setNeedsInput, logEvent, notify,
+      masterEvent: (n, a) => masterEventRef.current(n, a),
+    })
+  }
+  const runMonitor = monitorRef.current.run
   monitorEventRef.current = (id, note) => runMonitor(id, note)
 
   // ---- per-task watcher: a mini Master owning one kanban task ----
@@ -332,11 +327,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const disposeSessionRuntime = useCallback((id: string) => {
     disposeTerminal(id)
     disposeSettle(id)
-    monitorAborts.current.abort(id) // cancel any in-flight monitor turn for this session
+    monitorRef.current!.dispose(id) // cancel in-flight monitor turn + drop its registries
     chatAborts.current.abort(id) // cancel any in-flight chat reply for this session
-    monitorHistories.current.delete(id)
-    monitorBusy.current.delete(id)
-    monitorQueue.current.delete(id)
     chatHistories.current.delete(id)
     chatBusy.current.delete(id)
     taskSessionsRef.current.delete(id)
