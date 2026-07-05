@@ -9,8 +9,6 @@ import { ACCENT, defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, 
 import * as native from './native'
 import { buildCfg, hasCreds, runMasterTurn } from './master'
 import type { ApiMessage, MasterExec } from './master'
-import { runMonitorTurn } from './monitor'
-import type { MonitorExec } from './monitor'
 import { draftTaskSpec, runWatcherTurn } from './llm/watcher'
 import type { TaskSpecDraft, WatcherExec } from './llm/watcher'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './terminals'
@@ -27,6 +25,7 @@ import type { McpSession } from './mcp'
 import { estimateLogUsage, estimateOutputUsage } from './usage'
 import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
+import { runMonitorLoop } from './store/monitor-runner'
 import { reducer, withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './store/task-state'
 import type { LocatedTask } from './store/task-state'
@@ -347,66 +346,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const monitorBusy = useRef<Set<string>>(new Set())
   const monitorQueue = useRef<Map<string, string>>(new Map())
 
-  // Serialize private monitor turns per session and cap their retained history.
-  const runMonitor = useCallback(async (id: string, note: string) => {
-    const st = stateRef.current.settings
-    if (!(st.masterEnabled && hasCreds(st) && st.followMode)) return
-    if (monitorBusy.current.has(id)) {
-      monitorQueue.current.set(id, note)
-      return
-    }
-    monitorBusy.current.add(id)
-    try {
-      let pending: string | undefined = note
-      while (pending !== undefined) {
-        const current = pending
-        pending = undefined
-        const agent = stateRef.current.agents.find(a => a.id === id)
-        if (!agent) break
-        let history = monitorHistories.current.get(id)
-        if (!history) {
-          history = []
-          monitorHistories.current.set(id, history)
-        }
-        const exec: MonitorExec = {
-          updateStatus: (task, summary, actionNeeded) => {
-            applyAgentStatus(id, task, summary, actionNeeded)
-            return 'status updated'
-          },
-          flagNeedsInput: question => {
-            const screen = isAltScreen(id) ? readScreen(id) : (stateRef.current.agents.find(a => a.id === id)?.log ?? []).slice(-14).map(l => l.x)
-            const { options, cursorNum } = extractOptions(screen)
-            setNeedsInput(id, question || 'waiting for input', options, cursorNum)
-            return 'flagged as needing input'
-          },
-          reportToMaster: (digest, importance) => {
-            const a = stateRef.current.agents.find(x => x.id === id)
-            dispatch(s2 => ({
-              ...s2,
-              agents: s2.agents.map(x => (x.id === id ? { ...x, attention: true } : x)),
-            }))
-            logEvent(importance === 'info' ? 'done' : 'escalate', id, `Monitor: ${digest.slice(0, 96)}`)
-            if (importance === 'critical' && a) notify('escalate', `${a.name} needs attention`, digest.slice(0, 90), id)
-            masterEventRef.current(
-              `[monitor report · ${importance}] session "${a?.name ?? id}" (${id}): ${digest}\n\n` +
-              'This came from the session\'s dedicated monitor. Relay it to the user in 1-2 sentences ending with "Next action:", and act with your tools if needed.',
-              id,
-            )
-            return 'reported to Master'
-          },
-        }
-        try {
-          await runMonitorTurn(buildCfg(st, st.monitorModel || undefined), agent, current, history, exec)
-        } catch (e) {
-          logEvent('escalate', id, `Monitor error: ${e instanceof Error ? e.message : String(e)}`)
-        }
-        pending = monitorQueue.current.get(id)
-        monitorQueue.current.delete(id)
-      }
-    } finally {
-      monitorBusy.current.delete(id)
-    }
-  }, [applyAgentStatus, logEvent, notify, setNeedsInput])
+  // Serialize private monitor turns per session (loop body in store/monitor-runner).
+  const runMonitor = useCallback((id: string, note: string) => runMonitorLoop({
+    stateRef, dispatch, histories: monitorHistories, busy: monitorBusy, queue: monitorQueue,
+    applyAgentStatus, setNeedsInput, logEvent, notify,
+    masterEvent: (n, a) => masterEventRef.current(n, a),
+  }, id, note), [applyAgentStatus, logEvent, notify, setNeedsInput])
 
   monitorEventRef.current = (id, note) => runMonitor(id, note)
 
