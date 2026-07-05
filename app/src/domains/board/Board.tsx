@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DragEvent, KeyboardEvent } from 'react'
-import { useActions, useConductor } from '../store'
-import { ACCENT, hexToRgba } from '../data'
-import type { Agent, BoardCol, BoardTask, TaskChatMsg } from '../types'
-import { IC, Icon, ViewHeader } from './ui'
-import { Markdown } from './Markdown'
+import { useActions, useConductor } from '../../store'
+import { ACCENT, hexToRgba } from '../../data'
+import type { Agent, BoardCol, BoardTask, TaskChatMsg } from '../../types'
+import { IC, Icon, ViewHeader } from '../../components/ui'
+import { Markdown } from '../../components/Markdown'
 import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from './TaskSpecForm'
 
 const FIELD = {

@@ -3,13 +3,13 @@
 // the user in the task thread. Extracted from the provider; operates on the
 // stable refs/callbacks in `ctx`.
 import type { MutableRefObject } from 'react'
-import type { Agent, AppState, BoardCol, EventType, NotifKind, TaskChatMsg } from '../types'
-import type { ApiMessage } from '../master'
-import { buildCfg, hasCreds } from '../master'
-import { runWatcherTurn } from '../llm/watcher'
-import type { WatcherExec } from '../llm/watcher'
-import { isAltScreen, readScreen } from '../terminals'
-import { sendLineToSession } from '../state-lib'
+import type { Agent, AppState, BoardCol, EventType, NotifKind, TaskChatMsg } from '../../types'
+import type { ApiMessage } from '../../master'
+import { buildCfg, hasCreds } from '../../master'
+import { runWatcherTurn } from './watcher'
+import type { WatcherExec } from './watcher'
+import { isAltScreen, readScreen } from '../../terminals'
+import { sendLineToSession } from '../../state-lib'
 import { findTaskInState, updateLocatedTask } from './task-state'
 
 export interface WatcherCtx {

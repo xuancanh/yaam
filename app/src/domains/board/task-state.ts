@@ -1,7 +1,7 @@
 // Pure task-location helpers: board tasks live in the flat active-workspace
 // slice OR in a background workspace's `workspaceData` slice, so locating and
 // updating one means searching both. No React, no side effects.
-import type { AppState, BoardTask } from '../types'
+import type { AppState, BoardTask } from '../../types'
 
 export interface LocatedTask {
   task: BoardTask

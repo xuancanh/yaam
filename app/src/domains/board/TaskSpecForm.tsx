@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useActions, useConductor } from '../store'
-import { isTauri, pickFolder } from '../native'
+import { useActions, useConductor } from '../../store'
+import { isTauri, pickFolder } from '../../native'
 
 // Shared task-spec editor: the SAME fields, AI drafting, and reject-with-
 // questions gate everywhere a task can be created (board "New task" dialog,
