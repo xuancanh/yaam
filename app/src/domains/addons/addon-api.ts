@@ -192,11 +192,17 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
         }))
         return `schedule "${name}" created`
       },
-      toggle: (name, on) => dispatch(s2 => ({
-        ...s2,
-        crons: s2.crons.map(c => (c.name === name ? { ...c, on: typeof on === 'boolean' ? on : !c.on } : c)),
-      })),
-      remove: name => dispatch(s2 => ({ ...s2, crons: s2.crons.filter(c => c.name !== name) })),
+      toggle: (name, on) => {
+        // schedules are keyed by id in the command; resolve the (unique) name
+        const c = stateRef.current.crons.find(x => x.name === name)
+        if (c && ctx.execCommand) ctx.execCommand('toggle_schedule', { id: c.id, on: typeof on === 'boolean' ? on : undefined }, addonId)
+        else dispatch(s2 => ({ ...s2, crons: s2.crons.map(x => (x.name === name ? { ...x, on: typeof on === 'boolean' ? on : !x.on } : x)) }))
+      },
+      remove: name => {
+        const c = stateRef.current.crons.find(x => x.name === name)
+        if (c && ctx.execCommand) ctx.execCommand('remove_schedule', { id: c.id }, addonId)
+        else dispatch(s2 => ({ ...s2, crons: s2.crons.filter(x => x.name !== name) }))
+      },
     },
     agent: {
       wake: note => ctx.wakeAgent(addonId, String(note)),
