@@ -10,7 +10,7 @@ import * as native from '../../core/native'
 import { dispatchAddonRpc, exportAddonPackage, loadAddonFolder } from '../../core/addons'
 import type { AddonApi } from '../../core/addons'
 import { generateAddonPackage } from './addon-gen'
-import type { ConductorActions } from '../../store'
+import type { ConductorActions } from '../../app/actions'
 
 export interface AddonsActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void

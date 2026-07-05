@@ -9,7 +9,7 @@ import { buildCfg, hasCreds } from '../../master'
 import { mkId } from '../../core/state-lib'
 import * as native from '../../core/native'
 import { draftTaskSpec } from './watcher'
-import type { ConductorActions } from '../../store'
+import type { ConductorActions } from '../../app/actions'
 
 export interface BoardActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void

@@ -3,7 +3,7 @@
 // ../store for existing imports.
 import { useCallback, useContext, useRef, useSyncExternalStore } from 'react'
 import type { AppState } from '../core/types'
-import type { ConductorActions } from '../store'
+import type { ConductorActions } from '../app/actions'
 import { useAppStore } from '../core/store'
 import { ActionsCtx } from '../core/context'
 

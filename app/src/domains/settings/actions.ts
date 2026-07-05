@@ -9,7 +9,7 @@ import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import { mkId } from '../../core/state-lib'
 import { PERM_ORDER } from '../../core/data'
-import type { ConductorActions } from '../../store'
+import type { ConductorActions } from '../../app/actions'
 
 export interface SettingsActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void

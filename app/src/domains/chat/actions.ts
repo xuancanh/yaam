@@ -6,7 +6,7 @@ import type { MutableRefObject } from 'react'
 import type { Agent, AppState, EventType } from '../../core/types'
 import { mkId } from '../../core/state-lib'
 import { defaultDetail, mkMemory, mkTools } from '../../core/data'
-import type { ConductorActions } from '../../store'
+import type { ConductorActions } from '../../app/actions'
 
 export interface ChatActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void

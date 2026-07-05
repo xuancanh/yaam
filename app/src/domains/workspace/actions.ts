@@ -7,7 +7,7 @@ import type { AppState } from '../../core/types'
 import { mkId, switchWorkspaceIn } from '../../core/state-lib'
 import { MASTER_GREETING } from '../../core/data'
 import * as native from '../../core/native'
-import type { ConductorActions } from '../../store'
+import type { ConductorActions } from '../../app/actions'
 
 export interface WorkspaceActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void

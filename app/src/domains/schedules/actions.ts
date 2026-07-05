@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import type { AppState, EventType } from '../../core/types'
 import { mkId } from '../../core/state-lib'
-import type { ConductorActions } from '../../store'
+import type { ConductorActions } from '../../app/actions'
 
 export interface SchedulesActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void

@@ -5,7 +5,7 @@
 import { useMemo } from 'react'
 import { dispatch } from '../../core/store'
 import { focusSessionIn } from '../../core/state-lib'
-import type { ConductorActions } from '../../store'
+import type { ConductorActions } from '../../app/actions'
 
 type ShellActions = Pick<ConductorActions,
   | 'setView' | 'openPalette' | 'closePalette' | 'setPaletteQuery'
