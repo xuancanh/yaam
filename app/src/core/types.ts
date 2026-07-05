@@ -411,6 +411,10 @@ export interface OrchestrationSettings {
   /** optional public base URL (Cloudflare Tunnel, Tailscale MagicDNS, …) shown
    *  as the connect link instead of the raw interface IPs */
   remotePublicUrl?: string
+  /** persisted URL token — connect links survive restarts; editable */
+  remoteToken?: string
+  /** mint a fresh URL token on every server start instead of persisting one */
+  remoteTokenRotate?: boolean
 }
 
 export type BoardCol = 'backlog' | 'progress' | 'review' | 'done' | 'failed'

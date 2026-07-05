@@ -38,10 +38,11 @@ export interface RemotePairedDevice {
   at: number
 }
 
-/** Start (or return the already-running) companion server. */
-export async function remoteStart(port?: number): Promise<RemoteInfo> {
+/** Start (or return the already-running) companion server. `token` is the
+ *  persisted URL token so links survive restarts; omit to mint a fresh one. */
+export async function remoteStart(port?: number, token?: string): Promise<RemoteInfo> {
   if (!isTauri) throw new Error('the remote companion requires the desktop app')
-  return await invoke<RemoteInfo>('remote_start', { port: port ?? null })
+  return await invoke<RemoteInfo>('remote_start', { port: port ?? null, token: token ?? null })
 }
 
 export async function remoteStop(): Promise<void> {

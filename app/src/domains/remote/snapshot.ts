@@ -35,8 +35,11 @@ export interface RemoteSnapshot {
     cost: number
     kind: string
     repo: string
-    /** last plain terminal lines, for the mobile session view */
-    screen: string[]
+    /** serialized ANSI terminal buffer (xterm serialize addon) — the mobile
+     *  app replays it into its own xterm for pixel-faithful rendering */
+    term: string
+    /** source terminal width, so the replay uses the same column count */
+    cols: number
   }[]
   tasks: {
     id: string
@@ -58,7 +61,6 @@ export interface RemoteSnapshot {
 }
 
 const MSG_CAP = 30
-const SCREEN_CAP = 40
 const TASK_CAP = 60
 const TEXT_CAP = 4000
 
@@ -66,8 +68,11 @@ const clip = (s: string) => (s.length > TEXT_CAP ? `${s.slice(0, TEXT_CAP)}…` 
 
 export function buildRemoteSnapshot(
   s: AppState,
-  readScreen: (id: string) => string[] = () => [],
+  readTerm: (id: string) => { data: string; cols: number } = () => ({ data: '', cols: 80 }),
 ): RemoteSnapshot {
+  // scope to the ACTIVE workspace — tasks already are (workspaceData holds the
+  // rest), and showing a different world than the desktop reads as "not synced"
+  const live = s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
   const approvals: RemoteApproval[] = s.pendingToolApprovals.map(pa => ({
     kind: 'master' as const,
     id: pa.id,
@@ -75,8 +80,7 @@ export function buildRemoteSnapshot(
     label: `Master wants "${pa.toolId}"`,
     detail: 'Ask-first tool call from the Master agent.',
   }))
-  for (const a of s.agents) {
-    if (a.archived) continue
+  for (const a of live) {
     for (const m of a.chatLog ?? []) {
       if (m.approval === 'pending') {
         approvals.push({
@@ -89,7 +93,6 @@ export function buildRemoteSnapshot(
       }
     }
   }
-  const live = s.agents.filter(a => !a.archived)
   return {
     ts: Date.now(),
     workspace: s.workspaces.find(w => w.id === s.activeWorkspace)?.name ?? 'yaam',
@@ -105,7 +108,7 @@ export function buildRemoteSnapshot(
         cost: a.cost,
         kind: a.kind ?? 'real',
         repo: a.repo,
-        screen: readScreen(a.id).slice(-SCREEN_CAP),
+        ...(() => { const t = readTerm(a.id); return { term: t.data, cols: t.cols } })(),
       })),
     tasks: s.tasks
       .filter(t => !t.archived)

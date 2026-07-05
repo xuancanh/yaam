@@ -101,6 +101,11 @@ export async function pairingStatus(): Promise<'pending' | 'paired' | 'unknown'>
   return (res.status as 'pending' | 'paired' | 'unknown') ?? 'unknown'
 }
 
+/** SSE stream URL for live snapshot pushes. */
+export function streamUrl(): string {
+  return apiUrl('/api/stream', { d: deviceToken() })
+}
+
 export async function fetchState(): Promise<RemoteSnapshot> {
   return await getJson<RemoteSnapshot>('/api/state', { d: deviceToken() })
 }

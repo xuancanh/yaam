@@ -3,12 +3,15 @@
 // session-data listener; keystrokes go straight back to the PTY.
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import '@xterm/xterm/css/xterm.css'
 import { onSessionData, resizeSession, writeSession } from './native'
 
 interface Entry {
   term: Terminal
   fit: FitAddon
+  /** lazily loaded — only when something (the mobile companion) serializes */
+  serializer?: SerializeAddon
   onPlainLine: ((line: string) => void) | null
   onUserInput: (() => void) | null
   /** Enter pressed — the user submitted something to the session */
@@ -160,6 +163,23 @@ export function readScreen(id: string, maxRows = 30): string[] {
 /** Report whether the session is showing a full-screen TUI buffer. */
 export function isAltScreen(id: string): boolean {
   return entries.get(id)?.term.buffer.active.type === 'alternate'
+}
+
+/** Serialize a session's terminal buffer to ANSI text (colors, layout, and a
+ *  bounded scrollback intact) so another xterm — the mobile companion's — can
+ *  replay it pixel-faithfully. Empty string when the terminal doesn't exist. */
+export function serializeScreen(id: string, scrollback = 80): string {
+  const entry = entries.get(id)
+  if (!entry) return ''
+  if (!entry.serializer) {
+    entry.serializer = new SerializeAddon()
+    entry.term.loadAddon(entry.serializer)
+  }
+  try {
+    return entry.serializer.serialize({ scrollback })
+  } catch {
+    return ''
+  }
 }
 
 /** Current xterm dimensions, so a respawn can open its PTY at the pane's real

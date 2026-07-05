@@ -326,6 +326,36 @@ export function SettingsView() {
                     style={{ ...FIELD_STYLE, width: '100%', marginTop: 8 }}
                   />
                 )}
+                {s.settings.remoteEnabled && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                    <input
+                      key={s.settings.remoteToken ?? ''}
+                      className="mono"
+                      defaultValue={s.settings.remoteToken ?? ''}
+                      placeholder="URL token"
+                      disabled={s.settings.remoteTokenRotate === true}
+                      title="The token carried in connect links. Persisted across restarts so links keep working; edit it to invalidate every existing link."
+                      onBlur={e => { const v = e.target.value.trim(); if (v.length >= 8 && v !== s.settings.remoteToken) updateSettings({ remoteToken: v }) }}
+                      style={{ ...FIELD_STYLE, flex: 1, opacity: s.settings.remoteTokenRotate ? 0.5 : 1 }}
+                    />
+                    <button
+                      className="open-btn"
+                      title="Mint a new token now — existing connect links stop working"
+                      style={{ padding: '7px 11px', fontSize: 11.5, flexShrink: 0 }}
+                      onClick={() => updateSettings({ remoteToken: Array.from(crypto.getRandomValues(new Uint8Array(24)), b => (b % 36).toString(36)).join('') })}
+                    >
+                      ↻ Regenerate
+                    </button>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--mut)', flexShrink: 0, cursor: 'pointer' }} title="Mint a fresh token on every app start (links must be re-copied each time)">
+                      <input
+                        type="checkbox"
+                        checked={s.settings.remoteTokenRotate === true}
+                        onChange={e => updateSettings({ remoteTokenRotate: e.target.checked })}
+                      />
+                      Auto-rotate
+                    </label>
+                  </div>
+                )}
                 {(s.settings.remoteDevices ?? []).length > 0 && (
                   <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {(s.settings.remoteDevices ?? []).map(d => (

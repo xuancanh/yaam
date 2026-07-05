@@ -9,8 +9,57 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::Command;
 use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager, State};
+
+// ── remote terminal taps ─────────────────────────────────────────────────
+// Rust owns the PTY bytes, so multi-device terminal sync happens HERE: each
+// session keeps a bounded ring of recent raw output plus a broadcast channel.
+// The remote server replays the ring to a connecting device and then streams
+// live chunks — no desktop-webview round trip, so every screen stays in sync
+// even while the desktop UI is busy.
+
+const TAP_RING_CAP: usize = 200_000;
+const TAP_CHANNEL_CAP: usize = 512;
+
+struct SessionTap {
+    ring: std::collections::VecDeque<u8>,
+    tx: tokio::sync::broadcast::Sender<Vec<u8>>,
+}
+
+fn taps() -> &'static Mutex<HashMap<String, SessionTap>> {
+    static TAPS: OnceLock<Mutex<HashMap<String, SessionTap>>> = OnceLock::new();
+    TAPS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn tap_entry<'a>(map: &'a mut HashMap<String, SessionTap>, id: &str) -> &'a mut SessionTap {
+    map.entry(id.to_string()).or_insert_with(|| SessionTap {
+        ring: std::collections::VecDeque::new(),
+        tx: tokio::sync::broadcast::channel(TAP_CHANNEL_CAP).0,
+    })
+}
+
+pub(crate) fn tap_push(id: &str, bytes: &[u8]) {
+    let mut map = taps().lock().unwrap();
+    let tap = tap_entry(&mut map, id);
+    tap.ring.extend(bytes.iter().copied());
+    let excess = tap.ring.len().saturating_sub(TAP_RING_CAP);
+    if excess > 0 {
+        tap.ring.drain(..excess);
+    }
+    let _ = tap.tx.send(bytes.to_vec());
+}
+
+/// Ring backlog + live receiver for one session's raw terminal output.
+pub fn tap_subscribe(id: &str) -> (Vec<u8>, tokio::sync::broadcast::Receiver<Vec<u8>>) {
+    let mut map = taps().lock().unwrap();
+    let tap = tap_entry(&mut map, id);
+    (tap.ring.iter().copied().collect(), tap.tx.subscribe())
+}
+
+pub(crate) fn tap_remove(id: &str) {
+    taps().lock().unwrap().remove(id);
+}
 
 /// Resolve a shell name with the user's login PATH without interpolating it
 /// into shell code.
@@ -265,6 +314,8 @@ impl SessionManager {
             // queued into the same event. Exits when the reader drops its sender.
             while let Ok(first) = rx.recv() {
                 let (merged, _coalesced) = coalesce_output(first, &rx, OUTPUT_COALESCE_MAX_BYTES);
+                // tee raw bytes to remote subscribers (mobile companion terminals)
+                tap_push(&id_out, &merged);
                 let data = base64::engine::general_purpose::STANDARD.encode(&merged);
                 let _ = app_out.emit(
                     "session-data",
@@ -506,6 +557,9 @@ pub fn resize_session(
 #[tauri::command]
 pub fn kill_session(state: State<'_, SessionManager>, id: String) -> Result<(), String> {
     state.kill(&id);
+    // the ring stays through a plain exit (devices can still read the final
+    // screen); an explicit kill/delete drops it
+    tap_remove(&id);
     Ok(())
 }
 

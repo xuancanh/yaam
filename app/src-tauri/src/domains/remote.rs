@@ -8,12 +8,17 @@
 //! and applies through its normal action paths.
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
+use tokio_stream::wrappers::{BroadcastStream, WatchStream};
+use tokio_stream::StreamExt;
 
 /// One action the phone asks the desktop to perform. The desktop frontend
 /// routes it through the same conductor actions its own UI uses.
@@ -57,6 +62,8 @@ pub struct RemoteShared {
     commands: Mutex<Vec<RemoteCommand>>,
     devices: Mutex<HashMap<String, PairedDevice>>,
     pending: Mutex<Vec<PairRequest>>,
+    /// bumped on every publish — SSE subscribers wake and resend the snapshot
+    snap_tx: tokio::sync::watch::Sender<u64>,
 }
 
 impl Default for RemoteShared {
@@ -67,6 +74,7 @@ impl Default for RemoteShared {
             commands: Mutex::new(Vec::new()),
             devices: Mutex::new(HashMap::new()),
             pending: Mutex::new(Vec::new()),
+            snap_tx: tokio::sync::watch::channel(0).0,
         }
     }
 }
@@ -178,6 +186,9 @@ struct AuthQuery {
     d: String,
     #[serde(default)]
     device: String,
+    /// session id for the terminal byte stream
+    #[serde(default)]
+    id: String,
 }
 
 /// URL token only (pairing endpoints — possession of the QR/link).
@@ -261,6 +272,41 @@ async fn command(State(s): Shared, Query(q): Query<AuthQuery>, Json(cmd): Json<R
     (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
 }
 
+/// SSE: push the snapshot to every paired device the moment it is published —
+/// chat transcripts and the board stay in sync across devices without polling.
+async fn stream_state(
+    State(s): Shared,
+    Query(q): Query<AuthQuery>,
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, StatusCode> {
+    if !check_device(&s, &q) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let shared = s.clone();
+    let stream = WatchStream::new(s.snap_tx.subscribe()).map(move |_| {
+        let snap = shared.snapshot.lock().unwrap().clone();
+        Ok(Event::default().data(if snap.is_empty() { "{}".to_string() } else { snap }))
+    });
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+/// SSE: one session's RAW terminal bytes (base64 per event) — ring backlog
+/// first, then live chunks straight from the PTY reader thread. Rust owns the
+/// PTY, so remote terminals stay live even while the desktop webview is busy.
+async fn stream_term(
+    State(s): Shared,
+    Query(q): Query<AuthQuery>,
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, StatusCode> {
+    if !check_device(&s, &q) || q.id.is_empty() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let (backlog, rx) = crate::domains::session::tap_subscribe(&q.id);
+    let first = tokio_stream::once(Ok(Event::default().data(B64.encode(backlog))));
+    let live = BroadcastStream::new(rx)
+        .filter_map(|r| r.ok())
+        .map(|bytes| Ok(Event::default().data(B64.encode(bytes))));
+    Ok(Sse::new(first.chain(live)).keep_alive(KeepAlive::default()))
+}
+
 fn router(shared: Arc<RemoteShared>) -> Router {
     Router::new()
         .route("/", get(app_page))
@@ -268,6 +314,8 @@ fn router(shared: Arc<RemoteShared>) -> Router {
         .route("/api/pair/request", post(pair_request))
         .route("/api/pair/status", get(pair_status))
         .route("/api/state", get(state))
+        .route("/api/stream", get(stream_state))
+        .route("/api/term", get(stream_term))
         .route("/api/command", post(command))
         .fallback(get(app_page))
         .with_state(shared)
@@ -291,16 +339,24 @@ pub struct RemoteInfo {
 }
 
 #[tauri::command]
-pub fn remote_start(state: tauri::State<'_, RemoteManager>, port: Option<u16>) -> Result<RemoteInfo, String> {
+pub fn remote_start(state: tauri::State<'_, RemoteManager>, port: Option<u16>, token: Option<String>) -> Result<RemoteInfo, String> {
     let port = port.unwrap_or(8712);
     let mut stop_slot = state.stop.lock().unwrap();
+    // the frontend passes its persisted token so connect links survive
+    // restarts; None/short means "mint a fresh one" (first run or auto-rotate)
+    let wanted = token.filter(|t| t.len() >= 8);
     let token = {
         let mut t = state.shared.token.lock().unwrap();
-        if stop_slot.is_some() && !t.is_empty() {
-            t.clone() // already running — return the live token
-        } else {
-            *t = rand_token(24);
-            t.clone()
+        match wanted {
+            Some(w) => {
+                *t = w;
+                t.clone()
+            }
+            None if stop_slot.is_some() && !t.is_empty() => t.clone(), // already running
+            None => {
+                *t = rand_token(24);
+                t.clone()
+            }
         }
     };
     if stop_slot.is_none() {
@@ -358,6 +414,7 @@ pub fn remote_stop(state: tauri::State<'_, RemoteManager>) {
 #[tauri::command]
 pub fn remote_publish(state: tauri::State<'_, RemoteManager>, json: String) {
     *state.shared.snapshot.lock().unwrap() = json;
+    state.shared.snap_tx.send_modify(|v| *v = v.wrapping_add(1));
 }
 
 #[tauri::command]
@@ -408,7 +465,7 @@ mod tests {
     }
 
     fn q(t: &str, d: &str, device: &str) -> AuthQuery {
-        AuthQuery { t: t.into(), d: d.into(), device: device.into() }
+        AuthQuery { t: t.into(), d: d.into(), device: device.into(), id: String::new() }
     }
 
     #[test]

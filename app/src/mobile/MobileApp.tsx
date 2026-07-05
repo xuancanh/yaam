@@ -4,9 +4,10 @@
 // conductor actions.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Markdown } from '../components/Markdown'
+import { TerminalView } from './TerminalView'
 import type { RemoteSnapshot } from '../domains/remote/snapshot'
 import {
-  deviceToken, fetchState, forgetPairing, pairingStatus, ping, requestPairing, sendCommand, urlToken,
+  deviceToken, fetchState, forgetPairing, pairingStatus, ping, requestPairing, sendCommand, streamUrl, urlToken,
 } from './api'
 
 const POLL_MS = 2000
@@ -199,7 +200,7 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
         {s.summary && <div className="meta" style={{ whiteSpace: 'normal' }}>{s.summary}</div>}
         {s.actionNeeded && <div className="warn">⚠ {s.actionNeeded}</div>}
         <div className="section">TERMINAL</div>
-        <div className="screen">{s.screen.length ? s.screen.join('\n') : '(no output)'}</div>
+        <TerminalView sessionId={s.id} data={s.term} cols={s.cols} />
         <div className="btnrow">
           {live
             ? <button className="btn danger" onClick={() => void sendCommand({ kind: 'session_stop', id: s.id })}>Stop session</button>
@@ -346,12 +347,44 @@ export function MobileApp() {
           .then(s => { setSnap(s); setOnline(true) })
           .catch(e => {
             setOnline(false)
-            if (String(e).includes('403')) { forgetPairing(); setPairing('unpaired'); setSnap(null) }
+            if (!String(e).includes('403')) return
+            // a 403 is NOT automatically a lost pairing — the desktop may have
+            // restarted with a rotated URL token. Drop the device token only
+            // when the server explicitly no longer knows this device.
+            void pairingStatus()
+              .then(st => {
+                if (st === 'unknown') { forgetPairing(); setPairing('unpaired'); setSnap(null) }
+              })
+              .catch(() => setPairing('bad-token')) // stale link — pairing kept
           })
       }
-      tick()
-      const iv = setInterval(tick, POLL_MS)
-      return () => clearInterval(iv)
+      // prefer SSE (the server pushes on every publish — chats/tasks stream
+      // live); fall back to polling when the stream can't be established
+      let es: EventSource | null = null
+      let iv: ReturnType<typeof setInterval> | null = null
+      const startPolling = () => {
+        if (iv) return
+        tick()
+        iv = setInterval(tick, POLL_MS)
+      }
+      try {
+        es = new EventSource(streamUrl())
+        es.onmessage = e => {
+          try { setSnap(JSON.parse(String(e.data)) as RemoteSnapshot); setOnline(true) } catch { /* partial frame */ }
+        }
+        es.onerror = () => {
+          es?.close()
+          es = null
+          startPolling()
+        }
+        tick() // immediate first paint while the stream connects
+      } catch {
+        startPolling()
+      }
+      return () => {
+        es?.close()
+        if (iv) clearInterval(iv)
+      }
     }
   }, [pairing])
 

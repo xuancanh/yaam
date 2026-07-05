@@ -33,6 +33,7 @@ describe('buildRemoteSnapshot', () => {
         agent({ id: 'a1', task: 'auth refactor', summary: 'tests green', actionNeeded: 'review PR' }),
         agent({ id: 'a2', name: 'helper', kind: 'chat', chatLog, chatModel: 'sonnet-4' }),
         agent({ id: 'a3', archived: true }),
+        agent({ id: 'a4', name: 'elsewhere', workspaceId: 'w2' }),
       ],
       tasks: [
         task({ id: 't1', col: 'review', watcherNote: 'awaiting review', awaitingUser: true, chat: taskChat, description: 'desc', criteria: ['c1'] }),
@@ -41,12 +42,13 @@ describe('buildRemoteSnapshot', () => {
       ],
       pendingToolApprovals: [{ id: 'ap1', toolId: 'run_shell' }],
     })
-    const snap = buildRemoteSnapshot(s, id => (id === 'a1' ? ['$ npm test', 'ok'] : []))
+    const snap = buildRemoteSnapshot(s, id => (id === 'a1' ? { data: '\x1b[32m$ npm test\x1b[0m ok', cols: 190 } : { data: '', cols: 80 }))
 
     expect(snap.workspace).toBe('acme')
     // sessions: real agents only, with their terminal tail; archived excluded
-    expect(snap.sessions.map(x => x.id)).toEqual(['a1'])
-    expect(snap.sessions[0]).toMatchObject({ task: 'auth refactor', cost: 1.25, screen: ['$ npm test', 'ok'] })
+    expect(snap.sessions.map(x => x.id)).toEqual(['a1']) // archived + other-workspace excluded
+    expect(snap.sessions[0]).toMatchObject({ task: 'auth refactor', cost: 1.25, cols: 190 })
+    expect(snap.sessions[0].term).toContain('npm test') // serialized ANSI, colors kept
 
     // chats carry recent messages, thinking excluded
     expect(snap.chats.map(c => c.id)).toEqual(['a2'])
@@ -76,7 +78,7 @@ describe('buildRemoteSnapshot', () => {
   it('caps message and screen payloads so snapshots stay small', () => {
     const chatLog: ChatMsg[] = Array.from({ length: 80 }, (_, i) => ({ id: `m${i}`, role: 'user' as const, text: 'x'.repeat(5000), at: i }))
     const s = state({ agents: [agent({ id: 'c1', kind: 'chat', chatLog })] })
-    const snap = buildRemoteSnapshot(s, () => Array.from({ length: 200 }, (_, i) => `line ${i}`))
+    const snap = buildRemoteSnapshot(s, () => ({ data: '', cols: 80 }))
     expect(snap.chats[0].msgs.length).toBe(30)
     expect(snap.chats[0].msgs[0].text.length).toBeLessThanOrEqual(4001)
   })

@@ -145,6 +145,10 @@ button.card.sel { border-color: rgba(245, 196, 81, .45); background: var(--panel
 }
 .composer button:disabled { opacity: .35; }
 
+.termscroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: #0A0B0F; padding: 6px; }
+.termhost { min-width: min-content; }
+.termhost .xterm { padding: 2px; }
+
 .screen {
   background: var(--bg3); border: 1px solid var(--line); border-radius: 12px;
   padding: 10px 12px; font-size: 11px; line-height: 1.45; overflow-x: auto; white-space: pre;

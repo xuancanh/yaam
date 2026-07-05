@@ -11,23 +11,25 @@ import {
   remoteSetDevices, remoteStart, remoteStop, remoteTakeCommands,
 } from '../../core/native'
 import type { RemoteCommand } from '../../core/native'
-import { isAltScreen, readScreen } from '../../core/terminals'
+import { serializeScreen, terminalSize } from '../../core/terminals'
 import { confirmAction } from '../../components/Confirm'
 import { buildRemoteSnapshot } from './snapshot'
 
-const PUBLISH_DEBOUNCE_MS = 1000
+// short debounce: chat deltas land in the store per animation frame, and the
+// SSE stream pushes every publish — this is the streaming granularity remotes see
+const PUBLISH_DEBOUNCE_MS = 300
 const POLL_MS = 2000
 
-/** Last terminal lines for one session: live TUI screen, else the log tail. */
-function screenFor(id: string): string[] {
-  if (isAltScreen(id)) return readScreen(id)
-  const a = useAppStore.getState().agents.find(x => x.id === id)
-  return (a?.log ?? []).slice(-40).map(l => l.x)
+/** One session's terminal, serialized with colors/layout for the mobile xterm. */
+function termFor(id: string): { data: string; cols: number } {
+  return { data: serializeScreen(id), cols: terminalSize(id)?.cols ?? 80 }
 }
 
 export function RemoteCompanion() {
   const enabled = useConductorSelector(s => s.settings.remoteEnabled === true)
   const devices = useConductorSelector(s => s.settings.remoteDevices)
+  /** user edited/regenerated the token in Settings → restart the server on it */
+  const tokenKey = useConductorSelector(s => (s.settings.remoteTokenRotate ? 'rotate' : s.settings.remoteToken ?? ''))
   const actions = useActions()
   const actionsRef = useRef(actions)
   actionsRef.current = actions
@@ -50,13 +52,18 @@ export function RemoteCompanion() {
 
     const publish = () => {
       if (dead) return
-      void remotePublish(JSON.stringify(buildRemoteSnapshot(useAppStore.getState(), screenFor)))
+      void remotePublish(JSON.stringify(buildRemoteSnapshot(useAppStore.getState(), termFor)))
     }
 
-    void remoteStart()
+    // stable connect links: reuse the persisted token unless auto-rotate is on
+    const st = useAppStore.getState().settings
+    const persisted = st.remoteTokenRotate ? undefined : st.remoteToken
+    void remoteStart(undefined, persisted)
       .then(info => {
         if (dead) return
         dispatch(s => ({ ...s, remoteInfo: info }))
+        const cur = useAppStore.getState().settings
+        if (cur.remoteToken !== info.token) actionsRef.current.updateSettings({ remoteToken: info.token })
         publish()
       })
       .catch(e => {
@@ -113,6 +120,9 @@ export function RemoteCompanion() {
       void remoteTakeCommands().then(cs => {
         if (dead) return
         for (const c of cs) applyCommand(c)
+        // republish right away so the phone sees its own action reflected on
+        // the next poll instead of one debounce later
+        if (cs.length) setTimeout(publish, 120)
       }).catch(() => {})
       void remotePendingPairs().then(reqs => {
         if (dead) return
@@ -128,7 +138,8 @@ export function RemoteCompanion() {
       void remoteStop()
       dispatch(s => (s.remoteInfo ? { ...s, remoteInfo: null } : s))
     }
-  }, [enabled])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, tokenKey])
 
   return null
 }
