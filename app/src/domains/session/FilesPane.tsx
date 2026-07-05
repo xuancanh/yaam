@@ -8,6 +8,7 @@ import { highlight, langForFile } from '../../core/highlight'
 import { gitFileDiff, gitStatus, listDir, readFileB64, readTextFile } from '../../core/native'
 import type { DirEntryInfo } from '../../core/native'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
+import { parseDiffLines } from './diff-marks'
 import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
@@ -44,26 +45,6 @@ const GIT_COLORS: Record<string, string> = {
 function gitColor(status: string | undefined): string | null {
   if (!status) return null
   return GIT_COLORS[status] ?? 'var(--amber)'
-}
-
-/** Parse `git diff -U0` hunk headers into per-line change markers. */
-/** Parse a file diff into line-number markers for the source gutter. */
-function parseDiffLines(diff: string): { added: Set<number>; modified: Set<number>; deletedAfter: Set<number> } {
-  const added = new Set<number>()
-  const modified = new Set<number>()
-  const deletedAfter = new Set<number>()
-  for (const m of diff.matchAll(/^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
-    const oldCount = m[1] !== undefined ? parseInt(m[1], 10) : 1
-    const newStart = parseInt(m[2], 10)
-    const newCount = m[3] !== undefined ? parseInt(m[3], 10) : 1
-    if (newCount === 0) {
-      deletedAfter.add(newStart)
-      continue
-    }
-    const target = oldCount === 0 ? added : modified
-    for (let i = 0; i < newCount; i++) target.add(newStart + i)
-  }
-  return { added, modified, deletedAfter }
 }
 
 interface GitInfo {
