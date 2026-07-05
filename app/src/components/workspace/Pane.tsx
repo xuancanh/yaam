@@ -3,7 +3,7 @@ import { useActions } from '../../store'
 import { ACCENT, memTokens } from '../../data'
 import type { Agent } from '../../types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../ui'
-import { ChatPane } from './ChatPane'
+import { ChatPane } from '../../domains/chat/ChatPane'
 import { FilesPane } from './FilesPane'
 import { TerminalPane } from './TerminalPane'
 

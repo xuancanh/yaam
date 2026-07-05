@@ -3,8 +3,8 @@ import type { KeyboardEvent } from 'react'
 import { useActions } from '../../store'
 import { ACCENT, hexToRgba } from '../../data'
 import type { Agent, ChatMsg } from '../../types'
-import { IC, Icon } from '../ui'
-import { Markdown } from '../Markdown'
+import { IC, Icon } from '../../components/ui'
+import { Markdown } from '../../components/Markdown'
 
 // Chat-mode session body: a Claude-Desktop-style conversation in a pane —
 // the agent edits files, runs commands, loads skills, and calls MCP tools.

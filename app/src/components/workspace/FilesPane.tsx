@@ -10,7 +10,7 @@ import type { DirEntryInfo } from '../../native'
 import type { Agent } from '../../types'
 import { IC, Icon } from '../ui'
 import { Markdown } from '../Markdown'
-import { ChatPane } from './ChatPane'
+import { ChatPane } from '../../domains/chat/ChatPane'
 import { TerminalPane } from './TerminalPane'
 
 export type FilesMode = 'split' | 'replace'

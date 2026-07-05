@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useActions, useConductor } from '../store'
-import { chatSearch, isTauri, pickFolder } from '../native'
-import type { ChatSearchHit } from '../native'
-import { ACCENT, hexToRgba } from '../data'
-import type { Agent } from '../types'
-import { EditableName, IC, Icon } from './ui'
-import { ChatPane } from './workspace/ChatPane'
+import { useActions, useConductor } from '../../store'
+import { chatSearch, isTauri, pickFolder } from '../../native'
+import type { ChatSearchHit } from '../../native'
+import { ACCENT, hexToRgba } from '../../data'
+import type { Agent } from '../../types'
+import { EditableName, IC, Icon } from '../../components/ui'
+import { ChatPane } from './ChatPane'
 
 // ChatGPT/Claude-style chat home: a sidebar of conversations (full-text
 // searchable via the embedded tantivy engine) and the selected conversation
