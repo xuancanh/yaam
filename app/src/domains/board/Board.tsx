@@ -7,6 +7,7 @@ import { IC, Icon, ViewHeader } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
 import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from './TaskSpecForm'
 import { ReviewPanel } from './ReviewPanel'
+import { GitWorkbench } from '../session/GitPanel'
 
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
@@ -105,9 +106,78 @@ function ChatBubble({ m }: { m: TaskChatMsg }) {
 }
 
 /** Edit a task specification and converse with its dedicated watcher. */
+/** Review-tab actions: feedback to the watcher chat, approve & merge, request changes. */
+function TaskReviewFooter({ task, onClose }: { task: BoardTask; onClose: () => void }) {
+  const { approveTaskReview, rejectTaskReview, sendTaskChat } = useActions()
+  const [comment, setComment] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const approve = async () => {
+    setBusy(true)
+    setErr('')
+    const e = await approveTaskReview(task.id)
+    setBusy(false)
+    if (e) setErr(e)
+    else onClose()
+  }
+  return (
+    <>
+      {err && (
+        <div className="mono" style={{ borderTop: '1px solid var(--line)', padding: '9px 16px', fontSize: 11, color: 'var(--red-soft)', whiteSpace: 'pre-wrap', maxHeight: 100, overflowY: 'auto' }}>
+          {err}
+        </div>
+      )}
+      <div style={{ borderTop: '1px solid var(--line)', padding: '11px 15px', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <textarea
+          value={comment}
+          onChange={e => setComment(e.target.value)}
+          placeholder="Feedback — sent to the task's watcher…"
+          rows={2}
+          style={{
+            flex: 1, background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
+            padding: '7px 10px', color: 'var(--text)', outline: 'none', fontSize: 12, resize: 'vertical',
+            fontFamily: 'var(--font-sans)',
+          }}
+        />
+        <button
+          className="open-btn"
+          title="Send feedback to the watcher without changing the task's column"
+          style={{ flex: 'none', padding: '8px 12px', fontSize: 11.5, opacity: comment.trim() ? 1 : 0.5 }}
+          disabled={!comment.trim()}
+          onClick={() => { sendTaskChat(task.id, comment.trim()); setComment('') }}
+        >
+          Send
+        </button>
+        <button
+          className="deny-btn"
+          style={{ flex: 'none', padding: '8px 14px', fontSize: 12 }}
+          disabled={busy}
+          title="Bounce the task to In progress; your feedback becomes the watcher's next instruction"
+          onClick={() => { rejectTaskReview(task.id, comment); onClose() }}
+        >
+          Request changes
+        </button>
+        <button
+          className="approve-btn"
+          style={{ flex: 'none', padding: '8px 16px', fontSize: 12, opacity: busy ? 0.6 : 1 }}
+          disabled={busy}
+          onClick={() => { void approve() }}
+        >
+          {busy ? 'Merging…' : 'Approve & merge'}
+        </button>
+      </div>
+    </>
+  )
+}
+
 function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | null; onClose: () => void }) {
-  const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes }), shallowEqual)
+  const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes, agents: x.agents }), shallowEqual)
   const { updateTask, sendTaskChat, focusTab, startTask, restartTask, deleteTask } = useActions()
+  const [view, setView] = useState<'chat' | 'review'>('chat')
+  // the task's worktree, if any of its sessions ran isolated
+  const worktree = (task.agentIds ?? [])
+    .map(aid => s.agents.find(a => a.id === aid)?.worktree)
+    .find(Boolean)
   const runWith = task.templateId
     ? `template · ${(s.templates ?? []).find(t => t.id === task.templateId)?.name ?? task.templateId}`
     : (s.agentTypes.find(t => t.id === task.typeId)?.name ?? 'default agent type')
@@ -148,7 +218,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.5)', zIndex: 42 }} />
       <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: 460, maxWidth: '92vw', background: 'var(--panel)',
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: view === 'review' ? 960 : 460, maxWidth: '94vw', background: 'var(--panel)',
         borderLeft: '1px solid var(--line2)', zIndex: 43, display: 'flex', flexDirection: 'column',
         boxShadow: '-20px 0 60px rgba(0,0,0,.45)',
       }}>
@@ -189,6 +259,14 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
               )}
             </div>
           </div>
+          <button
+            className="icon-btn"
+            title={view === 'chat' ? 'Review the task\'s changes (diff, stage, commit, approve)' : 'Back to the watcher chat'}
+            style={{ width: 26, height: 26, borderRadius: 7, color: view === 'review' ? 'var(--accent)' : worktree ? 'var(--amber)' : undefined }}
+            onClick={() => setView(v => (v === 'chat' ? 'review' : 'chat'))}
+          >
+            <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={13} stroke={1.7} />
+          </button>
           <button className="icon-btn danger" title="Delete task" style={{ width: 26, height: 26, borderRadius: 7 }} onClick={() => { deleteTask(task.id); onClose() }}>
             <Icon paths={IC.close} size={12} stroke={1.8} />
           </button>
@@ -197,6 +275,14 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
           </button>
         </div>
 
+        {view === 'review' ? (
+          <GitWorkbench
+            cwd={worktree?.workdir ?? agent?.cwd ?? task.cwd}
+            worktree={worktree}
+            footer={<TaskReviewFooter task={task} onClose={onClose} />}
+          />
+        ) : (
+        <>
         <div style={{ padding: '12px 17px', borderBottom: '1px solid var(--line)', flexShrink: 0, maxHeight: '38%', overflowY: 'auto' }}>
           {editingSpec ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -276,6 +362,8 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
     </>
   )
