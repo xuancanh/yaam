@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { hexToRgba } from '../../core/data'
-import { pickFolder } from '../../core/native'
+import { pickFile, pickFolder } from '../../core/native'
 import { PROVIDERS, providerFor } from '../../master'
 import { SHELLS } from '../../core/data'
 import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
 import { ToolsSection } from './ToolsView'
-import { availableCatalog, scanImportableMcpServers } from './mcp-market'
+import { availableCatalog, installMcpb, scanImportableMcpServers } from './mcp-market'
 import type { McpCandidate } from './mcp-market'
 
 const FIELD_STYLE = {
@@ -127,12 +127,24 @@ function McpSection() {
   const [marketOpen, setMarketOpen] = useState(false)
   const [imported, setImported] = useState<McpCandidate[] | null>(null)
   const [scanning, setScanning] = useState(false)
+  const [bundleError, setBundleError] = useState<string | null>(null)
 
   const addCandidate = (c: McpCandidate) => {
     addMcpServer(c.name, c.url ?? '', c.headers, c.transport === 'stdio'
-      ? { transport: 'stdio', command: c.command, args: c.args, env: c.env }
+      ? { transport: 'stdio', command: c.command, args: c.args, env: c.env, cwd: c.cwd }
       : { transport: 'http' })
     setImported(cur => cur?.filter(x => x !== c) ?? cur)
+  }
+
+  const installBundle = async () => {
+    const path = await pickFile(['mcpb', 'dxt', 'zip'], 'MCP bundle')
+    if (!path) return
+    try {
+      addCandidate(await installMcpb(path))
+    } catch (e) {
+      setBundleError(e instanceof Error ? e.message : String(e))
+      window.setTimeout(() => setBundleError(null), 6000)
+    }
   }
 
   const scan = async () => {
@@ -164,7 +176,11 @@ function McpSection() {
           <button className="open-btn" style={{ padding: '5px 13px', fontSize: 12 }} onClick={() => { void scan() }} disabled={scanning}>
             {scanning ? 'Scanning…' : 'Import from Claude / Cursor / Codex…'}
           </button>
+          <button className="open-btn" style={{ padding: '5px 13px', fontSize: 12 }} onClick={() => { void installBundle() }} title="Install a Claude Desktop extension bundle (.mcpb / .dxt)">
+            Install .mcpb…
+          </button>
         </div>
+        {bundleError && <div style={{ fontSize: 11.5, color: 'var(--red-soft)', paddingBottom: 8 }}>{bundleError}</div>}
 
         {marketOpen && (
           <div style={{ padding: '2px 0 10px' }}>

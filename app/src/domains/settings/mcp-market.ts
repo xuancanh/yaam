@@ -2,7 +2,8 @@
 // parsers for the MCP configs other AI apps already have on this machine
 // (Claude Desktop, Claude Code, Cursor, Codex, Windsurf). Everything returns
 // McpCandidate rows the UI can add as YAAM servers with one click.
-import { readTextFile } from '../../core/native'
+import { homeDir } from '@tauri-apps/api/path'
+import { execCommand, readTextFile } from '../../core/native'
 import type { McpServer } from '../../core/types'
 
 export interface McpCandidate {
@@ -17,6 +18,8 @@ export interface McpCandidate {
   args?: string[]
   /** "KEY=value" lines; empty values mark credentials the user must fill in */
   env?: string
+  /** working directory for the process (e.g. an unpacked bundle dir) */
+  cwd?: string
 }
 
 /** Curated one-click servers. stdio entries need Node (npx) or uv (uvx). */
@@ -164,6 +167,76 @@ export async function scanImportableMcpServers(existing: McpServer[]): Promise<M
     seen.add(fp)
     return true
   })
+}
+
+// ---------------------------------------------------------------- .mcpb
+
+/** The parts of a Claude Desktop extension manifest we act on.
+ *  Spec: github.com/modelcontextprotocol/mcpb (MANIFEST.md). */
+interface McpbManifest {
+  name?: string
+  display_name?: string
+  description?: string
+  server?: {
+    type?: string
+    entry_point?: string
+    mcp_config?: { command?: string; args?: string[]; env?: Record<string, string> }
+  }
+  user_config?: Record<string, { title?: string; description?: string; required?: boolean; default?: unknown }>
+}
+
+const shellEsc = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+
+/** Replace manifest template variables. ${user_config.*} defaults are filled
+ *  when declared; otherwise the placeholder stays visible for the user to edit. */
+function substitute(value: string, dir: string, userConfig: McpbManifest['user_config']): string {
+  return value
+    .replaceAll('${__dirname}', dir)
+    .replace(/\$\{user_config\.([\w-]+)\}/g, (m, key: string) => {
+      const def = userConfig?.[key]?.default
+      return typeof def === 'string' || typeof def === 'number' ? String(def) : m
+    })
+}
+
+/** Install a Claude Desktop extension (.mcpb/.dxt): unpack the bundle under
+ *  ~/.yaam/mcpb/, read manifest.json, and shape its server as a stdio
+ *  candidate. user_config values without defaults stay as ${user_config.*}
+ *  placeholders in env/args for the user to fill in the server editor. */
+export async function installMcpb(path: string): Promise<McpCandidate> {
+  const file = path.split('/').pop() ?? 'bundle.mcpb'
+  const slug = file.replace(/\.(mcpb|dxt|zip)$/i, '').replace(/[^\w.-]+/g, '-')
+  const home = (await homeDir()).replace(/\/$/, '')
+  const dir = `${home}/.yaam/mcpb/${slug}`
+  const res = await execCommand(`mkdir -p ${shellEsc(dir)} && unzip -o ${shellEsc(path)} -d ${shellEsc(dir)} >/dev/null`, undefined, 120_000)
+  if (res.code !== 0) throw new Error(`could not unpack the bundle: ${res.output.slice(0, 300)}`)
+  const manifest = JSON.parse(await readTextFile(`${dir}/manifest.json`)) as McpbManifest
+  const cfg = manifest.server?.mcp_config
+  let command = cfg?.command
+  let args = cfg?.args ?? []
+  if (!command) {
+    // no explicit mcp_config — derive from the declared runtime + entry point
+    const entry = manifest.server?.entry_point ?? ''
+    const type = manifest.server?.type ?? 'node'
+    if (type === 'node') { command = 'node'; args = [`${dir}/${entry}`] }
+    else if (type === 'python') { command = 'python3'; args = [`${dir}/${entry}`] }
+    else { command = `${dir}/${entry}`; args = [] }
+  } else {
+    args = args.map(a => substitute(a, dir, manifest.user_config))
+    command = substitute(command, dir, manifest.user_config)
+  }
+  const env = Object.entries(cfg?.env ?? {})
+    .map(([k, v]) => `${k}=${substitute(v, dir, manifest.user_config)}`)
+    .join('\n') || undefined
+  return {
+    name: manifest.display_name || manifest.name || slug,
+    source: '.mcpb bundle',
+    description: manifest.description,
+    transport: 'stdio',
+    command,
+    args,
+    env,
+    cwd: dir,
+  }
 }
 
 /** Marketplace entries not already configured. */

@@ -202,9 +202,9 @@ export async function chatSearch(query: string, limit?: number): Promise<ChatSea
 }
 
 /** Open the native single-file picker when available. */
-export async function pickFile(): Promise<string | null> {
+export async function pickFile(extensions: string[] = ['json'], label = 'YAAM addon'): Promise<string | null> {
   if (!isTauri) return null
-  const picked = await openDialog({ multiple: false, filters: [{ name: 'YAAM addon', extensions: ['json'] }] })
+  const picked = await openDialog({ multiple: false, filters: [{ name: label, extensions }] })
   return typeof picked === 'string' ? picked : null
 }
 
