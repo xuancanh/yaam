@@ -6,7 +6,8 @@ import type { MutableRefObject } from 'react'
 import type { AppState, BoardCol, BoardTask } from '../../core/types'
 import { buildCfg, hasCreds } from '../../master'
 import { mkId } from '../../shared/id'
-import * as native from '../../core/native'
+import { realSessionProcessPort } from '../session/ports'
+import type { SessionProcessPort } from '../session/ports'
 import { draftTaskSpec } from './watcher'
 import type { TaskSpecDraft } from './watcher'
 
@@ -26,6 +27,8 @@ export interface BoardActionsCtx {
   /** tear down a task's watcher runtime (cancel in-flight turn + drop registries) on delete */
   disposeWatcher: (taskId: string) => void
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
+  /** native PTY capability for detaching a task's previous session on restart */
+  port?: SessionProcessPort
 }
 
 export interface BoardActions {
@@ -47,6 +50,7 @@ export interface BoardActions {
 
 export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
   const { dispatch, stateRef, dragId, later } = ctx
+  const port = ctx.port ?? realSessionProcessPort
   return useMemo(() => ({
     startCardDrag: id => { dragId.current = id },
     enterCol: col => dispatch(s => (s.dragOverCol === col ? s : { ...s, dragOverCol: col })),
@@ -72,7 +76,7 @@ export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
       const prev = t.agentId ? stateRef.current.agents.find(a => a.id === t.agentId) : undefined
       if (prev && (prev.status === 'running' || prev.status === 'needs')) {
         ctx.markUserStopped(prev.id)
-        native.killSession(prev.id).catch(() => {})
+        port.killSession(prev.id).catch(() => {})
       }
       dispatch(s => ({
         ...s,
@@ -152,5 +156,5 @@ export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
       ctx.logEvent('edit', id, 'Requested changes on the diff')
       ctx.flash('Requested changes')
     },
-  }), [dispatch, stateRef, dragId, later, ctx])
+  }), [dispatch, stateRef, dragId, later, port, ctx])
 }

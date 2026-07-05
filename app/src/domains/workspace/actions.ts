@@ -7,7 +7,8 @@ import type { AppState } from '../../core/types'
 import { mkId } from '../../shared/id'
 import { switchWorkspaceIn } from './state'
 import { MASTER_GREETING } from '../../core/data'
-import * as native from '../../core/native'
+import { realSessionProcessPort } from '../session/ports'
+import type { SessionProcessPort } from '../session/ports'
 
 export interface WorkspaceActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -19,6 +20,8 @@ export interface WorkspaceActionsCtx {
   disposeSessionRuntime: (id: string) => void
   /** cancel any in-flight Master turn (workspace being deleted) */
   abortMaster: () => void
+  /** native PTY capability for tearing down the workspace's sessions */
+  port?: SessionProcessPort
 }
 
 export interface WorkspaceActions {
@@ -29,8 +32,15 @@ export interface WorkspaceActions {
 }
 
 export function useWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActions {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createWorkspaceActions(ctx), [ctx.dispatch, ctx.stateRef, ctx.later, ctx.flash, ctx.runMaster, ctx.markUserStopped, ctx.disposeSessionRuntime, ctx.abortMaster, ctx.port])
+}
+
+/** The workspace actions as a plain factory (no React), for unit testing. */
+export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActions {
   const { dispatch, stateRef, later, flash } = ctx
-  return useMemo(() => ({
+  const port = ctx.port ?? realSessionProcessPort
+  return {
     switchWorkspace: id => {
       // Master events that queued while this workspace was inactive
       const pending = stateRef.current.workspaceData[id]?.pendingMasterNotes ?? []
@@ -68,9 +78,9 @@ export function useWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActions 
       // kill the workspace's sessions and tear down all their runtime state
       for (const a of s0.agents.filter(a => a.workspaceId === id)) {
         ctx.markUserStopped(a.id)
-        native.killSession(a.id).catch(() => {})
+        port.killSession(a.id).catch(() => {})
         ctx.disposeSessionRuntime(a.id)
-        native.removeSession(a.id).catch(() => {})
+        port.removeSession(a.id).catch(() => {})
       }
       dispatch(s => {
         let next = s
@@ -89,5 +99,5 @@ export function useWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActions 
       })
       flash('Workspace deleted')
     },
-  }), [dispatch, stateRef, later, flash, ctx])
+  }
 }
