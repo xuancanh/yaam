@@ -1,7 +1,7 @@
-// Embedded full-text search over chat transcripts, powered by tantivy —
-// the standard embedded search-engine library in Rust (Lucene-style inverted
-// index). Chat volumes are small, so the index lives in RAM and is rebuilt
-// whenever the frontend pushes a fresh snapshot of all messages.
+//! Embedded full-text search over chat transcripts, powered by tantivy — the
+//! standard embedded search-engine library in Rust (Lucene-style inverted
+//! index). Chat volumes are small, so the index lives in RAM and is rebuilt
+//! whenever the frontend pushes a fresh snapshot of all messages.
 use std::sync::Mutex;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
@@ -38,11 +38,7 @@ pub struct ChatHit {
 }
 
 /// Rebuild the in-RAM index from the full set of chat messages.
-#[tauri::command]
-pub fn chat_search_reindex(
-    state: tauri::State<'_, ChatSearchState>,
-    docs: Vec<ChatDoc>,
-) -> Result<usize, String> {
+pub fn reindex(state: &ChatSearchState, docs: Vec<ChatDoc>) -> Result<usize, String> {
     let mut schema_builder = Schema::builder();
     let chat_id = schema_builder.add_text_field("chat_id", STORED);
     let msg_id = schema_builder.add_text_field("msg_id", STORED);
@@ -91,12 +87,7 @@ pub fn chat_search_reindex(
 }
 
 /// Query the index; returns the best-matching messages with their chat ids.
-#[tauri::command]
-pub fn chat_search(
-    state: tauri::State<'_, ChatSearchState>,
-    query: String,
-    limit: Option<usize>,
-) -> Result<Vec<ChatHit>, String> {
+pub fn search(state: &ChatSearchState, query: String, limit: Option<usize>) -> Result<Vec<ChatHit>, String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     let Some(engine) = guard.as_ref() else {
         return Ok(vec![]);

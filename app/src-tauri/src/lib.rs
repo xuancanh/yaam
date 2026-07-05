@@ -1,71 +1,50 @@
-mod bedrock;
-mod chatsearch;
-mod sessions;
+//! Composition root: declare the layered modules, register managed state and
+//! the command surface, and run the Tauri app. Domain logic lives in `core`;
+//! the IPC handlers live in `commands`; one-time startup lives in `setup`.
+mod commands;
+mod core;
+mod setup;
 
-use bedrock::BedrockState;
-use chatsearch::ChatSearchState;
-use sessions::SessionManager;
+use core::bedrock::BedrockState;
+use core::pty::SessionManager;
+use core::search::ChatSearchState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Configure plugins, shared state, commands, and platform setup before running Tauri.
 pub fn run() {
-  tauri::Builder::default()
-    .plugin(tauri_plugin_dialog::init())
-    .plugin(tauri_plugin_http::init())
-    .manage(SessionManager::default())
-    .manage(BedrockState::default())
-    .manage(ChatSearchState::default())
-    .invoke_handler(tauri::generate_handler![
-      bedrock::bedrock_invoke,
-      sessions::spawn_session,
-      sessions::write_session,
-      sessions::kill_session,
-      sessions::resize_session,
-      sessions::live_sessions,
-      sessions::detect_cli_session,
-      sessions::git_diff,
-      sessions::git_status,
-      sessions::git_file_diff,
-      sessions::list_dir,
-      sessions::run_credential_command,
-      sessions::exec_command,
-      chatsearch::chat_search_reindex,
-      chatsearch::chat_search,
-      sessions::read_text_file,
-      sessions::write_text_file,
-      sessions::save_state,
-      sessions::load_state,
-      sessions::load_state_backup,
-      sessions::save_partition,
-      sessions::load_partition,
-      sessions::save_session,
-      sessions::remove_session,
-      sessions::load_sessions,
-    ])
-    .setup(|app| {
-      // `tauri dev` runs a bare binary (no .app bundle), so macOS falls back to
-      // a generic dock icon that doesn't match the bundled app — set it here.
-      #[cfg(target_os = "macos")]
-      {
-        use objc2::{AnyThread, MainThreadMarker};
-        use objc2_app_kit::{NSApplication, NSImage};
-        use objc2_foundation::NSData;
-        if let Some(mtm) = MainThreadMarker::new() {
-          let data = NSData::with_bytes(include_bytes!("../icons/icon.png"));
-          if let Some(img) = NSImage::initWithData(NSImage::alloc(), &data) {
-            unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&img)) };
-          }
-        }
-      }
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
-      Ok(())
-    })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
+        .manage(SessionManager::default())
+        .manage(BedrockState::default())
+        .manage(ChatSearchState::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::session::spawn_session,
+            commands::session::write_session,
+            commands::session::resize_session,
+            commands::session::kill_session,
+            commands::session::live_sessions,
+            commands::session::detect_cli_session,
+            commands::git::git_diff,
+            commands::git::git_status,
+            commands::git::git_file_diff,
+            commands::fs::list_dir,
+            commands::fs::read_text_file,
+            commands::fs::write_text_file,
+            commands::fs::run_credential_command,
+            commands::fs::exec_command,
+            commands::state::save_state,
+            commands::state::load_state,
+            commands::state::load_state_backup,
+            commands::state::save_partition,
+            commands::state::load_partition,
+            commands::state::save_session,
+            commands::state::remove_session,
+            commands::state::load_sessions,
+            commands::search::chat_search_reindex,
+            commands::search::chat_search,
+            commands::bedrock::bedrock_invoke,
+        ])
+        .setup(|app| setup::init(app))
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

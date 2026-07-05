@@ -1,12 +1,12 @@
-// AWS Bedrock bridge for the Master brain. Credentials come from either:
-//  - a credential command whose stdout holds AWS credentials (JSON like
-//    `aws configure export-credentials` / `claude default-credential-export`,
-//    a nested { Credentials: … } payload, or AWS_* env-style lines), or
-//  - the standard AWS credential chain (env vars, ~/.aws profiles, SSO, IMDS),
-//    which caches and auto-refreshes temporary credentials on its own.
-// Clients are cached until the exported credentials expire. On an auth failure
-// we run the user's optional refresh command (e.g. `aws sso login`), rebuild
-// the client (re-running the credential command), and retry once.
+//! AWS Bedrock bridge for the Master brain. Credentials come from either:
+//!  - a credential command whose stdout holds AWS credentials (JSON like
+//!    `aws configure export-credentials` / `claude default-credential-export`,
+//!    a nested { Credentials: … } payload, or AWS_* env-style lines), or
+//!  - the standard AWS credential chain (env vars, ~/.aws profiles, SSO, IMDS),
+//!    which caches and auto-refreshes temporary credentials on its own.
+//! Clients are cached until the exported credentials expire. On an auth failure
+//! we run the user's optional refresh command (e.g. `aws sso login`), rebuild
+//! the client (re-running the credential command), and retry once.
 use aws_config::{BehaviorVersion, Region};
 use aws_sdk_bedrockruntime::config::Credentials;
 use aws_sdk_bedrockruntime::error::DisplayErrorContext;
@@ -14,7 +14,6 @@ use aws_sdk_bedrockruntime::{primitives::Blob, Client};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
-use tauri::State;
 
 #[derive(Clone)]
 struct CachedClient {
@@ -172,10 +171,10 @@ fn still_fresh(c: &CachedClient) -> bool {
     }
 }
 
-#[tauri::command]
 /// Invoke Bedrock with a cached client, refreshing credentials and retrying once.
-pub async fn bedrock_invoke(
-    state: State<'_, BedrockState>,
+#[allow(clippy::too_many_arguments)]
+pub async fn invoke_model(
+    state: &BedrockState,
     region: String,
     profile: String,
     refresh_cmd: String,
