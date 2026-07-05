@@ -1,7 +1,7 @@
 import { ConductorProvider, useConductor } from './store'
 import { TitleBar } from './components/TitleBar'
 import { IconRail } from './components/IconRail'
-import { Sidebar } from './components/Sidebar'
+import { Sidebar } from './domains/master/Sidebar'
 import { Workspace } from './components/Workspace'
 import { Overview } from './components/Overview'
 import { Board } from './domains/board/Board'

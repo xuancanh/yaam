@@ -1,10 +1,10 @@
 // Master turn harness: call the model, execute tools, verify claims.
-import type { AppState } from '../types'
-import { buildCfg, callApi } from './client'
-import { runTool, TOOLS } from './master-tools'
-import { addonToolDefs } from '../addons'
-import type { MasterExec } from './master-tools'
-import { chatHistory, systemPrompt } from './master-prompt'
+import type { AppState } from '../../types'
+import { buildCfg, callApi } from '../../llm/client'
+import { runTool, TOOLS } from './tools'
+import { addonToolDefs } from '../../addons'
+import type { MasterExec } from './tools'
+import { chatHistory, systemPrompt } from './prompt'
 
 export interface MasterTurnResult {
   text: string

@@ -4,14 +4,14 @@
 // drains. Extracted from the provider; operates on the stable refs/callbacks
 // in `ctx`.
 import type { MutableRefObject } from 'react'
-import type { Addon, AppState } from '../types'
-import type { AddonApi } from '../addons'
-import type { ApiMessage, MasterExec } from '../master'
-import { hasCreds, runMasterTurn } from '../master'
-import { execAddonTool, parseAddonPackage } from '../addons'
-import { humanizeCron, KEYMAP, mkId, sendLineToSession, wait } from '../state-lib'
-import { PERM_ORDER, SHELLS } from '../data'
-import * as native from '../native'
+import type { Addon, AppState } from '../../types'
+import type { AddonApi } from '../../addons'
+import type { ApiMessage, MasterExec } from '../../master'
+import { hasCreds, runMasterTurn } from '../../master'
+import { execAddonTool, parseAddonPackage } from '../../addons'
+import { humanizeCron, KEYMAP, mkId, sendLineToSession, wait } from '../../state-lib'
+import { PERM_ORDER, SHELLS } from '../../data'
+import * as native from '../../native'
 
 export interface MasterCtx {
   stateRef: MutableRefObject<AppState>
@@ -27,7 +27,7 @@ export interface MasterCtx {
   launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string) => string | null
   armResponseWatch: (id: string) => void
   sessionScreenTail: (id: string) => string
-  logEvent: (type: import('../types').EventType, agentId: string | null, text: string) => void
+  logEvent: (type: import('../../types').EventType, agentId: string | null, text: string) => void
   flash: (t: string) => void
   applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
   setNeedsInput: (id: string, question: string) => void

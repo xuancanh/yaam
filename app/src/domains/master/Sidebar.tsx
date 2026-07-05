@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { hasCreds } from '../master'
-import { useActions, useConductor } from '../store'
-import { ACCENT, hexToRgba } from '../data'
-import type { Message } from '../types'
-import { IC, Icon, MasterMark } from './ui'
-import { Markdown } from './Markdown'
+import { hasCreds } from '../../master'
+import { useActions, useConductor } from '../../store'
+import { ACCENT, hexToRgba } from '../../data'
+import type { Message } from '../../types'
+import { IC, Icon, MasterMark } from '../../components/ui'
+import { Markdown } from '../../components/Markdown'
 
 /** Render a Master routing decision with its target session context. */
 function RouteCard({ msg }: { msg: Message }) {
