@@ -8,6 +8,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::Command;
+use std::sync::mpsc;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -78,6 +79,38 @@ struct SessionHandle {
 /// Grace period between the polite SIGTERM and the forced SIGKILL. CLIs use it to
 /// flush their session/resume files instead of dying mid-write.
 const SHUTDOWN_GRACE_MS: u64 = 2000;
+
+/// Bounded depth of the per-session output queue between the PTY reader and the
+/// emitter thread. A slow/blocked webview backpressures the reader (which in turn
+/// throttles the child via the PTY) instead of letting output buffer without limit.
+const OUTPUT_CHANNEL_CAP: usize = 256;
+
+/// Upper bound on how many bytes the emitter merges into a single IPC event when
+/// output is backed up. Chunks that are already queued get coalesced so a burst
+/// crosses the bridge as a few large events rather than thousands of tiny ones;
+/// when the webview keeps up this is a no-op (one chunk in → one event out).
+const OUTPUT_COALESCE_MAX_BYTES: usize = 64 * 1024;
+
+/// Merge `first` with any chunks already waiting on `rest`, up to `max_bytes`.
+/// Returns the merged buffer and the number of source chunks it consumed. It keeps
+/// pulling ready chunks while the buffer is still under `max_bytes`, so the result
+/// may overshoot by at most one chunk (each chunk is a single bounded PTY read).
+/// Pulled out as a pure function so coalescing is unit-testable without a live PTY
+/// or `AppHandle`.
+fn coalesce_output(first: Vec<u8>, rest: &mpsc::Receiver<Vec<u8>>, max_bytes: usize) -> (Vec<u8>, usize) {
+    let mut merged = first;
+    let mut count = 1;
+    while merged.len() < max_bytes {
+        match rest.try_recv() {
+            Ok(chunk) => {
+                merged.extend_from_slice(&chunk);
+                count += 1;
+            }
+            Err(_) => break,
+        }
+    }
+    (merged, count)
+}
 
 /// Shut a session's process down gracefully: ask its process group to terminate
 /// (SIGTERM), then force-kill after a grace period. On non-unix (or without a
@@ -204,25 +237,42 @@ impl SessionManager {
             );
         }
 
-        // stream raw PTY output to the frontend
-        let app_out = app.clone();
-        let id_out = id.clone();
+        // Stream raw PTY output to the frontend through a bounded queue. The reader
+        // thread only reads and enqueues; a dedicated emitter thread coalesces any
+        // backed-up chunks into one IPC event. The bounded channel means a webview
+        // that can't keep up backpressures the reader (and thus the child) rather
+        // than letting output buffer without limit.
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(OUTPUT_CHANNEL_CAP);
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
+                    // send blocks when the queue is full — the desired backpressure.
+                    // A closed receiver (emitter gone) means we should stop reading.
                     Ok(n) => {
-                        let data = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-                        let _ = app_out.emit(
-                            "session-data",
-                            DataEvent {
-                                id: id_out.clone(),
-                                data,
-                            },
-                        );
+                        if tx.send(buf[..n].to_vec()).is_err() {
+                            break;
+                        }
                     }
                 }
+            }
+        });
+        let app_out = app.clone();
+        let id_out = id.clone();
+        std::thread::spawn(move || {
+            // recv blocks until the next chunk; then merge whatever else is already
+            // queued into the same event. Exits when the reader drops its sender.
+            while let Ok(first) = rx.recv() {
+                let (merged, _coalesced) = coalesce_output(first, &rx, OUTPUT_COALESCE_MAX_BYTES);
+                let data = base64::engine::general_purpose::STANDARD.encode(&merged);
+                let _ = app_out.emit(
+                    "session-data",
+                    DataEvent {
+                        id: id_out.clone(),
+                        data,
+                    },
+                );
             }
         });
 
@@ -477,9 +527,11 @@ pub fn detect_cli_session(
 #[cfg(test)]
 mod tests {
     use super::{
-        derive_session_id, resolve_login_executable, select_session_id, session_launch_spec,
+        coalesce_output, derive_session_id, resolve_login_executable, select_session_id,
+        session_launch_spec,
     };
     use std::path::{Path, PathBuf};
+    use std::sync::mpsc;
 
     #[test]
     /// Resolve a guaranteed system shell through an explicit path.
@@ -546,6 +598,42 @@ mod tests {
             select_session_id("claude", &mut candidates, &excluded).as_deref(),
             Some("second")
         );
+    }
+
+    #[test]
+    /// When the webview keeps up, each chunk is emitted on its own — nothing to
+    /// coalesce because the queue is empty by the time the emitter drains.
+    fn coalesce_emits_single_chunk_when_queue_is_empty() {
+        let (_tx, rx) = mpsc::sync_channel::<Vec<u8>>(4);
+        let (merged, count) = coalesce_output(b"hello".to_vec(), &rx, 64 * 1024);
+        assert_eq!(merged, b"hello");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    /// A burst that is already queued gets merged into one buffer, in order.
+    fn coalesce_merges_backed_up_chunks_in_order() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(8);
+        tx.send(b"bb".to_vec()).unwrap();
+        tx.send(b"cc".to_vec()).unwrap();
+        let (merged, count) = coalesce_output(b"aa".to_vec(), &rx, 64 * 1024);
+        assert_eq!(merged, b"aabbcc");
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    /// Coalescing stops once the buffer reaches the byte cap, leaving the rest
+    /// queued for the next event (may overshoot by at most one chunk).
+    fn coalesce_respects_the_byte_cap() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(8);
+        tx.send(vec![b'b'; 3]).unwrap();
+        tx.send(vec![b'c'; 3]).unwrap();
+        // cap of 4: first chunk (3) is under the cap, pull one more (→6 ≥ 4, stop)
+        let (merged, count) = coalesce_output(vec![b'a'; 3], &rx, 4);
+        assert_eq!(count, 2);
+        assert_eq!(merged.len(), 6);
+        // the third chunk is still queued
+        assert_eq!(rx.recv().unwrap(), vec![b'c'; 3]);
     }
 
     #[test]
