@@ -29,6 +29,7 @@ import { runMasterLoop } from './domains/master/runner'
 import { useSettingsActions } from './domains/settings/actions'
 import { useBoardActions } from './domains/board/actions'
 import { useSchedulesActions } from './domains/schedules/actions'
+import { useChatActions } from './domains/chat/actions'
 import type { TaskSpecDraft } from './domains/board/watcher'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
@@ -1718,12 +1719,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     watcherHistories, watcherQueue, taskSessions: taskSessionsRef,
   })
   const schedulesActions = useSchedulesActions({ dispatch, flash, logEvent, launchFromTemplate })
+  const chatActions = useChatActions({ dispatch, stateRef, logEvent, runChatMessage })
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
     ...settingsActions,
     ...boardActions,
     ...schedulesActions,
+    ...chatActions,
     setView: v => dispatch(s => ({ ...s, view: v })),
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
@@ -2121,40 +2124,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     },
 
 
-    newChatSession: (name, cwd, chatTypeId, model, personaId, skillSourceIds) => {
-      const id = mkId('a')
-      const dir = (cwd ?? stateRef.current.settings.defaultCwd ?? '').trim()
-      const chatType = stateRef.current.chatAgentTypes.find(t => t.id === chatTypeId)
-        ?? stateRef.current.chatAgentTypes.find(t => t.enabled)
-        ?? stateRef.current.chatAgentTypes[0]
-      const agent: Agent = {
-        id, name: name?.trim() || chatType?.name || 'chat', short: (name?.trim() || chatType?.name || 'CH').slice(0, 2).toUpperCase(),
-        color: '#7FD1FF', repo: dir ? dir.split('/').pop() || dir : '~', branch: 'chat',
-        status: 'idle', model: chatType ? `${chatType.name} · ${model || chatType.model}` : 'chat agent', kind: 'chat', cwd: dir,
-        chatTypeId: chatType?.id,
-        chatModel: model || chatType?.model,
-        nameIsDefault: !name?.trim(),
-        personaId,
-        skillSourceIds,
-        workspaceId: stateRef.current.activeWorkspace,
-        memory: mkMemory(), tools: mkTools(), log: [],
-        chatLog: [{
-          id: mkId('cm'), role: 'assistant', at: Date.now(),
-          text: `Hi — I'm a chat agent${dir ? ` working in \`${dir}\`` : ''}. I can browse and edit files, run commands and scripts, load skills, and call your MCP servers. What are we doing?`,
-        }],
-        ...defaultDetail(), usageVersion: 1,
-      }
-      dispatch(s => ({ ...s, agents: s.agents.concat([agent]), activeChatId: id, view: 'chat' }))
-      logEvent('route', id, `Started chat agent “${agent.name}”`)
-      return id
-    },
-
-    openChat: id => dispatch(s => ({ ...s, activeChatId: id, ...(id ? { view: 'chat' as const } : {}) })),
-
-    sendChatMessage: (agentId, text) => {
-      const msg = text.trim()
-      if (msg) void runChatMessage(agentId, msg)
-    },
 
 
 
@@ -2375,7 +2344,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, boardActions, schedulesActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, installPackage, later, launchSession, logEvent, makeAddonApi, probeCliSession, runChatMessage, runMaster, sendAddonChatImpl])
+  }), [settingsActions, boardActions, schedulesActions, chatActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, installPackage, later, launchSession, logEvent, makeAddonApi, probeCliSession, runMaster, sendAddonChatImpl])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)
