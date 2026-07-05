@@ -1,10 +1,14 @@
 # Store refactor progress review and remaining plan
 
+> **Historical review.** Use [architecture.md](architecture.md) and
+> [frontend-domains.md](frontend-domains.md) for the current implementation. The
+> body is preserved as the migration record.
+>
 > **Status addendum (2026-07-05).** Much of this review has since been executed.
-> `store.tsx` is now a 73-line composition root that does **not** subscribe to the
-> whole store; the runtime moved into `app/conductor-runtime.ts` (a 55-line
-> coordinator composing four domain sub-hooks under `app/runtime/`:
-> `session`, `addon`, `chat`, `master`, sharing a `RuntimeRefs` bundle). Concretely:
+> `store.tsx` is now a 32-line composition root that does **not** subscribe to the
+> whole store; the runtime moved into `app/conductor-runtime.ts`, which composes
+> four plain domain subsystems under `app/runtime/`:
+> `session`, `addon`, `chat`, `master`, sharing a `RuntimeRefs` bundle. Concretely:
 >
 > - **#1 provider hot subscription — done.** `stateRef` is mirrored via
 >   `useAppStore.subscribe`; no `useConductor()` remains in any production component

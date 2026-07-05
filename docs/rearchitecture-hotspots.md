@@ -1,5 +1,11 @@
 # Rearchitecture hotspots beyond the store
 
+> **Historical audit.** Use [architecture.md](architecture.md),
+> [frontend-domains.md](frontend-domains.md), [backend-domains.md](backend-domains.md),
+> and [security.md](security.md) for current behavior. Findings below are
+> preserved as the audit that motivated the changes and may describe already
+> fixed code.
+>
 > **Status addendum (2026-07-05).** In progress. Both **P0 authority gaps are
 > closed**:
 > - **Addon execution isolated.** Tool/hook handlers no longer run via

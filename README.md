@@ -46,7 +46,7 @@ Each session's card is kept current by its monitor — the current **task**, a t
 
 The **Chat** rail is a home for **chat agents**: in-app LLM assistants (no PTY) that act on your machine.
 
-- **Hands-on tools** — browse folders, read/write/surgically-edit files, run shell commands and scripts, load **skills** (reusable instruction packs), and call tools on your **MCP servers**. File writes are sandboxed to the chat's working folder. Tool calls render as live ⚙ traces.
+- **Hands-on tools** — browse folders, read/write/surgically-edit files, run shell commands and scripts, load **skills** (reusable instruction packs), and call tools on your **MCP servers**. Built-in write/edit operations are canonically scoped to the chat's working folder; risky shell, AppleScript, and delete tools ask first by default. Tool calls render as live ⚙ traces.
 - **Streaming replies** — token-by-token, with reasoning models' thinking shown in a collapsible block.
 - **Configurable agent types** — each with its own provider, credentials, and a per-chat model list; an optional persona and chosen skill sources.
 - **Full-text search** across every conversation via an embedded tantivy index, rebuilt automatically.
@@ -72,7 +72,8 @@ Addons extend the app without touching core code. A package (`*.yaam.json` or a 
 
 Addons live in a **marketplace** (rail → Addons): search, an installed list with grant chips, packages from any number of registries (http(s) or local folders), and **✦ Generate** — describe an addon and an LLM builds, validates, and installs it. Every addon tab has **Preview**, **Source**, and **Customize** (a scoped chat that edits the addon through a validated tool).
 
-> ⚠ Tool handlers and hooks run with app privileges — install only trusted packages. Views stay sandboxed.
+> Addon views, tool handlers, and hooks run in opaque-origin, network-denied
+> sandbox frames. Their only app access is the permission-scoped addon API.
 
 ## Workspaces
 
@@ -82,14 +83,19 @@ Work is organized into **workspaces** (switcher in the title bar): each has its 
 
 - **Schedules** — a 5-field cron scheduler plus one-time runs; can launch sessions or seed board tasks, from the UI or Master.
 - **Templates** — preconfigured launches, one-shot (run a task and exit) or interactive, that feed quick launches, schedules, and tasks.
-- **MCP & skills** — Settings-managed streamable-HTTP MCP servers and a registry of reusable skill packs, both available to chat agents.
+- **MCP & skills** — Settings-managed streamable-HTTP and local stdio MCP
+  servers, config/extension import, and registries of reusable skill packs, all
+  available to chat agents.
 - **Notifications & activity** — session exits, failures, cron runs, and Master decisions in the bell popover and Activity timeline.
 - **Diff review** — Approve / Request-changes over a session's live `git diff`.
 - **Persistence** — sessions, board, schedules, templates, layouts, settings, and more survive restarts.
 
 ## Development
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for architecture, data flows, and the change checklist. Requires Node 20+, Rust (rustup), and Xcode command-line tools on macOS.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the contributor workflow and
+[docs/architecture.md](docs/architecture.md) for architecture, data flows,
+domains, technologies, persistence, and security boundaries. Requires Node 20+,
+Rust (rustup), and Xcode command-line tools on macOS.
 
 ```sh
 cd app

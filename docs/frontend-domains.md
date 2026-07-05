@@ -1,0 +1,488 @@
+# Frontend domain implementation
+
+## Frontend design rules
+
+The frontend separates four concerns:
+
+- `AppState` is data in Zustand.
+- Domain action factories expose commands to the UI.
+- Plain runtime factories own timers, subscriptions, queues, histories, and OS
+  or LLM side effects.
+- React components render selector-derived state and call stable actions.
+
+Pure transitions stay near their owning domain. Native operations should use a
+narrow port where one exists. Runtime lifecycle is explicit through `start`,
+`dispose`, and keyed cancellation methods.
+
+## Application composition (`app/`)
+
+### Responsibility
+
+The application layer wires domains together; it does not own feature rules.
+
+### Implementation
+
+- `conductor-runtime.ts` constructs `AppRuntime`, the shared kernel, domain
+  subsystems, stable action surface, state mirror, feedback timer, and teardown.
+- `runtime/session.ts` assembles the mutually dependent session, monitor,
+  watcher, settle, launch, and exit services.
+- `runtime/addon.ts` assembles addon API, agent, editor/package, hook, and
+  sandbox execution paths.
+- `runtime/chat.ts` assembles integrations, chat runtime, persistence,
+  hydration, chat search indexing, and session-runtime cleanup.
+- `runtime/master.ts` assembles Master, workspace event routing, and scheduler.
+- `runtime/refs.ts` supplies typed mutable cells for construction cycles and
+  fast task-session/user-stop bindings.
+- `conductor-actions.ts` composes every domain action factory.
+- `actions.ts` composes domain-owned TypeScript action interfaces.
+- `global-effects.ts` owns appearance updates, global error logging, and
+  keyboard shortcuts.
+- `appearance.ts` projects theme, density, scale, and font settings onto the
+  document root.
+
+`store.tsx` constructs `AppRuntime` once with a ref so React StrictMode's render
+probe does not create duplicate runtimes. Its mount effect starts the runtime;
+cleanup disposes it.
+
+### Command registry status
+
+`app/commands/` contains an actor-aware command registry, capability policy,
+audit ring, validation hook, and one-shot approval mechanism. It defines actors
+for user, Master, watcher, chat, and addon callers. `createAppRuntime` constructs
+the registry and registers the first vertical use case: `send_to_session`.
+The UI session action executes that command as the user actor. Addon
+`sendToSession` calls execute it as an addon actor carrying the package id,
+after the normal addon permission wrapper has allowed `sessions:send`.
+
+Migration is partial. Master, watcher, chat, and other addon operations still
+largely use their existing domain adapters and policy gates. Do not assume every
+action is centrally audited or authorized by the registry yet.
+
+## Shared foundation (`core/`, `store/`, `shared/`, `llm/`)
+
+### State and selectors
+
+- `core/store.ts` creates the data-only Zustand store and pure `dispatch` helper.
+- `store/hooks.ts` exposes full-state access, narrow selectors with equality
+  caching, one-level shallow equality, and stable actions from context.
+- `core/context.ts` keeps context identity outside hot-reloaded provider code.
+- `core/types.ts` defines persisted records, runtime state, domain entities,
+  and the combined `AppState`.
+- `core/data.ts` seeds default agent types, templates, providers/settings,
+  skills, persona, Master tools, colors, and fresh state.
+
+### Runtime ports and cancellation
+
+- `core/ports.ts` defines `StatePort`, `ClockPort`, and `Disposable`. Real ports
+  adapt Zustand and browser timers; tests use fakes.
+- `core/abort-registry.ts` owns keyed `AbortController`s for chats, monitors,
+  watchers, addon agents, and Master work.
+- `core/ports.fakes.ts` supplies deterministic test doubles.
+
+### Native and terminal adapters
+
+- `core/native.ts` is the TypeScript/Tauri boundary. It maps camel-case frontend
+  types to Rust commands/events and provides browser-preview fallbacks where
+  meaningful.
+- `core/terminals.ts` owns the module-level xterm registry, the single native
+  output listener, per-session streaming UTF-8 decoders, ANSI-stripped line
+  extraction, terminal sizing, repaint, and disposal.
+
+### LLM client
+
+`llm/client.ts` contains provider definitions, credential-command caching,
+Anthropic/OpenAI request conversion, Bedrock delegation, buffered calls, SSE
+stream parsing, thinking/tool-call normalization, and authentication retry.
+
+The domain loops consume the common `ApiMessage`, `ApiContentBlock`,
+`ApiResponse`, and `LlmConfig` shapes.
+
+### Shared utilities
+
+- `shared/id.ts` generates client-side entity ids.
+- `shared/zip.ts` and `shared/filetext.ts` parse attached zip-based office files
+  and extract display/prompt text.
+- `core/highlight.ts` provides shared source highlighting.
+- `core/usage.ts` estimates output tokens and spend from retained text.
+
+## Activity domain
+
+### Purpose
+
+Route events and notifications to the workspace that owns the affected session.
+
+### Implementation
+
+`domains/activity/service.ts` is a plain factory over `StatePort`. `widOf`
+resolves a session's workspace, `logEvent` prepends a bounded 200-item activity
+entry, and `notify` prepends a bounded 30-item notification. Background
+workspace data is updated inside `workspaceData` without switching the UI.
+
+### Tests
+
+Tests cover active/background routing, invalid session fallback, and bounds.
+
+## Session domain
+
+### Purpose
+
+Own real terminal-session state, process/terminal actions, launch planning,
+prompt attention, settle detection, exit classification, pane layout, and the
+workspace file viewer.
+
+### Main implementation units
+
+| File | Responsibility |
+| --- | --- |
+| `controller.ts` | One public lifecycle surface composed from session and prompt actions |
+| `app/commands/session-commands.ts` | Registered `send_to_session` use case and capability |
+| `ports.ts` | `SessionProcessPort` over native PTY and xterm capabilities |
+| `actions.ts` | Archive, restore, delete, resume, launch, send, and stop |
+| `prompt-actions.ts` | Approve, deny, or choose a numbered terminal prompt option |
+| `config-actions.ts` | Per-session memory/tool toggles and permissions |
+| `layout-actions.ts` | Pane/group assignment, split ratios, maximize/minimize, focus |
+| `layout-state.ts` | Pure group creation, removal, legacy migration, and focus transitions |
+| `launch.ts` | Pure launch-plan construction, Claude session-id injection, initial Agent record |
+| `launch-runtime.ts` | PTY spawn, CLI id probing, template launch, canonical task launch |
+| `command.ts` | Agent type matching, env prefix, key mapping, delayed Enter send |
+| `attention.ts` | Screen tails, needs-input escalation, monitor status, bounded output/usage |
+| `prompt-detection.ts` | Pure prompt/menu heuristics and numbered option extraction |
+| `use-settle.ts` | Plain settle runtime plus legacy React adapter |
+| `exit.ts` | Pure stopped/failed/completed/exited classification |
+| `exit-handler.ts` | Effectful process-exit coordinator and native subscription |
+| `FilesPane.tsx` | File tree, git status/diff gutter, source/document/media preview |
+| `Workspace.tsx`, `Pane.tsx`, `TerminalPane.tsx` | Pane layout and terminal/chat mounting |
+
+### Launch and resume
+
+`buildLaunch` creates an optimistic real `Agent`, selects the launch type, and
+injects a UUID for new Claude sessions. `createLaunchRuntime` attaches xterm,
+spawns through `SessionProcessPort`, probes Codex/OpenCode session files when
+needed, and records errors on the agent.
+
+Templates build CLI-specific shell-safe commands. Task runs are forced to
+one-shot mode and use the same path for active and background workspaces.
+Resume prefers a captured CLI id and falls back to each agent type's configured
+resume command.
+
+### Output and attention
+
+The terminal registry routes raw bytes directly to xterm and calls:
+
+- `appendTail` for complete ANSI-stripped lines;
+- `bumpSettle` for every raw chunk, including TUI redraws;
+- `clearNeeds` for meaningful user input;
+- `armResponseWatch` when the user submits input.
+
+Retained logs are capped at 200 entries. Cost and token usage are estimates from
+printable output characters.
+
+### Settle and prompt detection
+
+The runtime waits for three seconds of quiet, then reads the active xterm screen
+for alternate-screen apps or the new line tail for plain sessions. It suppresses
+prompt detection while known busy markers are visible, extracts menu choices,
+and deduplicates repeated questions. A four-second scan catches persistent TUI
+dialogs even if ordinary settle timing misses them.
+
+### Exit handling
+
+The pure classifier distinguishes user stop, non-zero failure, successful
+ephemeral completion, and ordinary interactive exit. The coordinator then:
+
+- updates the session status and task column;
+- captures a missing CLI resume id;
+- fires addon hooks;
+- reports to the task watcher or generic monitor;
+- logs/notifies the correct workspace;
+- schedules optional successful one-shot auto-archive.
+
+### File pane
+
+The file pane lists directories, polls git status, loads text or base64 binary
+content, provides image/PDF/office previews, highlights source, and derives
+changed-line markers from zero-context git diffs. It is shared by real sessions
+and chat sessions with a working folder.
+
+### Tests
+
+Tests cover launch plans/runtime, controller effects through fake ports, action
+cleanup, prompt actions/detection, settle timing, exit classification/fan-out,
+and layout behavior indirectly through state helpers.
+
+## Board domain
+
+### Purpose
+
+Own task specifications, workflow columns, task chat, task-session bindings,
+per-task watcher agents, diff review, and scheduled task metadata.
+
+### Implementation
+
+- `actions.ts` implements drag/drop, CRUD, watcher-driven start/restart, task
+  chat, task drafting, schedules, and review decisions.
+- `task-state.ts` locates and updates tasks across active/background workspaces.
+- `task-prompt.ts` builds the worker prompt and acceptance contract.
+- `watcher.ts` defines task drafting and the task-scoped LLM tool loop.
+- `watcher-runner.ts` adapts watcher tools to current state, terminal screens,
+  task messages, and session launches.
+- `watcher-runtime.ts` owns private histories, busy state, queued notes, and
+  keyed cancellation.
+- `Board.tsx` and `TaskSpecForm.tsx` implement kanban and specification UI.
+
+### Watcher behavior
+
+Each task has a capped private watcher history. The watcher can set the card
+column/note, send input, inspect attached sessions, ask the user, and spawn a
+one-shot worker. It receives stable terminal output and process-exit evidence.
+Before claiming progress it can inspect the latest screen and process status.
+
+The runtime serializes turns per task, drains queued notes, cancels on task
+deletion, and prevents more than three simultaneous task workers.
+
+### Tests
+
+Tests cover active/background task lookup and updates plus watcher queue,
+cancellation, and disposal.
+
+## Master domain
+
+### Purpose
+
+Provide the user-facing orchestrator, per-session monitor agents, current-state
+prompt construction, tool execution, approval handling, and sidebar UI.
+
+### Implementation
+
+- `master.ts` is the capped ten-round Master harness and integrity check.
+- `tools.ts` declares Master JSON schemas and dispatches calls to `MasterExec`.
+- `prompt.ts` serializes agent/workspace/tool policy state and addon directives.
+- `runner.ts` implements tool effects, policy gates, queue draining, and visible
+  reply/trace updates.
+- `master-runtime.ts` owns busy/queued/dedup state and cancellation.
+- `monitor.ts` defines a three-round session-monitor harness.
+- `monitor-runner.ts` maps monitor tools to status, prompt, and Master events.
+- `monitor-runtime.ts` owns per-session histories, busy set, last-note queue, and
+  abort registry.
+- `actions.ts` implements composer send and Master tool approval decisions.
+- `Sidebar.tsx` renders chat, routes, escalations, build results, collapsed
+  traces, and pending Ask-first approvals.
+
+### Policy
+
+Master tools first pass the global catalog gate. Session-targeted tools also
+pass the target agent's tool toggle and permission. `Ask first` creates a visible
+approval record and consumes a one-shot token on retry. `Approval` and `Off` are
+blocked. Addon-contributed tools execute through the addon sandbox and its
+permission-scoped API.
+
+### Reliability
+
+The runtime coalesces proactive notes while a turn is busy, deduplicates repeated
+events, caps loops/history, supports cancellation, and prevents unsupported
+action claims through an integrity retry.
+
+## Chat domain
+
+### Purpose
+
+Provide in-app LLM agents that operate on files and applications without a PTY.
+
+### Implementation
+
+- `actions.ts` creates/selects chats, sends/stops/retries/clears, resolves inline
+  approvals, changes Ask/Auto mode, and returns available skills.
+- `chat-runtime.ts` owns private API histories, busy state, abort controllers,
+  and pending approval promises.
+- `runner.ts` resolves provider credentials, reconstructs history, attaches MCP
+  and skills, handles slash invocation and attachments, streams visible logs,
+  and auto-titles a first conversation.
+- `agent.ts` defines built-in/MCP tools, system prompt, tool execution, and the
+  24-round streaming loop.
+- `log.ts` appends bounded visible transcript entries and updates streaming
+  messages.
+- `search-indexer.ts` subscribes only to transcript-reference changes and
+  debounces Tantivy reindexing.
+- `ChatView.tsx` provides chat selection and full-text search.
+- `ChatPane.tsx` renders messages, attachments, files panel, tool traces,
+  approval bubbles, slash menu, retry/copy/export, and stop/send controls.
+
+### Tools
+
+Built-ins cover directory/file navigation, multi-file reads, glob/grep, file
+creation/edit/move/copy/delete, shell and AppleScript execution, web search,
+page fetch, raw HTTP, board/schedule operations, skill save/load, and connected
+MCP tools.
+
+`run_command`, `run_applescript`, and `delete_path` require inline approval in
+Ask mode. Write/edit paths are checked lexically in the frontend and
+canonically against the chat root by Rust. Tool arguments marked incomplete by
+the streaming parser are refused.
+
+### Attachments and history
+
+Text and extracted office/PDF content enter the user prompt; images become
+base64 vision blocks. Original paths are included so tools can access the file.
+Visible logs are persisted, while private provider history is memory-only and
+reconstructed from user/assistant messages after restart. Thinking and tool
+traces are excluded from reconstructed history.
+
+## Schedule domain
+
+### Purpose
+
+Own cron expressions, templates, one-time scheduling, and execution across all
+workspaces.
+
+### Implementation
+
+- `cron.ts` parses five cron fields and produces human-readable labels.
+- `due.ts` purely selects schedules/tasks due at a given clock value.
+- `template-command.ts` creates shell-quoted Claude/Codex commands for mode,
+  model, prompt, system prompt, approval, and extra arguments.
+- `actions.ts` manages template and schedule records.
+- `runtime.ts` owns the 15-second clock, boot gate, minute deduplication,
+  one-time disarming, task creation, task starts, raw session launch, hooks,
+  activity, and notification.
+- `Schedules.tsx` and `TemplatesView.tsx` provide management UI.
+
+### Tests
+
+Cron parsing, due selection, active/background execution, boot gating, and
+runtime disposal are tested with fake state and clock ports.
+
+## Addon domain
+
+### Purpose
+
+Load third-party packages that can contribute views, Master tools, lifecycle
+hooks, and scoped LLM agents without giving package JavaScript ambient main
+webview authority.
+
+### Implementation
+
+- `core/addons.ts` owns the package contract, permissions, API whitelist,
+  snapshot projection, YAML subset parser, package validation/export, tool
+  definitions, and handler/hook dispatch.
+- `addon-api.ts` implements the raw API for sessions, tasks, templates,
+  schedules, UI, agent wake, and namespaced storage.
+- `sandbox.ts` runs handler/hook JavaScript in a hidden opaque-origin iframe.
+- `agent-runtime.ts` owns addon-agent histories, busy state, and cancellation.
+- `addon-agent.ts` defines the addon's permission-scoped mini-Master loop.
+- `runtime.ts` owns package installation and customization chat/editor state.
+- `addon-editor.ts` edits a package only through validated full-package
+  replacement.
+- `addon-gen.ts` generates and retries validation of new packages.
+- `actions.ts` covers install/export/remove, grants, RPC, registry URLs, and AI
+  generation.
+- `AddonView.tsx` hosts sandboxed previews, source view, and customization chat.
+- `AddonsView.tsx` provides installed/registry lists and generation UI.
+
+### Isolation
+
+View and handler iframes omit `allow-same-origin`, so their origin is opaque.
+Their CSP denies network access. The host verifies message source and method,
+passes only the bounded addon snapshot, enforces grants on every API method,
+caps API results at 256 KiB, and resets a handler frame after a 10-second
+timeout.
+
+Fresh packages auto-grant only non-dangerous requested scopes. Machine-acting
+and LLM-steering scopes require explicit user grants.
+
+## Settings and integrations domain
+
+### Purpose
+
+Manage provider settings, agent types, Master controls, appearance, MCP
+servers, skill/persona/registry records, addon registries, and Claude plugin
+marketplaces.
+
+### Implementation
+
+- `actions.ts` owns settings/entity mutations, live MCP connect/disconnect,
+  registry refresh, and Master tool catalog permissions.
+- `integrations.ts` owns live MCP session and skill-catalog caches.
+- `mcp-market.ts` defines curated servers and imports config from Claude,
+  Cursor, Codex, Windsurf, `.mcpb`, and `.dxt` sources.
+- `plugin-market.ts` parses GitHub plugin marketplaces and resolves plugin
+  sources.
+- `SettingsView.tsx` composes settings tabs; `ToolsView.tsx` renders Master tool
+  policy.
+
+### MCP behavior
+
+The shared MCP client supports streamable HTTP and local stdio. It performs
+initialize, initialized notification, tools/list, and tools/call. HTTP handles
+plain JSON or SSE-framed responses and session ids. Rust owns stdio child
+processes; requests serialize per server.
+
+## Workspace domain
+
+### Purpose
+
+Provide isolated product slices while allowing background sessions and
+schedules to continue.
+
+### Implementation
+
+`state.ts` contains pure snapshot/apply/switch transitions. `actions.ts`
+switches, creates, renames, and deletes workspaces. Switching replays queued
+Master notes after loading the target slice. Deletion cancels Master, kills and
+disposes owned sessions, removes their persisted files, and removes the
+workspace data.
+
+Tests cover pure swapping, queued state, and effectful cleanup through fake
+session ports.
+
+## Shell domain
+
+### Purpose
+
+Own global navigation and overlays rather than feature data.
+
+### Implementation
+
+- `actions.ts` handles view navigation, palette, notifications, inspector,
+  drawer, new-session dialog, and needs-attention navigation.
+- `TitleBar.tsx` hosts workspace and appearance controls.
+- `IconRail.tsx` selects top-level built-in/addon views.
+- `Overview.tsx`, `Timeline.tsx`, and `UsageSummary.tsx` present aggregate state.
+- `Drawer.tsx` hosts agent detail and live git diff review.
+- `SlideOver.tsx` hosts memory/tool configuration.
+- `CommandPalette.tsx` offers keyboard navigation/actions.
+- `Toast.tsx` renders transient feedback.
+
+Global keyboard/error/appearance listeners live in the application layer because
+they are process-wide effects, not shell state transitions.
+
+## Persistence infrastructure
+
+### Purpose
+
+Own storage schema, backward-compatible hydration, change detection, keychain
+mirroring, debounced writes, and close flushing.
+
+### Implementation
+
+- `schema.ts` projects main and per-session partitions and stamps schema v1.
+- `loaders.ts` loads main/backup and new/legacy session layouts.
+- `hydrate.ts` defensively normalizes legacy records, layouts, usage counters,
+  addons, and interrupted chats.
+- `hydrate-effect.ts` sequences load, apply, terminal restore, keychain resolve,
+  readiness, and integration startup.
+- `subscribe.ts` identifies changes relevant to main, session, secret, and chat
+  search writers.
+- `runtime.ts` owns subscription/timer lifecycle, save errors, immediate
+  structural session writes, keychain readiness, Tauri close flush, and browser
+  fallback.
+
+Persistence tests cover schema projection, watched slices, hydration migration,
+debounce, close flush, and cleanup.
+
+## Frontend test architecture
+
+Tests are colocated with domains. Pure functions use direct fixtures; effectful
+runtimes use fake `StatePort`, `ClockPort`, process ports, frames, and abort
+signals. The current suite includes 36 files and 172 test cases in this
+snapshot. UI behavior is covered selectively with jsdom and Testing Library;
+most coverage focuses on domain and runtime invariants.

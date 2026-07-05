@@ -22,7 +22,9 @@ only escalates digests to Master, so Master isn't spammed by raw terminal noise.
 app/                     Tauri app (the whole product)
   src/                   React frontend. Root holds only the app hub; everything else is grouped.
     App.tsx main.tsx     composition root + entry
-    store.tsx            central provider: shared refs/effects/persistence + the actions object
+    store.tsx            32-line provider: AppRuntime lifecycle + stable ActionsCtx
+    app/                 non-React application runtime, subsystem wiring, action composition
+    infrastructure/      persistence schema, hydration, subscriptions, save/close runtime
     master.ts monitor.ts compatibility barrels (llm/client + domains/master/*)
     store/               store internals: hooks (useConductor/useConductorSelector/useActions),
                          state-helpers, secrets (keychain redaction), + tests
@@ -30,7 +32,7 @@ app/                     Tauri app (the whole product)
     components/          shared UI primitives only: ui.tsx, Markdown.tsx
     core/                shared foundation used across domains:
       store.ts           Zustand store (useAppStore) + dispatch
-      types.ts data.ts state-lib.ts context.ts   types, seed/catalogs, pure helpers, ActionsCtx
+      types.ts data.ts context.ts ports.ts       types, seed/catalogs, ActionsCtx, runtime ports
       native.ts mcp.ts terminals.ts               Tauri bridge, MCP client, xterm registry
       addons.ts highlight.ts skills.ts usage.ts   addon contract, highlighter, skills, usage est.
     domains/             feature domains — each owns its view, components, logic (runner), actions:
@@ -39,7 +41,8 @@ app/                     Tauri app (the whole product)
       board/             Board + TaskSpecForm, watcher-runner + watcher, task-state (kanban)
       master/            Sidebar, runner + monitor-runner, master/tools/prompt/monitor harnesses
       addons/            AddonsView/AddonView/AddonSource, addon-api, addon-agent/editor/gen
-      settings/          SettingsView, ToolsView
+      activity/          workspace-aware event/notification service
+      settings/          SettingsView, ToolsView, integrations + MCP/plugin import
       schedules/         Schedules, TemplatesView
       shell/             app chrome + top-level views: TitleBar, IconRail, CommandPalette,
                          Overview, Timeline, Drawer, SlideOver, Toast, UsageSummary
@@ -53,11 +56,13 @@ app/                     Tauri app (the whole product)
       domains/state.rs   atomic persistence: main partition + per-session files
       domains/git.rs, domains/fs.rs   git inspection; fs + timeout-bounded exec
       domains/search.rs  tantivy full-text index over chat transcripts
+      domains/mcp.rs     local stdio MCP child-process transport
       domains/bedrock.rs AWS Bedrock InvokeModel bridge + credential parsing/caching
       domains/secrets.rs OS-keychain credential storage (keyring)
     capabilities/default.json   Tauri ACL permissions
     tauri.conf.json      productName YAAM, identifier dev.yaam.conductor (kept for state compat)
     icons/               app icons, generated from app/app-icon.svg via `tauri icon`
+docs/README.md           current architecture/domain/security documentation index
 docs/addons.md           canonical addon architecture + authoring reference
 registry/                seed addon registry (index.json + packages/*.yaam.json + qa-gate/ folder format)
 scripts/pack-addon.mjs   folder-format addon → single-file .yaam.json
@@ -77,11 +82,11 @@ Run everything from `app/`. Cargo must be on PATH (`export PATH="$HOME/.cargo/bi
 - `npx tsc --noEmit -p tsconfig.app.json` — typecheck the frontend. **Always run
   before committing.** (A bare `npx tsc --noEmit` silently checks NOTHING — the
   root tsconfig is a solution-style config with `files: []`.)
-- `npm run lint` — oxlint. Two pre-existing `only-export-components` warnings in
+- `npm run lint` — oxlint. Three pre-existing `only-export-components` warnings in
   `ui.tsx` and files that export both a component and helpers are expected/benign.
 - `npm run build` — production frontend build (`tsc -b && vite build`).
 - `(cd src-tauri && cargo check)` — typecheck Rust. `cargo test --lib` runs the
-  bedrock credential-parser unit tests.
+  colocated backend domain tests.
 - `npm run tauri build` — release bundle (.app + .dmg). Ad-hoc signed
   (`signingIdentity: "-"`); no notarization.
 
@@ -89,23 +94,17 @@ Whole gate before a commit: `npx tsc --noEmit -p tsconfig.app.json && npm run li
 
 ## Architecture notes that will bite you
 
-**One store, domain-sliced actions.** State lives in a single **Zustand** store
-(`core/store.ts` — `useAppStore`); `dispatch(updater)` replaces state with the
-reducer's old semantics (full-object return, no-op bail-out). `store.tsx` owns
-the runtime refs/effects and composes the action surface. Read state with
-`useConductor()` (full) or `useConductorSelector(sel, isEqual?)` (a Zustand
-selector subscription — the narrow-slice path). Feature-domain
-actions live in `domains/<x>/actions.ts` as `useXActions(ctx)` hooks (settings,
-board, schedules, chat, addons, workspace) that take a context of stable
-refs/callbacks and are spread into the provider's `ConductorActions` memo. The
-remaining app-shell + session-runtime actions (pane layout, session lifecycle,
-resume, master send) stay in `store.tsx` because they're bound to the terminal
-registry and runtime refs there. `stateRef.current` mirrors state for closures/
-effects. Several callbacks are wired through **refs** (`masterEventRef`,
-`bumpSettleRef`, `fireAddonHookRef`, `onSettleRef`, `monitorEventRef`,
-`launchFromTemplate`) to break declaration-order/TDZ cycles — respect that
-pattern when adding cross-referencing callbacks. Consumers read state via
-`useConductor()` (full) or `useConductorSelector(sel)` (narrow slice).
+**One data store, plain domain runtimes.** State lives in one **Zustand** store
+(`core/store.ts`); `dispatch(updater)` replaces state with full-object/no-op
+semantics. `app/conductor-runtime.ts` builds a non-React `AppRuntime` from four
+plain subsystems under `app/runtime/` (session/board, addon, chat/boot,
+Master/scheduler), then composes domain-owned action factories. `store.tsx` only
+constructs/starts/disposes that runtime and provides its stable actions. Runtime
+maps, timers, histories, queues, subscriptions, and abort controllers belong to
+their subsystem—not Zustand and not React. Typed refs in `app/runtime/refs.ts`
+exist only for genuine construction cycles. Components use
+`useConductorSelector`; do not reintroduce full-state subscriptions on hot
+surfaces. See `docs/architecture.md` and `docs/frontend-domains.md`.
 
 **StrictMode double-invokes reducers.** Never put side effects (launching,
 scheduling, network) inside a dispatch updater — they'll fire twice. Do the
@@ -115,21 +114,23 @@ side effect outside `dispatch`, and Master events dedupe on a 10s window.
 the hot-reloaded store recreates context identity on HMR and blanks the app
 ("useConductor outside provider"). Keep them in the stable module.
 
-**Persistence + migrations.** State is written through ONE selector per
-partition (`state-lib.ts`): `selectMainState` → the low-churn main blob
+**Persistence + migrations.** State is written through one selector per
+partition (`infrastructure/persistence/schema.ts`): `selectMainState` → the low-churn main blob
 (`conductor-state.json`), and `selectSession` → one file per session
 (`sessions/<id>.json`, diff-written so a terminal line rewrites only that
-session). Both the debounced 800ms writer and the `beforeunload` flush go
-through those selectors, so the on-disk shape can't drift. Rust writes are
+session). Direct Zustand subscriptions in `infrastructure/persistence/runtime.ts`
+drive debounced writers. Tauri close is vetoed while an awaited, 3s-bounded
+flush completes; `beforeunload` is only a browser fallback. Rust writes are
 atomic (temp + fsync + rename + `.bak`) and hydration recovers from the backup.
 When you add a new persisted top-level field, you MUST:
 1. add it to `PersistedState` and `AppState` in `types.ts`,
 2. seed it in `data.ts` `seedState()`,
 3. hydrate it defensively: `field: p.field ?? s.field ?? <empty>`,
 4. add it to the matching selector — `selectMainState` for a normal durable
-   field (its debounced effect's dep array too), or `selectSession` if it lives
-   on an agent,
-5. **guard every read with `?? []` / `?? {}`** — existing users have saved states
+   field or `selectSession` if it lives on an agent,
+5. add its reference to the matching change detector in
+   `infrastructure/persistence/subscribe.ts`,
+6. **guard every read with `?? []` / `?? {}`** — existing users have saved states
    that predate your field. (The templates crash was exactly this: a saved state
    without `templates` made `s.templates.find` throw. See commit 7edf98a.)
 
@@ -153,7 +154,7 @@ Tauri http plugin to dodge CORS.
   command whose stdout yields the key/token; parsed, cached until its stated
   expiry, and re-run on 401/403. Bedrock parses AWS credential JSON
   (`aws configure export-credentials` shape, nested `Credentials`, or `AWS_*`
-  env lines) in `core/bedrock.rs`, with an optional refresh command (`aws sso login`).
+  env lines) in `src-tauri/src/domains/bedrock.rs`, with an optional refresh command (`aws sso login`).
 - **Master harness** (`domains/master/master.ts`): tool loop capped at 10 iters, temperature
   0.2, with an **integrity check** — if the model claims it took an action but
   called no tool, the turn is retried. Master must actually drive terminals via
@@ -177,7 +178,7 @@ Tauri http plugin to dodge CORS.
   args (`incompleteArgs`) are refused, not run with `{}`. Streaming routes a
   thinking channel separate from the answer (rendered as a collapsible block);
   thinking is kept out of replayed API history. Excluded from workspace
-  tabs/groups/overview; transcripts feed the tantivy index (`core/search.rs`) and
+  tabs/groups/overview; transcripts feed the Tantivy index (`src-tauri/src/domains/search.rs`) and
   chats auto-title after the first turn unless renamed.
 - **Addon agents** (`domains/addons/addon-agent.ts`): optional per-addon harness whose tools
   are the addon's permission-scoped API; woken by subscribed hooks or `agent.wake`.
@@ -211,7 +212,7 @@ screen scan of the xterm buffer (`readScreen`), not by line streaming. Key rules
 
 - `AgentTemplate` (types.ts): mode `ephemeral | interactive`, prompt (`{task}`
   placeholder), system prompt, model, approval (`safe|edits|full`), cwd, extra
-  args, autoArchive. `buildTemplateCommand()` in `state-lib.ts` maps these to
+  args, autoArchive. `buildTemplateCommand()` in `domains/schedules/template-command.ts` maps these to
   real CLI flags — claude: `-p`, `--model`, `--append-system-prompt`,
   `--permission-mode acceptEdits`, `--dangerously-skip-permissions`; codex:
   `exec --skip-git-repo-check`, `-m`, `--sandbox read-only`,
@@ -220,7 +221,7 @@ screen scan of the xterm buffer (`readScreen`), not by line streaming. Key rules
   composed prompt (the board's criteria/goal layer).
 - Templates launch from the Templates view, NewSessionDialog, board tasks, cron
   schedules, and Master (`run_template` tool; `create_schedule` accepts a template).
-- The 15s ticker in `store.tsx` fires cron schedules AND scheduled board tasks
+- The 15s ticker in `domains/schedules/runtime.ts` fires cron schedules AND scheduled board tasks
   (`BoardTask.scheduleAt`), across all workspaces (active and background pools).
 
 ## Workspaces
@@ -231,7 +232,7 @@ splits; a session lives in at most one group; legacy `focusedIds` migrates via
 `groupsFromLegacy`). The **scoped slice**
 (messages/crons/tasks/events/notifications/groups) is swapped between flat state
 and `workspaceData[id]` on switch (see `switchWorkspaceIn`, `scopedFromState`,
-`applyScoped` in state-lib.ts). Templates and agentTypes are global, not scoped.
+`applyScoped` in `domains/workspace/state.ts`). Templates and agentTypes are global, not scoped.
 Background workspaces still fire schedules and queue Master notes.
 
 ## Addons
@@ -239,11 +240,11 @@ Background workspaces still fire schedules and queue Master notes.
 A full platform — see `docs/addons.md` for the canonical reference. In short:
 addons are packages (single-file manifest 2 JSON, or the folder format manifest 3:
 `addon.yaml` + real html/js/md files, strict YAML-subset parser in `addons.ts`)
-with four capability types — a sandboxed iframe **view**, Master **tools**
-(`new Function('input','api', src)`), lifecycle **hooks** (`onSessionExit`,
+with four capability types — a sandboxed iframe **view**, sandboxed Master
+**tools**, lifecycle **hooks** (`onSessionExit`,
 `onNeedsInput`, `onTaskMoved`, `onCronFired`, `masterPromptAppend`), and an
 **agent** (its own LLM harness). All converge on one permission-enforced
-`AddonApi` built by `makeAddonApi(addonId)` and wrapped by `enforcePermissions()`.
+`AddonApi` built by `app/runtime/addon.ts` and wrapped by `enforcePermissions()`.
 Scopes: `state:read`, `sessions:send`, `sessions:launch`, `tasks`, `schedules`,
 `agent`, `master:prompt`, `ui`, `storage`. Views talk to the app over postMessage
 (`yaam:state` push + `yaam:call` RPC, incl. `agent.wake`). Management lives in the
@@ -255,6 +256,9 @@ scopes (`state:read`, `ui`, `storage`) — the rest (`sessions:*`, `tasks`,
 `masterPromptAppend` only fires for addons holding `master:prompt`. Views get an
 injected `default-src 'none'` CSP (no network) and only receive state snapshots
 when the addon holds `state:read`; disabled addons get an empty grant set.
+Tool and hook JavaScript also runs in an opaque-origin, network-denied iframe
+with whitelisted/permission-checked RPC, a timeout, and result-size cap—never
+evaluate package code in the main webview.
 
 When extending the addon API surface: add to `AddonApi` → implement in
 `makeAddonApiRaw` → map in `METHOD_PERMISSION`/`ALL_PERMISSIONS` → whitelist in
@@ -276,7 +280,7 @@ When extending the addon API surface: add to `AddonApi` → implement in
 
 ## Gotchas checklist
 
-- New persisted field → do all 5 persistence steps above AND guard reads with `?? []`.
+- New persisted field → do all 6 persistence steps above AND guard reads with `?? []`.
 - New cross-referencing callback → wire through a ref if it forms a cycle.
 - Don't put side effects in dispatch updaters (StrictMode double-fire).
 - Don't move contexts out of `context.ts`.

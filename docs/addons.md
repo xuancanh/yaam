@@ -6,8 +6,8 @@ package (`*.yaam.json`) that can ship any mix of:
 | Capability | What it adds | Runs where |
 |---|---|---|
 | **view** | A tab in the icon rail | Sandboxed iframe (no privileges) |
-| **tools** | New actions in Master's tool list | App context, permission-checked API |
-| **hooks** | Reactions to app lifecycle + Master behavior changes | App context, permission-checked API |
+| **tools** | New actions in Master's tool list | Opaque-origin handler sandbox + permission-checked RPC |
+| **hooks** | Reactions to app lifecycle + Master behavior changes | Opaque-origin handler sandbox + permission-checked RPC |
 | **agent** | The addon's own LLM harness (a mini-Master whose tools are the addon's API) | LLM loop over the permission-checked API |
 
 Built-in features are implemented against the same surface an addon gets —
@@ -47,11 +47,11 @@ the kanban board is fully reproducible as an addon
 
 Key properties:
 
-- **One API, three entry points.** Views (over RPC), tool handlers, and hooks
-  all end up calling the same `AddonApi` object, built per addon
-  (`makeAddonApi(addonId)` in `store.tsx`) and wrapped by
+- **One API, four entry points.** Views, tool handlers, hooks, and addon agents
+  all end up calling the same `AddonApi` object, built per addon by
+  `app/src/app/runtime/addon.ts` and wrapped by
   `enforcePermissions()` so every method checks the addon's granted scopes.
-- **Views are untrusted; code capabilities are trusted-but-scoped.** The
+- **Package HTML and JavaScript are untrusted.** The
   iframe has `sandbox="allow-scripts"` plus an injected CSP
   (`default-src 'none'`), so no cookies, no parent DOM, and no outbound
   requests of any kind (fetch/XHR/WebSocket/remote images are all blocked);
@@ -72,16 +72,20 @@ Key properties:
 
 | File | Role |
 |---|---|
-| `app/src/addons.ts` | Package parsing/validation/export, `AddonApi` type, permission tables + `enforcePermissions`, RPC dispatch, tool/hook executors, snapshot builder |
-| `app/src/store.tsx` | `makeAddonApi` (the real implementations), install/export/toggle/grant actions, hook firing points, addon editor chat |
-| `app/src/components/AddonView.tsx` | Tab shell (Preview / Source / Customize), iframe bridge (state push + `yaam:call` handling) |
-| `app/src/components/AddonSource.tsx` | Source mode: manifest form + code-editor blocks |
-| `app/src/llm/master-tools.ts` | `create_addon` / `remove_addon` tool definitions (author-facing docs live in the descriptions) |
-| `app/src/llm/addon-editor.ts` | The per-addon Customize chat harness (`update_addon` tool) |
+| `app/src/core/addons.ts` | Package parsing/validation/export, `AddonApi` type, permission tables, RPC dispatch, snapshot builder, tool/hook entry points |
+| `app/src/app/runtime/addon.ts` | Per-addon API construction, permission wrapping, agents, hook fan-out, editor/package runtime |
+| `app/src/domains/addons/addon-api.ts` | Raw implementations behind the permission wrapper |
+| `app/src/domains/addons/sandbox.ts` | Opaque-origin handler/hook sandbox and host RPC bridge |
+| `app/src/domains/addons/actions.ts` | Install/export/toggle/grant/remove and view RPC actions |
+| `app/src/domains/addons/AddonView.tsx` | Tab shell (Preview / Source / Customize) and view iframe bridge |
+| `app/src/domains/addons/AddonSource.tsx` | Source mode: manifest form + code-editor blocks |
+| `app/src/domains/master/tools.ts` | `create_addon` / `remove_addon` tool definitions |
+| `app/src/domains/addons/addon-editor.ts` | Per-addon Customize chat harness (`update_addon` tool) |
+| `app/src/domains/addons/addon-gen.ts` | Addon generator and author-facing API/package instructions |
 | `registry/` | Seed registry: `index.json` + example packages |
 
-To **extend the API surface**: add the method to `AddonApi` + implement in
-`makeAddonApiRaw` (store) → add its scope to `METHOD_PERMISSION` and, if new,
+To **extend the API surface**: add the method to `AddonApi` + implement it in
+`domains/addons/addon-api.ts` → add its scope to `METHOD_PERMISSION` and, if new,
 to `ALL_PERMISSIONS` → whitelist in `ADDON_RPC_METHODS` if views may call it →
 mention it in the `create_addon` description and the addon-editor prompt so
 the LLMs generate against it.
@@ -452,7 +456,7 @@ Everything lives in the **Addons view** (icon rail → Addons) — a
 marketplace-style manager: search, installed list with grants, per-registry
 package browsing, and **✦ Generate** (describe an addon in plain language;
 an LLM with the complete authoring context builds, validates, and installs
-it — see `app/src/llm/addon-gen.ts`).
+it — see `app/src/domains/addons/addon-gen.ts`).
 
 - **Export** — the addon's detail pane writes the shareable
   `<name>.yaam.json` (includes permissions).
