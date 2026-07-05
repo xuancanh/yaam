@@ -1048,6 +1048,21 @@ export function SettingsView() {
                 onToggle={() => updateSettings({ osNotifications: s.settings.osNotifications === false })}
               />
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>GitHub token</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
+                  Personal access token for skill registries, plugin marketplaces, and MCP catalogs — lifts the 60 req/h unauthenticated API limit. Stored in the OS keychain.
+                </div>
+              </div>
+              <input
+                type="password"
+                defaultValue={s.settings.githubToken ?? ''}
+                placeholder="ghp_… / github_pat_…"
+                onBlur={e => updateSettings({ githubToken: e.target.value.trim() })}
+                style={{ ...FIELD_STYLE, width: 240 }}
+              />
+            </div>
           </div>
 
           </>}

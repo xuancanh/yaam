@@ -8,9 +8,27 @@ import { isTauri } from './base'
 // their own UA (and forbid overriding it), so only add ours on the desktop.
 const UA_HEADER: Record<string, string> = isTauri ? { 'user-agent': 'yaam/1.0' } : {}
 
+// GitHub personal access token (Settings → General). Injected ONLY into GET
+// fetches against GitHub hosts — skill registries, plugin marketplaces, MCP
+// catalogs — lifting the 60 req/h unauthenticated rate limit. Deliberately
+// NOT injected into httpRequest: that is the chat agent's generic tool, and
+// the model must not silently act on GitHub with the user's credentials.
+let githubToken: () => string = () => ''
+
+/** Wire where the GitHub token is read from (called once at boot). */
+export function setGithubTokenSource(fn: () => string): void {
+  githubToken = fn
+}
+
+function githubAuth(url: string): Record<string, string> {
+  if (!/^https:\/\/(api\.github\.com|raw\.githubusercontent\.com|codeload\.github\.com|github\.com)\//.test(url)) return {}
+  const t = githubToken().trim()
+  return t ? { authorization: `Bearer ${t}` } : {}
+}
+
 /** Fetch text through Tauri's HTTP plugin so desktop requests are not blocked by CORS. */
 export async function httpGetText(url: string): Promise<string> {
-  const res = await (isTauri ? tauriFetch : fetch)(url, { headers: UA_HEADER })
+  const res = await (isTauri ? tauriFetch : fetch)(url, { headers: { ...UA_HEADER, ...githubAuth(url) } })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return await res.text()
 }

@@ -3,7 +3,11 @@
 // state of its own — drives the store only through dispatch.
 import { useEffect } from 'react'
 import { dispatch, useAppStore } from '../core/store'
+import { setGithubTokenSource } from '../infrastructure/native/http'
 import { applyAppearance } from './appearance'
+
+// GitHub fetchers read the PAT lazily from the live store (set once, module scope)
+setGithubTokenSource(() => useAppStore.getState().settings.githubToken ?? '')
 
 export function useGlobalEffects(): void {
   // appearance: stamp theme/density/typography onto <html> now and on every

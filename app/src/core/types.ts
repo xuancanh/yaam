@@ -394,6 +394,9 @@ export interface OrchestrationSettings {
   /** native desktop notifications for escalations/finished work when the app
    *  is unfocused (default on) */
   osNotifications?: boolean
+  /** GitHub personal access token for registry/marketplace fetches (lifts the
+   *  unauthenticated 60 req/h API limit; keychain-backed like API keys) */
+  githubToken?: string
   /** Master chat panel width (px, drag-resizable) */
   sidebarWidth?: number
   /** Master chat panel collapsed to a slim rail */
