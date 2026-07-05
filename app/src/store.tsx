@@ -1,11 +1,11 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
   Addon, AddonHookName, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
   ChatAgentType, ChatMsg, McpServer, NotifKind, Notification, Panel, Persona, PersistedState, Skill, SkillRegistry, TaskChatMsg, View,
 } from './core/types'
-import { defaultDetail, mkMemory, mkTools, PERM_ORDER, seedState } from './core/data'
+import { defaultDetail, mkMemory, mkTools, PERM_ORDER } from './core/data'
 import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
@@ -19,8 +19,8 @@ import { mcpConnect } from './core/mcp'
 import type { McpSession } from './core/mcp'
 import { estimateLogUsage, estimateOutputUsage } from './core/usage'
 import type { AddonApi } from './core/addons'
-import { ActionsCtx, StateCtx, StoreCtx } from './core/context'
-import type { ConductorStore } from './core/context'
+import { ActionsCtx } from './core/context'
+import { dispatch, useAppStore } from './core/store'
 import { runMonitorLoop } from './domains/master/monitor-runner'
 import { runWatcherLoop } from './domains/board/watcher-runner'
 import { runChatMessageTurn } from './domains/chat/runner'
@@ -34,7 +34,7 @@ import { useWorkspaceActions } from './domains/workspace/actions'
 import type { TaskSpecDraft } from './domains/board/watcher'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
-import { reducer, withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
+import { withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './domains/board/task-state'
 import type { LocatedTask } from './domains/board/task-state'
 
@@ -180,22 +180,16 @@ export { cronMatches, humanizeCron } from './core/state-lib'
 
 /** Own the complete app state, native/LLM effects, and action surface for the UI. */
 export function ConductorProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, undefined, seedState)
+  // State lives in the Zustand store; the provider subscribes to the whole
+  // state (so its state-dep effects re-run and stateRef stays fresh) and drives
+  // updates through `dispatch`. Selector consumers (useConductorSelector) get
+  // Zustand's per-slice subscriptions instead.
+  const state = useAppStore()
   const toastTimer = useRef<number | undefined>(undefined)
   const pending = useRef<number[]>([])
   const dragId = useRef<string | null>(null)
   const stateRef = useRef(state)
   stateRef.current = state
-
-  // External-store bridge (finding #3): selector consumers subscribe here and
-  // re-render only when their slice changes. getSnapshot reads the render-synced
-  // stateRef; subscribers are notified after each committed state change.
-  const subscribersRef = useRef(new Set<() => void>())
-  const conductorStore = useRef<ConductorStore>({
-    subscribe: cb => { subscribersRef.current.add(cb); return () => { subscribersRef.current.delete(cb) } },
-    getSnapshot: () => stateRef.current,
-  }).current
-  useEffect(() => { for (const cb of subscribersRef.current) cb() }, [state])
 
   // set by the Master/monitor runners below; refs avoid declaration cycles
   const masterEventRef = useRef<(note: string, agentId?: string) => void>(() => {})
@@ -2215,13 +2209,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  return (
-    <StoreCtx.Provider value={conductorStore}>
-      <StateCtx.Provider value={state}>
-        <ActionsCtx.Provider value={actions}>{children}</ActionsCtx.Provider>
-      </StateCtx.Provider>
-    </StoreCtx.Provider>
-  )
+  return <ActionsCtx.Provider value={actions}>{children}</ActionsCtx.Provider>
 }
 
 export { useConductor, useConductorSelector, useActions } from './store/hooks'

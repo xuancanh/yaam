@@ -1,37 +1,24 @@
-// Consumer hooks for the conductor store. Kept in a light module (React +
-// context only, no store internals) so selector behavior is unit-testable and
-// Fast Refresh stays happy. Re-exported from ../store for existing imports.
-import { useCallback, useContext, useRef, useSyncExternalStore } from 'react'
+// Consumer hooks for the conductor store. State lives in the Zustand store
+// (core/store); actions come from the provider via ActionsCtx. Re-exported from
+// ../store for existing imports.
+import { useContext } from 'react'
+import { useStoreWithEqualityFn } from 'zustand/traditional'
 import type { AppState } from '../core/types'
 import type { ConductorActions } from '../store'
-import { ActionsCtx, StateCtx, StoreCtx } from '../core/context'
+import { useAppStore } from '../core/store'
+import { ActionsCtx } from '../core/context'
 
-/** Read the current AppState and fail fast when rendered outside the provider.
- *  Re-renders on EVERY state change — prefer useConductorSelector for a slice. */
+/** Read the whole AppState. Re-renders on EVERY state change — prefer
+ *  useConductorSelector for a narrow slice. */
 export function useConductor(): AppState {
-  const s = useContext(StateCtx)
-  if (!s) throw new Error('useConductor outside provider')
-  return s
+  return useAppStore()
 }
 
 /** Subscribe to a narrow slice of state; the component re-renders only when the
  *  selected value changes (by `isEqual`, default Object.is) rather than on every
- *  update. This is the selective-subscription path (finding #3). */
+ *  update. Backed by Zustand's selector subscription. */
 export function useConductorSelector<T>(selector: (s: AppState) => T, isEqual: (a: T, b: T) => boolean = Object.is): T {
-  const store = useContext(StoreCtx)
-  if (!store) throw new Error('useConductorSelector outside provider')
-  const selRef = useRef(selector); selRef.current = selector
-  const eqRef = useRef(isEqual); eqRef.current = isEqual
-  const cache = useRef<{ v: T } | null>(null)
-  // cache the selected value so an unrelated state change (new state object,
-  // same slice) returns a referentially-stable result and skips re-render
-  const getSelection = useCallback(() => {
-    const next = selRef.current(store.getSnapshot())
-    if (cache.current && eqRef.current(cache.current.v, next)) return cache.current.v
-    cache.current = { v: next }
-    return next
-  }, [store])
-  return useSyncExternalStore(store.subscribe, getSelection, getSelection)
+  return useStoreWithEqualityFn(useAppStore, selector, isEqual)
 }
 
 /** Read the stable action surface and fail fast outside the provider. */
