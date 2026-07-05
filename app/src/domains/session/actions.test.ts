@@ -119,29 +119,26 @@ describe('createSessionActions', () => {
     expect(get('a1')?.status).toBe('running')
   })
 
-  // a corrupted terminal (stuck in the alt screen after a Ctrl+C-killed TUI)
-  // must never leak into the resumed process — but ONLY that case may wipe
-  // the scrollback
-  it('resume hard-resets the reused xterm BEFORE respawning only when stuck in the alt screen', () => {
-    seed([agent({ status: 'error' })])
-    const port = fakePort({ isAltScreen: vi.fn(() => true) })
-    const order: string[] = []
-    vi.mocked(port.resetTerminal).mockImplementation(() => { order.push('reset') })
-    vi.mocked(port.spawnSession).mockImplementation(async () => { order.push('spawn') })
-    createSessionActions(ctx(port)).resume('a1')
-    expect(order).toEqual(['reset', 'spawn'])
-    expect(port.restoreTerminalModes).not.toHaveBeenCalled()
-  })
-
-  // a session that exited normally keeps its scrollback across resume — the
-  // regression was an unconditional reset clearing healthy history
-  it('resume of a healthy terminal restores modes and PRESERVES the scrollback', () => {
+  // resume NEVER wipes the scrollback automatically — the regression was an
+  // unconditional reset clearing healthy history. Modes are re-normalized and
+  // a corrupted (alt-screen) death only WARNS, pointing at Clear terminal.
+  it('resume restores modes and preserves the scrollback', () => {
     seed([agent({ status: 'idle' })])
     const port = fakePort() // isAltScreen defaults to false
     createSessionActions(ctx(port)).resume('a1')
     expect(port.resetTerminal).not.toHaveBeenCalled()
     expect(port.restoreTerminalModes).toHaveBeenCalledWith('a1')
     expect(port.spawnSession).toHaveBeenCalled()
+    expect(get('a1')?.log.at(-1)?.x).not.toContain('Clear terminal')
+  })
+
+  it('resume after a mid-render TUI death keeps the buffer but warns about Clear terminal', () => {
+    seed([agent({ status: 'error' })])
+    const port = fakePort({ isAltScreen: vi.fn(() => true) })
+    createSessionActions(ctx(port)).resume('a1')
+    expect(port.resetTerminal).not.toHaveBeenCalled()
+    expect(port.restoreTerminalModes).toHaveBeenCalledWith('a1')
+    expect(get('a1')?.log.at(-1)?.x).toContain('Clear terminal')
   })
 
   it('refreshTerminal is the explicit user reset: restore modes, then wipe', () => {

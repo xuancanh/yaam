@@ -3,6 +3,7 @@ import { useActions } from '../../store'
 import { ACCENT, memTokens } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
+import { confirmAction } from '../../components/Confirm'
 import { ChatPane } from '../chat/ChatPane'
 import { FilesPane } from './FilesPane'
 import { GitPanel } from './GitPanel'
@@ -13,9 +14,10 @@ const filesOpenCache = new Map<string, boolean>()
 
 /** Render one terminal pane with session controls and optional file explorer. */
 export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
-  const { setActivePane, closePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession, refreshTerminal } = useActions()
+  const { setActivePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession, refreshTerminal, archiveSession } = useActions()
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
   const [gitOpen, setGitOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   // Toggle the pane-local file explorer and repaint the terminal after resizing.
   const toggleFiles = () => {
     setFilesOpen(v => {
@@ -69,12 +71,43 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={15} stroke={1.7} />
           </button>
         )}
-        <button className="icon-btn" title="Memory & context" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); openPanel(agent.id, 'memory') }}>
-          <Icon paths={['M7 7h10v10H7z', ...IC.chip]} size={15} />
-        </button>
-        <button className="icon-btn" title="Tools & permissions" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); openPanel(agent.id, 'tools') }}>
-          <Icon paths={[...IC.sliders, 'M6 9m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 15m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']} size={15} />
-        </button>
+        <div style={{ position: 'relative' }}>
+          <button
+            className="icon-btn"
+            title="Session settings — memory & context, tools & permissions"
+            style={{ width: 27, height: 27, borderRadius: 7, color: settingsOpen ? 'var(--accent)' : undefined }}
+            onClick={e => { e.stopPropagation(); setSettingsOpen(v => !v) }}
+          >
+            <Icon paths={[...IC.sliders, 'M6 9m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 15m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']} size={15} />
+          </button>
+          {settingsOpen && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={e => { e.stopPropagation(); setSettingsOpen(false) }} />
+              <div style={{
+                position: 'absolute', top: 31, right: 0, zIndex: 41, minWidth: 190,
+                background: 'var(--panel)', border: '1px solid var(--line2)', borderRadius: 10,
+                padding: 4, boxShadow: '0 8px 28px rgba(0,0,0,.35)',
+              }}>
+                <button
+                  className="palette-item"
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: 'none', textAlign: 'left', padding: '7px 10px', borderRadius: 7, fontSize: 12, color: 'var(--text)' }}
+                  onClick={e => { e.stopPropagation(); setSettingsOpen(false); openPanel(agent.id, 'memory') }}
+                >
+                  <Icon paths={['M7 7h10v10H7z', ...IC.chip]} size={14} />
+                  Memory & context
+                </button>
+                <button
+                  className="palette-item"
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: 'none', textAlign: 'left', padding: '7px 10px', borderRadius: 7, fontSize: 12, color: 'var(--text)' }}
+                  onClick={e => { e.stopPropagation(); setSettingsOpen(false); openPanel(agent.id, 'tools') }}
+                >
+                  <Icon paths={[...IC.sliders, 'M6 9m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 15m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']} size={14} />
+                  Tools & permissions
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         {agent.kind !== 'chat' && (agent.status === 'idle' || agent.status === 'error') && (
           <button className="icon-btn" title="Resume session" style={{ width: 27, height: 27, borderRadius: 7, color: 'var(--green)' }} onClick={e => { e.stopPropagation(); resume(agent.id) }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z" /></svg>
@@ -103,7 +136,23 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
             ? <Icon paths={['M9 4v5H4', 'M15 4v5h5', 'M9 20v-5H4', 'M15 20v-5h5']} size={14} stroke={1.8} />
             : <Icon paths={['M4 9V4h5', 'M20 9V4h-5', 'M4 15v5h5', 'M20 15v5h-5']} size={14} stroke={1.8} />}
         </button>
-        <button className="icon-btn danger" title="Close pane" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); closePane(index) }}>
+        <button
+          className="icon-btn danger"
+          title="Close session — stops the process and archives it (recoverable from Archived)"
+          style={{ width: 27, height: 27, borderRadius: 7 }}
+          onClick={e => {
+            e.stopPropagation()
+            const running = agent.status === 'running' || agent.status === 'needs'
+            void confirmAction({
+              title: `Close “${agent.name}”?`,
+              detail: running
+                ? 'The running process will be stopped and the session archived. You can restore it from the Archived list in Agents.'
+                : 'The session will be archived. You can restore it from the Archived list in Agents.',
+              confirmLabel: running ? 'Stop & archive' : 'Archive',
+              danger: running,
+            }).then(ok => { if (ok) archiveSession(agent.id) })
+          }}
+        >
           <Icon paths={IC.close} size={14} stroke={1.8} />
         </button>
       </div>

@@ -157,12 +157,14 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
             resumeNote = `resuming via · ${cmd}`
           }
         }
-        // the respawn reuses this xterm. Only hard-reset (which wipes the
-        // scrollback) when the old process actually died stuck in the
-        // alternate screen; a clean exit just gets its modes re-normalized so
-        // the session's history survives the resume.
-        if (port.isAltScreen(id)) port.resetTerminal(id)
-        else port.restoreTerminalModes(id)
+        // the respawn reuses this xterm. NEVER wipe the scrollback
+        // automatically — re-normalize the modes (alt screen, mouse tracking,
+        // …) and let the respawned CLI repaint its own content. If the old
+        // TUI died mid-render, warn: the pane header's Clear-terminal button
+        // is the explicit fix for a garbled screen.
+        const wasCorrupted = port.isAltScreen(id)
+        port.restoreTerminalModes(id)
+        if (wasCorrupted) resumeNote += ' · the previous TUI was killed mid-render — if the screen looks garbled, use the pane\'s ↻ Clear terminal button'
         port.spawnSession(id, `${envPrefix(type?.env)}${cmd}`.trim(), agent.cwd || undefined, undefined, undefined, terminalShell).catch(() => {})
         probeCliSession(id, cmd, agent.cwd || '', true)
       }

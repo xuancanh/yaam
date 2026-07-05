@@ -226,11 +226,12 @@ back to `FolderExplorer` (whole-folder browse with the rich viewer) while
 keeping the host footer's review actions.
 
 Exit handling restores the terminal modes a dead process left behind (alt
-screen, mouse tracking, bracketed paste). `resume` hard-resets the reused
-xterm only when it is still stuck in the alternate screen (a Ctrl+C-killed
-TUI); a healthy terminal just gets its modes re-normalized so scrollback
-survives the resume. The pane header's Clear-terminal button is the explicit
-user-initiated full reset — history is never wiped automatically.
+screen, mouse tracking, bracketed paste). `resume` never wipes the scrollback:
+it re-normalizes modes and lets the respawned CLI repaint; if the old TUI died
+mid-render (still in the alternate screen) it only appends a warning pointing
+at the pane header's Clear-terminal button — the explicit user-initiated full
+reset. History is never cleared automatically. Closing a pane stops the
+process and archives the session behind a confirmation.
 
 ### Tests
 
