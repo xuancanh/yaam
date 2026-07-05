@@ -5,8 +5,9 @@
 // numbers to change markers (green = new, amber = modified, red = deletion).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { highlight, langForFile } from '../../core/highlight'
-import { gitFileDiff, gitStatus, listDir, readTextFile } from '../../core/native'
+import { gitFileDiff, gitStatus, listDir, readFileB64, readTextFile } from '../../core/native'
 import type { DirEntryInfo } from '../../core/native'
+import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
@@ -74,6 +75,20 @@ interface GitInfo {
 }
 
 const MAX_LINES = 8000
+
+const IMG_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
+}
+
+/** How the viewer should treat one file, by extension. */
+function viewKind(name: string): 'image' | 'pdf' | 'office' | 'text' {
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+  if (IMG_MIME[ext]) return 'image'
+  if (ext === 'pdf') return 'pdf'
+  if (ext === 'docx' || ext === 'xlsx' || ext === 'pptx') return 'office'
+  return 'text'
+}
 
 // ---------------------------------------------------------------- tree
 
@@ -161,10 +176,12 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   const [err, setErr] = useState<string | null>(null)
   const [marks, setMarks] = useState<{ added: Set<number>; modified: Set<number>; deletedAfter: Set<number> } | null>(null)
   const [mdView, setMdView] = useState<'rendered' | 'raw'>('rendered')
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
   const contentRef = useRef<string | null>(null)
 
   const status = git?.byPath.get(path)
   const name = path.slice(path.lastIndexOf('/') + 1)
+  const kind = viewKind(name)
   const lang = langForFile(name)
   const isMd = /\.(md|markdown|mdx)$/i.test(name)
   const rendered = isMd && mdView === 'rendered'
@@ -173,6 +190,25 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   // Read the selected file and its diff, ignoring stale async completions.
   const load = useCallback(async () => {
     try {
+      if (kind === 'image' || kind === 'pdf') {
+        // rendered natively from a data URL; no diff/polling semantics
+        const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+        const mime = kind === 'pdf' ? 'application/pdf' : IMG_MIME[ext]
+        setDataUrl(`data:${mime};base64,${await readFileB64(path)}`)
+        setErr(null)
+        return
+      }
+      if (kind === 'office') {
+        // office docs preview as extracted text (viewer stays read-only)
+        const extracted = await extractFileText(name, b64ToBytes(await readFileB64(path)))
+        const text = extracted.text ?? '(no text extracted)'
+        if (text !== contentRef.current) {
+          contentRef.current = text
+          setContent(text)
+        }
+        setErr(null)
+        return
+      }
       const text = await readTextFile(path)
       if (text !== contentRef.current) {
         contentRef.current = text
@@ -183,7 +219,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
       setErr(e instanceof Error ? e.message : String(e))
       return
     }
-    if (git && rel) {
+    if (kind === 'text' && git && rel) {
       if (git.byPath.get(path) === '??') {
         // untracked: every line is new
         setMarks({ added: new Set([-1]), modified: new Set(), deletedAfter: new Set() })
@@ -197,19 +233,22 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
     } else {
       setMarks(null)
     }
-  }, [path, git, rel])
+  }, [path, git, rel, kind, name])
 
-  // load on open, then poll — the agent edits files while you watch
+  // load on open, then poll — the agent edits files while you watch.
+  // Images/PDFs load once (no cheap change detection over base64 payloads).
   useEffect(() => {
     contentRef.current = null
     setContent(null)
     setErr(null)
     setMarks(null)
+    setDataUrl(null)
     setMdView('rendered')
     void load()
+    if (kind === 'image' || kind === 'pdf') return
     const iv = window.setInterval(() => void load(), 4000)
     return () => window.clearInterval(iv)
-  }, [load])
+  }, [load, kind])
 
   const allLines = (content ?? '').split('\n')
   const truncated = allLines.length > MAX_LINES
@@ -244,7 +283,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
             {status === '??' ? 'NEW' : status}
           </span>
         )}
-        <span className="mono" style={{ fontSize: 10, color: 'var(--faint)', flexShrink: 0 }}>{allLines.length} lines</span>
+        {content !== null && <span className="mono" style={{ fontSize: 10, color: 'var(--faint)', flexShrink: 0 }}>{allLines.length} lines{kind === 'office' ? ' · extracted text' : ''}</span>}
         <div style={{ flex: 1 }} />
         {isMd && (
           <button
@@ -285,6 +324,16 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         <div style={{ padding: 18, fontSize: 12, color: 'var(--red-soft)' }}>
           Can't display this file — {err.includes('stream did not contain valid UTF-8') ? 'it is binary or not UTF-8 text.' : err}
         </div>
+      ) : kind === 'image' ? (
+        dataUrl ? (
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <img src={dataUrl} alt={name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6 }} />
+          </div>
+        ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
+      ) : kind === 'pdf' ? (
+        dataUrl ? (
+          <embed src={dataUrl} type="application/pdf" style={{ flex: 1, width: '100%', minHeight: 0 }} />
+        ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
       ) : content === null ? (
         <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
       ) : rendered ? (
@@ -334,7 +383,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         </div>
       )}
 
-      {gutter === 'git' && !err && content !== null && (
+      {gutter === 'git' && !err && content !== null && kind === 'text' && (
         <div className="mono" style={{
           height: 24, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 14, padding: '0 12px',
           background: 'var(--panel)', borderTop: '1px solid var(--line)', fontSize: 10, color: 'var(--dim)',

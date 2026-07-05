@@ -6,6 +6,7 @@ import { ACCENT, hexToRgba } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { EditableName, IC, Icon } from '../../components/ui'
 import { ChatPane } from './ChatPane'
+import { FilesPane } from '../session/FilesPane'
 
 // ChatGPT/Claude-style chat home: a sidebar of conversations (full-text
 // searchable via the embedded tantivy engine) and the selected conversation
@@ -118,6 +119,8 @@ export function ChatView() {
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<ChatSearchHit[] | null>(null)
   const [creating, setCreating] = useState(false)
+  // per-chat Files-panel toggle (explorer + viewer beside the conversation)
+  const [filesOpen, setFilesOpen] = useState<Record<string, boolean>>({})
 
   // chats are workspace-specific (each carries the workspace it was created in)
   const inWorkspace = (a: Agent) => a.kind === 'chat' && !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace
@@ -254,8 +257,18 @@ export function ChatView() {
                   thinking
                 </span>
               )}
+              <button
+                className="icon-btn"
+                title={filesOpen[selected.id] ? 'Hide the file explorer' : 'Browse & preview files next to this chat'}
+                onClick={() => setFilesOpen(cur => ({ ...cur, [selected.id]: !cur[selected.id] }))}
+                style={{ width: 26, height: 26, borderRadius: 7, color: filesOpen[selected.id] ? 'var(--accent)' : undefined }}
+              >
+                <Icon paths={['M3 7a2 2 0 012-2h4l2 2h9a1 1 0 011 1v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z']} size={14} stroke={1.7} />
+              </button>
             </div>
-            <ChatPane agent={selected} active />
+            {filesOpen[selected.id]
+              ? <FilesPane agent={selected} active />
+              : <ChatPane agent={selected} active />}
           </>
         ) : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
