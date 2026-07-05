@@ -2,6 +2,7 @@
 // Browser build: reindex is a no-op (returns 0), search returns no hits.
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from './base'
+import { expectObjectArray } from './validate'
 
 export interface ChatSearchHit {
   chatId: string
@@ -22,6 +23,7 @@ export async function chatSearchReindex(docs: { chatId: string; msgId: string; r
 /** Full-text search across chats via the embedded engine. */
 export async function chatSearch(query: string, limit?: number): Promise<ChatSearchHit[]> {
   if (!isTauri) return []
-  const hits = await invoke<{ chat_id: string; msg_id: string; role: string; text: string; score: number }[]>('chat_search', { query, limit: limit ?? null })
-  return hits.map(h => ({ chatId: h.chat_id, msgId: h.msg_id, role: h.role, text: h.text, score: h.score }))
+  const raw = await invoke('chat_search', { query, limit: limit ?? null })
+  const hits = expectObjectArray(raw, ['chat_id', 'msg_id', 'role', 'text', 'score'], 'chatSearch')
+  return hits.map(h => ({ chatId: h.chat_id as string, msgId: h.msg_id as string, role: h.role as string, text: h.text as string, score: h.score as number }))
 }

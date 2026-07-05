@@ -2,6 +2,7 @@
 // session's directory. Desktop only.
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from './base'
+import { expectArray, expectObject } from './validate'
 
 export interface GitStatusResult {
   root: string
@@ -11,7 +12,10 @@ export interface GitStatusResult {
 /** Read porcelain git status plus the repository root for a session directory. */
 export async function gitStatus(cwd: string): Promise<GitStatusResult> {
   if (!isTauri) throw new Error('git requires the desktop app')
-  return await invoke<GitStatusResult>('git_status', { cwd })
+  const raw = await invoke('git_status', { cwd })
+  const obj = expectObject(raw, ['root', 'files'], 'gitStatus')
+  expectArray(obj.files, 'gitStatus.files')
+  return obj as unknown as GitStatusResult
 }
 
 /** Return the working-tree diff for one repository-relative file. */

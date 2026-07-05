@@ -5,6 +5,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
 import { isTauri } from './base'
+import { expectObjectArray } from './validate'
 
 /** Open the native directory picker when available. */
 export async function pickFolder(defaultPath?: string): Promise<string | null> {
@@ -80,6 +81,7 @@ export interface DirEntryInfo {
 /** List one directory through the backend for the workspace file tree. */
 export async function listDir(path: string): Promise<DirEntryInfo[]> {
   if (!isTauri) return []
-  const raw = await invoke<{ name: string; path: string; is_dir: boolean }[]>('list_dir', { path })
-  return raw.map(e => ({ name: e.name, path: e.path, isDir: e.is_dir }))
+  const raw = await invoke('list_dir', { path })
+  const entries = expectObjectArray(raw, ['name', 'path', 'is_dir'], 'listDir')
+  return entries.map(e => ({ name: e.name as string, path: e.path as string, isDir: e.is_dir as boolean }))
 }
