@@ -2,12 +2,15 @@
 // proactive-event routing that either runs Master now or stashes the note for a
 // background workspace, and the cron/scheduled-task ticker. Sets masterEventRef.
 // Depends on the session runtime (launch/attention) and the addon subsystem
-// (Master can drive addons).
-import { useMemo, useRef } from 'react'
+// (Master can drive addons). A plain factory with a start/dispose lifecycle;
+// useMasterSubsystem is a thin create-once React adapter.
+import { useEffect, useRef } from 'react'
 import { dispatch } from '../../core/store'
+import { browserClock, type StatePort } from '../../core/ports'
+import * as native from '../../core/native'
 import { createMasterRuntime } from '../../domains/master/master-runtime'
 import type { MasterRuntime } from '../../domains/master/master-runtime'
-import { useSchedulerRuntime } from '../../domains/schedules/runtime'
+import { createSchedulerRuntime } from '../../domains/schedules/runtime'
 import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
 import type { SessionRuntime } from './session'
@@ -16,29 +19,32 @@ import type { AddonSubsystem } from './addon'
 export interface MasterSubsystem {
   runMaster: MasterRuntime['run']
   abortMaster: () => void
+  /** arm the scheduler ticker */
+  start: () => void
+  /** stop the scheduler + abort any in-flight Master turn */
+  dispose: () => void
 }
 
-export function useMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem): MasterSubsystem {
+export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem): MasterSubsystem {
   const { stateRef, widOf, logEvent, notify, flash } = k
   const { masterEventRef, toolApprovalsRef, userStoppedRef, fireAddonHookRef } = refs
+  const state: StatePort = { get: () => stateRef.current, update: dispatch, subscribe: () => () => {} }
 
-  // cron + scheduled-task ticker
-  useSchedulerRuntime(useMemo(() => ({
-    stateRef, logEvent, notify, launchSession: session.launchSession, spawnTaskSession: session.spawnTaskSession,
+  const scheduler = createSchedulerRuntime({
+    state, clock: browserClock, logEvent, notify,
+    launchSession: session.launchSession, spawnTaskSession: session.spawnTaskSession,
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
-  }), [stateRef, logEvent, notify, session.launchSession, session.spawnTaskSession, fireAddonHookRef]))
+    canLaunch: native.isTauri,
+  })
 
-  const masterRef = useRef<MasterRuntime>(undefined)
-  if (!masterRef.current) {
-    masterRef.current = createMasterRuntime({
-      stateRef, dispatch, toolApprovalsRef, userStoppedRef,
-      disposeAddon: addon.disposeAddon, launchSession: session.launchSession, launchFromTemplate: session.launchFromTemplate,
-      armResponseWatch: session.armResponseWatch,
-      sessionScreenTail: session.sessionScreenTail, logEvent, flash,
-      applyAgentStatus: session.applyAgentStatus, setNeedsInput: session.setNeedsInput, makeAddonApi: addon.makeAddonApi,
-    })
-  }
-  const runMaster = masterRef.current.run
+  const master = createMasterRuntime({
+    stateRef, dispatch, toolApprovalsRef, userStoppedRef,
+    disposeAddon: addon.disposeAddon, launchSession: session.launchSession, launchFromTemplate: session.launchFromTemplate,
+    armResponseWatch: session.armResponseWatch,
+    sessionScreenTail: session.sessionScreenTail, logEvent, flash,
+    applyAgentStatus: session.applyAgentStatus, setNeedsInput: session.setNeedsInput, makeAddonApi: addon.makeAddonApi,
+  })
+  const runMaster = master.run
   masterEventRef.current = (note, agentId) => {
     const s = stateRef.current
     const wid = widOf(s, agentId ?? null)
@@ -50,5 +56,19 @@ export function useMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, sessio
     })
   }
 
-  return { runMaster, abortMaster: () => masterRef.current!.abort() }
+  return {
+    runMaster,
+    abortMaster: () => master.abort(),
+    start: () => scheduler.start(),
+    dispose: () => { scheduler.dispose(); master.abort() },
+  }
+}
+
+/** React adapter: build the subsystem once, bind the scheduler lifecycle to the effect. */
+export function useMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem): MasterSubsystem {
+  const ref = useRef<MasterSubsystem>(undefined)
+  if (!ref.current) ref.current = createMasterSubsystem(k, refs, session, addon)
+  const sub = ref.current
+  useEffect(() => { sub.start(); return () => sub.dispose() }, [sub])
+  return sub
 }
