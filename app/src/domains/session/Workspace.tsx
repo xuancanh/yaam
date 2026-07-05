@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useActions, useConductor } from '../store'
-import { ACCENT, hexToRgba, indicatorColor } from '../data'
-import type { Agent, TabGroup } from '../types'
-import { IC, Icon, StatusPill } from './ui'
-import { NewSessionDialog } from './workspace/NewSessionDialog'
-import { Divider } from './workspace/Divider'
-import { Pane } from './workspace/Pane'
+import { useActions, useConductor } from '../../store'
+import { ACCENT, hexToRgba, indicatorColor } from '../../data'
+import type { Agent, TabGroup } from '../../types'
+import { IC, Icon, StatusPill } from '../../components/ui'
+import { NewSessionDialog } from './NewSessionDialog'
+import { Divider } from './Divider'
+import { Pane } from './Pane'
 
 type LayoutKey = '1' | '2col' | '2row' | '3' | '4'
 

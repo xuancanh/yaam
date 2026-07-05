@@ -7,7 +7,7 @@ import type { ApiMessage } from '../../master'
 import type { McpSession } from '../../mcp'
 import type { CatalogSkill } from '../../skills'
 import { buildChatCfg, callApi, chatTypeHasCreds } from '../../llm/client'
-import { runChatTurn } from '../../llm/chat-agent'
+import { runChatTurn } from './agent'
 import { mkId } from '../../state-lib'
 
 export interface ChatCtx {

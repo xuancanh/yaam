@@ -3,13 +3,13 @@
 // agent is an in-app LLM loop with first-class tools: navigate and edit
 // files, run scripts, load skills from the registry, and call tools on the
 // user's configured MCP servers.
-import * as native from '../native'
-import { mcpCallTool } from '../mcp'
-import type { McpSession } from '../mcp'
-import type { CatalogSkill } from '../skills'
-import type { Agent } from '../types'
-import { callApiStream } from './client'
-import type { ApiContentBlock, ApiMessage, LlmConfig } from './client'
+import * as native from '../../native'
+import { mcpCallTool } from '../../mcp'
+import type { McpSession } from '../../mcp'
+import type { CatalogSkill } from '../../skills'
+import type { Agent } from '../../types'
+import { callApiStream } from '../../llm/client'
+import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
 
 export interface ChatTurnEvent {
   /** delta = streamed text chunk · thinking = streamed reasoning chunk ·
