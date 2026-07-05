@@ -773,6 +773,7 @@ const ORCHESTRATION: Array<{ id: 'autoRoute' | 'approveDestructive' | 'followMod
 /** Render global provider, orchestration, session, agent-type, and addon settings. */
 const SETTINGS_TABS = [
   ['general', 'General'],
+  ['appearance', 'Appearance'],
   ['brain', 'Master Brain'],
   ['types', 'Terminal Agents'],
   ['chatagents', 'Chat Agents'],
@@ -993,8 +994,9 @@ export function SettingsView() {
 
           </>}
 
+          {tab === 'appearance' && <AppearanceSection />}
+
           {tab === 'general' && <>
-          <AppearanceSection />
           <SectionLabel>SESSION DEFAULTS</SectionLabel>
           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
