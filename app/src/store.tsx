@@ -10,10 +10,9 @@ import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './core/terminals'
-import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS, dispatchAddonRpc, enforcePermissions, execAddonHook, exportAddonPackage, loadAddonFolder, parseAddonPackage } from './core/addons'
+import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS, enforcePermissions, execAddonHook, exportAddonPackage, parseAddonPackage } from './core/addons'
 import { runAddonEditorTurn } from './domains/addons/addon-editor'
 import { runAddonAgentTurn } from './domains/addons/addon-agent'
-import { generateAddonPackage } from './domains/addons/addon-gen'
 import { fetchSkillRegistry } from './core/skills'
 import type { CatalogSkill } from './core/skills'
 import { mcpConnect } from './core/mcp'
@@ -30,6 +29,7 @@ import { useSettingsActions } from './domains/settings/actions'
 import { useBoardActions } from './domains/board/actions'
 import { useSchedulesActions } from './domains/schedules/actions'
 import { useChatActions } from './domains/chat/actions'
+import { useAddonsActions } from './domains/addons/actions'
 import type { TaskSpecDraft } from './domains/board/watcher'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
@@ -1720,6 +1720,11 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   })
   const schedulesActions = useSchedulesActions({ dispatch, flash, logEvent, launchFromTemplate })
   const chatActions = useChatActions({ dispatch, stateRef, logEvent, runChatMessage })
+  const addonsActions = useAddonsActions({
+    dispatch, stateRef, flash, installPackage,
+    sendAddonChat: (id, text) => { void sendAddonChatImpl(id, text) },
+    makeAddonApi, addonAgentHistories, addonEditorHistories,
+  })
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
@@ -1727,6 +1732,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     ...boardActions,
     ...schedulesActions,
     ...chatActions,
+    ...addonsActions,
     setView: v => dispatch(s => ({ ...s, view: v })),
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
@@ -2128,119 +2134,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
 
 
-    openAddon: id => dispatch(s => ({ ...s, view: 'addon', activeAddon: id })),
-
-    toggleAddon: id => dispatch(s => ({
-      ...s,
-      addons: s.addons.map(a => (a.id === id ? { ...a, enabled: !a.enabled } : a)),
-    })),
-
-    toggleAddonGrant: (id, perm) => dispatch(s => ({
-      ...s,
-      addons: s.addons.map(a => a.id === id
-        ? { ...a, granted: a.granted.includes(perm) ? a.granted.filter(g => g !== perm) : a.granted.concat([perm]) }
-        : a),
-    })),
-
-    installAddonFromFile: () => {
-      void (async () => {
-        try {
-          const path = await native.pickFile()
-          if (!path) return
-          const json = await native.readTextFile(path)
-          installPackage(json, 'file')
-        } catch (e) {
-          flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      })()
-    },
-
-    installAddonFromFolder: () => {
-      void (async () => {
-        try {
-          const dir = await native.pickFolder()
-          if (!dir) return
-          let manifest: string | null = null
-          for (const cand of ['addon.yaml', 'addon.yml', 'addon.json']) {
-            try {
-              manifest = await native.readTextFile(`${dir}/${cand}`)
-              break
-            } catch { /* try the next manifest name */ }
-          }
-          if (!manifest) throw new Error('no addon.yaml / addon.yml / addon.json in that folder')
-          const json = await loadAddonFolder(manifest, rel => native.readTextFile(`${dir}/${rel}`))
-          installPackage(json, 'file')
-        } catch (e) {
-          flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      })()
-    },
-
-    installAddonFromUrl: url => {
-      void (async () => {
-        try {
-          // registries can be local: non-http entries are filesystem paths
-          const json = /^https?:\/\//.test(url) ? await native.httpGetText(url) : await native.readTextFile(url)
-          installPackage(json, /^https?:\/\//.test(url) ? 'url' : 'file')
-        } catch (e) {
-          flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      })()
-    },
-
-    generateAddon: async prompt => {
-      const st = stateRef.current.settings
-      if (!(st.masterEnabled && hasCreds(st))) return 'No brain configured — enable LLM Master in Settings first.'
-      try {
-        const json = await generateAddonPackage(buildCfg(st), prompt)
-        installPackage(json, 'master')
-        return ''
-      } catch (e) {
-        return e instanceof Error ? e.message : String(e)
-      }
-    },
-
-    sendAddonChat: (id, text) => { void sendAddonChatImpl(id, text) },
-
-    addonRpc: (addonId, method, args) => dispatchAddonRpc(makeAddonApi(addonId), method, args),
-
-    updateAddonMeta: (id, patch) => dispatch(s => ({
-      ...s,
-      addons: s.addons.map(a => (a.id === id ? { ...a, ...patch } : a)),
-    })),
-
-    exportAddon: id => {
-      void (async () => {
-        const addon = stateRef.current.addons.find(a => a.id === id)
-        if (!addon) return
-        try {
-          const path = await native.pickSavePath(`${addon.name.replace(/[^a-z0-9-]/gi, '-')}.yaam.json`)
-          if (!path) return
-          await native.writeTextFile(path, exportAddonPackage(addon))
-          flash(`Exported ${addon.name}`)
-        } catch (e) {
-          flash(`Export failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      })()
-    },
-    removeAddon: id => {
-      addonAgentHistories.current.delete(id)
-      addonEditorHistories.current.delete(id)
-      dispatch(s => {
-        const addonStorage = { ...s.addonStorage }
-        delete addonStorage[id]
-        const addonChats = { ...s.addonChats }
-        delete addonChats[id]
-        return {
-          ...s,
-          addons: s.addons.filter(a => a.id !== id),
-          addonStorage, addonChats,
-          view: s.activeAddon === id ? 'workspace' : s.view,
-          activeAddon: s.activeAddon === id ? null : s.activeAddon,
-        }
-      })
-    },
-
     switchWorkspace: id => {
       // Master events that queued while this workspace was inactive
       const pending = stateRef.current.workspaceData[id]?.pendingMasterNotes ?? []
@@ -2344,7 +2237,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, boardActions, schedulesActions, chatActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, installPackage, later, launchSession, logEvent, makeAddonApi, probeCliSession, runMaster, sendAddonChatImpl])
+  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)
