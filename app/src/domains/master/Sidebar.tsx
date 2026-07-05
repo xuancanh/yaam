@@ -237,6 +237,10 @@ export function Sidebar() {
   }), shallowEqual)
   const { setComposer, send, updateSettings, resolveToolApproval } = useActions()
   const scrollRef = useRef<HTMLDivElement>(null)
+  // stick-to-bottom scrolling: follow new messages only while the user is near
+  // the bottom; when they scroll up to read, stop following and offer a jump
+  const nearBottomRef = useRef(true)
+  const [farFromBottom, setFarFromBottom] = useState(false)
   const isMac = navigator.platform.toUpperCase().includes('MAC')
   const width = Math.max(280, Math.min(640, s.settings.sidebarWidth ?? 392))
 
@@ -260,10 +264,33 @@ export function Sidebar() {
     window.addEventListener('pointerup', up)
   }
 
-  useEffect(() => {
+  const scrollToBottom = (smooth = false) => {
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  }
+
+  const onScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+    nearBottomRef.current = dist < 120
+    setFarFromBottom(dist > 320)
+  }
+
+  // new messages: follow only while pinned near the bottom
+  useEffect(() => {
+    if (nearBottomRef.current) scrollToBottom()
   }, [s.messages])
+
+  // first mount and every re-open from the collapsed rail: start at the bottom
+  // (the container remounts, so the messages-dep effect alone never fires)
+  useEffect(() => {
+    if (!s.settings.sidebarHidden) {
+      nearBottomRef.current = true
+      setFarFromBottom(false)
+      scrollToBottom()
+    }
+  }, [s.settings.sidebarHidden])
 
   const runningCount = s.agents.filter(a => a.status === 'running').length
 
@@ -345,8 +372,25 @@ export function Sidebar() {
         </button>
       </div>
 
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 15px', display: 'flex', flexDirection: 'column', gap: 15 }}>
-        {s.messages.map(m => <MessageRow key={m.id} msg={m} />)}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
+        <div ref={scrollRef} onScroll={onScroll} style={{ flex: 1, overflowY: 'auto', padding: '16px 15px', display: 'flex', flexDirection: 'column', gap: 15 }}>
+          {s.messages.map(m => <MessageRow key={m.id} msg={m} />)}
+        </div>
+        {farFromBottom && (
+          <button
+            title="Jump to the latest message"
+            onClick={() => { nearBottomRef.current = true; setFarFromBottom(false); scrollToBottom(true) }}
+            style={{
+              position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
+              display: 'flex', alignItems: 'center', gap: 6, padding: '5px 13px', borderRadius: 999,
+              background: 'var(--panel3)', border: '1px solid var(--line2)', color: 'var(--text)',
+              fontSize: 11.5, fontWeight: 600, cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,.35)',
+            }}
+          >
+            <Icon paths={['M12 5v14', 'M6 13l6 6 6-6']} size={12} stroke={2} />
+            Latest
+          </button>
+        )}
       </div>
 
       {s.pendingToolApprovals.length > 0 && (
