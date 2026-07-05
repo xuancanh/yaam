@@ -2,13 +2,11 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  AddonHookName, LogLine,
-  PersistedState, TaskChatMsg,
+  AddonHookName, LogLine, TaskChatMsg,
 } from './core/types'
-import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
-import { disposeTerminal, getTerminal, repaintSession } from './core/terminals'
+import { disposeTerminal } from './core/terminals'
 import { enforcePermissions, execAddonHook } from './core/addons'
 import { runAddonAgentTurn } from './domains/addons/addon-agent'
 import type { AddonApi } from './core/addons'
@@ -40,11 +38,9 @@ import { useChatSearchIndexer } from './domains/chat/search-indexer'
 import { useSessionExitHandler } from './domains/session/exit-handler'
 import { useSchedulerRuntime } from './domains/schedules/runtime'
 import { createAddonApi } from './domains/addons/addon-api'
-import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
 import { useSessionSettle } from './domains/session/use-settle'
-import { buildHydration } from './infrastructure/persistence/hydrate'
-import { loadSnapshot } from './infrastructure/persistence/loaders'
+import { useHydration } from './infrastructure/persistence/hydrate-effect'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './domains/board/task-state'
 import type { LocatedTask } from './domains/board/task-state'
 import type { ConductorActions } from './app/actions'
@@ -232,81 +228,15 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // persistence: restore everything (including session definitions and their
   // output tails) on launch, save on change. Restored sessions come back
   // paused — resume respawns their command.
-  // the save-side persistence runtime (created once in render, below). Hydration
-  // seeds its keychain-ready set and calls markReady() when the snapshot applies.
-  const persistenceRef = useRef<PersistenceRuntime | undefined>(undefined)
-  const hydrateStarted = useRef(false)
-  // connect enabled MCP/skill integrations once hydration has actually finished.
-  // Set below (after connectMcp/refreshSkillCatalog exist) and invoked from the
-  // hydration effect — no fixed-delay timer racing disk/keychain load (finding #3).
+  // connect enabled MCP/skill integrations once hydration has actually finished
+  // (set below, after connectMcp/refreshSkillCatalog exist; invoked from the boot
+  // effect) — no fixed-delay timer racing disk/keychain load (finding #3).
   const startIntegrationsRef = useRef<() => void>(() => {})
-  useEffect(() => {
-    if (hydrateStarted.current) return
-    hydrateStarted.current = true
-    // Apply one merged snapshot: dispatch the pure hydration result, then rebuild
-    // terminals. Throws if not usable so the caller can fall back / start fresh.
-    const hydrateFrom = (p: Partial<PersistedState>) => {
-          const { next, restoredAgents } = buildHydration(p, stateRef.current)
-          dispatch(() => next)
-          // rebuild each restored session's terminal with its saved tail, and
-          // reattach to PTYs that are still alive in the backend (webview reload)
-          native.liveSessions().then(liveIds => {
-            const alive = new Set(liveIds)
-            for (const a of restoredAgents) {
-              const { term } = getTerminal(a.id, line => appendTail(a.id, line), () => clearNeeds(a.id), () => bumpSettle(a.id), () => armResponseWatch(a.id))
-              if (alive.has(a.id)) {
-                // live PTY: never inject text (it corrupts TUI screens) —
-                // nudge the app to repaint itself once the pane has mounted
-                window.setTimeout(() => repaintSession(a.id), 1200)
-              } else {
-                for (const l of a.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
-                term.writeln('\x1b[33m── restored from previous run · press ▶ to relaunch ──\x1b[0m')
-              }
-            }
-            if (alive.size) {
-              dispatch(s2 => ({
-                ...s2,
-                agents: s2.agents.map(a => alive.has(a.id)
-                  ? { ...a, status: 'running' as const, log: a.log.concat([{ t: 'sys' as const, x: 'reattached · session still running' }]) }
-                  : a),
-              }))
-            }
-          }).catch(() => {})
-    }
-    void (async () => {
-      try {
-        const { merged, usedBackup } = await loadSnapshot()
-        if (usedBackup) dispatch(s => ({ ...s, toast: 'Restored from backup — the main state file was unreadable' }))
-        // start-fresh unless there is something worth restoring
-        if (Object.keys(merged).some(k => k !== 'agents') || merged.agents?.length) hydrateFrom(merged)
-      } catch (e) {
-        console.error('[yaam] hydration failed — starting fresh:', e)
-        dispatch(s => ({ ...s, toast: 'Saved state was unreadable — starting fresh' }))
-      }
-      // fill credential fields the file no longer holds from the OS keychain,
-      // and mark anything already present (legacy plaintext) as keychain-bound
-      // once the sync effect writes it
-      try {
-        const resolved: Record<string, string> = {}
-        for (const { account, value } of secretEntries(stateRef.current)) {
-          if (value) continue // legacy plaintext still in the loaded file
-          const v = await native.secretGet(account)
-          if (v) { resolved[account] = v; persistenceRef.current!.keychainReady.add(account) }
-        }
-        if (Object.keys(resolved).length) dispatch(s => applyResolvedSecrets(s, resolved))
-      } catch (e) {
-        console.error('[yaam] keychain resolve failed:', e)
-      }
-      // restored state is fully applied — enable saves, then connect integrations
-      persistenceRef.current!.markReady()
-      startIntegrationsRef.current()
-    })()
-  }, [appendTail, armResponseWatch, bumpSettle, clearNeeds])
 
-  // All save-side persistence (debounced main/session writers, keychain mirror,
-  // teardown flush, save-error state) lives in a dedicated runtime that subscribes
-  // to the store directly. Created once during render so the hydration effect can
-  // seed its keychain set and call markReady() when the restored snapshot is applied.
+  // All save-side persistence (debounced writers, keychain mirror, teardown flush)
+  // lives in a dedicated runtime that subscribes to the store directly. Created
+  // once in render so the boot effect can seed its keychain set and markReady().
+  const persistenceRef = useRef<PersistenceRuntime | undefined>(undefined)
   if (!persistenceRef.current) {
     persistenceRef.current = createPersistenceRuntime(
       { getState: useAppStore.getState, subscribe: useAppStore.subscribe },
@@ -314,6 +244,14 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     )
   }
   const persistence = persistenceRef.current
+
+  // Boot: load + apply the snapshot, rebuild/reattach terminals, resolve secrets,
+  // then enable saves + connect integrations (infrastructure/persistence/hydrate-effect).
+  useHydration(useMemo(() => ({
+    stateRef, persistence, startIntegrations: () => startIntegrationsRef.current(),
+    appendTail, clearNeeds, bumpSettle, armResponseWatch,
+  }), [persistence, appendTail, clearNeeds, bumpSettle, armResponseWatch]))
+
   useEffect(() => {
     persistence.start()
     return () => persistence.dispose()
