@@ -113,4 +113,28 @@ describe('workspace scoping round-trip', () => {
     expect(switchWorkspaceIn(s, 'ws-a', 'hi')).toBe(s)
     expect(switchWorkspaceIn(s, 'ghost', 'hi')).toBe(s)
   })
+
+  // Invariant guard for finding #2: the scoped-field set is hand-enumerated in
+  // scopedFromState/applyScoped, so a new WorkspaceData field that isn't wired
+  // through both would be silently dropped on every workspace switch.
+  it('scopedFromState captures exactly the workspace-scoped field set', () => {
+    expect(Object.keys(scopedFromState(baseState())).sort()).toEqual([
+      'activeGroup', 'crons', 'events', 'groups', 'messages',
+      'minimizedIds', 'notifications', 'pendingMasterNotes', 'tasks',
+    ])
+  })
+  it('applyScoped restores every durable scoped field onto state', () => {
+    const slice = {
+      groups: [], activeGroup: null, minimizedIds: ['m1'],
+      messages: [{ id: 'x' }], crons: [{ id: 'c' }], tasks: [{ id: 't' }],
+      events: [{ id: 'e' }], notifications: [{ id: 'n' }], pendingMasterNotes: [],
+    } as unknown as Parameters<typeof applyScoped>[1]
+    const out = applyScoped(baseState(), slice)
+    expect(out.minimizedIds).toEqual(['m1'])
+    expect(out.messages).toEqual([{ id: 'x' }])
+    expect(out.crons).toEqual([{ id: 'c' }])
+    expect(out.tasks).toEqual([{ id: 't' }])
+    expect(out.events).toEqual([{ id: 'e' }])
+    expect(out.notifications).toEqual([{ id: 'n' }])
+  })
 })
