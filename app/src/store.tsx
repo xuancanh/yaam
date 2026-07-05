@@ -49,7 +49,7 @@ import { mkId } from './shared/id'
 import { chatTranscriptsChanged } from './infrastructure/persistence/subscribe'
 import { createPersistenceRuntime } from './infrastructure/persistence/runtime'
 import type { PersistenceRuntime } from './infrastructure/persistence/runtime'
-import { cronMatches } from './domains/schedules/cron'
+import { collectDueSchedules, collectDueTasks } from './domains/schedules/due'
 import { buildTemplateCommand } from './domains/schedules/template-command'
 import { activeGroupOf, focusSessionIn, mkGroup, removeFromGroups } from './domains/session/layout-state'
 import { envPrefix, sendLineToSession, spawnAgentProcess, typeForCommand } from './domains/session/command'
@@ -603,20 +603,29 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // Core one-shot launch for a board task. The watcher owns spawning: it calls
   // this via its spawn_session tool (extraInstructions augment the prompt), and
   // a task may accumulate several sessions (task.agentIds).
-  const spawnTaskSession = useCallback((taskId: string, extraInstructions?: string, briefWatcher = false): string | null => {
+  // The ONE canonical one-shot launch for a board task, in any workspace (active
+  // or background). Locates the task, launches its template — or the default
+  // agent type — one-shot, binds its watcher, and updates the card in its own
+  // workspace slice. The scheduler, the watcher's spawn tool, and the board's
+  // start/drag paths all go through here so active and background behave identically.
+  const spawnTaskSession = useCallback((
+    taskId: string,
+    opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string },
+  ): string | null => {
     const st = stateRef.current
-    const task = st.tasks.find(t => t.id === taskId)
-    if (!task) return null
+    const located = findTaskInState(st, taskId, opts?.workspaceId)
+    if (!located) return null
+    const { task, workspaceId } = located
     // layered prompt: work text fills the template's {task} slot; the
     // verification contract (criteria + goal) is appended after the composed
     // prompt so template framing can't swallow or contradict it
     const work = taskWorkText(task)
-      + (extraInstructions?.trim() ? `\n\nAdditional instructions from the task watcher:\n${extraInstructions.trim()}` : '')
+      + (opts?.extraInstructions?.trim() ? `\n\nAdditional instructions from the task watcher:\n${opts.extraInstructions.trim()}` : '')
     const contract = taskContract(task)
     let id: string | null = null
     // watcher-driven task sessions are ALWAYS one-shot: they run the task and exit
     if (task.templateId && (st.templates ?? []).some(t => t.id === task.templateId)) {
-      id = launchFromTemplate(task.templateId, work, undefined, task.cwd, true, contract)
+      id = launchFromTemplate(task.templateId, work, workspaceId, task.cwd, true, contract)
     } else {
       const type = (task.typeId ? st.agentTypes.find(t => t.id === task.typeId) : undefined)
         ?? st.agentTypes.find(t => t.enabled)
@@ -628,27 +637,22 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         id: '', name: task.title.slice(0, 18), typeId: type.id, mode: 'ephemeral',
         prompt: '{task}', systemPrompt: '', model: '', approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
       }
-      id = launchSession(buildTemplateCommand(oneShot, type, work, contract), task.cwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, undefined, { ephemeral: true })
+      id = launchSession(buildTemplateCommand(oneShot, type, work, contract), task.cwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, workspaceId, { ephemeral: true })
     }
     if (!id) return null
-    taskSessionsRef.current.set(id, { taskId, workspaceId: st.activeWorkspace })
+    taskSessionsRef.current.set(id, { taskId, workspaceId })
     const sessionName = stateRef.current.agents.find(a => a.id === id)?.name ?? id
-    dispatch(s2 => ({
-      ...s2,
-      tasks: s2.tasks.map(t => t.id === taskId
-        ? {
-            ...t, agentId: id, agentIds: [...(t.agentIds ?? []), ...(id ? [id] : [])], scheduleAt: undefined,
-            col: t.col === 'backlog' || t.col === 'done' || t.col === 'failed' ? 'progress' as const : t.col,
-          }
-        : t),
-    }))
+    dispatch(s2 => updateLocatedTask(s2, taskId, t => ({
+      ...t, agentId: id, agentIds: [...(t.agentIds ?? []), id!], scheduleAt: undefined,
+      col: t.col === 'backlog' || t.col === 'done' || t.col === 'failed' ? 'progress' as const : t.col,
+    }), workspaceId))
     armResponseWatch(id)
     pushTaskChat(taskId, 'system', `Spawned one-shot session “${sessionName}” for this task`)
     if (!task.cwd && !st.settings.defaultCwd && !(task.templateId && (st.templates ?? []).find(t => t.id === task.templateId)?.cwd)) {
       pushTaskChat(taskId, 'system',
         '⚠ No working folder set — the session runs in your home directory. If this task targets a repo, set the folder in the task spec and Relaunch.')
     }
-    if (briefWatcher) {
+    if (opts?.briefWatcher) {
       runWatcherRef.current(taskId,
         `A one-shot session "${sessionName}" was just spawned to work this task; it received the title, description and criteria as its prompt, with the criteria set as an explicit goal (stop condition) it must self-verify before exiting. ` +
         'Set your card note, make sure the task sits in the right column, and post one short kickoff message for the user.')
@@ -658,14 +662,15 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return id
   }, [armResponseWatch, flash, launchFromTemplate, launchSession, logEvent, pushTaskChat])
 
-  spawnTaskSessionRef.current = (taskId, extraInstructions) => spawnTaskSession(taskId, extraInstructions, false)
+  spawnTaskSessionRef.current = (taskId, extraInstructions) => spawnTaskSession(taskId, { extraInstructions })
 
   // Deterministic start (drag to progress, schedules, no-brain fallback):
-  // spawn directly, then brief the watcher.
-  const spawnSessionForTask = useCallback((taskId: string) => {
-    const task = stateRef.current.tasks.find(t => t.id === taskId)
-    if (!task || task.agentId) return
-    spawnTaskSession(taskId, undefined, true)
+  // spawn directly, then brief the watcher. Optionally targets a background
+  // workspace (the scheduler fires tasks in every workspace).
+  const spawnSessionForTask = useCallback((taskId: string, workspaceId?: string) => {
+    const located = findTaskInState(stateRef.current, taskId, workspaceId)
+    if (!located || located.task.agentId) return
+    spawnTaskSession(taskId, { briefWatcher: true, workspaceId: located.workspaceId })
   }, [spawnTaskSession])
 
   // Watcher-first start (the mini master owns spawning): hand the task to its
@@ -891,8 +896,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         ...Object.entries(st.workspaceData).map(([wid, d]) => ({ wid, crons: d.crons })),
       ]
       for (const pool of pools) {
-        const due = pool.crons.filter(c => c.on && c.lastFiredMinute !== minuteKey
-          && (c.at ? c.at <= now.getTime() : cronMatches(c.schedule, now)))
+        const due = collectDueSchedules(pool.crons, now)
         if (!due.length) continue
         dispatch(s => {
           // one-time schedules (at) disarm after firing
@@ -962,66 +966,25 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // scheduled tasks: spawn a session when their time arrives (all workspaces)
-      const nowMs = Date.now()
+      // scheduled tasks: spawn a session when their time arrives, in whatever
+      // workspace the task lives in. Both active and background go through the
+      // one canonical launch path (spawnTaskSession) — no duplicated logic.
       const taskPools: Array<{ wid: string; tasks: typeof st.tasks }> = [
         { wid: st.activeWorkspace, tasks: st.tasks },
         ...Object.entries(st.workspaceData).map(([wid, d]) => ({ wid, tasks: d.tasks })),
       ]
       for (const pool of taskPools) {
-        for (const t of pool.tasks) {
-          if (!t.scheduleAt || t.scheduleAt > nowMs || t.agentId) continue
-          if (pool.wid === st.activeWorkspace && native.isTauri) {
-            // active workspace: go through the watcher path (one-shot session,
-            // kickoff chat, watcher ownership); clear the schedule up front so
-            // a failed launch doesn't refire every tick
-            dispatch(s => ({
-              ...s,
-              tasks: s.tasks.map(x => (x.id === t.id ? { ...x, scheduleAt: undefined } : x)),
-            }))
-            spawnSessionForTask(t.id)
-            continue
-          }
-          const id = !native.isTauri ? null
-            : t.templateId && (st.templates ?? []).some(x => x.id === t.templateId)
-              ? launchFromTemplate(t.templateId, taskWorkText(t), pool.wid, t.cwd, true, taskContract(t))
-              : (() => {
-                  // mirror spawnTaskSession exactly: honor the task's agent type
-                  // and force a one-shot run
-                  const type = (t.typeId ? st.agentTypes.find(x => x.id === t.typeId) : undefined)
-                    ?? st.agentTypes.find(x => x.enabled)
-                  if (!type) return null
-                  const oneShot: AgentTemplate = {
-                    id: '', name: t.title.slice(0, 18), typeId: type.id, mode: 'ephemeral',
-                    prompt: '{task}', systemPrompt: '', model: '', approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
-                  }
-                  return launchSession(buildTemplateCommand(oneShot, type, taskWorkText(t), taskContract(t)), t.cwd || st.settings.defaultCwd || '', t.title.slice(0, 18), type.id, pool.wid, { ephemeral: true })
-                })()
-          if (id) {
-            taskSessionsRef.current.set(id, { taskId: t.id, workspaceId: pool.wid })
-            armResponseWatch(id)
-            pushTaskChat(t.id, 'system', `Spawned scheduled one-shot session “${t.title.slice(0, 18)}”`)
-            runWatcherRef.current(t.id,
-              `A scheduled one-shot session was just spawned to work this task. Set the card note, keep it in progress, and post one short kickoff message for the user.`)
-          }
-          // clear the schedule even on a failed launch so it doesn't refire every tick
-          dispatch(s => {
-            // Attach the launched worker and clear the one-time schedule in its workspace.
-            const patch = (tasks: typeof s.tasks) => tasks.map(x => x.id === t.id
-              ? { ...x, scheduleAt: undefined, agentId: id ?? x.agentId, col: id ? 'progress' as const : x.col }
-              : x)
-            if (pool.wid === s.activeWorkspace) return { ...s, tasks: patch(s.tasks) }
-            const d = s.workspaceData[pool.wid]
-            if (!d) return s
-            return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, tasks: patch(d.tasks) } } }
-          })
-          logEvent('route', id, `Scheduled task “${t.title.slice(0, 48)}” ${id ? 'started' : 'was due but no session could be launched'}`)
+        for (const t of collectDueTasks(pool.tasks, now)) {
+          // spawnTaskSession clears scheduleAt on success; clear it on failure
+          // (or in a browser build that can't launch) so it doesn't refire every tick
+          const id = native.isTauri ? spawnTaskSession(t.id, { workspaceId: pool.wid, briefWatcher: true }) : null
+          if (!id) dispatch(s => updateLocatedTask(s, t.id, x => ({ ...x, scheduleAt: undefined }), pool.wid))
           notify('cron', id ? 'Scheduled task started' : 'Scheduled task could not start', t.title.slice(0, 60), id)
         }
       }
     }, 15000)
     return () => window.clearInterval(timer)
-  }, [armResponseWatch, launchFromTemplate, launchSession, logEvent, notify, pushTaskChat, spawnSessionForTask])
+  }, [logEvent, notify, spawnTaskSession])
 
   // Master brain: run one LLM turn (chat → tools → chat), serializing turns
   const masterBusyRef = useRef(false)
