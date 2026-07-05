@@ -115,13 +115,15 @@ export function createAppRuntime(): AppRuntime {
   registerSessionCommands(registry, { stateRef })
   const addonExec = (name: string, input: unknown, addonId: string) =>
     void registry.execute(name, input, { actor: { kind: 'addon', addonId } }).catch(() => {})
+  const masterSendLine = (sid: string, text: string) =>
+    void registry.execute('send_to_session', { sessionId: sid, text }, { actor: { kind: 'master' } }).catch(() => {})
 
   // ── domain subsystems, cross-wired through the cycle refs ────────────────
   const refs = createRuntimeRefs()
   const session = createSessionRuntime(kernel, refs)
   const addon = createAddonSubsystem(kernel, refs, session, addonExec)
   const chat = createChatBoot(kernel, refs, session)
-  const master = createMasterSubsystem(kernel, refs, session, addon)
+  const master = createMasterSubsystem(kernel, refs, session, addon, masterSendLine)
 
   const actions = createConductorActions({
     ...kernel,

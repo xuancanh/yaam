@@ -24,7 +24,11 @@ export interface MasterSubsystem {
   dispose: () => void
 }
 
-export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem): MasterSubsystem {
+/** Writes a line to a session's PTY as the master actor (routes through the
+ *  shared command). Master's own tool-permission gates apply before it. */
+export type MasterSendLine = (sid: string, text: string) => void
+
+export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem, sendLine?: MasterSendLine): MasterSubsystem {
   const { stateRef, widOf, logEvent, notify, flash } = k
   const { masterEventRef, toolApprovalsRef, userStoppedRef, fireAddonHookRef } = refs
   const state: StatePort = { get: () => stateRef.current, update: dispatch, subscribe: () => () => {} }
@@ -42,6 +46,7 @@ export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, ses
     armResponseWatch: session.armResponseWatch,
     sessionScreenTail: session.sessionScreenTail, logEvent, flash,
     applyAgentStatus: session.applyAgentStatus, setNeedsInput: session.setNeedsInput, makeAddonApi: addon.makeAddonApi,
+    sendLine,
   })
   const runMaster = master.run
   masterEventRef.current = (note, agentId) => {
