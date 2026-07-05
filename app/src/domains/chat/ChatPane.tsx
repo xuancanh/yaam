@@ -10,6 +10,8 @@ import type { Agent, ChatMsg } from '../../core/types'
 import type { ChatAttachment } from './runner'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
+import { artifactSrcDoc, extractArtifact } from './artifacts'
+import type { ChatArtifact } from './artifacts'
 
 // Chat-mode session body: a Claude-Desktop-style conversation in a pane —
 // the agent edits files, runs commands, loads skills, and calls MCP tools.
@@ -116,7 +118,7 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
   )
 }
 
-function Bubble({ m, live, canRetry, onRetry, busy, onApprove }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, ok: boolean) => void }) {
+function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, ok: boolean) => void; onArtifact?: (a: ChatArtifact) => void }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
   if (m.role === 'thinking') return <ThinkingBubble m={m} live={!!live} />
@@ -160,6 +162,7 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove }: { m: ChatMsg; l
       </div>
     )
   }
+  const artifact = live ? null : extractArtifact(m.text)
   return (
     <div
       onMouseEnter={() => setHover(true)}
@@ -170,10 +173,59 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove }: { m: ChatMsg; l
         <Markdown text={m.text} />
         {live && <span className="stream-caret" />}
       </div>
-      <div style={{ display: 'flex', gap: 2, marginTop: 4, height: 22, opacity: hover && !live ? 1 : 0, transition: 'opacity .12s' }}>
-        <HoverBtn title={copied ? 'Copied!' : 'Copy message'} paths={COPY_IC} onClick={copy} />
-        {canRetry && onRetry && <HoverBtn title="Retry — regenerate from the last message" paths={RETRY_IC} onClick={onRetry} />}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, minHeight: 22 }}>
+        {artifact && onArtifact && (
+          <button
+            className="mono"
+            title="Render this output live in a sandboxed panel"
+            onClick={() => onArtifact(artifact)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 10.5, fontWeight: 600,
+              padding: '3px 10px', borderRadius: 7, background: hexToRgba(ACCENT, 0.08),
+              border: `1px solid ${hexToRgba(ACCENT, 0.35)}`, color: 'var(--accent)',
+            }}
+          >
+            <Icon paths={['M4 5h16v14H4z', 'M4 9h16']} size={11} stroke={1.8} />
+            Open {artifact.kind.toUpperCase()} artifact
+          </button>
+        )}
+        <div style={{ display: 'flex', gap: 2, opacity: hover && !live ? 1 : 0, transition: 'opacity .12s' }}>
+          <HoverBtn title={copied ? 'Copied!' : 'Copy message'} paths={COPY_IC} onClick={copy} />
+          {canRetry && onRetry && <HoverBtn title="Retry — regenerate from the last message" paths={RETRY_IC} onClick={onRetry} />}
+        </div>
       </div>
+    </div>
+  )
+}
+
+/** Live sandboxed preview of an assistant-produced document (HTML/SVG). */
+function ArtifactPanel({ artifact, onClose }: { artifact: ChatArtifact; onClose: () => void }) {
+  return (
+    <div style={{ width: '46%', minWidth: 320, flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--line)', background: 'var(--panel)' }}>
+      <div style={{ height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', borderBottom: '1px solid var(--line)' }}>
+        <Icon paths={['M4 5h16v14H4z', 'M4 9h16']} size={13} stroke={1.7} />
+        <span className="mono" style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4 }}>ARTIFACT · {artifact.kind.toUpperCase()}</span>
+        <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>sandboxed · no network</span>
+        <div style={{ flex: 1 }} />
+        <button
+          className="icon-btn"
+          title="Copy source"
+          onClick={() => { void navigator.clipboard.writeText(artifact.source) }}
+          style={{ width: 24, height: 24, borderRadius: 6 }}
+        >
+          <Icon paths={COPY_IC} size={11} stroke={1.8} />
+        </button>
+        <button className="icon-btn" title="Close artifact" onClick={onClose} style={{ width: 24, height: 24, borderRadius: 6 }}>
+          <Icon paths={IC.close} size={11} stroke={2} />
+        </button>
+      </div>
+      {/* same trust model as addon views: opaque origin, inline-only CSP */}
+      <iframe
+        title="chat artifact"
+        sandbox="allow-scripts"
+        srcDoc={artifactSrcDoc(artifact)}
+        style={{ flex: 1, border: 'none', background: '#fff' }}
+      />
     </div>
   )
 }
@@ -219,6 +271,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   const [loadingAtts, setLoadingAtts] = useState(0)
   const [dragOver, setDragOver] = useState(false)
   const [note, setNote] = useState<string | null>(null)
+  const [artifact, setArtifact] = useState<ChatArtifact | null>(null)
   const [menuSel, setMenuSel] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -352,7 +405,8 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   const hasUserMsg = log.some(m => m.role === 'user')
 
   return (
-    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg2)' }}>
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', background: 'var(--bg2)' }}>
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div ref={scrollRef} style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '16px 36px' }}>
         {/* ChatGPT-style readable column: content centered at a comfortable width */}
         <div style={{ maxWidth: 860, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--chat-gap)' }}>
@@ -365,6 +419,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
               onRetry={() => retryChat(agent.id)}
               busy={busy}
               onApprove={(msgId, ok) => approveChatTool(agent.id, msgId, ok)}
+              onArtifact={setArtifact}
             />
           ))}
           {busy && log[log.length - 1]?.role !== 'assistant' && (
@@ -477,6 +532,8 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
         </div>
         </div>
       </div>
+    </div>
+    {artifact && <ArtifactPanel artifact={artifact} onClose={() => setArtifact(null)} />}
     </div>
   )
 }
