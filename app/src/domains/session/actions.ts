@@ -19,7 +19,7 @@ export interface SessionActionsCtx {
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   markUserStopped: (id: string) => void
   disposeSessionRuntime: (id: string) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }) => string | null
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
   armResponseWatch: (id: string) => void
   appendTail: (id: string, line: string) => void
@@ -36,7 +36,7 @@ export interface SessionActions {
   unarchiveSession: (id: string) => void
   deleteSession: (id: string) => void
   resume: (id: string) => void
-  newRealSession: (command: string, cwd: string, terminalShell?: string) => void
+  newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean) => void
   sendInput: (id: string, text: string) => void
   stopSession: (id: string) => void
 }
@@ -141,8 +141,8 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       }, id))
     },
 
-    newRealSession: (command, cwd, terminalShell) => {
-      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell })
+    newRealSession: (command, cwd, terminalShell, isolate) => {
+      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell, isolate })
       if (id) {
         logEvent('route', id, `Launched session · ${command.trim()}`)
         flash('Session launched')

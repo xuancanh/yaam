@@ -43,7 +43,7 @@ export interface ConductorActionsDeps {
   markUserStopped: (id: string) => void
   disposeWatcher: (taskId: string) => void
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
-  launchFromTemplate: (templateId: string, task?: string) => string | null
+  launchFromTemplate: (templateId: string, task?: string, isolate?: boolean) => string | null
   runChatMessage: (agentId: string, text: string, atts?: import('../domains/chat/runner').ChatAttachment[]) => void
   stopChatMessage: (agentId: string) => void
   retryChatMessage: (agentId: string) => void
@@ -62,7 +62,7 @@ export interface ConductorActionsDeps {
   // session
   armResponseWatch: (id: string) => void
   clearFlagged: (id: string) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }) => string | null
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
   appendTail: (id: string, line: string) => void
   clearNeeds: (id: string) => void

@@ -28,6 +28,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const [task, setTask] = useState('')
 
   const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
+  const [isolate, setIsolate] = useState(false)
 
   const isShell = typeId === 'shell'
   const isCustom = typeId === 'custom'
@@ -57,12 +58,12 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   // Dispatch a template run or a real PTY session.
   const launch = () => {
     if (tpl) {
-      runTemplate(tpl.id, task.trim() || undefined)
+      runTemplate(tpl.id, task.trim() || undefined, isolate || undefined)
       onClose()
       return
     }
     if (!effectiveCommand.trim()) return
-    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined)
+    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined, isolate || undefined)
     onClose()
   }
 
@@ -155,6 +156,15 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           )}
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none' }} title="The working folder (a git repo, or a folder whose subfolders are repos) is mirrored into git worktrees on branch yaam/<session>; the session works there and your checkout stays untouched until you merge.">
+            <input type="checkbox" checked={isolate} onChange={e => setIsolate(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
+            <span>
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>Isolate in a git worktree</span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                Runs on a branch in a mirrored copy — supports multi-repo folders; review &amp; merge when done.
+              </span>
+            </span>
+          </label>
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button

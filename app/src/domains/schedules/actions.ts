@@ -8,7 +8,7 @@ export interface SchedulesActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
   flash: (t: string) => void
   logEvent: (type: EventType, agentId: string | null, text: string) => void
-  launchFromTemplate: (templateId: string, task?: string) => string | null
+  launchFromTemplate: (templateId: string, task?: string, isolate?: boolean) => string | null
   /** application command registry entry point (routes schedule toggle/remove) */
   execCommand?: <R = unknown>(name: string, input: unknown, ctx: { actor: { kind: 'user' } }) => Promise<R>
 }
@@ -17,7 +17,7 @@ export interface SchedulesActions {
   addTemplate: () => string
   updateTemplate: (id: string, patch: Partial<AgentTemplate>) => void
   deleteTemplate: (id: string) => void
-  runTemplate: (id: string, task?: string) => void
+  runTemplate: (id: string, task?: string, isolate?: boolean) => void
   addCron: (cron: Omit<Cron, 'id' | 'on' | 'built' | 'last'>) => void
   deleteCron: (id: string) => void
   toggleCron: (id: string) => void
@@ -55,8 +55,8 @@ export function createSchedulesActions(ctx: SchedulesActionsCtx): SchedulesActio
       tasks: s.tasks.map(t => t.templateId === id ? { ...t, templateId: undefined } : t),
       crons: s.crons.map(c => c.templateId === id ? { ...c, templateId: undefined } : c),
     })),
-    runTemplate: (id, task) => {
-      const lid = ctx.launchFromTemplate(id, task)
+    runTemplate: (id, task, isolate) => {
+      const lid = ctx.launchFromTemplate(id, task, isolate)
       if (lid) ctx.flash('Session launched from template')
     },
 

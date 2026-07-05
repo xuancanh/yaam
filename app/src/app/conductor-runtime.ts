@@ -58,7 +58,7 @@ function assembleRuntimeDeps(
     runWatcher: session.runWatcher, pushTaskChat: session.pushTaskChat,
     markUserStopped: (id: string) => refs.userStoppedRef.current.add(id),
     disposeWatcher: session.disposeWatcher, taskSessions: refs.taskSessionsRef,
-    launchFromTemplate: (templateId: string, task?: string) => session.launchFromTemplate(templateId, task),
+    launchFromTemplate: (templateId: string, task?: string, isolate?: boolean) => session.launchFromTemplate(templateId, task, undefined, undefined, undefined, undefined, isolate),
     runChatMessage: chat.runChatMessage, stopChatMessage: chat.stopChatMessage,
     retryChatMessage: chat.retryChatMessage, resetChatRuntime: chat.resetChatRuntime,
     resolveChatApproval: chat.resolveChatApproval,

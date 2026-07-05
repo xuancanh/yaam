@@ -27,6 +27,8 @@ export interface SessionProcessPort {
   sendLine: (id: string, text: string) => void
   /** discover a CLI's resume id from its session files (best-effort) */
   detectCliSession: (kind: string, cwd: string | undefined, sinceMs: number, exclude?: string[]) => Promise<string | null>
+  /** isolate a working folder in git worktree(s); returns where to run */
+  createWorktree: (baseCwd: string, slug: string) => Promise<native.WorktreeInfo>
   /** create (or reuse) the xterm terminal for a session and wire its callbacks */
   attachTerminal: (
     id: string,
@@ -47,6 +49,7 @@ export const realSessionProcessPort: SessionProcessPort = {
   writeSession: (id, data) => native.writeSession(id, data),
   sendLine: (id, text) => sendLineToSession(id, text),
   detectCliSession: (kind, cwd, sinceMs, exclude) => native.detectCliSession(kind, cwd, sinceMs, exclude),
+  createWorktree: (baseCwd, slug) => native.worktreeCreate(baseCwd, slug),
   attachTerminal: (id, onPlainLine, onUserInput, onActivity, onUserSubmit) => {
     const { term } = getTerminal(id, onPlainLine, onUserInput, onActivity, onUserSubmit)
     return { writeln: text => term.writeln(text) }

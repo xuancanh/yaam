@@ -15,6 +15,8 @@ export interface TaskSpecValue {
   /** '' = default type · type id · 'tpl:<id>' = template */
   runWith: string
   cwd: string
+  /** run the task's sessions in an isolated git worktree */
+  isolate: boolean
 }
 
 /** the createTask/boardTask-shaped patch a resolved spec produces */
@@ -25,10 +27,11 @@ export interface TaskSpecPatch {
   templateId?: string
   typeId?: string
   cwd?: string
+  isolate?: boolean
 }
 
 export function emptyTaskSpec(defaultCwd: string): TaskSpecValue {
-  return { title: '', description: '', criteria: '', runWith: '', cwd: defaultCwd }
+  return { title: '', description: '', criteria: '', runWith: '', cwd: defaultCwd, isolate: false }
 }
 
 const FIELD = {
@@ -56,6 +59,7 @@ function toPatch(v: TaskSpecValue, description: string, criteria: string[]): Tas
     description,
     criteria,
     cwd: v.cwd.trim() || undefined,
+    isolate: v.isolate || undefined,
     ...(v.runWith.startsWith('tpl:') ? { templateId: v.runWith.slice(4) } : { typeId: v.runWith || undefined }),
   }
 }
@@ -170,6 +174,15 @@ export function TaskSpecFields({ v, set, questions, error, autoFocus }: {
           </div>
         </div>
       </div>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none' }} title="The working folder (a git repo, or a folder whose subfolders are repos) is mirrored into git worktrees; the task's sessions work there and changes land via the review queue.">
+        <input type="checkbox" checked={v.isolate} onChange={e => set({ ...v, isolate: e.target.checked })} style={{ marginTop: 2 }} />
+        <span>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>Isolate in a git worktree</span>
+          <span style={{ display: 'block', fontSize: 10.5, color: 'var(--dim)', marginTop: 2 }}>
+            Sessions work on a branch in a mirrored copy (multi-repo folders supported); approve &amp; merge from the Review column.
+          </span>
+        </span>
+      </label>
       {questions.length > 0 && (
         <div style={{ border: '1px solid rgba(255,176,32,.4)', background: 'rgba(255,176,32,.07)', borderRadius: 10, padding: '10px 13px' }}>
           <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--amber)', marginBottom: 6 }}>Needs more info before it can be created</div>

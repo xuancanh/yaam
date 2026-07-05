@@ -22,6 +22,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     writeSession: vi.fn(async () => {}),
     sendLine: vi.fn(),
     detectCliSession: vi.fn(async () => null),
+    createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     attachTerminal: vi.fn(() => ({ writeln: vi.fn() })),
     disposeTerminal: vi.fn(),
     ...over,
@@ -87,6 +88,36 @@ describe('createLaunchRuntime.launchSession', () => {
     expect(rt.launchSession('   ', '/repo')).toBeNull()
     expect(port.spawnSession).not.toHaveBeenCalled()
     expect(useAppStore.getState().agents).toHaveLength(0)
+  })
+
+  it('isolate: builds the worktree first, then spawns inside its workdir', async () => {
+    const port = fakePort({
+      createWorktree: vi.fn(async (base: string, slug: string) => ({
+        root: `/home/.yaam/worktrees/${slug}`, base, slug,
+        workdir: `/home/.yaam/worktrees/${slug}/repo`,
+        repos: [{ name: 'repo', source: base, branch: `yaam/${slug}`, base_ref: 'main' }],
+      })),
+    })
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('mycli run', '/repo', 'Iso', 'cli', undefined, { isolate: true })!
+    expect(port.createWorktree).toHaveBeenCalledWith('/repo', id)
+    await Promise.resolve()
+    await Promise.resolve()
+    const agent = useAppStore.getState().agents.find(a => a.id === id)
+    expect(agent?.cwd).toBe(`/home/.yaam/worktrees/${id}/repo`)
+    expect(agent?.worktree?.root).toBe(`/home/.yaam/worktrees/${id}`)
+    expect(port.spawnSession).toHaveBeenCalledWith(id, expect.any(String), `/home/.yaam/worktrees/${id}/repo`, undefined, undefined, undefined)
+  })
+
+  it('isolate: a worktree failure marks the session errored without spawning', async () => {
+    const port = fakePort({ createWorktree: vi.fn(async () => { throw new Error('no git repository found') }) })
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('mycli run', '/plain-folder', 'Iso', 'cli', undefined, { isolate: true })!
+    await Promise.resolve()
+    await Promise.resolve()
+    const agent = useAppStore.getState().agents.find(a => a.id === id)
+    expect(agent?.status).toBe('error')
+    expect(port.spawnSession).not.toHaveBeenCalled()
   })
 
   it('focuses a launch in the active workspace but leaves background launches alone', () => {

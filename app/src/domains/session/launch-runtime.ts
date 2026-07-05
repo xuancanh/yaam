@@ -35,7 +35,7 @@ export interface LaunchRuntimeCtx {
 
 export interface LaunchRuntime {
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }) => string | null
   launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string) => string | null
   spawnTaskSession: (taskId: string, opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string }) => string | null
   spawnSessionForTask: (taskId: string, workspaceId?: string) => void
@@ -87,7 +87,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
     }
 
     // Create optimistic session state, spawn its PTY, and attach lifecycle tracking.
-    const launchSession = (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }): string | null => {
+    const launchSession = (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }): string | null => {
       const plan = buildLaunch({ command, cwd, nameHint, typeId, workspaceId, opts }, stateRef.current.agentTypes, stateRef.current.activeWorkspace)
       if (!plan) return null
       const { agent, spawnCommand, knownSessionId, launchType } = plan
@@ -99,21 +99,43 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         return { ...focusSessionIn(withAgent, id), newSessionOpen: false }
       })
       port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
-      // Claude's id is known up front; only codex/opencode need file detection.
-      if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', agent.cwd ?? '', false)
-      port.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, agent.cwd || undefined, undefined, undefined, opts?.terminalShell).catch(err => {
+      const fail = (err: unknown) => {
         dispatch(s => ({
           ...s,
           agents: s.agents.map(a => a.id === id
-            ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err', x: String(err) }]) }
+            ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err' as const, x: String(err) }]) }
             : a),
         }))
-      })
+      }
+      const spawn = (spawnCwd: string | undefined) => {
+        // Claude's id is known up front; only codex/opencode need file detection.
+        if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', spawnCwd ?? '', false)
+        port.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd || undefined, undefined, undefined, opts?.terminalShell).catch(fail)
+      }
+      if (opts?.isolate && agent.cwd) {
+        // isolation: mirror the working folder (a repo, or a folder of repos)
+        // into git worktrees first, then run the session inside the mirror
+        port.createWorktree(agent.cwd, id).then(wt => {
+          dispatch(s => ({
+            ...s,
+            agents: s.agents.map(a => a.id === id
+              ? {
+                  ...a, cwd: wt.workdir,
+                  worktree: { root: wt.root, base: wt.base, workdir: wt.workdir },
+                  log: a.log.concat([{ t: 'sys' as const, x: `isolated in worktree ${wt.root} (${wt.repos.length} repo${wt.repos.length > 1 ? 's' : ''})` }]),
+                }
+              : a),
+          }))
+          spawn(wt.workdir)
+        }).catch(fail)
+      } else {
+        spawn(agent.cwd)
+      }
       return id
     }
 
     // Resolve a persisted template into a command and launch it in the target workspace.
-    const launchFromTemplate = (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string): string | null => {
+    const launchFromTemplate = (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string, isolate?: boolean): string | null => {
       const st = stateRef.current
       const stored = (st.templates ?? []).find(t => t.id === templateId)
       if (!stored) {
@@ -124,7 +146,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       const type = st.agentTypes.find(t => t.id === tpl.typeId)
       const command = buildTemplateCommand(tpl, type, task, contract)
       const id = launchSession(command, cwdOverride || tpl.cwd || st.settings.defaultCwd || '', tpl.name, type?.id, workspaceId, {
-        ephemeral: tpl.mode === 'ephemeral', autoArchive: tpl.autoArchive, templateId: tpl.id,
+        ephemeral: tpl.mode === 'ephemeral', autoArchive: tpl.autoArchive, templateId: tpl.id, isolate,
       })
       if (id) logEvent('route', id, `Launched template “${tpl.name}”${task ? ` · ${task.slice(0, 48)}` : ''}`)
       return id
@@ -144,10 +166,17 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       const work = taskWorkText(task)
         + (opts?.extraInstructions?.trim() ? `\n\nAdditional instructions from the task watcher:\n${opts.extraInstructions.trim()}` : '')
       const contract = taskContract(task)
+      // isolation: the task's FIRST session builds the worktree; follow-up
+      // sessions re-enter the same worktree so the work-in-progress carries over
+      const prior = (task.agentIds ?? [])
+        .map(aid => st.agents.find(a => a.id === aid)?.worktree)
+        .find(Boolean)
+      const runCwd = prior?.workdir || task.cwd
+      const isolate = !!task.isolate && !prior
       let id: string | null = null
       // watcher-driven task sessions are ALWAYS one-shot: they run the task and exit
       if (task.templateId && (st.templates ?? []).some(t => t.id === task.templateId)) {
-        id = launchFromTemplate(task.templateId, work, workspaceId, task.cwd, true, contract)
+        id = launchFromTemplate(task.templateId, work, workspaceId, runCwd, true, contract, isolate)
       } else {
         const type = (task.typeId ? st.agentTypes.find(t => t.id === task.typeId) : undefined)
           ?? st.agentTypes.find(t => t.enabled)
@@ -159,9 +188,16 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
           id: '', name: task.title.slice(0, 18), typeId: type.id, mode: 'ephemeral',
           prompt: '{task}', systemPrompt: '', model: '', approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
         }
-        id = launchSession(buildTemplateCommand(oneShot, type, work, contract), task.cwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, workspaceId, { ephemeral: true })
+        id = launchSession(buildTemplateCommand(oneShot, type, work, contract), runCwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, workspaceId, { ephemeral: true, isolate })
       }
       if (!id) return null
+      if (prior) {
+        // adopt the task's existing worktree on the follow-up session
+        dispatch(s2 => ({
+          ...s2,
+          agents: s2.agents.map(a => a.id === id ? { ...a, worktree: prior } : a),
+        }))
+      }
       taskSessions.current.set(id, { taskId, workspaceId })
       const sessionName = stateRef.current.agents.find(a => a.id === id)?.name ?? id
       dispatch(s2 => updateLocatedTask(s2, taskId, t => ({

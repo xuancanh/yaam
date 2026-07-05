@@ -108,6 +108,8 @@ export interface Agent {
   /** chat tool safety: 'ask' (default) pauses shell/AppleScript/delete tool
    *  calls for inline approval; 'auto' runs them without asking */
   permMode?: 'ask' | 'auto'
+  /** git-worktree isolation this session runs in (cwd === workdir) */
+  worktree?: { root: string; base: string; workdir: string }
 }
 
 /** one message in a chat-mode session */
@@ -457,6 +459,8 @@ export interface BoardTask {
   typeId?: string
   /** working directory for the spawned session (overrides template/default) */
   cwd?: string
+  /** run the task's sessions in an isolated git worktree (reviewed via the queue) */
+  isolate?: boolean
 }
 
 export interface AddonTool {
