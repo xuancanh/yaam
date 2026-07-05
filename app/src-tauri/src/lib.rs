@@ -7,12 +7,23 @@ mod util;
 use domains::bedrock::BedrockState;
 use domains::search::ChatSearchState;
 use domains::session::SessionManager;
+use tauri::{Emitter, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
+        // Give the webview a chance to flush persisted state before teardown:
+        // veto the OS close, tell the frontend, and let it destroy the window
+        // once its flush settles (it applies its own timeout so a stuck flush
+        // can't wedge the close). destroy() bypasses this event, so no loop.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.emit("close-requested", ());
+            }
+        })
         .manage(SessionManager::default())
         .manage(BedrockState::default())
         .manage(ChatSearchState::default())

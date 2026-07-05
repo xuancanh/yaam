@@ -2,6 +2,7 @@
 // browser (e.g. `npm run dev` opened directly) so the simulated agents still work.
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 
@@ -88,6 +89,25 @@ export function onSessionExit(cb: (e: SessionExit) => void): () => void {
     else fn()
   })
   return () => { alive = false; unlisten() }
+}
+
+/** Subscribe to the backend's close-requested event (the OS close was vetoed so
+ *  the app can flush first). No-op outside Tauri. Returns an unsubscribe fn. */
+export function onCloseRequested(cb: () => void): () => void {
+  if (!isTauri) return () => {}
+  let alive = true
+  let unlisten = () => {}
+  listen('close-requested', () => cb()).then(fn => {
+    if (alive) unlisten = fn
+    else fn()
+  })
+  return () => { alive = false; unlisten() }
+}
+
+/** Force-close the app window (bypasses the CloseRequested veto). */
+export async function destroyWindow(): Promise<void> {
+  if (!isTauri) return
+  await getCurrentWindow().destroy()
 }
 
 /** Open the native directory picker when available. */

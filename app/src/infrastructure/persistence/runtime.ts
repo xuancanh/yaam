@@ -23,11 +23,12 @@ export interface PersistenceRuntime {
   /** Enable writes. Called once the restored snapshot has been applied so the
    *  debounced writers can never clobber saved state during load. */
   markReady: () => void
-  /** Wire store subscriptions + the beforeunload flush. */
+  /** Wire store subscriptions + the close/unload flush. */
   start: () => void
-  /** Synchronously persist both partitions from the latest state (teardown). */
-  flush: () => void
-  /** Clear timers, remove the unload listener, and unsubscribe. */
+  /** Persist both partitions from the latest state (teardown); resolves once
+   *  every write has settled so a caller can await it before closing. */
+  flush: () => Promise<void>
+  /** Clear timers, remove listeners, and unsubscribe. */
   dispose: () => void
 }
 
@@ -124,15 +125,22 @@ export function createPersistenceRuntime(
   }
 
   // Persist both partitions from the latest state, through the same selectors as
-  // the debounced writers so they can never drift apart.
-  const flush = () => {
+  // the debounced writers so they can never drift apart. Resolves once every
+  // write settles, so teardown can await durability before closing the window.
+  const flush = async (): Promise<void> => {
     const st = store.getState()
-    native.saveStateFile(JSON.stringify(redactSecrets(selectMainState(st), keychainReady))).catch(() => {})
+    const writes: Array<Promise<unknown>> = [
+      native.saveStateFile(JSON.stringify(redactSecrets(selectMainState(st), keychainReady))).catch(e => onSaveError('main', e)),
+    ]
     for (const a of st.agents) {
-      if (savedAgents.get(a.id) !== a) native.saveSession(a.id, JSON.stringify(selectSession(a))).catch(() => {})
+      if (savedAgents.get(a.id) !== a) writes.push(native.saveSession(a.id, JSON.stringify(selectSession(a))).catch(e => onSaveError('session', e)))
     }
+    await Promise.allSettled(writes)
   }
-  const onBeforeUnload = () => flush()
+  // Fallback flush for a plain-browser dev context, where there is no Tauri
+  // close lifecycle to coordinate with (best-effort, can't be awaited).
+  const onBeforeUnload = () => { void flush() }
+  let closeOff: (() => void) | undefined
 
   return {
     keychainReady,
@@ -147,7 +155,19 @@ export function createPersistenceRuntime(
         } else armSession()
       }))
       unsubs.push(store.subscribe((s, prev) => { if (secretsChanged(s, prev)) armSecret() }))
-      window.addEventListener('beforeunload', onBeforeUnload)
+      // In Tauri the OS close is vetoed backend-side; flush (bounded so a stuck
+      // write can't wedge the close), then destroy the window. In a plain
+      // browser fall back to the best-effort beforeunload flush.
+      if (native.isTauri) {
+        closeOff = native.onCloseRequested(() => {
+          void (async () => {
+            await Promise.race([flush(), new Promise(r => window.setTimeout(r, 3000))])
+            await native.destroyWindow().catch(() => {})
+          })()
+        })
+      } else {
+        window.addEventListener('beforeunload', onBeforeUnload)
+      }
     },
     flush,
     dispose() {
@@ -155,6 +175,7 @@ export function createPersistenceRuntime(
       if (sessionTimer) window.clearTimeout(sessionTimer)
       if (secretTimer) window.clearTimeout(secretTimer)
       for (const u of unsubs) u()
+      closeOff?.()
       window.removeEventListener('beforeunload', onBeforeUnload)
     },
   }

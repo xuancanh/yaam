@@ -2,11 +2,14 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('../../core/native', () => ({
+  isTauri: false,
   saveStateFile: vi.fn(() => Promise.resolve()),
   saveSession: vi.fn(() => Promise.resolve()),
   removeSession: vi.fn(() => Promise.resolve()),
   secretSet: vi.fn(() => Promise.resolve()),
   secretDelete: vi.fn(() => Promise.resolve()),
+  onCloseRequested: vi.fn(() => () => {}),
+  destroyWindow: vi.fn(() => Promise.resolve()),
 }))
 
 import * as native from '../../core/native'
