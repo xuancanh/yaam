@@ -29,7 +29,8 @@ app/                     Tauri app (the whole product)
     llm/client.ts        shared LLM core: provider defs + protocol adapters + SSE streaming
     components/          shared UI primitives only: ui.tsx, Markdown.tsx
     core/                shared foundation used across domains:
-      types.ts data.ts state-lib.ts context.ts   types, seed/catalogs, pure helpers, contexts
+      store.ts           Zustand store (useAppStore) + dispatch
+      types.ts data.ts state-lib.ts context.ts   types, seed/catalogs, pure helpers, ActionsCtx
       native.ts mcp.ts terminals.ts               Tauri bridge, MCP client, xterm registry
       addons.ts highlight.ts skills.ts usage.ts   addon contract, highlighter, skills, usage est.
     domains/             feature domains — each owns its view, components, logic (runner), actions:
@@ -88,8 +89,12 @@ Whole gate before a commit: `npx tsc --noEmit -p tsconfig.app.json && npm run li
 
 ## Architecture notes that will bite you
 
-**One store, domain-sliced actions.** `store.tsx` owns the single `useReducer`
-state, the runtime refs/effects, and composes the action surface. Feature-domain
+**One store, domain-sliced actions.** State lives in a single **Zustand** store
+(`core/store.ts` — `useAppStore`); `dispatch(updater)` replaces state with the
+reducer's old semantics (full-object return, no-op bail-out). `store.tsx` owns
+the runtime refs/effects and composes the action surface. Read state with
+`useConductor()` (full) or `useConductorSelector(sel, isEqual?)` (a Zustand
+selector subscription — the narrow-slice path). Feature-domain
 actions live in `domains/<x>/actions.ts` as `useXActions(ctx)` hooks (settings,
 board, schedules, chat, addons, workspace) that take a context of stable
 refs/callbacks and are spread into the provider's `ConductorActions` memo. The

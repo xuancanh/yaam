@@ -29,7 +29,8 @@ Use `cargo test` for the Rust unit tests (Bedrock credential parser, session lau
 ```text
 app/src/               root holds the app hub; the rest is grouped
   App.tsx main.tsx   composition root + entry
-  store.tsx          state owner: shared refs/effects/persistence + the actions object
+  core/store.ts      Zustand store (useAppStore) + dispatch — the state container
+  store.tsx          provider: shared refs/effects/persistence + the composed action surface
   master.ts monitor.ts  compatibility barrels (llm/client + domains/master/*)
   store/             hooks (useConductor/useConductorSelector/useActions), state-helpers, secrets
   llm/client.ts      shared LLM core: providers/protocols + SSE streaming
