@@ -5,7 +5,7 @@ import type {
   Addon, AddonHookName, AddonPermission, Agent, AgentTemplate, AppState, BoardCol, BoardTask, Cron, EscOption, EventType, LogLine,
   ChatAgentType, ChatMsg, McpServer, NotifKind, Notification, Panel, Persona, PersistedState, Skill, SkillRegistry, TaskChatMsg, View,
 } from './core/types'
-import { defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, seedState } from './core/data'
+import { defaultDetail, mkMemory, mkTools, PERM_ORDER, seedState } from './core/data'
 import * as native from './core/native'
 import { buildCfg, hasCreds } from './master'
 import type { ApiMessage } from './master'
@@ -30,6 +30,7 @@ import { useBoardActions } from './domains/board/actions'
 import { useSchedulesActions } from './domains/schedules/actions'
 import { useChatActions } from './domains/chat/actions'
 import { useAddonsActions } from './domains/addons/actions'
+import { useWorkspaceActions } from './domains/workspace/actions'
 import type { TaskSpecDraft } from './domains/board/watcher'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
@@ -172,7 +173,7 @@ import {
   PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
   activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, groupsFromLegacy,
   mkGroup, mkId, removeFromGroups, selectMainState, selectSession,
-  sendLineToSession, spawnAgentProcess, switchWorkspaceIn, taskContract, taskWorkText, typeForCommand,
+  sendLineToSession, spawnAgentProcess, taskContract, taskWorkText, typeForCommand,
 } from './core/state-lib'
 
 export { cronMatches, humanizeCron } from './core/state-lib'
@@ -1725,6 +1726,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     sendAddonChat: (id, text) => { void sendAddonChatImpl(id, text) },
     makeAddonApi, addonAgentHistories, addonEditorHistories,
   })
+  const workspaceActions = useWorkspaceActions({
+    dispatch, stateRef, later, flash, runMaster,
+    markUserStopped: id => userStoppedRef.current.add(id), disposeSessionRuntime,
+  })
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
@@ -1733,6 +1738,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     ...schedulesActions,
     ...chatActions,
     ...addonsActions,
+    ...workspaceActions,
     setView: v => dispatch(s => ({ ...s, view: v })),
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
@@ -2134,64 +2140,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
 
 
-    switchWorkspace: id => {
-      // Master events that queued while this workspace was inactive
-      const pending = stateRef.current.workspaceData[id]?.pendingMasterNotes ?? []
-      dispatch(s => switchWorkspaceIn(s, id, MASTER_GREETING))
-      if (pending.length) {
-        later(600, () => {
-          if (stateRef.current.activeWorkspace !== id) return
-          void runMaster(`[events queued while this workspace was in the background]\n${pending.join('\n\n')}\n\nSummarize these for the user (grouped, brief).`)
-        })
-      }
-    },
-
-    createWorkspace: name => {
-      const id = mkId('ws')
-      const trimmed = name.trim() || `Workspace ${stateRef.current.workspaces.length + 1}`
-      dispatch(s => switchWorkspaceIn(
-        { ...s, workspaces: s.workspaces.concat([{ id, name: trimmed }]) },
-        id, MASTER_GREETING,
-      ))
-      flash(`Workspace “${trimmed}” created`)
-    },
-
-    renameWorkspace: (id, name) => dispatch(s => ({
-      ...s,
-      workspaces: s.workspaces.map(w => (w.id === id ? { ...w, name: name.trim() || w.name } : w)),
-    })),
-
-    deleteWorkspace: id => {
-      const s0 = stateRef.current
-      if (s0.workspaces.length <= 1) {
-        flash('Cannot delete the last workspace')
-        return
-      }
-      // kill the workspace's sessions and tear down all their runtime state
-      for (const a of s0.agents.filter(a => a.workspaceId === id)) {
-        userStoppedRef.current.add(a.id)
-        native.killSession(a.id).catch(() => {})
-        disposeSessionRuntime(a.id)
-        native.removeSession(a.id).catch(() => {})
-      }
-      dispatch(s => {
-        let next = s
-        if (s.activeWorkspace === id) {
-          const fallback = s.workspaces.find(w => w.id !== id)!
-          next = switchWorkspaceIn(s, fallback.id, MASTER_GREETING)
-        }
-        const workspaceData = { ...next.workspaceData }
-        delete workspaceData[id]
-        return {
-          ...next,
-          workspaces: next.workspaces.filter(w => w.id !== id),
-          workspaceData,
-          agents: next.agents.filter(a => a.workspaceId !== id),
-        }
-      })
-      flash('Workspace deleted')
-    },
-
     openNewSession: () => dispatch(s => ({ ...s, newSessionOpen: true })),
     closeNewSession: () => dispatch(s => ({ ...s, newSessionOpen: false })),
 
@@ -2237,7 +2185,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
+  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, later, launchSession, logEvent, probeCliSession, runMaster])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)
