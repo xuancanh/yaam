@@ -28,6 +28,7 @@ import { runChatMessageTurn } from './domains/chat/runner'
 import { runMasterLoop } from './domains/master/runner'
 import { useSettingsActions } from './domains/settings/actions'
 import { useBoardActions } from './domains/board/actions'
+import { useSchedulesActions } from './domains/schedules/actions'
 import type { TaskSpecDraft } from './domains/board/watcher'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, redactSecrets, secretEntries } from './store/secrets'
@@ -1716,11 +1717,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     markUserStopped: id => userStoppedRef.current.add(id),
     watcherHistories, watcherQueue, taskSessions: taskSessionsRef,
   })
+  const schedulesActions = useSchedulesActions({ dispatch, flash, logEvent, launchFromTemplate })
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
     ...settingsActions,
     ...boardActions,
+    ...schedulesActions,
     setView: v => dispatch(s => ({ ...s, view: v })),
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
@@ -2155,43 +2158,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
 
 
-    addTemplate: () => {
-      const id = mkId('tpl')
-      dispatch(s => ({
-        ...s,
-        templates: (s.templates ?? []).concat([{
-          id, name: `template-${(s.templates ?? []).length + 1}`,
-          typeId: s.agentTypes.find(t => t.enabled)?.id ?? 'claude',
-          mode: 'ephemeral', prompt: '{task}', systemPrompt: '', model: '',
-          approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
-        }]),
-      }))
-      return id
-    },
-    updateTemplate: (id, patch) => dispatch(s => ({
-      ...s,
-      templates: (s.templates ?? []).map(t => t.id === id ? { ...t, ...patch } : t),
-    })),
-    deleteTemplate: id => dispatch(s => ({
-      ...s,
-      templates: (s.templates ?? []).filter(t => t.id !== id),
-      tasks: s.tasks.map(t => t.templateId === id ? { ...t, templateId: undefined } : t),
-      crons: s.crons.map(c => c.templateId === id ? { ...c, templateId: undefined } : c),
-    })),
-    runTemplate: (id, task) => {
-      const lid = launchFromTemplate(id, task)
-      if (lid) flash('Session launched from template')
-    },
-
-    addCron: cron => {
-      dispatch(s => ({
-        ...s,
-        crons: s.crons.concat([{ ...cron, id: mkId('c'), on: true, built: false, last: '—' }]),
-      }))
-      flash('Schedule created')
-      logEvent('cron', null, `Created schedule ${cron.name}`)
-    },
-    deleteCron: id => dispatch(s => ({ ...s, crons: s.crons.filter(c => c.id !== id) })),
 
     openAddon: id => dispatch(s => ({ ...s, view: 'addon', activeAddon: id })),
 
@@ -2409,7 +2375,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
       }))
       flash('Session stopped')
     },
-  }), [settingsActions, boardActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, installPackage, later, launchFromTemplate, launchSession, logEvent, makeAddonApi, probeCliSession, runChatMessage, runMaster, sendAddonChatImpl])
+  }), [settingsActions, boardActions, schedulesActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, installPackage, later, launchSession, logEvent, makeAddonApi, probeCliSession, runChatMessage, runMaster, sendAddonChatImpl])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)
