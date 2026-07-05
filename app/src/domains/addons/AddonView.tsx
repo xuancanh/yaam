@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { useActions, useConductor, useConductorSelector, shallowEqual } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { useAppStore } from '../../core/store'
 import { AddonSource } from './AddonSource'
 import { addonSnapshot } from '../../core/addons'
 import type { Addon } from '../../core/types'
@@ -91,24 +92,25 @@ function withViewCsp(html: string): string {
 
 /** Render an addon's preview, source, or customization mode. */
 export function AddonView() {
-  // This scope hands the addon iframe a full-state snapshot (gated by its
-  // state:read grant), so it intentionally subscribes to the whole store.
-  const s = useConductor()
+  // Only `addons`/`activeAddon` drive this view reactively; the full-state
+  // snapshot handed to the iframe (gated by its state:read grant) is pushed
+  // imperatively from useAppStore.getState(), so we do not subscribe to the
+  // whole store and rerender on unrelated terminal/chat activity.
+  const s = useConductorSelector(x => ({ addons: x.addons, activeAddon: x.activeAddon }), shallowEqual)
   const { removeAddon, addonRpc } = useActions()
   const [mode, setMode] = useState<'view' | 'source' | 'chat'>('view')
   const iframeRef = useRef<HTMLIFrameElement>(null)
-  const stateRef = useRef(s)
-  stateRef.current = s
 
   const addon = s.addons.find(a => a.id === s.activeAddon)
 
   // Push the latest state snapshot into the addon iframe — only when the
   // addon actually holds state:read; otherwise it gets a denial marker.
   const push = useCallback(() => {
-    const a = stateRef.current.addons.find(x => x.id === stateRef.current.activeAddon)
+    const st = useAppStore.getState()
+    const a = st.addons.find(x => x.id === st.activeAddon)
     const allowed = !!a?.enabled && a.granted.includes('state:read')
     iframeRef.current?.contentWindow?.postMessage(
-      { type: 'yaam:state', state: allowed ? addonSnapshot(stateRef.current) : null, denied: allowed ? undefined : 'state:read' }, '*')
+      { type: 'yaam:state', state: allowed ? addonSnapshot(st) : null, denied: allowed ? undefined : 'state:read' }, '*')
   }, [])
 
   useEffect(() => {
@@ -119,7 +121,7 @@ export function AddonView() {
       if (e.data?.type === 'yaam:call' && typeof e.data.callId === 'string' && typeof e.data.method === 'string') {
         const { callId, method } = e.data
         const args = Array.isArray(e.data.args) ? e.data.args : []
-        const id = stateRef.current.activeAddon
+        const id = useAppStore.getState().activeAddon
         if (!id) return
         addonRpc(id, method, args).then(result => {
           iframeRef.current?.contentWindow?.postMessage({ type: 'yaam:result', callId, result }, '*')
