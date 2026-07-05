@@ -116,6 +116,36 @@ fn read_text_impl(root: Option<&str>, path: &str) -> Result<String, String> {
     std::fs::read_to_string(scoped_path(root, path)?).map_err(|e| e.to_string())
 }
 
+/// A ranged text read: the requested 1-based line window plus the file's total
+/// line count, so the viewer/agent can page a large file without marshalling it
+/// whole across IPC. `offset` is 1-based; `limit` caps the returned lines.
+#[derive(Serialize)]
+pub struct TextRange {
+    lines: Vec<String>,
+    total: usize,
+    /// 1-based line number of the first returned line
+    start: usize,
+}
+
+fn read_text_range_impl(
+    root: Option<&str>,
+    path: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<TextRange, String> {
+    let text = std::fs::read_to_string(scoped_path(root, path)?).map_err(|e| e.to_string())?;
+    let all: Vec<&str> = text.split('\n').collect();
+    let total = all.len();
+    let start = offset.max(1);
+    let lines = all
+        .iter()
+        .skip(start - 1)
+        .take(limit.max(1))
+        .map(|s| s.to_string())
+        .collect();
+    Ok(TextRange { lines, total, start })
+}
+
 /// Read one file as base64 — the viewer/import path for binary formats (PDF,
 /// office docs, images). Size-capped so a stray multi-GB file cannot be
 /// marshalled through the IPC bridge.
@@ -280,6 +310,16 @@ pub fn read_text_file(path: String, root: Option<String>) -> Result<String, Stri
 }
 
 #[tauri::command]
+pub fn read_text_range(
+    path: String,
+    offset: usize,
+    limit: usize,
+    root: Option<String>,
+) -> Result<TextRange, String> {
+    read_text_range_impl(root.as_deref(), &path, offset, limit)
+}
+
+#[tauri::command]
 pub fn read_file_b64(
     path: String,
     root: Option<String>,
@@ -314,7 +354,7 @@ pub async fn exec_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        exec_command_impl, list_dir_impl, read_text_impl, resolve_in_root,
+        exec_command_impl, list_dir_impl, read_text_impl, read_text_range_impl, resolve_in_root,
         run_credential_command_impl, write_text_impl,
     };
     use std::path::{Path, PathBuf};
@@ -505,5 +545,24 @@ mod tests {
     fn scope_rejects_a_missing_root() {
         let err = resolve_in_root("/no/such/workspace/root/here", "file.txt").unwrap_err();
         assert!(err.contains("workspace root unavailable"));
+    }
+
+    #[test]
+    fn read_text_range_returns_the_requested_window_and_total() {
+        let dir = TestDir::new("ranged");
+        let file = dir.path().join("f.txt");
+        std::fs::write(&file, "l1\nl2\nl3\nl4\nl5").unwrap();
+        let p = file.to_string_lossy();
+
+        let r = read_text_range_impl(None, &p, 2, 2).unwrap();
+        assert_eq!(r.lines, vec!["l2".to_string(), "l3".to_string()]);
+        assert_eq!(r.total, 5);
+        assert_eq!(r.start, 2);
+
+        // a window past the end clamps to what exists
+        let tail = read_text_range_impl(None, &p, 5, 10).unwrap();
+        assert_eq!(tail.lines, vec!["l5".to_string()]);
+        // offset 0 is treated as line 1
+        assert_eq!(read_text_range_impl(None, &p, 0, 1).unwrap().start, 1);
     }
 }

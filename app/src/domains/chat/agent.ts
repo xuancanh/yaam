@@ -285,14 +285,13 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
       const multi = Array.isArray(input.paths) ? (input.paths as unknown[]).filter((p): p is string => typeof p === 'string').slice(0, 8) : null
       const readOne = async (raw: string) => {
         const p = raw.startsWith('/') ? normalizePath(raw) : root ? normalizePath(`${root}/${raw}`) : raw
-        const text = await native.readTextFile(p)
-        const lines = text.split('\n')
         const offset = Math.max(1, Number(input.offset) || 1)
         const limit = Math.max(1, Math.min(2000, Number(input.limit) || 800))
-        const slice = lines.slice(offset - 1, offset - 1 + limit)
-        const body = slice.map((l, i) => `${offset + i}\t${l}`).join('\n')
+        // ranged read: only the requested line window crosses IPC, not the whole file
+        const { lines, total, start } = await native.readTextRange(p, offset, limit)
+        const body = lines.map((l, i) => `${start + i}\t${l}`).join('\n')
         const capped = body.length > 40_000 ? `${body.slice(0, 40_000)}\n… (truncated — page with offset/limit)` : body
-        return `${lines.length} lines total\n${capped}`
+        return `${total} lines total\n${capped}`
       }
       if (multi && multi.length) {
         const parts = await Promise.all(multi.map(async p => {

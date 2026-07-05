@@ -5,7 +5,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
 import { isTauri } from './base'
-import { expectObjectArray } from './validate'
+import { expectObject, expectObjectArray } from './validate'
 
 /** Open the native directory picker when available. */
 export async function pickFolder(defaultPath?: string): Promise<string | null> {
@@ -56,6 +56,24 @@ export async function readFileB64(path: string, root?: string, maxBytes?: number
  *  backend authorizes the path against that workspace root (symlink-safe). */
 export async function readTextFile(path: string, root?: string): Promise<string> {
   return await invoke<string>('read_text_file', { path, root })
+}
+
+export interface TextRange {
+  /** the requested 1-based line window */
+  lines: string[]
+  /** total lines in the file */
+  total: number
+  /** 1-based line number of the first returned line */
+  start: number
+}
+
+/** Read a 1-based line window of a text file (paging for large files) without
+ *  marshalling the whole file across IPC. */
+export async function readTextRange(path: string, offset: number, limit: number, root?: string): Promise<TextRange> {
+  if (!isTauri) return { lines: [], total: 0, start: Math.max(1, offset) }
+  const raw = await invoke('read_text_range', { path, offset, limit, root })
+  const o = expectObject(raw, ['lines', 'total', 'start'], 'readTextRange')
+  return { lines: o.lines as string[], total: o.total as number, start: o.start as number }
 }
 
 /** Write a UTF-8 file through the native backend. When `root` is given, the

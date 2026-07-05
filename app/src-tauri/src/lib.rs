@@ -41,6 +41,7 @@ pub fn run() {
             domains::git::git_file_diff,
             domains::fs::list_dir,
             domains::fs::read_text_file,
+            domains::fs::read_text_range,
             domains::fs::read_file_b64,
             domains::fs::write_text_file,
             domains::fs::run_credential_command,
