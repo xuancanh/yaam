@@ -4,6 +4,7 @@ pub mod bedrock;
 pub mod fs;
 pub mod git;
 pub mod mcp;
+pub mod icons;
 pub mod remote;
 pub mod search;
 pub mod secrets;

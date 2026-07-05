@@ -40,5 +40,5 @@ tiny_http = "0.12.0"
 # dev-mode dock icon (bare binary, no .app bundle): set NSApplication's icon at runtime
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSResponder"] }
-objc2-foundation = { version = "0.3", features = ["NSData"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSResponder", "NSWorkspace", "NSImageRep", "NSBitmapImageRep"] }
+objc2-foundation = { version = "0.3", features = ["NSData", "NSString", "NSDictionary", "NSGeometry"] }

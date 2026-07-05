@@ -71,6 +71,7 @@ pub fn run() {
             domains::mcp::mcp_stdio_request,
             domains::mcp::mcp_stdio_notify,
             domains::mcp::mcp_stdio_stop,
+            domains::icons::file_icon,
             domains::remote::remote_start,
             domains::remote::remote_stop,
             domains::remote::remote_publish,

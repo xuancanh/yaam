@@ -11,6 +11,7 @@ import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import { parseDiffLines } from './diff-marks'
 import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
+import { FileIcon } from '../../components/FileIcon'
 import { Markdown } from '../../components/Markdown'
 import { ChatPane } from '../chat/ChatPane'
 import { TerminalPane } from './TerminalPane'
@@ -128,9 +129,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git }:
               <span style={{ width: 12, flexShrink: 0, fontSize: 8.5, color: 'var(--dim)' }}>
                 {e.isDir ? (isOpen ? '▾' : '▸') : ''}
               </span>
-              {e.isDir
-                ? <Icon paths={['M3 7a2 2 0 012-2h4l2 2h9a1 1 0 011 1v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z']} size={13} stroke={1.6} />
-                : <Icon paths={['M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z', 'M14 3v5h5']} size={13} stroke={1.6} />}
+              <FileIcon name={e.name} path={e.path} isDir={e.isDir} size={13} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</span>
               {!e.isDir && color && <span style={{ marginLeft: 'auto', fontSize: 9.5, flexShrink: 0, color }}>●</span>}
             </button>
@@ -291,7 +290,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px',
         background: 'var(--panel)', borderBottom: '1px solid var(--line)',
       }}>
-        <Icon paths={['M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z', 'M14 3v5h5']} size={13} stroke={1.6} />
+        <FileIcon name={name} path={path} isDir={false} size={14} />
         <span className="mono" style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={path}>
           {rel ?? name}
         </span>
