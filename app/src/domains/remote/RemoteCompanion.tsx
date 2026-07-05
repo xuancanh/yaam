@@ -144,6 +144,10 @@ export function RemoteCompanion() {
         if (cur.remoteToken !== info.token) {
           actionsRef.current.updateSettings({ remoteToken: info.token, remoteTokenAt: Date.now() })
         }
+        // re-hydrate paired devices after EVERY (re)start — a phone that
+        // reaches the fresh server before hydration would read as unpaired
+        // and get bounced back to the pairing screen
+        void remoteSetDevices(cur.remoteDevices ?? [])
         publish()
       })
       .catch(e => {

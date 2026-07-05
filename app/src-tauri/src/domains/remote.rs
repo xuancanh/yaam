@@ -376,8 +376,21 @@ pub fn remote_start(state: tauri::State<'_, RemoteManager>, port: Option<u16>, t
         }
     };
     if stop_slot.is_none() {
-        // bind synchronously so a port conflict surfaces to the caller
-        let listener = std::net::TcpListener::bind(("0.0.0.0", port)).map_err(|e| format!("could not bind port {port}: {e}"))?;
+        // bind synchronously so a port conflict surfaces to the caller. A
+        // token change restarts the server (stop → start back-to-back) and
+        // the old listener's graceful shutdown can briefly still hold the
+        // port — retry for a moment before giving up.
+        let listener = {
+            let mut attempt = std::net::TcpListener::bind(("0.0.0.0", port));
+            for _ in 0..10 {
+                if attempt.is_ok() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                attempt = std::net::TcpListener::bind(("0.0.0.0", port));
+            }
+            attempt.map_err(|e| format!("could not bind port {port}: {e}"))?
+        };
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let shared = state.shared.clone();

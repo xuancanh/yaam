@@ -47,8 +47,8 @@ function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) 
   if (state === 'bad-token') {
     return (
       <div className="pairwrap">
-        <h2>Link invalid</h2>
-        <p>This connect link is missing its token or the remote was restarted. Open the current link from YAAM's Settings → Phone remote on your desktop.</p>
+        <h2>Link out of date</h2>
+        <p>The token in this link is no longer current (it may have rotated). Open the newest link from Settings → Remote Control on your desktop — this device's pairing is kept, no re-pairing needed.</p>
       </div>
     )
   }
@@ -366,8 +366,13 @@ export function MobileApp() {
             // restarted with a rotated URL token. Drop the device token only
             // when the server explicitly no longer knows this device.
             void pairingStatus()
-              .then(st => {
-                if (st === 'unknown') { forgetPairing(); setPairing('unpaired'); setSnap(null) }
+              .then(async st => {
+                if (st !== 'unknown') return
+                // the server may be mid-restart with an empty device map —
+                // confirm before dropping the stored pairing
+                await new Promise(r => setTimeout(r, 1500))
+                const again = await pairingStatus().catch(() => 'pending' as const)
+                if (again === 'unknown') { forgetPairing(); setPairing('unpaired'); setSnap(null) }
               })
               .catch(() => setPairing('bad-token')) // stale link — pairing kept
           })
