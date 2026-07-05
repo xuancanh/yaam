@@ -1,7 +1,7 @@
 // Per-addon customization chat: a small dedicated LLM conversation that knows
 // one addon package and edits it via the update_addon tool.
-import { callApi } from '../../llm/client'
-import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
+import type { ApiMessage, LlmConfig } from '../../llm/client'
+import { runToolLoop } from '../../llm/tool-loop'
 
 const EDITOR_TOOLS = [
   {
@@ -47,24 +47,12 @@ export async function runAddonEditorTurn(
   apply: (packageJson: string) => string,
 ): Promise<string> {
   history.push({ role: 'user', content: userText })
-  const texts: string[] = []
-  for (let i = 0; i < 4; i++) {
-    const res = await callApi(cfg, editorSystem(addonJson), history, EDITOR_TOOLS)
-    const stepTexts = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text as string)
-    if (res.stop_reason !== 'tool_use') {
-      history.push({ role: 'assistant', content: stepTexts.join('\n') || '(ok)' })
-      texts.push(...stepTexts)
-      break
-    }
-    const results = []
-    for (const b of res.content.filter((x): x is ApiContentBlock => x.type === 'tool_use')) {
-      const json = typeof b.input?.package_json === 'string' ? b.input.package_json : ''
-      results.push({ type: 'tool_result', tool_use_id: b.id, content: apply(json) })
-    }
-    history.push({ role: 'assistant', content: res.content })
-    history.push({ role: 'user', content: results })
-  }
+  const { text } = await runToolLoop({
+    cfg, system: editorSystem(addonJson), history, tools: EDITOR_TOOLS, maxRounds: 4,
+    sequential: true, terminalAssistant: 'text',
+    execute: async (_name, input) => apply(typeof input?.package_json === 'string' ? input.package_json : ''),
+  })
   while (history.length > 20) history.shift()
   if (history.length && history[0].role !== 'user') history.shift()
-  return texts.join('\n\n').trim()
+  return text
 }
