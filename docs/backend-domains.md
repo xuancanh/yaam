@@ -43,7 +43,8 @@ expansion.
 | Rust domain | Commands | Frontend adapter |
 | --- | --- | --- |
 | Session | `spawn_session`, `write_session`, `resize_session`, `kill_session`, `live_sessions`, `detect_cli_session` | `core/native.ts`, `SessionProcessPort` |
-| Git | `git_diff`, `git_status`, `git_file_diff` | `core/native.ts`, FilesPane/Drawer |
+| Git | `git_diff`, `git_status`, `git_file_diff`, `git_file_diff_side`, `git_stage`, `git_unstage`, `git_commit` | `core/native.ts`, FilesPane/Drawer/GitWorkbench |
+| Worktree | `worktree_create`, `worktree_diff`, `worktree_merge`, `worktree_remove` | `infrastructure/native/worktree.ts`, launch runtime + review surfaces |
 | Filesystem | `list_dir`, `read_text_file`, `read_file_b64`, `write_text_file`, `run_credential_command`, `exec_command` | `core/native.ts`, chat/files/settings |
 | State | `save_state`, `load_state`, `load_state_backup`, `save_partition`, `load_partition`, `save_session`, `remove_session`, `load_sessions` | persistence runtime/loaders |
 | MCP | `mcp_stdio_start`, `mcp_stdio_request`, `mcp_stdio_notify`, `mcp_stdio_stop` | `core/mcp.ts` through native adapters |
@@ -159,14 +160,46 @@ traversal/absolute escape, symlinked file/directory escape, and missing roots.
 The git domain shells out to the `git` executable in the session cwd:
 
 - full working-tree diff against `HEAD`;
-- repository root plus porcelain status;
-- zero-context diff for a specific path.
+- repository root, current branch, plus porcelain status with the X/Y columns
+  split out (staged index state vs worktree state) for the staging UI;
+- zero-context diff for a specific path (gutter markers) and full-context
+  per-side diffs (`--cached` for staged, plain for unstaged);
+- staging operations for the git workbench: `git_stage` (`add`), `git_unstage`
+  (`restore --staged`), and `git_commit` (rejects empty messages, returns
+  git's summary line).
 
-Porcelain parsing normalizes renamed destinations and quoted paths. The domain
-is read-only with respect to git state; it does not stage, commit, or push.
+Porcelain parsing normalizes renamed destinations and quoted paths. Pushes and
+history rewrites remain out of scope — the UI never leaves the local repo.
 
 Tests cover modified/staged/untracked parsing, rename destinations, and quoted
 paths.
+
+## Worktree domain (`domains/worktree.rs`)
+
+Worktree isolation for sessions and board tasks. A working folder may be one
+git repo **or a plain folder whose immediate subfolders are each their own
+repo** (multi-repo workspace); both are mirrored under
+`~/.yaam/worktrees/<slug>/`:
+
+- `worktree_create` — one `git worktree add` (branch `yaam/<slug>`) per
+  detected repo, recording each repo's fork ref; in multi-repo folders,
+  non-repo entries (loose config files, docs) are symlinked so the workspace
+  shape survives. Metadata lands in `.yaam-worktree.json`; the returned
+  `workdir` is what the session uses as its cwd.
+- `worktree_diff` — per-repo diff against the fork ref, with `git add -A -N`
+  (intent-to-add) first so brand-new files appear.
+- `worktree_merge` — per repo: stage + commit outstanding work on the
+  isolation branch, skip repos with no commits ahead, verify the source
+  checkout is still on the fork branch, then `merge --no-ff`; a conflict
+  aborts the merge and reports per-repo results instead of leaving the source
+  mid-merge.
+- `worktree_remove` — `git worktree remove --force` per repo, optional branch
+  deletion, then the mirror folder is removed.
+
+Tests run against real temporary git repositories: single-repo round trip
+(isolate → edit → diff shows new files → merge back), multi-repo folders with
+symlinked loose entries and per-repo skip/merge results, and the no-repo
+error.
 
 ## State domain (`domains/state.rs`)
 

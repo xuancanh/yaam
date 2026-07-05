@@ -151,6 +151,7 @@ workspace file viewer.
 | `exit.ts` | Pure stopped/failed/completed/exited classification |
 | `exit-handler.ts` | Effectful process-exit coordinator and native subscription |
 | `FilesPane.tsx` | File tree, git status/diff gutter, source/document/media preview |
+| `GitPanel.tsx` | `GitWorkbench` (staging tree, single/all-files diffs, repo picker, AI-draftable commits) + the pane-header popup shell |
 | `Workspace.tsx`, `Pane.tsx`, `TerminalPane.tsx` | Pane layout and terminal/chat mounting |
 
 ### Launch and resume
@@ -204,6 +205,26 @@ content, provides image/PDF/office previews, highlights source, and derives
 changed-line markers from zero-context git diffs. It is shared by real sessions
 and chat sessions with a working folder.
 
+### Worktree isolation and the git workbench
+
+Launches (session dialog or task spec) can opt into worktree isolation:
+`launch-runtime` calls `createWorktree` before spawning, runs the session in
+the mirror's `workdir`, and records `agent.worktree`; a task's follow-up
+sessions re-enter the task's existing worktree. `GitWorkbench`
+(`GitPanel.tsx`) is the one git surface shared by three hosts — the pane
+popup, the agents → Review drawer (plus a feedback input that types into the
+session PTY and merge/approve/request-changes actions), and the task drawer's
+Review tab. It detects multi-repo folders through `shared/git-repos.ts`,
+stages/unstages per file or section, shows per-side diffs (worktree sessions
+review against their fork point in all-files mode), and commits with an
+optionally AI-drafted message. `mergeSessionWorktree` (actions) and
+`approveTaskReview` (board) perform the merge-back + mirror cleanup.
+
+Exit handling restores the terminal modes a dead process left behind (alt
+screen, mouse tracking, bracketed paste), and `resume` fully resets the reused
+xterm before respawning — a Ctrl+C-killed TUI must not leave the pane, or the
+resumed process, corrupted.
+
 ### Tests
 
 Tests cover launch plans/runtime, controller effects through fake ports, action
@@ -228,7 +249,13 @@ per-task watcher agents, diff review, and scheduled task metadata.
   task messages, and session launches.
 - `watcher-runtime.ts` owns private histories, busy state, queued notes, and
   keyed cancellation.
-- `Board.tsx` and `TaskSpecForm.tsx` implement kanban and specification UI.
+- `Board.tsx` and `TaskSpecForm.tsx` implement kanban and specification UI;
+  `ReviewPanel.tsx` is the review-queue modal (per-repo diffs, approve & merge,
+  request changes) and the task drawer embeds the shared `GitWorkbench`.
+- deleting a task archives it (`archiveTask`/`restoreTask`); the board header's
+  Archived viewer is the only surface offering hard deletion, and every
+  destructive action app-wide funnels through `components/Confirm.tsx`
+  (an imperative, host-less confirmation dialog).
 
 ### Watcher behavior
 

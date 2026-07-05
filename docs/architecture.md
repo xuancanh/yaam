@@ -302,6 +302,28 @@ The scheduler ticks every 15 seconds after boot and handles:
 
 One-time entries are disarmed and recurring entries deduplicate by minute.
 
+Deleting a task archives it (recoverable); permanent deletion exists only in
+the board's Archived viewer, and all destructive actions confirm first.
+
+## Worktree isolation and review flow
+
+Sessions and tasks can opt into git-worktree isolation at launch. The Rust
+worktree domain mirrors the working folder — one repo, or a folder of repos —
+under `~/.yaam/worktrees/<slug>` (branch `yaam/<slug>` per repo, loose entries
+symlinked), and the session runs in the mirror's `workdir`. The agent record
+carries `{ root, base, workdir }`; a task's follow-up sessions re-enter the
+same mirror so work-in-progress survives relaunches.
+
+Review closes the loop: worktree diffs (against each repo's fork ref, new
+files included) render in the review surfaces — the board's ReviewPanel, the
+agents → Review drawer, and the shared `GitWorkbench` (staging, per-side
+diffs, commits with AI-draftable messages, multi-repo picker). Approve stages
+and commits outstanding work, `--no-ff` merges each repo back into the
+original checkout (conflicts abort per repo and are reported instead of
+leaving the source mid-merge), removes the mirror, and completes the
+task/session; request-changes routes reviewer feedback to the watcher (tasks)
+or straight into the PTY (sessions).
+
 ## Addon flow
 
 Addon packages can contribute a view, Master tools, lifecycle hooks, and a

@@ -11,6 +11,7 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 - **Real terminals, not fakes** — every session is an OS process in a PTY, rendered with xterm.js.
 - **Master orchestrator** — a Claude-with-tools that routes tasks, monitors sessions, and acts on your chat instructions.
 - **Chat agents** — in-app Claude-Desktop-style assistants that edit files, run commands, load skills, and call MCP servers.
+- **Worktree isolation + review queue** — sessions and tasks can run in mirrored git worktrees (multi-repo folders supported); review the diff, stage, commit, and merge back from a Fork-style git workbench.
 - **Watcher-driven task board** — a kanban where each card is run by its own mini-Master.
 - **Extensible via addons** — a real plugin system with a marketplace, sandboxed views, Master tools, hooks, and per-addon agents.
 - **Workspaces** — isolated sets of sessions, chats, boards, and schedules that keep running in the background.
@@ -46,8 +47,11 @@ Each session's card is kept current by its monitor — the current **task**, a t
 
 The **Chat** rail is a home for **chat agents**: in-app LLM assistants (no PTY) that act on your machine.
 
-- **Hands-on tools** — browse folders, read/write/surgically-edit files, run shell commands and scripts, load **skills** (reusable instruction packs), and call tools on your **MCP servers**. Built-in write/edit operations are canonically scoped to the chat's working folder; risky shell, AppleScript, and delete tools ask first by default. Tool calls render as live ⚙ traces.
-- **Streaming replies** — token-by-token, with reasoning models' thinking shown in a collapsible block.
+- **Hands-on tools** — browse/search folders (glob + grep), read/write/surgically-edit files, manage files, run shell commands and scripts, research the web (search + fetch + raw HTTP), control macOS apps via AppleScript, drive the kanban board and schedules, save new skills, and call tools on your **MCP servers**. Built-in write/edit operations are canonically scoped to the chat's working folder; risky shell, AppleScript, and delete tools ask first by default (per-chat ASK/AUTO toggle) with inline Allow/Deny prompts. Tool calls render as live ⚙ traces.
+- **Slash commands** — `/` opens a fuzzy menu of every skill from the chat's sources (plus `/clear`, `/export`); picking one injects the skill deterministically.
+- **File import** — drag & drop or attach files: text inlines, PDFs and office documents (docx/xlsx/pptx) are text-extracted, images go to vision-capable models; a Files toggle mounts the same explorer/rich viewer terminal sessions use (images, PDFs, office previews).
+- **Durable workspace memory** — agents read shared memory each turn and append facts via a `remember` tool; a Memory editor lets you prune what they've learned.
+- **Streaming replies** — token-by-token, with reasoning models' thinking shown in a collapsible block; stop, retry, copy, and a send queue while the agent is busy.
 - **Configurable agent types** — each with its own provider, credentials, and a per-chat model list; an optional persona and chosen skill sources.
 - **Full-text search** across every conversation via an embedded tantivy index, rebuilt automatically.
 - Conversations persist and auto-title themselves; transcripts render markdown.
@@ -56,7 +60,15 @@ The **Chat** rail is a home for **chat agents**: in-app LLM assistants (no PTY) 
 
 ![Task board — watcher-driven cards with criteria, chat counts, and Done/Failed columns](docs/board.png)
 
-Drag-and-drop kanban where **each task is driven by its own watcher LLM** (a per-task mini-Master): it drafts the card and acceptance criteria from a rough idea (or asks questions if it's too vague), spawns and steers one-shot sessions, verifies live state before claiming progress, moves the card across columns (backlog → progress → review → done/failed), and chats with you in the card's own thread.
+Drag-and-drop kanban where **each task is driven by its own watcher LLM** (a per-task mini-Master): it drafts the card and acceptance criteria from a rough idea (or asks questions if it's too vague), spawns and steers one-shot sessions, verifies live state before claiming progress, moves the card across columns (backlog → progress → review → done/failed), and chats with you in the card's own thread. Deleting a card **archives** it (recoverable from the Archived viewer, the only place offering permanent deletion); every destructive action across the app asks for confirmation first.
+
+## Worktrees & the review queue
+
+Sessions and board tasks can opt into **git worktree isolation**: the working folder — a single repo *or* a plain folder whose subfolders are each their own repo — is mirrored under `~/.yaam/worktrees/<id>` with one worktree and a `yaam/<id>` branch per repo, so agents never touch your checkout until you approve.
+
+- **Review queue** — cards in "Needs review" open a diff of everything the task changed; **Approve & merge** commits outstanding work and `--no-ff` merges each repo back (conflicts abort safely), **Request changes** bounces the task with your feedback as the watcher's next instruction.
+- **Git workbench** — one Fork-style component on three surfaces (session pane popup, the agents → Review drawer, the task drawer's Review tab): a staged/unstaged file tree with per-file staging, single-file or continuous all-files diff views, a repo picker for multi-repo folders, and a commit box with AI-drafted messages. The review drawer adds a feedback chatbox that types straight into the session's terminal.
+- A task's follow-up sessions re-enter the same worktree, so work-in-progress carries across relaunches.
 
 ## Addons — a real plugin system
 
@@ -83,12 +95,12 @@ Work is organized into **workspaces** (switcher in the title bar): each has its 
 
 - **Schedules** — a 5-field cron scheduler plus one-time runs; can launch sessions or seed board tasks, from the UI or Master.
 - **Templates** — preconfigured launches, one-shot (run a task and exit) or interactive, that feed quick launches, schedules, and tasks.
-- **MCP & skills** — Settings-managed streamable-HTTP and local stdio MCP
-  servers, config/extension import, and registries of reusable skill packs, all
-  available to chat agents.
-- **Notifications & activity** — session exits, failures, cron runs, and Master decisions in the bell popover and Activity timeline.
-- **Diff review** — Approve / Request-changes over a session's live `git diff`.
-- **Persistence** — sessions, board, schedules, templates, layouts, settings, and more survive restarts.
+- **MCP everywhere** — streamable-HTTP *and* local stdio servers, a curated one-click marketplace, import from Claude Desktop / Claude Code / Cursor / Codex / Windsurf configs, and `.mcpb`/`.dxt` Claude Desktop extension bundles.
+- **Claude plugin marketplaces** — browse repos like `anthropics/claude-plugins-official` and install plugins for chat: skills and commands become slash-invocable skill registries, agents become personas, `.mcp.json` servers register directly.
+- **Skills** — local instruction packs plus GitHub/local registries (a keychain-backed GitHub token lifts API rate limits).
+- **Appearance** — Dark / Midnight / Light / System themes, interface scale, layout density, UI + mono font choices, and markdown-table typography.
+- **Notifications & activity** — session exits, failures, cron runs, and Master decisions in the bell popover and Activity timeline, mirrored to the OS notification center when the app is in the background.
+- **Persistence** — sessions, board, schedules, templates, layouts, settings, memory, and more survive restarts.
 
 ## Development
 

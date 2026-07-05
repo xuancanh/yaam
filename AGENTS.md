@@ -29,16 +29,22 @@ app/                     Tauri app (the whole product)
     store/               store internals: hooks (useConductor/useConductorSelector/useActions),
                          state-helpers, secrets (keychain redaction), + tests
     llm/client.ts        shared LLM core: provider defs + protocol adapters + SSE streaming
-    components/          shared UI primitives only: ui.tsx, Markdown.tsx
+    components/          shared UI primitives only: ui.tsx, Markdown.tsx, Confirm.tsx (imperative delete-confirmation dialog)
+    shared/              dependency-free helpers: zip/filetext (office & PDF extraction), git-repos (multi-repo cwd detection), id
     core/                shared foundation used across domains:
       store.ts           Zustand store (useAppStore) + dispatch
       types.ts data.ts context.ts ports.ts       types, seed/catalogs, ActionsCtx, runtime ports
       native.ts mcp.ts terminals.ts               Tauri bridge, MCP client, xterm registry
       addons.ts highlight.ts skills.ts usage.ts   addon contract, highlighter, skills, usage est.
     domains/             feature domains — each owns its view, components, logic (runner), actions:
-      session/           terminal-session UI: Workspace, Pane, TerminalPane, FilesPane, NewSessionDialog
-      chat/              ChatView, ChatPane, runner, agent (in-app chat agents)
-      board/             Board + TaskSpecForm, watcher-runner + watcher, task-state (kanban)
+      session/           terminal-session UI: Workspace, Pane, TerminalPane, FilesPane, GitPanel
+                         (Fork-style git workbench: staging/commit/AI messages, shared by the
+                         review drawer + task drawer), NewSessionDialog (worktree isolation toggle)
+      chat/              ChatView, ChatPane, runner, agent (in-app chat agents: slash skills,
+                         attachments/vision, ask-mode approvals, durable workspace memory)
+      board/             Board + TaskSpecForm + ReviewPanel (review queue: diff/approve-merge/
+                         request-changes), watcher-runner + watcher, task-state (kanban; delete
+                         archives — hard delete only from the Archived viewer)
       master/            Sidebar, runner + monitor-runner, master/tools/prompt/monitor harnesses
       addons/            AddonsView/AddonView/AddonSource, addon-api, addon-agent/editor/gen
       activity/          workspace-aware event/notification service
@@ -54,7 +60,9 @@ app/                     Tauri app (the whole product)
       setup.rs           one-time startup (dock icon, logging); util.rs shared helpers
       domains/session.rs SessionManager PTY engine + CLI session-id detection
       domains/state.rs   atomic persistence: main partition + per-session files
-      domains/git.rs, domains/fs.rs   git inspection; fs + timeout-bounded exec
+      domains/git.rs, domains/fs.rs   git status/diff/stage/commit; fs + timeout-bounded exec
+      domains/worktree.rs             git-worktree isolation (single- and multi-repo folders):
+                                      create/diff/merge/remove under ~/.yaam/worktrees
       domains/search.rs  tantivy full-text index over chat transcripts
       domains/mcp.rs     local stdio MCP child-process transport
       domains/bedrock.rs AWS Bedrock InvokeModel bridge + credential parsing/caching
