@@ -17,9 +17,9 @@ import { isAbortError } from '../../core/abort-registry'
 export interface WatcherCtx {
   stateRef: MutableRefObject<AppState>
   dispatch: (f: (s: AppState) => AppState) => void
-  histories: MutableRefObject<Map<string, ApiMessage[]>>
-  busy: MutableRefObject<Set<string>>
-  queue: MutableRefObject<Map<string, string[]>>
+  histories: Map<string, ApiMessage[]>
+  busy: Set<string>
+  queue: Map<string, string[]>
   /** per-task cancellation — aborted when the task is deleted */
   aborts: AbortRegistry
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
@@ -36,11 +36,11 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
   const st = ctx.stateRef.current.settings
   if (!(st.masterEnabled && hasCreds(st))) return
   if (!findTaskInState(ctx.stateRef.current, taskId)) return
-  if (ctx.busy.current.has(taskId)) {
-    ctx.queue.current.set(taskId, (ctx.queue.current.get(taskId) ?? []).concat([note]))
+  if (ctx.busy.has(taskId)) {
+    ctx.queue.set(taskId, (ctx.queue.get(taskId) ?? []).concat([note]))
     return
   }
-  ctx.busy.current.add(taskId)
+  ctx.busy.add(taskId)
   try {
     let pending: string[] = [note]
     while (pending.length) {
@@ -65,10 +65,10 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
         return all.filter(a => a.status === 'running' || a.status === 'needs').pop() ?? all[all.length - 1]
       }
       if (!getTask()) break
-      let history = ctx.histories.current.get(taskId)
+      let history = ctx.histories.get(taskId)
       if (!history) {
         history = []
-        ctx.histories.current.set(taskId, history)
+        ctx.histories.set(taskId, history)
       }
       const exec: WatcherExec = {
         moveTask: col => {
@@ -145,11 +145,11 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
         if (isAbortError(e) || ctx.aborts.signal(taskId).aborted) { pending = []; break }
         ctx.logEvent('escalate', null, `Watcher error: ${e instanceof Error ? e.message : String(e)}`)
       }
-      pending = ctx.queue.current.get(taskId) ?? []
-      ctx.queue.current.delete(taskId)
+      pending = ctx.queue.get(taskId) ?? []
+      ctx.queue.delete(taskId)
     }
   } finally {
-    ctx.busy.current.delete(taskId)
+    ctx.busy.delete(taskId)
     ctx.aborts.clear(taskId)
   }
 }

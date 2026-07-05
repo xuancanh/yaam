@@ -14,7 +14,8 @@ import { ActionsCtx } from './core/context'
 import { dispatch, useAppStore } from './core/store'
 import { createMonitorRuntime } from './domains/master/monitor-runtime'
 import type { MonitorRuntime } from './domains/master/monitor-runtime'
-import { runWatcherLoop } from './domains/board/watcher-runner'
+import { createWatcherRuntime } from './domains/board/watcher-runtime'
+import type { WatcherRuntime } from './domains/board/watcher-runtime'
 import { runChatMessageTurn } from './domains/chat/runner'
 import { runMasterLoop } from './domains/master/runner'
 import { useSettingsActions } from './domains/settings/actions'
@@ -135,11 +136,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   monitorEventRef.current = (id, note) => runMonitor(id, note)
 
   // ---- per-task watcher: a mini Master owning one kanban task ----
-  const watcherHistories = useRef<Map<string, ApiMessage[]>>(new Map())
-  const watcherBusy = useRef<Set<string>>(new Set())
-  const watcherQueue = useRef<Map<string, string[]>>(new Map())
-  // per-task cancellation for in-flight watcher turns (aborted on task delete)
-  const watcherAborts = useRef(new AbortRegistry())
   const runWatcherRef = useRef<(taskId: string, note: string) => void>(() => {})
   // Set synchronously when a task launches a session. This closes the small
   // gap before React commits task.agentId, during which a fast one-shot can exit.
@@ -163,15 +159,16 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     })))
   }, [])
 
-  // Serialize watcher turns per task and drain notes that arrive while one is running.
-  const runWatcher = useCallback((taskId: string, note: string) => runWatcherLoop({
-    stateRef, dispatch, histories: watcherHistories, busy: watcherBusy, queue: watcherQueue,
-    aborts: watcherAborts.current,
-    taskSessions: taskSessionsRef, applyAgentStatus, pushTaskChat, logEvent, notify,
-    fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
-    spawnTaskSession: (id, extra) => spawnTaskSessionRef.current(id, extra),
-  }, taskId, note), [applyAgentStatus, logEvent, notify, pushTaskChat])
-
+  // The watcher runtime owns the per-task history/busy/queue/cancellation registries.
+  const watcherRef = useRef<WatcherRuntime>(undefined)
+  if (!watcherRef.current) {
+    watcherRef.current = createWatcherRuntime({
+      stateRef, dispatch, taskSessions: taskSessionsRef, applyAgentStatus, pushTaskChat, logEvent, notify,
+      fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
+      spawnTaskSession: (id, extra) => spawnTaskSessionRef.current(id, extra),
+    })
+  }
+  const runWatcher = watcherRef.current.run
   runWatcherRef.current = (taskId, note) => { void runWatcher(taskId, note) }
 
   // Session settle/prompt watcher (armed snapshots, quiet timers, dialog scan)
@@ -427,7 +424,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
     spawnSessionForTask, startTaskViaWatcher, runWatcher, pushTaskChat,
     markUserStopped: (id: string) => userStoppedRef.current.add(id),
-    watcherHistories, watcherQueue, abortWatcher: (tid: string) => watcherAborts.current.abort(tid), taskSessions: taskSessionsRef,
+    disposeWatcher: (tid: string) => watcherRef.current!.dispose(tid), taskSessions: taskSessionsRef,
   }), [later, flash, logEvent, spawnSessionForTask, startTaskViaWatcher, runWatcher, pushTaskChat]))
   const schedulesActions = useSchedulesActions(useMemo(() => ({ dispatch, flash, logEvent, launchFromTemplate }), [flash, logEvent, launchFromTemplate]))
   const chatActions = useChatActions(useMemo(() => ({ dispatch, stateRef, logEvent, runChatMessage }), [logEvent, runChatMessage]))

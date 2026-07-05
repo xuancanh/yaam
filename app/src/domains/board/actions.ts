@@ -4,7 +4,6 @@
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AppState, BoardCol, BoardTask } from '../../core/types'
-import type { ApiMessage } from '../../master'
 import { buildCfg, hasCreds } from '../../master'
 import { mkId } from '../../shared/id'
 import * as native from '../../core/native'
@@ -24,10 +23,8 @@ export interface BoardActionsCtx {
   runWatcher: (taskId: string, note: string) => void
   pushTaskChat: (taskId: string, role: 'system' | 'user' | 'watcher', text: string) => void
   markUserStopped: (id: string) => void
-  watcherHistories: MutableRefObject<Map<string, ApiMessage[]>>
-  watcherQueue: MutableRefObject<Map<string, string[]>>
-  /** cancel a task's in-flight watcher turn (on delete) */
-  abortWatcher: (taskId: string) => void
+  /** tear down a task's watcher runtime (cancel in-flight turn + drop registries) on delete */
+  disposeWatcher: (taskId: string) => void
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
 }
 
@@ -127,9 +124,7 @@ export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
       tasks: s.tasks.map(t => (t.id === id ? { ...t, title: title.trim() || t.title } : t)),
     })),
     deleteTask: id => {
-      ctx.abortWatcher(id) // cancel any in-flight watcher turn for this task
-      ctx.watcherHistories.current.delete(id)
-      ctx.watcherQueue.current.delete(id)
+      ctx.disposeWatcher(id) // cancel any in-flight watcher turn + drop its registries
       for (const [sessionId, binding] of ctx.taskSessions.current) {
         if (binding.taskId === id) ctx.taskSessions.current.delete(sessionId)
       }
