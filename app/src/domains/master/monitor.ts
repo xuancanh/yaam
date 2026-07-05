@@ -4,8 +4,8 @@
 // to Master only when something noteworthy happens — Master never sees raw
 // terminal output from the watchers.
 import type { Agent } from '../../core/types'
-import { callApi } from '../../llm/client'
-import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
+import type { ApiMessage, LlmConfig } from '../../llm/client'
+import { runToolLoop } from '../../llm/tool-loop'
 
 export interface MonitorExec {
   updateStatus: (task?: string, summary?: string, actionNeeded?: string) => string
@@ -100,23 +100,11 @@ export async function runMonitorTurn(
   signal?: AbortSignal,
 ): Promise<void> {
   history.push({ role: 'user', content: note })
-  for (let i = 0; i < 3; i++) {
-    const res = await callApi(cfg, monitorSystem(agent), history, MONITOR_TOOLS, signal)
-    if (res.stop_reason !== 'tool_use') {
-      const text = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n')
-      history.push({ role: 'assistant', content: text || '(ok)' })
-      break
-    }
-    const results = res.content
-      .filter((b): b is ApiContentBlock => b.type === 'tool_use')
-      .map(b => ({
-        type: 'tool_result',
-        tool_use_id: b.id,
-        content: runMonitorTool(b.name || '', b.input || {}, exec),
-      }))
-    history.push({ role: 'assistant', content: res.content })
-    history.push({ role: 'user', content: results })
-  }
+  await runToolLoop({
+    cfg, system: monitorSystem(agent), history, tools: MONITOR_TOOLS, maxRounds: 3, signal,
+    terminalAssistant: 'text', sequential: true,
+    execute: async (name, input) => runMonitorTool(name, input, exec),
+  })
   // cap the private history so long-running sessions stay cheap
   while (history.length > 16) history.shift()
   if (history.length && history[0].role !== 'user') history.shift()
