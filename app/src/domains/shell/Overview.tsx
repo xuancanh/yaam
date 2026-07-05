@@ -21,23 +21,83 @@ function InlineUsage({ agent }: { agent: { used: number; cost: number; budget: n
   )
 }
 
-/** Summarize live and archived sessions in the active workspace. */
+/** One aggregate stat tile for the fleet header strip. */
+function FleetStat({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
+  return (
+    <div style={{ flex: 1, minWidth: 110, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 11, padding: '10px 13px' }}>
+      <div className="grotesk" style={{ fontSize: 19, fontWeight: 600, color: tone ?? 'var(--text)' }}>{value}</div>
+      <div className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.5, color: 'var(--dim)', marginTop: 2 }}>{label}</div>
+    </div>
+  )
+}
+
+/** The fleet as an ops console: aggregate stats, Master's routing, live
+ *  session/chat/watcher cards, and the archived shelf. */
 export function Overview() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace }), shallowEqual)
-  const { focusTab, resume, openPanel, openAgent, openDiff, renameSession, archiveSession, unarchiveSession, deleteSession } = useActions()
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, tasks: x.tasks, masterBusy: x.masterBusy }), shallowEqual)
+  const { focusTab, resume, openPanel, openAgent, openDiff, renameSession, archiveSession, unarchiveSession, deleteSession, openChat, setView } = useActions()
   // Keep legacy sessions without workspaceId in the active workspace.
   const inWs = (a: typeof s.agents[number]) => (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace
   const active = s.agents.filter(a => !a.archived && a.kind !== 'chat' && inWs(a))
+  const chats = s.agents.filter(a => !a.archived && a.kind === 'chat' && inWs(a))
   const archived = s.agents.filter(a => a.archived && inWs(a))
+  const watched = s.tasks.filter(t => !t.archived && (t.col === 'progress' || t.col === 'review'))
+  const running = active.filter(a => a.status === 'running')
+  const needs = active.filter(a => a.status === 'needs' || a.attention || a.actionNeeded)
+  const routed = active.filter(a => a.task) // Master-assigned work
+  const spend = [...active, ...chats, ...archived].reduce((n, a) => n + a.cost, 0)
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <ViewHeader title="All agents">
+      <ViewHeader title="Fleet">
         <span className="mono" style={{ fontSize: 11, color: 'var(--dim)', border: '1px solid var(--line)', borderRadius: 6, padding: '2px 8px' }}>
-          {active.length} sessions{archived.length ? ` · ${archived.length} archived` : ''}
+          {active.length} sessions · {chats.length} chats · {watched.length} watched tasks{archived.length ? ` · ${archived.length} archived` : ''}
         </span>
       </ViewHeader>
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+        {/* ── ops strip: the fleet at a glance ── */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+          <FleetStat label="RUNNING" value={running.length} tone={running.length ? 'var(--green)' : undefined} />
+          <FleetStat label="NEEDS YOU" value={needs.length} tone={needs.length ? 'var(--amber)' : undefined} />
+          <FleetStat label="WATCHED TASKS" value={watched.length} />
+          <FleetStat label="CHATS" value={chats.length} />
+          <FleetStat label="TOTAL SPEND" value={`$${spend.toFixed(2)}`} />
+        </div>
+
+        {/* ── Master routing: which sessions carry Master-assigned work ── */}
+        {routed.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 16, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '10px 14px', overflowX: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <span style={{
+                width: 26, height: 26, borderRadius: 8, background: 'var(--accent)', color: 'var(--panel)',
+                display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12,
+                animation: s.masterBusy ? 'cpulse 0.9s ease-in-out infinite' : 'none',
+              }}>M</span>
+              <span className="mono" style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color: 'var(--dim)' }}>ROUTING</span>
+            </div>
+            {routed.map(a => (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                {/* the connection */}
+                <span style={{ width: 26, height: 1.5, background: a.status === 'running' ? 'var(--accent)' : 'var(--line2)', margin: '0 2px', flexShrink: 0 }} />
+                <button
+                  onClick={() => openAgent(a.id)}
+                  title={a.task}
+                  className="mono"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', maxWidth: 220,
+                    background: 'var(--bg)', border: `1px solid ${a.status === 'running' ? 'rgba(245,196,81,.4)' : 'var(--line2)'}`,
+                    borderRadius: 8, padding: '4px 9px', fontSize: 10.5, color: 'var(--text)',
+                  }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: a.color, flexShrink: 0 }} />
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</span>
+                  <span style={{ color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>{a.task}</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <UsageSummary />
         <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))' }}>
           {active.map(a => {
@@ -107,6 +167,55 @@ export function Overview() {
             )
           })}
         </div>
+        {watched.length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            <div className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color: 'var(--dim)', marginBottom: 10 }}>WATCHED TASKS</div>
+            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))' }}>
+              {watched.map(tk => (
+                <div key={tk.id} style={{ background: 'var(--panel)', border: `1px solid ${tk.awaitingUser ? 'rgba(255,176,32,.45)' : 'var(--line)'}`, borderRadius: 12, padding: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="mono" style={{
+                      fontSize: 9, fontWeight: 700, letterSpacing: 0.4, padding: '1px 7px', borderRadius: 5, flexShrink: 0,
+                      color: tk.col === 'review' ? 'var(--amber)' : 'var(--green)',
+                      border: `1px solid ${tk.col === 'review' ? 'rgba(255,176,32,.4)' : 'rgba(61,220,151,.35)'}`,
+                    }}>{tk.col.toUpperCase()}</span>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tk.title}</span>
+                    {tk.awaitingUser && <span className="mono" style={{ fontSize: 9, fontWeight: 700, color: 'var(--amber)', flexShrink: 0 }}>WAITING ON YOU</span>}
+                  </div>
+                  {tk.watcherNote && (
+                    <div className="mono" style={{ marginTop: 6, fontSize: 10.5, color: 'var(--accent)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>⌁ {tk.watcherNote}</div>
+                  )}
+                  <button className="open-btn" style={{ marginTop: 9, padding: '5px 0', fontSize: 11.5, width: '100%' }} onClick={() => setView('board')}>
+                    Open board
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {chats.length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            <div className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color: 'var(--dim)', marginBottom: 10 }}>CHATS</div>
+            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))' }}>
+              {chats.map(c => {
+                const lastMsg = (c.chatLog ?? []).filter(m => m.role === 'user' || m.role === 'assistant').slice(-1)[0]
+                return (
+                  <div key={c.id} onClick={() => openChat(c.id)} className="palette-item" style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: 12, cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</span>
+                      {c.status === 'running'
+                        ? <span className="typing-dots" style={{ flexShrink: 0 }}><span /><span /><span /></span>
+                        : <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)', flexShrink: 0 }}>${c.cost.toFixed(2)}</span>}
+                    </div>
+                    <div style={{ marginTop: 5, fontSize: 11, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {lastMsg?.text.replace(/\s+/g, ' ').slice(0, 90) || 'empty chat'}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
         {archived.length > 0 && (
           <div style={{ marginTop: 24 }}>
             <div className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color: 'var(--dim)', marginBottom: 10 }}>ARCHIVED</div>
