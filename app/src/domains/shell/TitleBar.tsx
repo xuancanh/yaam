@@ -187,13 +187,6 @@ export function TitleBar() {
         </button>
         {s.notifOpen && <NotifPopover />}
       </div>
-      <div className="grotesk" style={{
-        width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(140deg,#3a4150,#20242d)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600,
-        color: 'var(--text2)', border: '1px solid var(--line2)',
-      }}>
-        KP
-      </div>
     </div>
   )
 }

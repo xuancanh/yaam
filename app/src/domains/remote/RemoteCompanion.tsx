@@ -21,6 +21,11 @@ import { buildRemoteSnapshot } from './snapshot'
 const PUBLISH_DEBOUNCE_MS = 300
 const POLL_MS = 800 // command/pairing drain — rpc browsing rides this loop
 
+/** Client-side token mint (same alphabet the server uses). */
+function mintToken(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(24)), b => (b % 36).toString(36)).join('')
+}
+
 /** One session's terminal, serialized with colors/layout for the mobile xterm. */
 function termFor(id: string): { data: string; cols: number } {
   return { data: serializeScreen(id), cols: terminalSize(id)?.cols ?? 80 }
@@ -85,7 +90,8 @@ export function RemoteCompanion() {
   const enabled = useConductorSelector(s => s.settings.remoteEnabled === true)
   const devices = useConductorSelector(s => s.settings.remoteDevices)
   /** user edited/regenerated the token in Settings → restart the server on it */
-  const tokenKey = useConductorSelector(s => (s.settings.remoteTokenRotate ? 'rotate' : s.settings.remoteToken ?? ''))
+  const tokenKey = useConductorSelector(s => s.settings.remoteToken ?? '')
+  const rotate = useConductorSelector(s => s.settings.remoteTokenRotate === true)
   const actions = useActions()
   const actionsRef = useRef(actions)
   actionsRef.current = actions
@@ -96,6 +102,23 @@ export function RemoteCompanion() {
   useEffect(() => {
     if (enabled) void remoteSetDevices(devices ?? [])
   }, [enabled, devices])
+
+  // auto-rotation: mint a fresh token once the user-chosen period elapses.
+  // Updating the setting restarts the server on the new token; paired devices
+  // keep working (their tokens are independent), only links must be re-copied.
+  useEffect(() => {
+    if (!enabled || !rotate) return
+    const check = () => {
+      const st = useAppStore.getState().settings
+      const periodMs = Math.max(0.1, st.remoteTokenRotateHours ?? 24) * 3_600_000
+      if (Date.now() - (st.remoteTokenAt ?? 0) >= periodMs) {
+        actionsRef.current.updateSettings({ remoteToken: mintToken(), remoteTokenAt: Date.now() })
+      }
+    }
+    check()
+    const iv = setInterval(check, 60_000)
+    return () => clearInterval(iv)
+  }, [enabled, rotate])
 
   useEffect(() => {
     if (!enabled) {
@@ -111,15 +134,16 @@ export function RemoteCompanion() {
       void remotePublish(JSON.stringify(buildRemoteSnapshot(useAppStore.getState(), termFor)))
     }
 
-    // stable connect links: reuse the persisted token unless auto-rotate is on
-    const st = useAppStore.getState().settings
-    const persisted = st.remoteTokenRotate ? undefined : st.remoteToken
-    void remoteStart(undefined, persisted)
+    // stable connect links: always run on the persisted token (minted once,
+    // rotated only by the user or the auto-rotation timer above)
+    void remoteStart(undefined, useAppStore.getState().settings.remoteToken)
       .then(info => {
         if (dead) return
         dispatch(s => ({ ...s, remoteInfo: info }))
         const cur = useAppStore.getState().settings
-        if (cur.remoteToken !== info.token) actionsRef.current.updateSettings({ remoteToken: info.token })
+        if (cur.remoteToken !== info.token) {
+          actionsRef.current.updateSettings({ remoteToken: info.token, remoteTokenAt: Date.now() })
+        }
         publish()
       })
       .catch(e => {

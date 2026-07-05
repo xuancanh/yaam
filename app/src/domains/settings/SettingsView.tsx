@@ -29,6 +29,7 @@ const SETTINGS_TABS = [
   ['types', 'Terminal Agents'],
   ['chatagents', 'Chat Agents'],
   ['mcp', 'MCP Servers'],
+  ['remote', 'Remote Control'],
   ['tools', 'Tools & Permissions'],
 ] as const
 type SettingsTab = (typeof SETTINGS_TABS)[number][0]
@@ -299,85 +300,6 @@ export function SettingsView() {
                 onToggle={() => updateSettings({ osNotifications: s.settings.osNotifications === false })}
               />
             </div>
-            <div style={{ display: 'flex', gap: 14, padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Phone remote</div>
-                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
-                  Serve the mobile companion app on your network: work with tasks, chats, and sessions from your phone. Every device must be paired — connecting needs the link's token AND an explicit approval on this desktop. Commands run through the same action paths as the UI; execution and credentials never leave this machine. Works over Tailscale/WireGuard (each interface gets its own link) and behind a Cloudflare Tunnel via the public URL below.
-                </div>
-                {s.settings.remoteEnabled && s.remoteInfo && (
-                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {(s.settings.remotePublicUrl?.trim()
-                      ? [{ label: 'public', url: `${s.settings.remotePublicUrl.trim().replace(/\/+$/, '')}/?t=${s.remoteInfo.token}` }]
-                      : []
-                    ).concat(s.remoteInfo.urls ?? []).map(u => (
-                      <div key={u.url} className="mono" style={{ fontSize: 11.5, wordBreak: 'break-all' }}>
-                        <span style={{ color: 'var(--dim)', textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, marginRight: 6 }}>{u.label}</span>
-                        <span style={{ color: 'var(--accent)', userSelect: 'all' }}>{u.url}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {s.settings.remoteEnabled && (
-                  <input
-                    defaultValue={s.settings.remotePublicUrl ?? ''}
-                    placeholder="Public base URL (Cloudflare Tunnel / MagicDNS) — optional"
-                    onBlur={e => updateSettings({ remotePublicUrl: e.target.value.trim() })}
-                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 8 }}
-                  />
-                )}
-                {s.settings.remoteEnabled && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                    <input
-                      key={s.settings.remoteToken ?? ''}
-                      className="mono"
-                      defaultValue={s.settings.remoteToken ?? ''}
-                      placeholder="URL token"
-                      disabled={s.settings.remoteTokenRotate === true}
-                      title="The token carried in connect links. Persisted across restarts so links keep working; edit it to invalidate every existing link."
-                      onBlur={e => { const v = e.target.value.trim(); if (v.length >= 8 && v !== s.settings.remoteToken) updateSettings({ remoteToken: v }) }}
-                      style={{ ...FIELD_STYLE, flex: 1, opacity: s.settings.remoteTokenRotate ? 0.5 : 1 }}
-                    />
-                    <button
-                      className="open-btn"
-                      title="Mint a new token now — existing connect links stop working"
-                      style={{ padding: '7px 11px', fontSize: 11.5, flexShrink: 0 }}
-                      onClick={() => updateSettings({ remoteToken: Array.from(crypto.getRandomValues(new Uint8Array(24)), b => (b % 36).toString(36)).join('') })}
-                    >
-                      ↻ Regenerate
-                    </button>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--mut)', flexShrink: 0, cursor: 'pointer' }} title="Mint a fresh token on every app start (links must be re-copied each time)">
-                      <input
-                        type="checkbox"
-                        checked={s.settings.remoteTokenRotate === true}
-                        onChange={e => updateSettings({ remoteTokenRotate: e.target.checked })}
-                      />
-                      Auto-rotate
-                    </label>
-                  </div>
-                )}
-                {(s.settings.remoteDevices ?? []).length > 0 && (
-                  <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {(s.settings.remoteDevices ?? []).map(d => (
-                      <span key={d.id} className="mono" style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 99, border: '1px solid var(--line2)', color: 'var(--text2)' }}>
-                        📱 {d.name || d.id.slice(0, 8)}
-                        <button
-                          title="Revoke this device — it must pair again to reconnect"
-                          onClick={() => updateSettings({ remoteDevices: (s.settings.remoteDevices ?? []).filter(x => x.id !== d.id) })}
-                          style={{ background: 'none', border: 'none', color: 'var(--red-soft)', cursor: 'pointer', fontSize: 12, padding: 0 }}
-                        >
-                          ✕
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <Switch
-                on={s.settings.remoteEnabled === true}
-                onToggle={() => updateSettings({ remoteEnabled: !s.settings.remoteEnabled })}
-              />
-            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>GitHub token</div>
@@ -489,6 +411,118 @@ export function SettingsView() {
           </>}
 
           {tab === 'mcp' && <McpSection />}
+
+          {tab === 'remote' && <>
+          <SectionLabel>REMOTE CONTROL</SectionLabel>
+          <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Serve the mobile companion</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
+                  Work with tasks, chats, and sessions from any device on your network — live terminals stream straight from the PTY, chats stream as they generate. Commands run through the same action paths as this UI; execution and credentials never leave this machine. Works over Tailscale/WireGuard (each interface gets its own link) and behind a Cloudflare Tunnel via the public URL.
+                </div>
+              </div>
+              <Switch
+                on={s.settings.remoteEnabled === true}
+                onToggle={() => updateSettings({ remoteEnabled: !s.settings.remoteEnabled })}
+              />
+            </div>
+            {s.settings.remoteEnabled && <>
+            <div style={{ padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>Connect links</div>
+              {s.remoteInfo ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {(s.settings.remotePublicUrl?.trim()
+                    ? [{ label: 'public', url: `${s.settings.remotePublicUrl.trim().replace(/\/+$/, '')}/?t=${s.remoteInfo.token}` }]
+                    : []
+                  ).concat(s.remoteInfo.urls ?? []).map(u => (
+                    <div key={u.url} className="mono" style={{ fontSize: 11.5, wordBreak: 'break-all' }}>
+                      <span style={{ color: 'var(--dim)', textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, marginRight: 6 }}>{u.label}</span>
+                      <span style={{ color: 'var(--accent)', userSelect: 'all' }}>{u.url}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: 'var(--dim)' }}>starting…</div>
+              )}
+              <input
+                defaultValue={s.settings.remotePublicUrl ?? ''}
+                placeholder="Public base URL (Cloudflare Tunnel / MagicDNS) — optional"
+                onBlur={e => updateSettings({ remotePublicUrl: e.target.value.trim() })}
+                style={{ ...FIELD_STYLE, width: '100%', marginTop: 8 }}
+              />
+            </div>
+            <div style={{ padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 2 }}>URL token</div>
+              <div style={{ fontSize: 12, color: 'var(--mut)', marginBottom: 8 }}>
+                Carried in every connect link and persisted across restarts. Editing or regenerating it invalidates existing links; paired devices stay paired.
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  key={s.settings.remoteToken ?? ''}
+                  className="mono"
+                  defaultValue={s.settings.remoteToken ?? ''}
+                  placeholder="URL token"
+                  onBlur={e => { const v = e.target.value.trim(); if (v.length >= 8 && v !== s.settings.remoteToken) updateSettings({ remoteToken: v, remoteTokenAt: Date.now() }) }}
+                  style={{ ...FIELD_STYLE, flex: 1 }}
+                />
+                <button
+                  className="open-btn"
+                  title="Mint a new token now — existing connect links stop working"
+                  style={{ padding: '7px 11px', fontSize: 11.5, flexShrink: 0 }}
+                  onClick={() => updateSettings({ remoteToken: Array.from(crypto.getRandomValues(new Uint8Array(24)), b => (b % 36).toString(36)).join(''), remoteTokenAt: Date.now() })}
+                >
+                  ↻ Regenerate
+                </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--mut2)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={s.settings.remoteTokenRotate === true}
+                    onChange={e => updateSettings({ remoteTokenRotate: e.target.checked, ...(e.target.checked && !s.settings.remoteTokenAt ? { remoteTokenAt: Date.now() } : {}) })}
+                  />
+                  Auto-rotate the token every
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={720}
+                  defaultValue={s.settings.remoteTokenRotateHours ?? 24}
+                  disabled={s.settings.remoteTokenRotate !== true}
+                  onBlur={e => { const h = Math.max(1, Math.min(720, Number(e.target.value) || 24)); updateSettings({ remoteTokenRotateHours: h }) }}
+                  style={{ ...FIELD_STYLE, width: 70, opacity: s.settings.remoteTokenRotate ? 1 : 0.5 }}
+                />
+                <span style={{ fontSize: 12, color: 'var(--mut)' }}>hours — connect links must be re-copied after each rotation; paired devices keep working</span>
+              </div>
+            </div>
+            <div style={{ padding: '14px 0' }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 2 }}>Paired devices</div>
+              <div style={{ fontSize: 12, color: 'var(--mut)', marginBottom: 8 }}>
+                Each device paired through an explicit approval on this desktop. Revoking locks it out immediately; it must pair again to reconnect.
+              </div>
+              {(s.settings.remoteDevices ?? []).length === 0 && (
+                <div style={{ fontSize: 12, color: 'var(--dim)' }}>No devices paired yet — open a connect link on your phone and approve the pairing dialog here.</div>
+              )}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {(s.settings.remoteDevices ?? []).map(d => (
+                  <span key={d.id} className="mono" style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 99, border: '1px solid var(--line2)', color: 'var(--text2)' }}>
+                    📱 {d.name || d.id.slice(0, 8)} <span style={{ color: 'var(--faint)' }}>· {new Date(d.at).toLocaleDateString()}</span>
+                    <button
+                      title="Revoke this device — it must pair again to reconnect"
+                      onClick={() => updateSettings({ remoteDevices: (s.settings.remoteDevices ?? []).filter(x => x.id !== d.id) })}
+                      style={{ background: 'none', border: 'none', color: 'var(--red-soft)', cursor: 'pointer', fontSize: 12, padding: 0 }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+            </>}
+          </div>
+          </>}
+
 
           {tab === 'tools' && <>
           <SectionLabel>MASTER TOOLS — what Master may do; click a permission to cycle it</SectionLabel>

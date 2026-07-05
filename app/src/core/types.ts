@@ -413,8 +413,12 @@ export interface OrchestrationSettings {
   remotePublicUrl?: string
   /** persisted URL token — connect links survive restarts; editable */
   remoteToken?: string
-  /** mint a fresh URL token on every server start instead of persisting one */
+  /** when the current URL token was minted (epoch ms) — drives auto-rotation */
+  remoteTokenAt?: number
+  /** auto-rotate the URL token after `remoteTokenRotateHours` */
   remoteTokenRotate?: boolean
+  /** rotation period in hours (default 24) */
+  remoteTokenRotateHours?: number
 }
 
 export type BoardCol = 'backlog' | 'progress' | 'review' | 'done' | 'failed'
