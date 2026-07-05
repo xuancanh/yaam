@@ -35,6 +35,7 @@ import { useSessionLayoutActions } from './domains/session/layout-actions'
 import { useSessionConfigActions } from './domains/session/config-actions'
 import { useSessionPromptActions } from './domains/session/prompt-actions'
 import { useMasterActions } from './domains/master/actions'
+import { useSessionActions } from './domains/session/actions'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
 import { AbortRegistry, isAbortError } from './core/abort-registry'
@@ -43,7 +44,6 @@ import { classifyExit } from './domains/session/exit'
 import { useSessionSettle } from './domains/session/use-settle'
 import { buildHydration } from './infrastructure/persistence/hydrate'
 import { loadSnapshot } from './infrastructure/persistence/loaders'
-import { inferLegacyTerminalShell } from './store/state-helpers'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './domains/board/task-state'
 import type { LocatedTask } from './domains/board/task-state'
 import type { ConductorActions } from './app/actions'
@@ -57,7 +57,7 @@ import type { PersistenceRuntime } from './infrastructure/persistence/runtime'
 import { collectDueSchedules, collectDueTasks } from './domains/schedules/due'
 import { buildTemplateCommand } from './domains/schedules/template-command'
 import { focusSessionIn, removeFromGroups } from './domains/session/layout-state'
-import { envPrefix, sendLineToSession, spawnAgentProcess, typeForCommand } from './domains/session/command'
+import { envPrefix, typeForCommand } from './domains/session/command'
 import { taskContract, taskWorkText } from './domains/board/task-prompt'
 
 export { cronMatches, humanizeCron } from './domains/schedules/cron'
@@ -1165,6 +1165,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const masterActions = useMasterActions(useMemo(() => ({
     stateRef, later, runMaster, toolApprovals: toolApprovalsRef,
   }), [later, runMaster]))
+  const sessionActions = useSessionActions(useMemo(() => ({
+    stateRef, flash, logEvent, markUserStopped: (id: string) => userStoppedRef.current.add(id),
+    disposeSessionRuntime, launchSession, probeCliSession, armResponseWatch, appendTail, clearNeeds, bumpSettle,
+  }), [flash, logEvent, disposeSessionRuntime, launchSession, probeCliSession, armResponseWatch, appendTail, clearNeeds, bumpSettle]))
 
   // Expose stable UI actions while implementations read fresh state through stateRef.
   const actions = useMemo<ConductorActions>(() => ({
@@ -1178,130 +1182,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     ...sessionLayoutActions,
     ...sessionConfigActions,
     ...sessionPromptActions,
+    ...sessionActions,
     ...masterActions,
-
-    archiveSession: id => {
-      const agent = stateRef.current.agents.find(a => a.id === id)
-      if (agent?.status === 'running' || agent?.status === 'needs') {
-        userStoppedRef.current.add(id)
-        native.killSession(id).catch(() => {})
-      }
-      // free the xterm buffer + runtime registries; the agent (with its log
-      // tail) stays persisted and the terminal is rebuilt on unarchive
-      disposeSessionRuntime(id)
-      dispatch(s => ({
-        ...s,
-        ...removeFromGroups(s, id),
-        agents: s.agents.map(a => a.id === id ? { ...a, archived: true, status: 'idle' as const, escReason: undefined } : a),
-        minimizedIds: s.minimizedIds.filter(x => x !== id),
-        drawer: s.drawer?.agentId === id ? null : s.drawer,
-      }))
-      flash(`Archived ${agent?.name ?? 'session'}`)
-      logEvent('edit', id, `Archived session ${agent?.name ?? id}`)
-    },
-
-    unarchiveSession: id => {
-      // the xterm was disposed on archive — recreate it and replay the retained
-      // (dimmed) tail, mirroring how restore rebuilds a paused session
-      const agent = stateRef.current.agents.find(a => a.id === id)
-      if (agent && agent.kind !== 'chat') {
-        disposeTerminal(id)
-        const { term } = getTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
-        for (const l of agent.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
-        term.writeln('\x1b[33m── unarchived · press ▶ to relaunch ──\x1b[0m')
-      }
-      dispatch(s => focusSessionIn(s, id))
-    },
-
-    deleteSession: id => {
-      const agent = stateRef.current.agents.find(a => a.id === id)
-      userStoppedRef.current.add(id)
-      native.killSession(id).catch(() => {})
-      disposeSessionRuntime(id)
-      native.removeSession(id).catch(() => {}) // drop its persisted file too
-      dispatch(s => ({
-        ...s,
-        ...removeFromGroups(s, id),
-        agents: s.agents.filter(a => a.id !== id),
-        tasks: s.tasks.map(t => (t.agentId === id || t.agentIds?.includes(id)
-          ? { ...t, agentId: t.agentId === id ? null : t.agentId, agentIds: (t.agentIds ?? []).filter(x => x !== id) }
-          : t)),
-        minimizedIds: s.minimizedIds.filter(x => x !== id),
-        drawer: s.drawer?.agentId === id ? null : s.drawer,
-        panel: s.panel?.agentId === id ? null : s.panel,
-      }))
-      flash(`Deleted ${agent?.name ?? 'session'}`)
-      logEvent('edit', null, `Deleted session ${agent?.name ?? id}`)
-    },
-
-    resume: id => {
-      const agent = stateRef.current.agents.find(a => a.id === id)
-      if (agent?.kind === 'chat') return // chat agents have no process; just send a message
-      const terminalShell = agent?.terminalShell ?? inferLegacyTerminalShell(agent?.cmd)
-      let resumeNote = 'session resumed'
-      if (agent?.kind === 'real' && agent.cmd && agent.status !== 'running') {
-        // prefer the CLI's own resume flow so the conversation continues
-        let cmd = agent.cmd
-        const type = stateRef.current.agentTypes.find(t => t.id === agent.typeId)
-          ?? typeForCommand(agent.cmd, stateRef.current.agentTypes)
-        if (type?.resumeCmd) {
-          if (type.resumeCmd.includes('{id}')) {
-            if (agent.cliSessionId) {
-              cmd = type.resumeCmd.replace('{id}', agent.cliSessionId)
-              resumeNote = `resuming ${type.name} session ${agent.cliSessionId}`
-            } else if (type.resumeFallbackCmd) {
-              cmd = type.resumeFallbackCmd
-              resumeNote = `no captured session id — resuming most recent via · ${cmd}`
-            }
-          } else {
-            cmd = type.resumeCmd
-            resumeNote = `resuming via · ${cmd}`
-          }
-        }
-        spawnAgentProcess(id, `${envPrefix(type?.env)}${cmd}`, agent.cwd, terminalShell).catch(() => {})
-        probeCliSession(id, cmd, agent.cwd || '', true)
-      }
-      dispatch(s => focusSessionIn({
-        ...s,
-        agents: s.agents.map(a => a.id === id
-          ? { ...a, terminalShell, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]) }
-          : a),
-      }, id))
-    },
-
-
-
-    newRealSession: (command, cwd, terminalShell) => {
-      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell })
-      if (id) {
-        logEvent('route', id, `Launched session · ${command.trim()}`)
-        flash('Session launched')
-      }
-    },
-
-    sendInput: (id, text) => {
-      armResponseWatch(id)
-      dispatch(s => ({
-        ...s,
-        agents: s.agents.map(a => a.id === id
-          ? { ...a, log: a.log.concat([{ t: 'you', x: text }]) }
-          : a),
-      }))
-      sendLineToSession(id, text)
-    },
-
-    stopSession: id => {
-      userStoppedRef.current.add(id)
-      native.killSession(id).catch(() => {})
-      dispatch(s => ({
-        ...s,
-        agents: s.agents.map(a => a.id === id
-          ? { ...a, status: 'idle' as const, log: a.log.concat([{ t: 'sys', x: 'stopped by you' }]) }
-          : a),
-      }))
-      flash('Session stopped')
-    },
-  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, sessionPromptActions, masterActions, appendTail, armResponseWatch, bumpSettle, clearNeeds, disposeSessionRuntime, flash, launchSession, logEvent, probeCliSession])
+  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, sessionPromptActions, sessionActions, masterActions])
 
   // surface background failures that would otherwise vanish (the webview
   // console reaches the dev log / devtools — the app shows no crash UI)
