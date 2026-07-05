@@ -75,18 +75,23 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
         const column = validCols.includes(String(col)) ? String(col) as BoardCol : 'backlog'
         const sp = (spec ?? {}) as Record<string, unknown>
         const strArr = (v: unknown) => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined
-        dispatch(s2 => ({
-          ...s2,
-          tasks: s2.tasks.concat([{
-            id, title: String(title).slice(0, 120), col: column, agentId: null,
-            description: typeof sp.description === 'string' ? sp.description : undefined,
-            criteria: strArr(sp.criteria),
-            cwd: typeof sp.cwd === 'string' ? sp.cwd : undefined,
-            typeId: typeof sp.typeId === 'string' ? sp.typeId : undefined,
-            templateId: typeof sp.templateId === 'string' ? sp.templateId : undefined,
-            chat: [{ id: mkId('tc'), role: 'system', text: 'Task created by an addon', at: Date.now() }],
-          }]),
-        }))
+        const input = {
+          id, title: String(title).slice(0, 120), col: column, note: 'Task created by an addon',
+          description: typeof sp.description === 'string' ? sp.description : undefined,
+          criteria: strArr(sp.criteria),
+          cwd: typeof sp.cwd === 'string' ? sp.cwd : undefined,
+          typeId: typeof sp.typeId === 'string' ? sp.typeId : undefined,
+          templateId: typeof sp.templateId === 'string' ? sp.templateId : undefined,
+        }
+        // shared command (caller-minted id lets us return it over the void seam);
+        // enforcePermissions already gated `tasks`. Fall back to a direct dispatch.
+        if (ctx.execCommand) ctx.execCommand('add_task', input, addonId)
+        else dispatch(s2 => ({ ...s2, tasks: s2.tasks.concat([{
+          id, title: input.title, col: column, agentId: null,
+          description: input.description, criteria: input.criteria, cwd: input.cwd,
+          typeId: input.typeId, templateId: input.templateId,
+          chat: [{ id: mkId('tc'), role: 'system', text: 'Task created by an addon', at: Date.now() }],
+        }]) }))
         return id
       },
       update: (id, patch) => {

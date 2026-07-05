@@ -84,7 +84,7 @@ export function createConductorActions(d: ConductorActionsDeps): ConductorAction
       dispatch, stateRef: d.stateRef, dragId: d.dragId, later: d.later, flash: d.flash, logEvent: d.logEvent,
       fireAddonHook: d.fireAddonHook, spawnSessionForTask: d.spawnSessionForTask, startTaskViaWatcher: d.startTaskViaWatcher,
       runWatcher: d.runWatcher, pushTaskChat: d.pushTaskChat, markUserStopped: d.markUserStopped,
-      disposeWatcher: d.disposeWatcher, taskSessions: d.taskSessions,
+      disposeWatcher: d.disposeWatcher, taskSessions: d.taskSessions, execCommand: d.execCommand,
     }),
     ...createSchedulesActions({ dispatch, flash: d.flash, logEvent: d.logEvent, launchFromTemplate: d.launchFromTemplate }),
     ...createChatActions({

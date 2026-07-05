@@ -29,6 +29,8 @@ export interface BoardActionsCtx {
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
   /** native PTY capability for detaching a task's previous session on restart */
   port?: SessionProcessPort
+  /** application command registry entry point (routes task creation + policy) */
+  execCommand?: <R = unknown>(name: string, input: unknown, ctx: { actor: { kind: 'user' } }) => Promise<R>
 }
 
 export interface BoardActions {
@@ -50,7 +52,7 @@ export interface BoardActions {
 
 export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => createBoardActions(ctx), [ctx.dispatch, ctx.stateRef, ctx.dragId, ctx.later, ctx.flash, ctx.logEvent, ctx.fireAddonHook, ctx.spawnSessionForTask, ctx.startTaskViaWatcher, ctx.runWatcher, ctx.pushTaskChat, ctx.markUserStopped, ctx.disposeWatcher, ctx.taskSessions, ctx.port])
+  return useMemo(() => createBoardActions(ctx), [ctx.dispatch, ctx.stateRef, ctx.dragId, ctx.later, ctx.flash, ctx.logEvent, ctx.fireAddonHook, ctx.spawnSessionForTask, ctx.startTaskViaWatcher, ctx.runWatcher, ctx.pushTaskChat, ctx.markUserStopped, ctx.disposeWatcher, ctx.taskSessions, ctx.port, ctx.execCommand])
 }
 
 /** Plain (non-React) factory for the board/task actions. */
@@ -92,22 +94,30 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
       later(50, () => ctx.spawnSessionForTask(taskId))
     },
     createTask: input => {
-      const id = mkId('t')
-      dispatch(s => ({
-        ...s,
-        tasks: s.tasks.concat([{
-          id,
-          title: input.title.trim().slice(0, 120),
-          col: 'backlog',
-          agentId: null,
-          description: input.description.trim(),
-          criteria: input.criteria.map(c => c.trim()).filter(Boolean),
-          templateId: input.templateId || undefined,
-          typeId: input.typeId || undefined,
-          cwd: input.cwd?.trim() || undefined,
-          chat: [{ id: mkId('tc'), role: 'system', text: 'Task created', at: Date.now() }],
-        }]),
-      }))
+      // route creation through the shared add_task command (user actor); the
+      // toast stays here. Fall back to a direct dispatch when unwired.
+      if (ctx.execCommand) {
+        void ctx.execCommand('add_task', {
+          title: input.title, description: input.description, criteria: input.criteria,
+          templateId: input.templateId, typeId: input.typeId, cwd: input.cwd,
+        }, { actor: { kind: 'user' } })
+      } else {
+        dispatch(s => ({
+          ...s,
+          tasks: s.tasks.concat([{
+            id: mkId('t'),
+            title: input.title.trim().slice(0, 120),
+            col: 'backlog',
+            agentId: null,
+            description: input.description.trim(),
+            criteria: input.criteria.map(c => c.trim()).filter(Boolean),
+            templateId: input.templateId || undefined,
+            typeId: input.typeId || undefined,
+            cwd: input.cwd?.trim() || undefined,
+            chat: [{ id: mkId('tc'), role: 'system', text: 'Task created', at: Date.now() }],
+          }]),
+        }))
+      }
       ctx.flash(`Task “${input.title.trim().slice(0, 32)}” created`)
     },
     updateTask: (id, patch) => dispatch(s => ({

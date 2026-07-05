@@ -27,6 +27,7 @@ import type { ConductorActions } from './actions'
 import { createCommandRegistry } from './commands/registry'
 import { createDefaultPolicy } from './commands/policy'
 import { registerSessionCommands } from './commands/session-commands'
+import { registerBoardCommands } from './commands/board-commands'
 import { telemetry } from '../core/telemetry'
 
 /** Foundation the provider owns and shares with both the runtime and the actions. */
@@ -101,7 +102,8 @@ export function createAppRuntime(): AppRuntime {
     toastTimer = browserClock.setTimeout(() => dispatch(s => ({ ...s, toast: null })), 2600)
   }
 
-  const activity = createActivityService(createStorePort())
+  const statePort = createStorePort()
+  const activity = createActivityService(statePort)
   const kernel: ConductorKernel = {
     stateRef, dragId, later, flash,
     widOf: activity.widOf, logEvent: activity.logEvent, notify: activity.notify,
@@ -124,6 +126,7 @@ export function createAppRuntime(): AppRuntime {
     }),
   })
   registerSessionCommands(registry, { stateRef, markUserStopped: id => refs.userStoppedRef.current.add(id) })
+  registerBoardCommands(registry, statePort)
   const addonExec = (name: string, input: unknown, addonId: string) =>
     void registry.execute(name, input, { actor: { kind: 'addon', addonId } }).catch(() => {})
   const masterSendLine = (sid: string, text: string) =>
