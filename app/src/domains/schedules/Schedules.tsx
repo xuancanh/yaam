@@ -39,12 +39,12 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
     && (action !== 'task' || Boolean(spec.title.trim()))
 
   // Validate the selected mode and persist its normalized Cron record.
-  const create = async () => {
+  const create = async (force = false) => {
     if (!valid || busy) return
     let boardTask: Cron['boardTask']
     if (action === 'task') {
       // same LLM completion / reject-with-questions gate as the task tab
-      const patch = await resolveForCreate()
+      const patch = await resolveForCreate(force)
       if (!patch) return
       boardTask = { ...patch, startNow }
     }
@@ -145,9 +145,20 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: valid && !busy ? 1 : 0.45 }} onClick={create} disabled={!valid || !!busy}>
+          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: valid && !busy ? 1 : 0.45 }} onClick={() => { void create() }} disabled={!valid || !!busy}>
             {busy === 'create' ? 'Checking…' : 'Create schedule'}
           </button>
+          {action === 'task' && (questions.length > 0 || llmOn) && (
+            <button
+              className="open-btn"
+              title="Skip the spec check and create the schedule's task exactly as written"
+              style={{ flex: 'none', padding: '9px 14px', opacity: valid && !busy ? 1 : 0.45 }}
+              onClick={() => { void create(true) }}
+              disabled={!valid || !!busy}
+            >
+              Create anyway
+            </button>
+          )}
           <button className="deny-btn" style={{ flex: 1, padding: 9 }} onClick={onClose}>Cancel</button>
         </div>
       </div>

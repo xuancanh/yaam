@@ -41,8 +41,8 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
   const [spec, setSpec] = useState(() => emptyTaskSpec(s.settings.defaultCwd || ''))
   const { busy, questions, error, llmOn, draft, resolveForCreate } = useTaskSpecAssist(spec, setSpec)
 
-  const create = async () => {
-    const patch = await resolveForCreate()
+  const create = async (force = false) => {
+    const patch = await resolveForCreate(force)
     if (!patch) return
     createTask(patch)
     onClose()
@@ -69,9 +69,20 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
               {busy === 'draft' ? 'Drafting…' : '✦ Draft with AI'}
             </button>
           )}
-          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: spec.title.trim() && !busy ? 1 : 0.45 }} onClick={create} disabled={!spec.title.trim() || !!busy}>
+          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: spec.title.trim() && !busy ? 1 : 0.45 }} onClick={() => { void create() }} disabled={!spec.title.trim() || !!busy}>
             {busy === 'create' ? 'Checking…' : 'Create task'}
           </button>
+          {(questions.length > 0 || llmOn) && (
+            <button
+              className="open-btn"
+              title="Skip the spec check and create the task exactly as written"
+              style={{ flex: 'none', padding: '9px 14px', opacity: spec.title.trim() && !busy ? 1 : 0.45 }}
+              onClick={() => { void create(true) }}
+              disabled={!spec.title.trim() || !!busy}
+            >
+              Create anyway
+            </button>
+          )}
           <button className="deny-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={onClose}>Cancel</button>
         </div>
       </div>

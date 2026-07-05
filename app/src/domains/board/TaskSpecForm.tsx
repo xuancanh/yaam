@@ -91,12 +91,15 @@ export function useTaskSpecAssist(v: TaskSpecValue, set: (v: TaskSpecValue) => v
     }
   }
 
-  /** Validate/complete the spec; null = rejected (questions shown), keep editing. */
-  const resolveForCreate = async (): Promise<TaskSpecPatch | null> => {
+  /** Validate/complete the spec; null = rejected (questions shown), keep
+   *  editing. `force` skips both the AI gate and the manual completeness
+   *  check — the user knows what they want; create the task as written. */
+  const resolveForCreate = async (force = false): Promise<TaskSpecPatch | null> => {
     if (!v.title.trim() || busy) return null
     setError('')
     setQuestions([])
     const crit = parsedCriteria(v)
+    if (force) return toPatch(v, v.description.trim(), crit)
     if (llmOn) {
       setBusy('create')
       try {
