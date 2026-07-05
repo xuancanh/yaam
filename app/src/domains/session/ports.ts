@@ -4,7 +4,7 @@
 // core/terminals wholesale and can be tested with fakes. The real implementation
 // wires the interface to the actual IPC and terminal registry; tests pass their own.
 import * as native from '../../core/native'
-import { getTerminal, disposeTerminal, isAltScreen, resetTerminal, restoreTerminalModes } from '../../core/terminals'
+import { getTerminal, disposeTerminal, isAltScreen, quiesceTerminal, resetTerminal, restoreTerminalModes } from '../../core/terminals'
 import { sendLineToSession } from './command'
 
 /** A minimal handle to a session's terminal — just what callers need to write. */
@@ -41,6 +41,8 @@ export interface SessionProcessPort {
   disposeTerminal: (id: string) => void
   /** undo modes a dead TUI left behind (alt screen, mouse, …); keeps scrollback */
   restoreTerminalModes: (id: string) => void
+  /** exit-time rest: restore modes, then hide/stop the cursor (dead session) */
+  quiesceTerminal: (id: string) => void
   /** full xterm reset (modes + buffers + scrollback) */
   resetTerminal: (id: string) => void
   /** true while the terminal is stuck in the alternate screen (dead TUI) */
@@ -62,6 +64,7 @@ export const realSessionProcessPort: SessionProcessPort = {
   },
   disposeTerminal: id => disposeTerminal(id),
   restoreTerminalModes: id => restoreTerminalModes(id),
+  quiesceTerminal: id => quiesceTerminal(id),
   resetTerminal: id => resetTerminal(id),
   isAltScreen: id => isAltScreen(id),
 }

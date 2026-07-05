@@ -215,6 +215,7 @@ export function restoreTerminalModes(id: string) {
   const entry = entries.get(id)
   if (!entry) return
   const { term } = entry
+  term.options.cursorBlink = true // revive a terminal quiesced by an earlier exit
   if (term.buffer.active.type !== 'alternate') {
     term.write(MODE_RESTORE) // modes only — the cursor is already where it belongs
     return
@@ -230,6 +231,18 @@ export function restoreTerminalModes(id: string) {
     if (target <= term.rows) term.write(`\x1b[${Math.max(1, target)};1H`)
     else term.write(`\x1b[${term.rows};1H\r\n`) // content fills the screen: scroll one line open
   })
+}
+
+/** Put a dead session's terminal to rest: normalize whatever modes the
+ *  process left behind, then hide the cursor and stop it blinking — a paused
+ *  session has nothing to type into, so a live cursor just reads as broken.
+ *  restoreTerminalModes (the resume path) undoes this. */
+export function quiesceTerminal(id: string) {
+  const entry = entries.get(id)
+  if (!entry) return
+  restoreTerminalModes(id)
+  entry.term.options.cursorBlink = false
+  entry.term.write('\x1b[?25l')
 }
 
 /** Full xterm reset (modes + buffers) — the clean slate before a respawn

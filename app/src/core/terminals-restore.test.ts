@@ -14,7 +14,7 @@ vi.mock('./native', () => ({
   writeSession: async () => {},
 }))
 
-import { getTerminal, isAltScreen, restoreTerminalModes, disposeTerminal } from './terminals'
+import { getTerminal, isAltScreen, quiesceTerminal, restoreTerminalModes, disposeTerminal } from './terminals'
 
 const write = (term: { write: (d: string, cb?: () => void) => void }, data: string) =>
   new Promise<void>(r => term.write(data, r))
@@ -59,6 +59,21 @@ describe('restoreTerminalModes', () => {
     expect(text[1]).toBe('old history B')
     expect(text.indexOf('new output')).toBeGreaterThanOrEqual(2)
     disposeTerminal('rt-alt')
+  })
+
+  it('quiesce stops the cursor on a dead session; restore revives it for resume', async () => {
+    const { term } = getTerminal('rt-dead')
+    await write(term, 'some output\r\n')
+    expect(term.options.cursorBlink).toBe(true)
+    quiesceTerminal('rt-dead')
+    await settle()
+    // a paused session has nothing to type into — no live cursor
+    expect(term.options.cursorBlink).toBe(false)
+    // resume path brings it back
+    restoreTerminalModes('rt-dead')
+    await settle()
+    expect(term.options.cursorBlink).toBe(true)
+    disposeTerminal('rt-dead')
   })
 
   it('scrolls one line open when the history fills the whole screen', async () => {

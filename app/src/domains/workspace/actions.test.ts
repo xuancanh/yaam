@@ -15,6 +15,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     writeSession: vi.fn(async () => {}), sendLine: vi.fn(), detectCliSession: vi.fn(async () => null),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     restoreTerminalModes: vi.fn(),
+    quiesceTerminal: vi.fn(),
     resetTerminal: vi.fn(),
     attachTerminal: vi.fn(() => ({ writeln: vi.fn() })), disposeTerminal: vi.fn(), isAltScreen: vi.fn(() => false),
     ...over,

@@ -35,7 +35,7 @@ function harness(seed: Partial<AppState>, opts: { locatedTask?: LocatedTask; use
     monitorEvent: vi.fn(),
     detectCliSession: vi.fn(async () => null),
     scheduleArchive: vi.fn((fn: () => void) => { scheduled.push(fn) }),
-    restoreTerminalModes: vi.fn(),
+    quiesceTerminal: vi.fn(),
   }
   return {
     ports, scheduled,
@@ -49,7 +49,7 @@ describe('coordinateSessionExit', () => {
     // Ctrl+C exit — the TUI never restored the alt screen/mouse modes itself
     const h = harness({ agents: [agent()] })
     h.run(130)
-    expect(h.ports.restoreTerminalModes).toHaveBeenCalledWith('a1')
+    expect(h.ports.quiesceTerminal).toHaveBeenCalledWith('a1')
   })
 
   it('a user stop stays idle+quiet: no notify, no monitor, logs the stop', () => {
