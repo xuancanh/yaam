@@ -5,12 +5,26 @@
 import { useMemo } from 'react'
 import { dispatch } from '../../core/store'
 import { focusSessionIn } from '../session/layout-state'
-import type { ConductorActions } from '../../app/actions'
+import type { Notification, Panel, View } from '../../core/types'
 
-type ShellActions = Pick<ConductorActions,
-  | 'setView' | 'openPalette' | 'closePalette' | 'setPaletteQuery'
-  | 'toggleNotif' | 'readAllNotif' | 'clickNotif' | 'openPanel' | 'setPanelTab' | 'closePanel'
-  | 'openAgent' | 'openDiff' | 'closeDrawer' | 'openNewSession' | 'closeNewSession' | 'gotoNeeds'>
+export interface ShellActions {
+  setView: (v: View) => void
+  openPalette: () => void
+  closePalette: () => void
+  setPaletteQuery: (q: string) => void
+  toggleNotif: () => void
+  readAllNotif: () => void
+  clickNotif: (n: Notification) => void
+  openPanel: (id: string, tab?: Panel['tab']) => void
+  setPanelTab: (tab: Panel['tab']) => void
+  closePanel: () => void
+  openAgent: (id: string) => void
+  openDiff: (id: string) => void
+  closeDrawer: () => void
+  openNewSession: () => void
+  closeNewSession: () => void
+  gotoNeeds: () => void
+}
 
 export function useShellActions(): ShellActions {
   return useMemo(() => ({

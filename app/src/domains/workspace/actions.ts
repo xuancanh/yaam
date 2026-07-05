@@ -8,7 +8,6 @@ import { mkId } from '../../shared/id'
 import { switchWorkspaceIn } from './state'
 import { MASTER_GREETING } from '../../core/data'
 import * as native from '../../core/native'
-import type { ConductorActions } from '../../app/actions'
 
 export interface WorkspaceActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -20,8 +19,12 @@ export interface WorkspaceActionsCtx {
   disposeSessionRuntime: (id: string) => void
 }
 
-type WorkspaceActions = Pick<ConductorActions,
-  'switchWorkspace' | 'createWorkspace' | 'renameWorkspace' | 'deleteWorkspace'>
+export interface WorkspaceActions {
+  switchWorkspace: (id: string) => void
+  createWorkspace: (name: string) => void
+  renameWorkspace: (id: string, name: string) => void
+  deleteWorkspace: (id: string) => void
+}
 
 export function useWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActions {
   const { dispatch, stateRef, later, flash } = ctx

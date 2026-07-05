@@ -1,9 +1,8 @@
 // Schedules-domain actions: agent-template CRUD + launch, and cron schedule
 // create/delete. Composed into the provider's action surface.
 import { useMemo } from 'react'
-import type { AppState, EventType } from '../../core/types'
+import type { AgentTemplate, AppState, Cron, EventType } from '../../core/types'
 import { mkId } from '../../shared/id'
-import type { ConductorActions } from '../../app/actions'
 
 export interface SchedulesActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -12,8 +11,14 @@ export interface SchedulesActionsCtx {
   launchFromTemplate: (templateId: string, task?: string) => string | null
 }
 
-type SchedulesActions = Pick<ConductorActions,
-  'addTemplate' | 'updateTemplate' | 'deleteTemplate' | 'runTemplate' | 'addCron' | 'deleteCron'>
+export interface SchedulesActions {
+  addTemplate: () => string
+  updateTemplate: (id: string, patch: Partial<AgentTemplate>) => void
+  deleteTemplate: (id: string) => void
+  runTemplate: (id: string, task?: string) => void
+  addCron: (cron: Omit<Cron, 'id' | 'on' | 'built' | 'last'>) => void
+  deleteCron: (id: string) => void
+}
 
 export function useSchedulesActions(ctx: SchedulesActionsCtx): SchedulesActions {
   const { dispatch } = ctx

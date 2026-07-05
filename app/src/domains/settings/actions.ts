@@ -4,12 +4,11 @@
 // side effects. Composed into the provider's action surface.
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
-import type { AppState } from '../../core/types'
+import type { AppState, ChatAgentType, McpServer, Persona, Skill, SkillRegistry } from '../../core/types'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import { mkId } from '../../shared/id'
 import { PERM_ORDER } from '../../core/data'
-import type { ConductorActions } from '../../app/actions'
 
 export interface SettingsActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -20,13 +19,33 @@ export interface SettingsActionsCtx {
   skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
 }
 
-type SettingsActions = Pick<ConductorActions,
-  | 'toggleAgentType' | 'addMcpServer' | 'updateMcpServer' | 'removeMcpServer' | 'connectMcpServer'
-  | 'addSkill' | 'updateSkill' | 'removeSkill' | 'addPersona' | 'updatePersona' | 'removePersona'
-  | 'addSkillRegistry' | 'updateSkillRegistry' | 'removeSkillRegistry' | 'refreshSkillRegistry'
-  | 'addChatAgentType' | 'updateChatAgentType' | 'deleteChatAgentType'
-  | 'toggleSetting' | 'updateSettings' | 'setAgentTypeCmd' | 'updateAgentType' | 'addAgentType'
-  | 'deleteAgentType' | 'cycleCatalogPerm'>
+export interface SettingsActions {
+  toggleAgentType: (id: string) => void
+  addMcpServer: (name: string, url: string, headers?: string) => void
+  updateMcpServer: (id: string, patch: Partial<Pick<McpServer, 'name' | 'url' | 'headers' | 'enabled'>>) => void
+  removeMcpServer: (id: string) => void
+  connectMcpServer: (id: string) => Promise<string>
+  addSkill: () => string
+  updateSkill: (id: string, patch: Partial<Pick<Skill, 'name' | 'description' | 'body'>>) => void
+  removeSkill: (id: string) => void
+  addPersona: () => string
+  updatePersona: (id: string, patch: Partial<Pick<Persona, 'name' | 'description' | 'body'>>) => void
+  removePersona: (id: string) => void
+  addSkillRegistry: (name: string, url: string) => void
+  updateSkillRegistry: (id: string, patch: Partial<Pick<SkillRegistry, 'name' | 'url' | 'enabled'>>) => void
+  removeSkillRegistry: (id: string) => void
+  refreshSkillRegistry: (id: string) => Promise<string>
+  addChatAgentType: () => void
+  updateChatAgentType: (id: string, patch: Partial<Omit<ChatAgentType, 'id'>>) => void
+  deleteChatAgentType: (id: string) => void
+  toggleSetting: (k: 'autoRoute' | 'approveDestructive' | 'followMode') => void
+  updateSettings: (patch: Partial<AppState['settings']>) => void
+  setAgentTypeCmd: (id: string, cmd: string) => void
+  updateAgentType: (id: string, patch: Partial<AppState['agentTypes'][number]>) => void
+  addAgentType: () => void
+  deleteAgentType: (id: string) => void
+  cycleCatalogPerm: (id: string) => void
+}
 
 export function useSettingsActions(ctx: SettingsActionsCtx): SettingsActions {
   const { dispatch, later } = ctx

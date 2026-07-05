@@ -6,7 +6,6 @@ import type { MutableRefObject } from 'react'
 import type { Agent, AppState, EventType } from '../../core/types'
 import { mkId } from '../../shared/id'
 import { defaultDetail, mkMemory, mkTools } from '../../core/data'
-import type { ConductorActions } from '../../app/actions'
 
 export interface ChatActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -15,7 +14,11 @@ export interface ChatActionsCtx {
   runChatMessage: (agentId: string, text: string) => void
 }
 
-type ChatActions = Pick<ConductorActions, 'newChatSession' | 'openChat' | 'sendChatMessage'>
+export interface ChatActions {
+  newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string, personaId?: string, skillSourceIds?: string[]) => string
+  openChat: (id: string | null) => void
+  sendChatMessage: (agentId: string, text: string) => void
+}
 
 export function useChatActions(ctx: ChatActionsCtx): ChatActions {
   const { dispatch, stateRef } = ctx

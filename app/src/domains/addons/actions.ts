@@ -3,14 +3,13 @@
 // remove. Composed into the provider's action surface.
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
-import type { Addon, AppState } from '../../core/types'
+import type { Addon, AddonPermission, AppState } from '../../core/types'
 import type { ApiMessage } from '../../master'
 import { buildCfg, hasCreds } from '../../master'
 import * as native from '../../core/native'
 import { dispatchAddonRpc, exportAddonPackage, loadAddonFolder } from '../../core/addons'
 import type { AddonApi } from '../../core/addons'
 import { generateAddonPackage } from './addon-gen'
-import type { ConductorActions } from '../../app/actions'
 
 export interface AddonsActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -23,10 +22,20 @@ export interface AddonsActionsCtx {
   addonEditorHistories: MutableRefObject<Map<string, ApiMessage[]>>
 }
 
-type AddonsActions = Pick<ConductorActions,
-  | 'openAddon' | 'toggleAddon' | 'toggleAddonGrant' | 'installAddonFromFile' | 'installAddonFromFolder'
-  | 'installAddonFromUrl' | 'generateAddon' | 'sendAddonChat' | 'addonRpc' | 'updateAddonMeta'
-  | 'exportAddon' | 'removeAddon'>
+export interface AddonsActions {
+  openAddon: (id: string) => void
+  removeAddon: (id: string) => void
+  toggleAddon: (id: string) => void
+  toggleAddonGrant: (id: string, perm: AddonPermission) => void
+  installAddonFromFile: () => void
+  installAddonFromFolder: () => void
+  generateAddon: (prompt: string) => Promise<string>
+  installAddonFromUrl: (url: string) => void
+  exportAddon: (id: string) => void
+  sendAddonChat: (id: string, text: string) => void
+  addonRpc: (addonId: string, method: string, args: unknown[]) => Promise<unknown>
+  updateAddonMeta: (id: string, patch: Partial<Pick<Addon, 'name' | 'version' | 'icon' | 'desc' | 'author'>>) => void
+}
 
 export function useAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
   const { dispatch, stateRef, flash, installPackage } = ctx

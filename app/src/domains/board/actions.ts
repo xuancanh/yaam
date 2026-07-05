@@ -3,13 +3,13 @@
 // action surface.
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
-import type { AppState } from '../../core/types'
+import type { AppState, BoardCol, BoardTask } from '../../core/types'
 import type { ApiMessage } from '../../master'
 import { buildCfg, hasCreds } from '../../master'
 import { mkId } from '../../shared/id'
 import * as native from '../../core/native'
 import { draftTaskSpec } from './watcher'
-import type { ConductorActions } from '../../app/actions'
+import type { TaskSpecDraft } from './watcher'
 
 export interface BoardActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -28,9 +28,20 @@ export interface BoardActionsCtx {
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
 }
 
-type BoardActions = Pick<ConductorActions,
-  | 'startCardDrag' | 'enterCol' | 'dropTo' | 'startTask' | 'restartTask' | 'createTask'
-  | 'updateTask' | 'sendTaskChat' | 'draftTask' | 'renameTask' | 'deleteTask' | 'scheduleTask'>
+export interface BoardActions {
+  startCardDrag: (id: string) => void
+  enterCol: (col: BoardCol) => void
+  dropTo: (col: BoardCol) => void
+  startTask: (taskId: string) => void
+  restartTask: (taskId: string) => void
+  createTask: (input: { title: string; description: string; criteria: string[]; templateId?: string; typeId?: string; cwd?: string }) => void
+  updateTask: (id: string, patch: Partial<Pick<BoardTask, 'title' | 'description' | 'criteria' | 'templateId' | 'typeId' | 'cwd'>>) => void
+  sendTaskChat: (taskId: string, text: string) => void
+  draftTask: (input: { title: string; description: string; criteria: string[] }) => Promise<TaskSpecDraft | null>
+  renameTask: (id: string, title: string) => void
+  deleteTask: (id: string) => void
+  scheduleTask: (taskId: string, at: number | null, templateId?: string | null) => void
+}
 
 export function useBoardActions(ctx: BoardActionsCtx): BoardActions {
   const { dispatch, stateRef, dragId, later } = ctx
