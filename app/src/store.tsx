@@ -34,6 +34,7 @@ import { useWorkspaceActions } from './domains/workspace/actions'
 import { useShellActions } from './domains/shell/actions'
 import { createAddonApi } from './domains/addons/addon-api'
 import { applyResolvedSecrets, secretEntries } from './store/secrets'
+import { AbortRegistry } from './core/abort-registry'
 import { buildLaunch } from './domains/session/launch'
 import { useSessionSettle } from './domains/session/use-settle'
 import { buildHydration } from './infrastructure/persistence/hydrate'
@@ -218,10 +219,13 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const monitorHistories = useRef<Map<string, ApiMessage[]>>(new Map())
   const monitorBusy = useRef<Set<string>>(new Set())
   const monitorQueue = useRef<Map<string, string>>(new Map())
+  // per-session cancellation for in-flight monitor turns (aborted on dispose)
+  const monitorAborts = useRef(new AbortRegistry())
 
   // Serialize private monitor turns per session (loop body in store/monitor-runner).
   const runMonitor = useCallback((id: string, note: string) => runMonitorLoop({
     stateRef, dispatch, histories: monitorHistories, busy: monitorBusy, queue: monitorQueue,
+    aborts: monitorAborts.current,
     applyAgentStatus, setNeedsInput, logEvent, notify,
     masterEvent: (n, a) => masterEventRef.current(n, a),
   }, id, note), [applyAgentStatus, logEvent, notify, setNeedsInput])
@@ -763,6 +767,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const disposeSessionRuntime = useCallback((id: string) => {
     disposeTerminal(id)
     disposeSettle(id)
+    monitorAborts.current.abort(id) // cancel any in-flight monitor turn for this session
     monitorHistories.current.delete(id)
     monitorBusy.current.delete(id)
     monitorQueue.current.delete(id)

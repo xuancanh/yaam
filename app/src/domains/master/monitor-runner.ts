@@ -10,6 +10,8 @@ import { runMonitorTurn } from '../../monitor'
 import type { MonitorExec } from '../../monitor'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { extractOptions } from '../session/prompt-detection'
+import type { AbortRegistry } from '../../core/abort-registry'
+import { isAbortError } from '../../core/abort-registry'
 
 export interface MonitorCtx {
   stateRef: MutableRefObject<AppState>
@@ -17,6 +19,8 @@ export interface MonitorCtx {
   histories: MutableRefObject<Map<string, ApiMessage[]>>
   busy: MutableRefObject<Set<string>>
   queue: MutableRefObject<Map<string, string>>
+  /** per-session cancellation — aborted when the session is disposed */
+  aborts: AbortRegistry
   applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
   setNeedsInput: (id: string, question: string, options?: EscOption[], cursorNum?: number) => void
   logEvent: (type: EventType, agentId: string | null, text: string) => void
@@ -73,8 +77,10 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
         },
       }
       try {
-        await runMonitorTurn(buildCfg(st, st.monitorModel || undefined), agent, current, history, exec)
+        await runMonitorTurn(buildCfg(st, st.monitorModel || undefined), agent, current, history, exec, ctx.aborts.signal(id))
       } catch (e) {
+        // the session was disposed mid-turn — stop quietly, don't report an error
+        if (isAbortError(e) || ctx.aborts.signal(id).aborted) { pending = undefined; break }
         ctx.logEvent('escalate', id, `Monitor error: ${e instanceof Error ? e.message : String(e)}`)
       }
       pending = ctx.queue.current.get(id)
@@ -82,5 +88,6 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
     }
   } finally {
     ctx.busy.current.delete(id)
+    ctx.aborts.clear(id)
   }
 }

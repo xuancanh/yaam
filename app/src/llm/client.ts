@@ -128,7 +128,7 @@ function anthropicAuthHeaders(key: string): Record<string, string> {
 }
 
 /** Send one Anthropic-shaped request through direct HTTP or the Bedrock bridge. */
-async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
+async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], signal?: AbortSignal): Promise<ApiResponse> {
   if (cfg.provider.id === 'bedrock') {
     // model id goes in the URL on Bedrock; auth is SigV4 in the backend
     const body = JSON.stringify({ anthropic_version: 'bedrock-2023-05-31', max_tokens: 8192, temperature: 0.2, system, messages, tools })
@@ -146,6 +146,7 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({ model: cfg.model, max_tokens: 8192, temperature: 0.2, system, messages, tools }),
+    signal,
   })
   let res = await send(await resolveKey(cfg))
   if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
@@ -197,7 +198,7 @@ function toOpenAiMessages(system: string, messages: ApiMessage[]): OaiMessage[] 
 }
 
 /** Adapt one request to OpenAI chat completions and normalize its response. */
-async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
+async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], signal?: AbortSignal): Promise<ApiResponse> {
   const base = (cfg.provider.models.length === 0 && cfg.baseUrl ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
   if (!base) throw new Error('custom provider needs a base URL (Settings → Master Brain)')
   // Build the request with a supplied key so auth failures can refresh and retry once.
@@ -214,6 +215,7 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
       messages: toOpenAiMessages(system, messages),
       tools: (tools as Array<{ name: string; description: string; input_schema: unknown }>).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
     }),
+    signal,
   })
   let res = await send(await resolveKey(cfg))
   if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
@@ -246,8 +248,8 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
 }
 
 /** Route a normalized LLM request to the configured wire-protocol adapter. */
-export function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[]): Promise<ApiResponse> {
-  return cfg.provider.protocol === 'anthropic' ? callAnthropic(cfg, system, messages, tools) : callOpenAi(cfg, system, messages, tools)
+export function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], signal?: AbortSignal): Promise<ApiResponse> {
+  return cfg.provider.protocol === 'anthropic' ? callAnthropic(cfg, system, messages, tools, signal) : callOpenAi(cfg, system, messages, tools, signal)
 }
 
 // ---------------------------------------------------------------- streaming

@@ -97,10 +97,11 @@ export async function runMonitorTurn(
   note: string,
   history: ApiMessage[],
   exec: MonitorExec,
+  signal?: AbortSignal,
 ): Promise<void> {
   history.push({ role: 'user', content: note })
   for (let i = 0; i < 3; i++) {
-    const res = await callApi(cfg, monitorSystem(agent), history, MONITOR_TOOLS)
+    const res = await callApi(cfg, monitorSystem(agent), history, MONITOR_TOOLS, signal)
     if (res.stop_reason !== 'tool_use') {
       const text = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n')
       history.push({ role: 'assistant', content: text || '(ok)' })
