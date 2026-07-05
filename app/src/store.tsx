@@ -20,18 +20,6 @@ import { createChatRuntime } from './domains/chat/chat-runtime'
 import type { ChatRuntime } from './domains/chat/chat-runtime'
 import { createMasterRuntime } from './domains/master/master-runtime'
 import type { MasterRuntime } from './domains/master/master-runtime'
-import { useSettingsActions } from './domains/settings/actions'
-import { useBoardActions } from './domains/board/actions'
-import { useSchedulesActions } from './domains/schedules/actions'
-import { useChatActions } from './domains/chat/actions'
-import { useAddonsActions } from './domains/addons/actions'
-import { useWorkspaceActions } from './domains/workspace/actions'
-import { useShellActions } from './domains/shell/actions'
-import { useSessionLayoutActions } from './domains/session/layout-actions'
-import { useSessionConfigActions } from './domains/session/config-actions'
-import { useSessionPromptActions } from './domains/session/prompt-actions'
-import { useMasterActions } from './domains/master/actions'
-import { useSessionActions } from './domains/session/actions'
 import { useActivityService } from './domains/activity/service'
 import { useAddonRuntime } from './domains/addons/runtime'
 import { useIntegrationRuntime } from './domains/settings/integrations'
@@ -47,8 +35,8 @@ import { useSessionSettle } from './domains/session/use-settle'
 import { useHydration } from './infrastructure/persistence/hydrate-effect'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './domains/board/task-state'
 import type { LocatedTask } from './domains/board/task-state'
-import type { ConductorActions } from './app/actions'
 import { useGlobalEffects } from './app/global-effects'
+import { useConductorActions } from './app/conductor-actions'
 
 
 
@@ -408,64 +396,23 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     stateRef, flash, logEvent, editorHistories: addonEditorHistories,
   }), [flash, logEvent]))
 
-  // Per-domain action slices, composed into the single action surface below.
-  // The ctx objects are memoized on their (stable) callback/ref deps so each
-  // slice — and therefore the ActionsCtx value — stays referentially stable
-  // across state-driven provider re-renders (terminal output / chat streaming
-  // must not re-render action consumers).
-  const settingsActions = useSettingsActions(useMemo(() => ({
-    dispatch, later, connectMcp, refreshSkillCatalog,
-    mcpSessions: mcpSessionsRef, skillCatalogs: skillCatalogsRef,
-  }), [later, connectMcp, refreshSkillCatalog]))
-  const boardActions = useBoardActions(useMemo(() => ({
-    dispatch, stateRef, dragId, later, flash, logEvent,
+  // Compose every domain action slice into the single ActionsCtx surface.
+  const actions = useConductorActions({
+    stateRef, dragId, later, flash, logEvent, notify,
+    connectMcp, refreshSkillCatalog, mcpSessions: mcpSessionsRef, skillCatalogs: skillCatalogsRef,
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
     spawnSessionForTask, startTaskViaWatcher, runWatcher, pushTaskChat,
     markUserStopped: (id: string) => userStoppedRef.current.add(id),
     disposeWatcher: (tid: string) => watcherRef.current!.dispose(tid), taskSessions: taskSessionsRef,
-  }), [later, flash, logEvent, spawnSessionForTask, startTaskViaWatcher, runWatcher, pushTaskChat]))
-  const schedulesActions = useSchedulesActions(useMemo(() => ({ dispatch, flash, logEvent, launchFromTemplate }), [flash, logEvent, launchFromTemplate]))
-  const chatActions = useChatActions(useMemo(() => ({ dispatch, stateRef, logEvent, runChatMessage }), [logEvent, runChatMessage]))
-  const addonsActions = useAddonsActions(useMemo(() => ({
-    dispatch, stateRef, flash, installPackage: addonRuntime.installPackage,
+    launchFromTemplate, runChatMessage,
+    installPackage: addonRuntime.installPackage,
     sendAddonChat: (id: string, text: string) => { void addonRuntime.sendAddonChat(id, text) },
     makeAddonApi, addonAgentHistories, addonEditorHistories,
     abortAgent: (aid: string) => addonAborts.current.abort(aid),
-  }), [flash, addonRuntime, makeAddonApi]))
-  const workspaceActions = useWorkspaceActions(useMemo(() => ({
-    dispatch, stateRef, later, flash, runMaster,
-    markUserStopped: (id: string) => userStoppedRef.current.add(id), disposeSessionRuntime,
-    abortMaster: () => masterRef.current!.abort(),
-  }), [later, flash, runMaster, disposeSessionRuntime]))
-  const shellActions = useShellActions()
-  const sessionLayoutActions = useSessionLayoutActions()
-  const sessionConfigActions = useSessionConfigActions()
-  const sessionPromptActions = useSessionPromptActions(useMemo(() => ({
-    stateRef, flash, logEvent, armResponseWatch, clearFlagged,
-  }), [flash, logEvent, armResponseWatch, clearFlagged]))
-  const masterActions = useMasterActions(useMemo(() => ({
-    stateRef, later, runMaster, toolApprovals: toolApprovalsRef,
-  }), [later, runMaster]))
-  const sessionActions = useSessionActions(useMemo(() => ({
-    stateRef, flash, logEvent, markUserStopped: (id: string) => userStoppedRef.current.add(id),
-    disposeSessionRuntime, launchSession, probeCliSession, armResponseWatch, appendTail, clearNeeds, bumpSettle,
-  }), [flash, logEvent, disposeSessionRuntime, launchSession, probeCliSession, armResponseWatch, appendTail, clearNeeds, bumpSettle]))
-
-  // Expose stable UI actions while implementations read fresh state through stateRef.
-  const actions = useMemo<ConductorActions>(() => ({
-    ...settingsActions,
-    ...boardActions,
-    ...schedulesActions,
-    ...chatActions,
-    ...addonsActions,
-    ...workspaceActions,
-    ...shellActions,
-    ...sessionLayoutActions,
-    ...sessionConfigActions,
-    ...sessionPromptActions,
-    ...sessionActions,
-    ...masterActions,
-  }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, sessionPromptActions, sessionActions, masterActions])
+    runMaster, disposeSessionRuntime, abortMaster: () => masterRef.current!.abort(),
+    toolApprovals: toolApprovalsRef,
+    armResponseWatch, clearFlagged, launchSession, probeCliSession, appendTail, clearNeeds, bumpSettle,
+  })
 
   useGlobalEffects()
 
