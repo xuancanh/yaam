@@ -1,4 +1,4 @@
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { formatEstimatedTokens } from '../../core/usage'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from '../../components/ui'
 import { UsageSummary } from './UsageSummary'
@@ -22,7 +22,7 @@ function InlineUsage({ agent }: { agent: { used: number; cost: number; budget: n
 
 /** Summarize live and archived sessions in the active workspace. */
 export function Overview() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace }), shallowEqual)
   const { focusTab, resume, openPanel, openAgent, openDiff, renameSession, archiveSession, unarchiveSession, deleteSession } = useActions()
   // Keep legacy sessions without workspaceId in the active workspace.
   const inWs = (a: typeof s.agents[number]) => (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace

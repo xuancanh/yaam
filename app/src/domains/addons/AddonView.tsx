@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductor, useConductorSelector, shallowEqual } from '../../store'
 import { AddonSource } from './AddonSource'
 import { addonSnapshot } from '../../core/addons'
 import type { Addon } from '../../core/types'
@@ -8,7 +8,7 @@ import { IC, Icon, MasterMark, ViewHeader } from '../../components/ui'
 
 /** Host the scoped LLM customization conversation for one addon package. */
 function AddonChat({ addon }: { addon: Addon }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ addonChats: x.addonChats, addonChatBusy: x.addonChatBusy }), shallowEqual)
   const { sendAddonChat } = useActions()
   const [draft, setDraft] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -91,6 +91,8 @@ function withViewCsp(html: string): string {
 
 /** Render an addon's preview, source, or customization mode. */
 export function AddonView() {
+  // This scope hands the addon iframe a full-state snapshot (gated by its
+  // state:read grant), so it intentionally subscribes to the whole store.
   const s = useConductor()
   const { removeAddon, addonRpc } = useActions()
   const [mode, setMode] = useState<'view' | 'source' | 'chat'>('view')

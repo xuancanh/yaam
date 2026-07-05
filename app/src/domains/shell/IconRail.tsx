@@ -1,4 +1,4 @@
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { hexToRgba, ACCENT } from '../../core/data'
 import type { View } from '../../core/types'
 import { IC, Icon, MasterMark } from '../../components/ui'
@@ -15,7 +15,7 @@ const NAV: Array<{ id: View; label: string; paths: string[] }> = [
 
 /** Render primary navigation plus enabled addon views for the active workspace. */
 export function IconRail() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ view: x.view, addons: x.addons, activeAddon: x.activeAddon }), shallowEqual)
   const { setView, openAddon } = useActions()
 
   return (

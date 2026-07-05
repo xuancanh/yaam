@@ -1,10 +1,10 @@
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT, PERM_COLORS, hexToRgba, memTokens } from '../../core/data'
 import { AgentAvatar, IC, Icon, Switch } from '../../components/ui'
 
 /** Route the active slide-over panel to its specialized content component. */
 export function SlideOver() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ panel: x.panel, agents: x.agents }), shallowEqual)
   const { closePanel, setPanelTab, toggleMem, toggleTool, cyclePerm } = useActions()
 
   if (!s.panel) return null

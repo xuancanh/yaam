@@ -1,15 +1,15 @@
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector } from '../../store'
 import { ACCENT, PERM_COLORS, hexToRgba } from '../../core/data'
 import { ViewHeader } from '../../components/ui'
 
 /** The Master tool permission grid — embedded in Settings → Tools. */
 export function ToolsSection() {
-  const s = useConductor()
+  const toolsCatalog = useConductorSelector(x => x.toolsCatalog)
   const { cycleCatalogPerm } = useActions()
 
   return (
         <div style={{ display: 'grid', gap: 13, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-          {s.toolsCatalog.map(t => {
+          {toolsCatalog.map(t => {
             const permColor = PERM_COLORS[t.perm] || 'var(--mut)'
             return (
               <div key={t.id} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: 15 }}>

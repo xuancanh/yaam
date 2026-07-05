@@ -1,10 +1,10 @@
-import { useConductor } from '../../store'
+import { useConductorSelector, shallowEqual } from '../../store'
 import { EVENT_COLORS, hexToRgba } from '../../core/data'
 import { ViewHeader } from '../../components/ui'
 
 /** Render the active workspace's reverse-chronological activity feed. */
 export function Timeline() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agents: x.agents, events: x.events }), shallowEqual)
   const byId = new Map(s.agents.map(a => [a.id, a]))
 
   return (

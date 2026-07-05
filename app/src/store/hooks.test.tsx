@@ -3,7 +3,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import { createElement } from 'react'
 import { render, act } from '@testing-library/react'
 import { useAppStore } from '../core/store'
-import { useConductorSelector } from './hooks'
+import { useConductorSelector, shallowEqual } from './hooks'
 import type { AppState } from '../core/types'
 
 const setState = (s: Partial<AppState>) => useAppStore.setState(s as AppState, true)
@@ -31,6 +31,24 @@ describe('useConductorSelector (Zustand-backed)', () => {
     act(() => setState({ toast: 'b', composer: 'y' } as unknown as AppState))
     expect(renders).toBe(2)
     expect(seen).toBe('b')
+  })
+
+  it('narrows a multi-field slice with shallowEqual (the Phase 7 pattern)', () => {
+    setState({ toast: 'a', composer: 'x', paletteQuery: 'q' } as unknown as AppState)
+    let renders = 0
+    function Probe() {
+      renders++
+      const s = useConductorSelector((st: AppState) => ({ toast: st.toast, composer: st.composer }), shallowEqual)
+      return createElement('span', null, `${s.toast}${s.composer}`)
+    }
+    render(createElement(Probe))
+    expect(renders).toBe(1)
+    // a field OUTSIDE the selected set changes → no re-render
+    act(() => setState({ toast: 'a', composer: 'x', paletteQuery: 'z' } as unknown as AppState))
+    expect(renders).toBe(1)
+    // a selected field changes → exactly one re-render
+    act(() => setState({ toast: 'a', composer: 'y', paletteQuery: 'z' } as unknown as AppState))
+    expect(renders).toBe(2)
   })
 
   it('supports a custom equality function for object slices', () => {

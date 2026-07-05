@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { KeyboardEvent } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import type { View } from '../../core/types'
 import { Icon } from '../../components/ui'
 
@@ -35,7 +35,7 @@ interface Command {
 
 /** Filter keyboard actions and dispatch the selected command or session focus. */
 export function CommandPalette() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agents: x.agents, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery }), shallowEqual)
   const a = useActions()
   const inputRef = useRef<HTMLInputElement>(null)
 

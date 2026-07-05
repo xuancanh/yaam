@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { hexToRgba } from '../../core/data'
 import { pickFolder } from '../../core/native'
 import { PROVIDERS, providerFor } from '../../master'
@@ -15,7 +15,7 @@ const FIELD_STYLE = {
 
 /** MCP servers chat agents can call tools on (streamable HTTP). */
 function McpSection() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ mcpServers: x.mcpServers }), shallowEqual)
   const { addMcpServer, updateMcpServer, removeMcpServer, connectMcpServer } = useActions()
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
@@ -84,7 +84,7 @@ function McpSection() {
 
 /** Skills registry: reusable instruction packs chat agents load on demand. */
 function SkillsSection() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ skills: x.skills }), shallowEqual)
   const { addSkill, updateSkill, removeSkill } = useActions()
   const [openId, setOpenId] = useState<string | null>(null)
 
@@ -138,7 +138,7 @@ function SkillsSection() {
 
 /** Personas: named voices/roles a chat adopts (picked per chat). */
 function PersonasSection() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ personas: x.personas }), shallowEqual)
   const { addPersona, updatePersona, removePersona } = useActions()
   const [openId, setOpenId] = useState<string | null>(null)
 
@@ -195,7 +195,7 @@ function PersonasSection() {
 
 /** Skill registries: remote (github tree) or local-folder skill sources. */
 function SkillRegistriesSection() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ skillRegistries: x.skillRegistries }), shallowEqual)
   const { addSkillRegistry, updateSkillRegistry, removeSkillRegistry, refreshSkillRegistry } = useActions()
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
@@ -259,7 +259,7 @@ function AddChatTypeButton() {
 
 /** Configurable chat-agent types: provider, model, credentials, persona. */
 function ChatTypesSection() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ chatAgentTypes: x.chatAgentTypes, settings: x.settings }), shallowEqual)
   const { updateChatAgentType, deleteChatAgentType } = useActions()
   return (
     <>
@@ -390,7 +390,7 @@ const SETTINGS_TABS = [
 type SettingsTab = (typeof SETTINGS_TABS)[number][0]
 
 export function SettingsView() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ settings: x.settings, agentTypes: x.agentTypes }), shallowEqual)
   const { toggleSetting, toggleAgentType, updateSettings, setAgentTypeCmd, updateAgentType, addAgentType, deleteAgentType } = useActions()
   const [tab, setTab] = useState<SettingsTab>('general')
   const [chatTab, setChatTab] = useState<'agents' | 'personas' | 'skills'>('agents')

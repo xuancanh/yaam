@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT, hexToRgba, indicatorColor } from '../../core/data'
 import type { Agent, TabGroup } from '../../core/types'
 import { IC, Icon, StatusPill } from '../../components/ui'
@@ -101,7 +101,7 @@ function LayoutMenu({ group }: { group: TabGroup | undefined }) {
 
 /** empty grid section: click to pick which session lives here */
 function EmptySlot({ index }: { index: number }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup }), shallowEqual)
   const { assignPane, openNewSession, setActivePane } = useActions()
   const [picking, setPicking] = useState(false)
   // assignable: loose sessions, plus sessions sitting alone in a single-pane
@@ -185,7 +185,7 @@ function EmptySlot({ index }: { index: number }) {
 
 /** Compose group/loose tabs, the active group's split grid, and the dock. */
 export function Workspace() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen }), shallowEqual)
   const { focusTab, activateGroup, closeGroup, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit } = useActions()
   const byId = new Map(s.agents.map(a => [a.id, a]))
   const ag = s.groups.find(g => g.id === s.activeGroup)

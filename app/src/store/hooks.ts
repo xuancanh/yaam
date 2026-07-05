@@ -31,6 +31,21 @@ export function useConductorSelector<T>(selector: (s: AppState) => T, isEqual: (
   return useSyncExternalStore(useAppStore.subscribe, getSelection, getSelection)
 }
 
+/** Shallow (one-level) equality for object/array slices — pass as the second
+ *  arg to useConductorSelector when a selector returns a fresh object of several
+ *  fields, so it re-renders only when one of those fields actually changes. */
+export function shallowEqual<T>(a: T, b: T): boolean {
+  if (Object.is(a, b)) return true
+  if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) return false
+  const ka = Object.keys(a as object)
+  const kb = Object.keys(b as object)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) {
+    if (!Object.is((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false
+  }
+  return true
+}
+
 /** Read the stable action surface and fail fast outside the provider. */
 export function useActions(): ConductorActions {
   const a = useContext(ActionsCtx)

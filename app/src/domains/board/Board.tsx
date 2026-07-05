@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DragEvent, KeyboardEvent } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT, hexToRgba } from '../../core/data'
 import type { Agent, BoardCol, BoardTask, TaskChatMsg } from '../../core/types'
 import { IC, Icon, ViewHeader } from '../../components/ui'
@@ -33,7 +33,7 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
 
 /** Draft, validate, and create a watcher-ready board task. */
 function NewTaskDialog({ onClose }: { onClose: () => void }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ settings: x.settings }), shallowEqual)
   const { createTask } = useActions()
   const [spec, setSpec] = useState(() => emptyTaskSpec(s.settings.defaultCwd || ''))
   const { busy, questions, error, llmOn, draft, resolveForCreate } = useTaskSpecAssist(spec, setSpec)
@@ -105,7 +105,7 @@ function ChatBubble({ m }: { m: TaskChatMsg }) {
 
 /** Edit a task specification and converse with its dedicated watcher. */
 function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | null; onClose: () => void }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes }), shallowEqual)
   const { updateTask, sendTaskChat, focusTab, startTask, restartTask, deleteTask } = useActions()
   const runWith = task.templateId
     ? `template · ${(s.templates ?? []).find(t => t.id === task.templateId)?.name ?? task.templateId}`
@@ -284,7 +284,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
 
 /** Configure or clear a board task's one-time launch time and template. */
 function SchedulePopover({ card, onClose }: { card: BoardTask; onClose: () => void }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ templates: x.templates }), shallowEqual)
   const { scheduleTask } = useActions()
   const [when, setWhen] = useState(card.scheduleAt ? toLocalInput(card.scheduleAt) : toLocalInput(Date.now() + 3600_000))
   const [templateId, setTemplateId] = useState(card.templateId ?? '')
@@ -332,7 +332,7 @@ function SchedulePopover({ card, onClose }: { card: BoardTask; onClose: () => vo
 
 /** Render a draggable task summary with worker and watcher status. */
 function Card({ card, agent, onOpen }: { card: BoardTask; agent: Agent | null; onOpen: () => void }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ templates: x.templates }), shallowEqual)
   const { startCardDrag, deleteTask, startTask } = useActions()
   const [scheduling, setScheduling] = useState(false)
   const unread = (card.chat ?? []).length
@@ -432,7 +432,7 @@ const COLS: Array<{ id: BoardCol; label: string; dot: string }> = [
 
 /** Render the active workspace's draggable watcher-driven kanban board. */
 export function Board() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, dragOverCol: x.dragOverCol }), shallowEqual)
   const { enterCol, dropTo } = useActions()
   const [creating, setCreating] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)

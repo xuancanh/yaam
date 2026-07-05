@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { NOTIF_COLORS, hexToRgba } from '../../core/data'
 import { EditableName, IC, Icon, MasterMark } from '../../components/ui'
 
 /** Switch, create, rename, and delete workspace-scoped state pools. */
 function WorkspaceSwitcher() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, agents: x.agents }), shallowEqual)
   const { switchWorkspace, createWorkspace, renameWorkspace, deleteWorkspace } = useActions()
   const [open, setOpen] = useState(false)
   const active = s.workspaces.find(w => w.id === s.activeWorkspace)
@@ -85,7 +85,7 @@ function WorkspaceSwitcher() {
 
 /** Render workspace notifications and actions from the title-bar bell. */
 function NotifPopover() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ notifications: x.notifications }), shallowEqual)
   const { readAllNotif, clickNotif } = useActions()
 
   return (
@@ -135,7 +135,7 @@ function NotifPopover() {
 
 /** Render the draggable desktop title bar and global controls. */
 export function TitleBar() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, notifications: x.notifications, notifOpen: x.notifOpen }), shallowEqual)
   const { openPalette, gotoNeeds, toggleNotif, setView } = useActions()
   const needsCount = s.agents.filter(a => a.status === 'needs' && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace).length
   const unread = s.notifications.filter(n => !n.read).length

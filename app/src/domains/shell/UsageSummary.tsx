@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useConductor } from '../../store'
+import { useConductorSelector, shallowEqual } from '../../store'
 import { ESTIMATED_OUTPUT_COST_PER_KTOK, formatEstimatedTokens } from '../../core/usage'
 
 /** Render one aggregate usage metric with its explanatory subtitle. */
@@ -15,7 +15,7 @@ function StatCard({ label, value, sub, valueColor }: { label: string; value: str
 
 /** Collapsible workspace-wide usage totals shown at the top of the Agents view. */
 export function UsageSummary() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace }), shallowEqual)
   const [open, setOpen] = useState(false)
   const agents = s.agents.filter(a => (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
   const totalCost = agents.reduce((n, a) => n + a.cost, 0)

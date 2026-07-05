@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useActions, useConductor, humanizeCron } from '../../store'
+import { useActions, useConductorSelector, shallowEqual, humanizeCron } from '../../store'
 import { ACCENT, hexToRgba } from '../../core/data'
 import type { Cron } from '../../core/types'
 import { IC, Icon, Switch, ViewHeader } from '../../components/ui'
@@ -17,7 +17,7 @@ function nextHourLocal(): string {
 
 /** Collect and normalize recurring or one-time schedule configuration. */
 function NewScheduleDialog({ onClose }: { onClose: () => void }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ settings: x.settings }), shallowEqual)
   const { addCron } = useActions()
   const [kind, setKind] = useState<'cron' | 'once'>('cron')
   const [name, setName] = useState('')
@@ -156,7 +156,7 @@ function NewScheduleDialog({ onClose }: { onClose: () => void }) {
 
 /** List, toggle, remove, and create schedules for the active workspace. */
 export function Schedules() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ crons: x.crons, templates: x.templates }), shallowEqual)
   const { toggleCron, deleteCron } = useActions()
   const [dialogOpen, setDialogOpen] = useState(false)
 

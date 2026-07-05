@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { DIFF_BG, DIFF_COLORS, LOG_COLORS } from '../../core/data'
 import { gitDiff, isTauri } from '../../core/native'
 import type { Agent, DiffFile } from '../../core/types'
@@ -169,7 +169,7 @@ function AgentBody({ agent }: { agent: Agent }) {
 
 /** Render the store-selected agent drawer and close it on backdrop interaction. */
 export function Drawer() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agents: x.agents, drawer: x.drawer }), shallowEqual)
   const { closeDrawer, renameSession } = useActions()
 
   if (!s.drawer) return null

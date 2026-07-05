@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { isTauri, pickFolder } from '../../core/native'
 
 // Shared task-spec editor: the SAME fields, AI drafting, and reject-with-
@@ -62,7 +62,7 @@ function toPatch(v: TaskSpecValue, description: string, criteria: string[]): Tas
 
 /** Drafting + validation shared by every task-creation surface. */
 export function useTaskSpecAssist(v: TaskSpecValue, set: (v: TaskSpecValue) => void) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ settings: x.settings }), shallowEqual)
   const { draftTask } = useActions()
   const [busy, setBusy] = useState<'draft' | 'create' | null>(null)
   const [questions, setQuestions] = useState<string[]>([])
@@ -126,7 +126,7 @@ export function TaskSpecFields({ v, set, questions, error, autoFocus }: {
   error: string
   autoFocus?: boolean
 }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes, templates: x.templates }), shallowEqual)
   const enabledTypes = s.agentTypes.filter(t => t.enabled)
   const templates = s.templates ?? []
 

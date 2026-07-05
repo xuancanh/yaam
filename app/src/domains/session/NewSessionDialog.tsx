@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { isTauri, pickFolder } from '../../core/native'
 import { SHELLS } from '../../core/data'
 
@@ -16,7 +16,7 @@ function FieldLabel({ children }: { children: string }) {
 
 /** Launch a terminal session (CLI/template/shell) or a chat-mode agent. */
 export function NewSessionDialog({ onClose }: { onClose: () => void }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes, settings: x.settings, templates: x.templates }), shallowEqual)
   const { newRealSession, runTemplate } = useActions()
 
   // terminal mode

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { chatSearch, isTauri, pickFolder } from '../../core/native'
 import type { ChatSearchHit } from '../../core/native'
 import { ACCENT, hexToRgba } from '../../core/data'
@@ -35,7 +35,7 @@ function timeLabel(at: number): string {
 
 /** inline "new chat" composer: agent type, model, folder */
 function NewChatRow({ onCreated }: { onCreated: (id: string) => void }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ chatAgentTypes: x.chatAgentTypes, settings: x.settings, skillRegistries: x.skillRegistries, personas: x.personas, skills: x.skills }), shallowEqual)
   const { newChatSession } = useActions()
   const types = s.chatAgentTypes.filter(t => t.enabled)
   const [typeId, setTypeId] = useState(types[0]?.id ?? '')
@@ -113,7 +113,7 @@ function NewChatRow({ onCreated }: { onCreated: (id: string) => void }) {
 }
 
 export function ChatView() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId }), shallowEqual)
   const { openChat, deleteSession, renameSession } = useActions()
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<ChatSearchHit[] | null>(null)

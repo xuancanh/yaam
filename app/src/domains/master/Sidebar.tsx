@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { hasCreds } from '../../master'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT, hexToRgba } from '../../core/data'
 import type { Message } from '../../core/types'
 import { IC, Icon, MasterMark } from '../../components/ui'
@@ -231,7 +231,10 @@ function MessageRow({ msg }: { msg: Message }) {
 
 /** Render the resizable Master conversation, composer, and collapsed rail. */
 export function Sidebar() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({
+    agents: x.agents, composer: x.composer, masterBusy: x.masterBusy,
+    messages: x.messages, pendingToolApprovals: x.pendingToolApprovals, settings: x.settings,
+  }), shallowEqual)
   const { setComposer, send, updateSettings, resolveToolApproval } = useActions()
   const scrollRef = useRef<HTMLDivElement>(null)
   const isMac = navigator.platform.toUpperCase().includes('MAC')

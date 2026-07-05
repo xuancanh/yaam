@@ -1688,6 +1688,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   return <ActionsCtx.Provider value={actions}>{children}</ActionsCtx.Provider>
 }
 
-export { useConductor, useConductorSelector, useActions } from './store/hooks'
+export { useConductor, useConductorSelector, useActions, shallowEqual } from './store/hooks'
 
 export type { LogLine }

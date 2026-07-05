@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useActions, useConductor } from '../../store'
+import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { httpGetText, readTextFile } from '../../core/native'
 import { ALL_PERMISSIONS } from '../../core/addons'
 import type { Addon } from '../../core/types'
@@ -175,7 +175,7 @@ function MarketDetail({ e, installed }: { e: RegistryEntry; installed?: Addon })
 }
 
 export function AddonsView() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ settings: x.settings, addons: x.addons }), shallowEqual)
   const { installAddonFromFile, installAddonFromFolder, updateSettings } = useActions()
   const [query, setQuery] = useState('')
   const [market, setMarket] = useState<RegistryEntry[]>([])

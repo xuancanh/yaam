@@ -1,4 +1,4 @@
-import { ConductorProvider, useConductor } from './store'
+import { ConductorProvider, useConductorSelector } from './store'
 import { TitleBar } from './domains/shell/TitleBar'
 import { IconRail } from './domains/shell/IconRail'
 import { Sidebar } from './domains/master/Sidebar'
@@ -20,20 +20,20 @@ import { Toast } from './domains/shell/Toast'
 
 /** Select the active top-level view from the centralized navigation state. */
 function MainArea() {
-  const s = useConductor()
+  const view = useConductorSelector(x => x.view)
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-      {s.view === 'workspace' && <Workspace />}
-      {s.view === 'overview' && <Overview />}
-      {s.view === 'board' && <Board />}
-      {s.view === 'timeline' && <Timeline />}
-      {s.view === 'crons' && <Schedules />}
-      {s.view === 'templates' && <TemplatesView />}
-      {s.view === 'tools' && <ToolsView />}
-      {s.view === 'addons' && <AddonsView />}
-      {s.view === 'chat' && <ChatView />}
-      {s.view === 'settings' && <SettingsView />}
-      {s.view === 'addon' && <AddonView />}
+      {view === 'workspace' && <Workspace />}
+      {view === 'overview' && <Overview />}
+      {view === 'board' && <Board />}
+      {view === 'timeline' && <Timeline />}
+      {view === 'crons' && <Schedules />}
+      {view === 'templates' && <TemplatesView />}
+      {view === 'tools' && <ToolsView />}
+      {view === 'addons' && <AddonsView />}
+      {view === 'chat' && <ChatView />}
+      {view === 'settings' && <SettingsView />}
+      {view === 'addon' && <AddonView />}
     </div>
   )
 }

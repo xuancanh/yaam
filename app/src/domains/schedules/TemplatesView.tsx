@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useConductor, useActions } from '../../store'
+import { useConductorSelector, shallowEqual, useActions } from '../../store'
 import { buildTemplateCommand } from '../../core/state-lib'
 import type { AgentTemplate, TemplateApproval, TemplateMode } from '../../core/types'
 import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
@@ -32,7 +32,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 /** Full-view editor for one template — opened by create / edit */
 /** Edit every persisted launch option for one agent template. */
 function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => void }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes }), shallowEqual)
   const { updateTemplate, runTemplate } = useActions()
   const type = s.agentTypes.find(t => t.id === tpl.typeId)
   const preview = buildTemplateCommand(tpl, type, tpl.prompt.includes('{task}') ? '<task>' : undefined)
@@ -158,7 +158,7 @@ function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => v
 /** compact card — summary only; click to open the full editor */
 /** Summarize a template and expose run, edit, and delete actions. */
 function TemplateCard({ tpl, onEdit }: { tpl: AgentTemplate; onEdit: () => void }) {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes }), shallowEqual)
   const { deleteTemplate, runTemplate } = useActions()
   const type = s.agentTypes.find(t => t.id === tpl.typeId)
   const promptPreview = tpl.prompt.replace(/\s+/g, ' ').trim()
@@ -209,7 +209,7 @@ function TemplateCard({ tpl, onEdit }: { tpl: AgentTemplate; onEdit: () => void 
 
 /** Manage global reusable agent launch templates. */
 export function TemplatesView() {
-  const s = useConductor()
+  const s = useConductorSelector(x => ({ templates: x.templates }), shallowEqual)
   const { addTemplate } = useActions()
   const [editingId, setEditingId] = useState<string | null>(null)
   const templates = s.templates ?? []
