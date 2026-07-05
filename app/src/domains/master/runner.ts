@@ -13,6 +13,7 @@ import { mkId } from '../../shared/id'
 import { humanizeCron } from '../schedules/cron'
 import { KEYMAP, sendLineToSession, wait } from '../session/command'
 import { PERM_ORDER, SHELLS } from '../../core/data'
+import { isAbortError } from '../../core/abort-registry'
 import * as native from '../../core/native'
 
 export interface MasterCtx {
@@ -34,6 +35,8 @@ export interface MasterCtx {
   applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
   setNeedsInput: (id: string, question: string) => void
   makeAddonApi: (addonId: string) => AddonApi
+  /** current cancellation signal for the Master turn (aborted on workspace delete) */
+  signal?: () => AbortSignal | undefined
 }
 
 /** Run Master turns until its queue drains, applying tool-permission gates. */
@@ -320,7 +323,7 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
     const note = pendingTurn.note
     pendingTurn = null
     try {
-      const { text, thinking } = await runMasterTurn(() => stateRef.current, exec, note)
+      const { text, thinking } = await runMasterTurn(() => stateRef.current, exec, note, ctx.signal?.())
       if (text || thinking) {
         dispatch(s => ({
           ...s,
@@ -332,6 +335,8 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
         }))
       }
     } catch (e) {
+      // the workspace was deleted mid-turn — stop quietly, don't post an error
+      if (isAbortError(e) || ctx.signal?.()?.aborted) { pendingTurn = null; break }
       dispatch(s => ({
         ...s,
         messages: s.messages.concat([{

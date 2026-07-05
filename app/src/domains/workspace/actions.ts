@@ -17,6 +17,8 @@ export interface WorkspaceActionsCtx {
   runMaster: (note?: string) => void
   markUserStopped: (id: string) => void
   disposeSessionRuntime: (id: string) => void
+  /** cancel any in-flight Master turn (workspace being deleted) */
+  abortMaster: () => void
 }
 
 export interface WorkspaceActions {
@@ -62,6 +64,7 @@ export function useWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActions 
         flash('Cannot delete the last workspace')
         return
       }
+      ctx.abortMaster() // cancel any in-flight Master turn tied to this teardown
       // kill the workspace's sessions and tear down all their runtime state
       for (const a of s0.agents.filter(a => a.workspaceId === id)) {
         ctx.markUserStopped(a.id)

@@ -21,6 +21,7 @@ export async function runMasterTurn(
   getState: () => AppState,
   exec: MasterExec,
   eventNote?: string,
+  signal?: AbortSignal,
 ): Promise<MasterTurnResult> {
   const s0 = getState()
   const cfg = buildCfg(s0.settings)
@@ -32,7 +33,7 @@ export async function runMasterTurn(
 
   for (let i = 0; i < 10; i++) {
     // re-describe state each iteration so tool effects are visible to the model
-    const res = await callApi(cfg, systemPrompt(getState()), messages, [...TOOLS, ...addonToolDefs(getState())])
+    const res = await callApi(cfg, systemPrompt(getState()), messages, [...TOOLS, ...addonToolDefs(getState())], signal)
     const stepTexts: string[] = []
     for (const block of res.content) {
       if (block.type === 'thinking' && block.text) trace.push(block.text)

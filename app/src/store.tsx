@@ -1005,6 +1005,8 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // Master brain: run one LLM turn (chat → tools → chat), serializing turns
   const masterBusyRef = useRef(false)
   const masterQueued = useRef<{ note?: string } | null>(null)
+  // cancellation for the single global Master turn (aborted on workspace delete)
+  const masterAborts = useRef(new AbortRegistry())
 
   const lastEventRef = useRef<{ note: string; at: number } | null>(null)
 
@@ -1013,6 +1015,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     stateRef, dispatch, masterBusyRef, masterQueued, lastEventRef, toolApprovalsRef, userStoppedRef,
     addonAgentHistories, addonEditorHistories, launchSession, launchFromTemplate, armResponseWatch,
     sessionScreenTail, logEvent, flash, applyAgentStatus, setNeedsInput, makeAddonApi,
+    signal: () => masterAborts.current.signal('master'),
   }, eventNote), [applyAgentStatus, armResponseWatch, flash, makeAddonApi, launchFromTemplate, launchSession, logEvent, sessionScreenTail, setNeedsInput])
 
   masterEventRef.current = (note, agentId) => {
@@ -1143,6 +1146,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   const workspaceActions = useWorkspaceActions(useMemo(() => ({
     dispatch, stateRef, later, flash, runMaster,
     markUserStopped: (id: string) => userStoppedRef.current.add(id), disposeSessionRuntime,
+    abortMaster: () => masterAborts.current.abort('master'),
   }), [later, flash, runMaster, disposeSessionRuntime]))
   const shellActions = useShellActions()
 
