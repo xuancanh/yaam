@@ -1,8 +1,8 @@
 # Rearchitecture hotspots beyond the store
 
-> **Historical audit.** Use [architecture.md](architecture.md),
-> [frontend-domains.md](frontend-domains.md), [backend-domains.md](backend-domains.md),
-> and [security.md](security.md) for current behavior. Findings below are
+> **Historical audit.** Use [architecture.md](../architecture.md),
+> [frontend-domains.md](../frontend-domains.md), [backend-domains.md](../backend-domains.md),
+> and [security.md](../security.md) for current behavior. Findings below are
 > preserved as the audit that motivated the changes and may describe already
 > fixed code.
 >
@@ -39,7 +39,7 @@ implement overlapping use cases independently. Moving those implementations
 into domain folders without first establishing one command and authorization
 boundary would preserve duplication and policy drift.
 
-This report complements `docs/store-domain-refactor-plan.md`. The command layer
+This report complements `docs/planning/store-domain-refactor-plan.md`. The command layer
 should be introduced before the later domain-runtime extraction in that plan.
 
 ## Priority matrix

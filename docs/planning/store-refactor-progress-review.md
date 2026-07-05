@@ -1,7 +1,7 @@
 # Store refactor progress review and remaining plan
 
-> **Historical review.** Use [architecture.md](architecture.md) and
-> [frontend-domains.md](frontend-domains.md) for the current implementation. The
+> **Historical review.** Use [architecture.md](../architecture.md) and
+> [frontend-domains.md](../frontend-domains.md) for the current implementation. The
 > body is preserved as the migration record.
 >
 > **Status addendum (2026-07-05).** Much of this review has since been executed.
@@ -71,14 +71,14 @@
 > The doc's `StatePort`/`ClockPort` seam is `core/ports.ts`. Remaining polish (not
 > blocking): retire the now-unused `useConductorRuntime`/`useConductorActions` hook
 > path once nothing imports it. Broader system rework continues in
-> `docs/rearchitecture-hotspots.md`. The original target-architecture text is
+> `docs/planning/rearchitecture-hotspots.md`. The original target-architecture text is
 > preserved below.
 
 Reviewed on 2026-07-04 against commit `c8f6981` plus the active selector-migration
 changes in the working tree.
 
 This is a fresh review of the current implementation. It supersedes the status
-assessment in `docs/store-domain-refactor-plan.md`; that document remains useful
+assessment in `docs/planning/store-domain-refactor-plan.md`; that document remains useful
 for the original target architecture and constraints.
 
 ## Executive result

@@ -2,7 +2,7 @@
 
 > Historical plan. The runtime extraction described here has largely shipped;
 > `store.tsx` is now lifecycle glue around a plain `AppRuntime`. Use
-> [architecture.md](architecture.md) and [frontend-domains.md](frontend-domains.md)
+> [architecture.md](../architecture.md) and [frontend-domains.md](../frontend-domains.md)
 > for the current implementation. The body is preserved as design history.
 
 ## Current assessment

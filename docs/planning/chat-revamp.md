@@ -2,7 +2,7 @@
 
 > Historical implementation plan. All listed cuts shipped; current chat,
 > integration, and security behavior is documented in
-> [frontend-domains.md](frontend-domains.md) and [security.md](security.md).
+> [frontend-domains.md](../frontend-domains.md) and [security.md](../security.md).
 
 Working design doc for the chat-experience revamp. Grounded in the current code
 (chat = in-app agent loop in `domains/chat/`, explorer/viewer = `session/FilesPane.tsx`,
