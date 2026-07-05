@@ -27,6 +27,7 @@ import type { ConductorActions } from './actions'
 import { createCommandRegistry } from './commands/registry'
 import { createDefaultPolicy } from './commands/policy'
 import { registerSessionCommands } from './commands/session-commands'
+import { telemetry } from '../core/telemetry'
 
 /** Foundation the provider owns and shares with both the runtime and the actions. */
 export interface ConductorKernel {
@@ -107,11 +108,18 @@ export function createAppRuntime(): AppRuntime {
   }
 
   // one command registry + policy governs use cases across actors (addons are
-  // gated by their granted capabilities; the UI/Master/watcher/chat are trusted)
+  // gated by their granted capabilities; the UI/Master/watcher/chat are trusted).
+  // Audit flows into telemetry — denials surface as warnings, not silent drops.
   const registry = createCommandRegistry(createDefaultPolicy(id => {
     const a = stateRef.current.addons.find(x => x.id === id)
     return a?.enabled ? a.granted : []
-  }))
+  }), {
+    onAudit: e => telemetry.emit({
+      severity: e.decision === 'deny' ? 'warn' : 'debug',
+      domain: 'commands', message: `${e.command} · ${e.decision}`, actor: e.actor.kind,
+      detail: e.error ? { error: e.error } : undefined,
+    }),
+  })
   registerSessionCommands(registry, { stateRef })
   const addonExec = (name: string, input: unknown, addonId: string) =>
     void registry.execute(name, input, { actor: { kind: 'addon', addonId } }).catch(() => {})
