@@ -9,8 +9,8 @@ import { ACCENT, defaultDetail, MASTER_GREETING, mkMemory, mkTools, PERM_ORDER, 
 import * as native from './native'
 import { buildCfg, hasCreds, runMasterTurn } from './master'
 import type { ApiMessage, MasterExec } from './master'
-import { draftTaskSpec, runWatcherTurn } from './llm/watcher'
-import type { TaskSpecDraft, WatcherExec } from './llm/watcher'
+import { draftTaskSpec } from './llm/watcher'
+import type { TaskSpecDraft } from './llm/watcher'
 import { disposeTerminal, getTerminal, isAltScreen, readScreen, repaintSession } from './terminals'
 import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS, addonSnapshot, dispatchAddonRpc, enforcePermissions, execAddonHook, execAddonTool, exportAddonPackage, loadAddonFolder, parseAddonPackage } from './addons'
 import { runAddonEditorTurn } from './llm/addon-editor'
@@ -26,6 +26,7 @@ import { estimateLogUsage, estimateOutputUsage } from './usage'
 import type { AddonApi } from './addons'
 import { ActionsCtx, StateCtx } from './context'
 import { runMonitorLoop } from './store/monitor-runner'
+import { runWatcherLoop } from './store/watcher-runner'
 import { reducer, withActiveGroup, inferLegacyTerminalShell } from './store/state-helpers'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './store/task-state'
 import type { LocatedTask } from './store/task-state'
@@ -383,124 +384,12 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // Serialize watcher turns per task and drain notes that arrive while one is running.
-  const runWatcher = useCallback(async (taskId: string, note: string) => {
-    const st = stateRef.current.settings
-    if (!(st.masterEnabled && hasCreds(st))) return
-    if (!findTaskInState(stateRef.current, taskId)) return
-    if (watcherBusy.current.has(taskId)) {
-      watcherQueue.current.set(taskId, (watcherQueue.current.get(taskId) ?? []).concat([note]))
-      return
-    }
-    watcherBusy.current.add(taskId)
-    try {
-      let pending: string[] = [note]
-      while (pending.length) {
-        const current = pending.join('\n\n')
-        pending = []
-        // Re-read the task after every tool call so watcher decisions see current state.
-        const getTask = () => findTaskInState(stateRef.current, taskId)?.task
-        // Every session ever attached to this task (committed state + fast launch bindings), spawn order.
-        const getAgents = () => {
-          const t = getTask()
-          const bound = Array.from(taskSessionsRef.current.entries())
-            .filter(([, binding]) => binding.taskId === taskId)
-            .map(([sid]) => sid)
-          const ids = [...new Set([...(t?.agentIds ?? []), ...(t?.agentId ? [t.agentId] : []), ...bound])]
-          return ids
-            .map(sid => stateRef.current.agents.find(a => a.id === sid))
-            .filter((a): a is Agent => !!a)
-        }
-        // Primary target for steering: the most recent live session, else the most recent.
-        const primaryAgent = () => {
-          const all = getAgents()
-          return all.filter(a => a.status === 'running' || a.status === 'needs').pop() ?? all[all.length - 1]
-        }
-        if (!getTask()) break
-        let history = watcherHistories.current.get(taskId)
-        if (!history) {
-          history = []
-          watcherHistories.current.set(taskId, history)
-        }
-        const exec: WatcherExec = {
-          moveTask: col => {
-            const valid: BoardCol[] = ['backlog', 'progress', 'review', 'done', 'failed']
-            if (!valid.includes(col as BoardCol)) return `invalid column "${col}"`
-            const t = getTask()
-            if (!t) return 'task no longer exists'
-            if (t.col === col) return `already in ${col}`
-            dispatch(s2 => updateLocatedTask(s2, taskId, x => ({ ...x, col: col as BoardCol })))
-            pushTaskChat(taskId, 'system', `Watcher moved the task to ${col}`)
-            fireAddonHookRef.current('onTaskMoved', { taskId, title: t.title, col, from: t.col })
-            logEvent(col === 'failed' ? 'escalate' : 'edit', t.agentId, `Watcher moved “${t.title.slice(0, 40)}” to ${col}`)
-            if (col === 'done') notify('done', 'Task done', t.title.slice(0, 60), t.agentId)
-            if (col === 'failed') notify('escalate', 'Task failed', t.title.slice(0, 60), t.agentId)
-            return `moved to ${col}`
-          },
-          updateNote: n => {
-            dispatch(s2 => updateLocatedTask(s2, taskId, x => ({ ...x, watcherNote: n.slice(0, 140) })))
-            // mirror onto the live worker's status card — the watcher IS its monitor
-            const a = primaryAgent()
-            const t = getTask()
-            if (a && t && (a.status === 'running' || a.status === 'needs')) applyAgentStatus(a.id, t.title.slice(0, 60), n.slice(0, 140))
-            return 'note updated'
-          },
-          sendToSession: (text, session) => {
-            const live = getAgents().filter(a => a.status === 'running' || a.status === 'needs')
-            const a = session
-              ? live.find(x => x.name === session || x.id === session)
-              : live[live.length - 1]
-            if (!a) return session ? `no live session named "${session}"` : 'no live session attached to this task'
-            sendLineToSession(a.id, text)
-            pushTaskChat(taskId, 'system', `Watcher → ${a.name}: ${text.slice(0, 120)}`)
-            return `sent to "${a.name}"`
-          },
-          askUser: q => {
-            const t = getTask()
-            pushTaskChat(taskId, 'watcher', q)
-            dispatch(s2 => updateLocatedTask(s2, taskId, x => ({ ...x, awaitingUser: true })))
-            notify('escalate', `Task “${(t?.title ?? '').slice(0, 40)}” needs you`, q.slice(0, 90), t?.agentId ?? null)
-            return 'asked — the user will reply in the task chat'
-          },
-          checkSession: () => {
-            const all = getAgents().slice(-4)
-            if (!all.length) return 'no session is attached to this task — spawn one with spawn_session if work is needed'
-            return all.map(a => {
-              const alive = a.status === 'running' || a.status === 'needs'
-              const screen = isAltScreen(a.id) ? readScreen(a.id) : (a.log ?? []).slice(-20).map(l => l.x)
-              const tail = screen.filter(l => l.trim()).slice(-12).join('\n')
-              return [
-                `session "${a.name}" · status: ${a.status} — process ${alive ? 'STILL RUNNING (not finished)' : 'exited'}`,
-                a.ephemeral ? 'kind: one-shot — it exits by itself when done; while running it prints little or nothing' : 'kind: interactive',
-                a.launchedAt ? `runtime: ${Math.round((Date.now() - a.launchedAt) / 1000)}s` : '',
-                a.summary ? `last summary: ${a.summary}` : '',
-                `latest output:\n${tail || '(no output yet)'}`,
-              ].filter(Boolean).join('\n')
-            }).join('\n\n---\n\n')
-          },
-          spawnSession: extra => {
-            const t = getTask()
-            if (!t) return 'task no longer exists'
-            const live = getAgents().filter(a => a.status === 'running' || a.status === 'needs')
-            if (live.length >= 3) return 'refused: 3 sessions are already running for this task — steer or stop one instead'
-            const sid = spawnTaskSessionRef.current(taskId, extra || undefined)
-            if (!sid) return 'failed to spawn (no enabled agent type, or the launch was rejected)'
-            const name = stateRef.current.agents.find(a => a.id === sid)?.name ?? sid
-            return `spawned one-shot session "${name}" — its output digests will come to you; it exits by itself when done`
-          },
-        }
-        try {
-          const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec)
-          if (reply) pushTaskChat(taskId, 'watcher', reply)
-        } catch (e) {
-          logEvent('escalate', null, `Watcher error: ${e instanceof Error ? e.message : String(e)}`)
-        }
-        pending = watcherQueue.current.get(taskId) ?? []
-        watcherQueue.current.delete(taskId)
-      }
-    } finally {
-      watcherBusy.current.delete(taskId)
-    }
-  }, [applyAgentStatus, logEvent, notify, pushTaskChat])
+  const runWatcher = useCallback((taskId: string, note: string) => runWatcherLoop({
+    stateRef, dispatch, histories: watcherHistories, busy: watcherBusy, queue: watcherQueue,
+    taskSessions: taskSessionsRef, applyAgentStatus, pushTaskChat, logEvent, notify,
+    fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
+    spawnTaskSession: (id, extra) => spawnTaskSessionRef.current(id, extra),
+  }, taskId, note), [applyAgentStatus, logEvent, notify, pushTaskChat])
 
   runWatcherRef.current = (taskId, note) => { void runWatcher(taskId, note) }
 
