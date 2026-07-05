@@ -1,24 +1,25 @@
 // Session settle/prompt watcher: owns the per-session timers and dedup state
 // (armed snapshots, quiet-period timers, last-flagged questions) and turns raw
-// PTY activity into "needs input" / "finished responding" signals. Pulled out of
-// the provider so the whole prompt-detection loop lives in the session domain;
-// the provider passes in its state ref, the notifier, and the Master/monitor/
-// watcher fan-out refs.
-import { useCallback, useEffect, useRef } from 'react'
+// PTY activity into "needs input" / "finished responding" signals. A plain
+// factory over StatePort + ClockPort with an explicit start/dispose lifecycle
+// (start arms the deterministic TUI-scan interval); useSessionSettle is a thin
+// React adapter binding it to the real store + browser clock.
+import { useEffect, useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AppState, EscOption, NotifKind } from '../../core/types'
 import type { LocatedTask } from '../board/task-state'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { hasCreds } from '../../master'
 import { dispatch } from '../../core/store'
+import { browserClock, type ClockPort, type Disposable, type StatePort } from '../../core/ports'
 import { activeGroupOf } from './layout-state'
 import {
   detectPrompt, extractOptions, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
 } from './prompt-detection'
 
 export interface SettleDeps {
-  stateRef: MutableRefObject<AppState>
-  later: (ms: number, fn: () => void) => void
+  state: StatePort
+  clock: ClockPort
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
   setNeedsInput: (id: string, question: string, options?: EscOption[], cursorNum?: number) => void
   runMonitor: (id: string, note: string) => void
@@ -39,38 +40,46 @@ export interface SettleApi {
   disposeSettle: (id: string) => void
 }
 
-export function useSessionSettle(deps: SettleDeps): SettleApi {
-  const { stateRef, later, notify, setNeedsInput, runMonitor, taskForSession, masterEventRef, monitorEventRef, runWatcherRef } = deps
+export interface SettleRuntime extends SettleApi {
+  /** arm the deterministic full-screen-TUI dialog scan */
+  start: () => void
+  /** stop the scan and cancel every per-session timer */
+  dispose: () => void
+}
+
+const focused = () => typeof document === 'undefined' || document.hasFocus()
+
+export function createSessionSettle(deps: SettleDeps): SettleRuntime {
+  const { state, clock, notify, setNeedsInput, runMonitor, taskForSession, masterEventRef, monitorEventRef, runWatcherRef } = deps
 
   // armed watch: snapshot of the screen/tail at arm time — we only relay once
   // the content has actually changed AND the TUI is no longer busy
-  const armedRef = useRef<Map<string, { snapshot: string; at: number }>>(new Map())
-  const settleRef = useRef<Map<string, { since: number; timer: number }>>(new Map())
-  const lastFlaggedRef = useRef<Map<string, string>>(new Map())
-  // set below; ref avoids a declaration cycle with onSettle
-  const bumpSettleRef = useRef<(id: string) => void>(() => {})
+  const armed = new Map<string, { snapshot: string; at: number }>()
+  const settle = new Map<string, { since: number; timer: Disposable }>()
+  const lastFlagged = new Map<string, string>()
+  let scan: Disposable | undefined
 
   // Mark a session as awaiting fresh output so the next settle means completion.
-  const armResponseWatch = useCallback((id: string) => {
+  const armResponseWatch = (id: string) => {
     const alt = isAltScreen(id)
-    const agent = stateRef.current.agents.find(a => a.id === id)
+    const agent = state.get().agents.find(a => a.id === id)
     const snapshot = alt
       ? readScreen(id).join('\n')
       : (agent?.log ?? []).slice(-14).map(l => l.x).join('\n')
-    armedRef.current.set(id, { snapshot, at: Date.now() })
+    armed.set(id, { snapshot, at: clock.now() })
     // ensure a settle check runs even if the session produces no output at all
-    later(4000, () => bumpSettleRef.current(id))
-  }, [stateRef, later])
+    clock.setTimeout(() => bumpSettle(id), 4000)
+  }
 
   // Inspect a stable rendered screen for prompts, completion, monitors, and watchers.
-  const onSettle = useCallback((id: string, since: number) => {
-    settleRef.current.delete(id)
-    const agent = stateRef.current.agents.find(a => a.id === id)
+  const onSettle = (id: string, since: number) => {
+    settle.delete(id)
+    const agent = state.get().agents.find(a => a.id === id)
     if (!agent || (agent.status !== 'running' && agent.status !== 'needs')) return
-    const st = stateRef.current.settings
+    const st = state.get().settings
     const llm = Boolean(st.masterEnabled && hasCreds(st) && st.followMode)
     const alt = isAltScreen(id)
-    const armed = armedRef.current.get(id)
+    const arm = armed.get(id)
 
     // TUIs redraw constantly, so judge the rendered screen (stable) instead
     // of the raw output stream; plain sessions use the new stream tail.
@@ -83,9 +92,9 @@ export function useSessionSettle(deps: SettleDeps): SettleApi {
     const { busy, promptDetected, question } = detectPrompt(content, alt)
 
     if (promptDetected) {
-      const already = agent.status === 'needs' && lastFlaggedRef.current.get(id) === question
+      const already = agent.status === 'needs' && lastFlagged.get(id) === question
       if (!already) {
-        lastFlaggedRef.current.set(id, question)
+        lastFlagged.set(id, question)
         const { options, cursorNum } = extractOptions(content)
         setNeedsInput(id, question, options, cursorNum)
         if (llm) {
@@ -107,34 +116,34 @@ export function useSessionSettle(deps: SettleDeps): SettleApi {
 
     // prompt gone (or the session is generating again) — it was answered
     if (agent.status === 'needs') {
-      lastFlaggedRef.current.delete(id)
-      dispatch(s => ({
+      lastFlagged.delete(id)
+      state.update(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id ? { ...a, status: 'running' as const, escReason: undefined } : a),
       }))
     }
 
-    if (armed) {
+    if (arm) {
       const joined = content.join('\n')
-      const expired = Date.now() - armed.at > 15 * 60 * 1000
-      const unchanged = joined === armed.snapshot
+      const expired = clock.now() - arm.at > 15 * 60 * 1000
+      const unchanged = joined === arm.snapshot
       if ((busy || unchanged) && !expired) {
-        settleRef.current.delete(id)
-        const timer = window.setTimeout(() => onSettleRef.current(id, since), 3500)
-        settleRef.current.set(id, { since, timer })
+        settle.delete(id)
+        const timer = clock.setTimeout(() => onSettle(id, since), 3500)
+        settle.set(id, { since, timer })
         return
       }
-      armedRef.current.delete(id)
+      armed.delete(id)
       if (!expired) {
         // deterministic indicator, independent of the LLM layer: if the user
         // isn't looking at this session, flash its tab and ring the bell
-        const st2 = stateRef.current
+        const st2 = state.get()
         const g2 = activeGroupOf(st2)
         const watching = (g2 ? g2.slots[g2.activePane] : null) === id
           && (agent.workspaceId ?? st2.activeWorkspace) === st2.activeWorkspace
-          && document.hasFocus()
+          && focused()
         if (!watching) {
-          dispatch(s2 => ({
+          state.update(s2 => ({
             ...s2,
             agents: s2.agents.map(a => (a.id === id ? { ...a, attention: true } : a)),
           }))
@@ -159,69 +168,95 @@ export function useSessionSettle(deps: SettleDeps): SettleApi {
         `The task's session "${agent.name}" produced stable output. ${alt ? 'Current screen' : 'New output'}:\n` +
         `${content.slice(-14).join('\n')}\n\nTrack progress against the acceptance criteria, update the card note, and move the task only if the evidence supports it.`)
     }
-  }, [stateRef, notify, runMonitor, setNeedsInput, taskForSession, masterEventRef, runWatcherRef])
-
-  const onSettleRef = useRef<(id: string, since: number) => void>(() => {})
-  onSettleRef.current = onSettle
+  }
 
   // (re)start the settle watcher — checks only run once output goes quiet.
   // Driven by RAW pty activity, because TUI redraws often contain no newlines.
-  // Reset a session's quiet-period timer whenever raw PTY activity arrives.
-  const bumpSettle = useCallback((id: string) => {
-    const prev = settleRef.current.get(id)
-    if (prev) window.clearTimeout(prev.timer)
-    const since = prev?.since ?? Math.max(0, (stateRef.current.agents.find(a => a.id === id)?.log.length ?? 1) - 1)
-    const timer = window.setTimeout(() => onSettle(id, since), 3000)
-    settleRef.current.set(id, { since, timer })
-  }, [stateRef, onSettle])
-  bumpSettleRef.current = bumpSettle
+  const bumpSettle = (id: string) => {
+    const prev = settle.get(id)
+    if (prev) prev.timer.dispose()
+    const since = prev?.since ?? Math.max(0, (state.get().agents.find(a => a.id === id)?.log.length ?? 1) - 1)
+    const timer = clock.setTimeout(() => onSettle(id, since), 3000)
+    settle.set(id, { since, timer })
+  }
+
+  const clearFlagged = (id: string) => { lastFlagged.delete(id) }
+  const disposeSettle = (id: string) => {
+    settle.get(id)?.timer.dispose()
+    settle.delete(id)
+    armed.delete(id)
+    lastFlagged.delete(id)
+  }
 
   // Deterministic safety net for full-screen TUIs: scan the rendered screen of
   // every running alt-buffer session for approval dialogs / selection menus.
   // Settle timing doesn't matter here; dedupe prevents refiring on redraws.
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      for (const a of stateRef.current.agents) {
-        if (a.kind !== 'real') continue
-        if (a.status !== 'running' && a.status !== 'needs') continue
-        if (!isAltScreen(a.id)) continue
-        const screen = readScreen(a.id)
-        if (!screen.length) continue
-        const joined = screen.join('\n')
-        if (TUI_PROMPT_RE.test(joined)) {
-          if (a.status !== 'running') continue
-          const question = (
-            screen.find(l => QUESTION_LINE_RE.test(l)) ||
-            screen.find(l => QUESTION_MARK_LINE_RE.test(l.trim())) ||
-            screen[screen.length - 1]
-          ).trim()
-          if (lastFlaggedRef.current.get(a.id) === question) continue
-          lastFlaggedRef.current.set(a.id, question)
-          const { options, cursorNum } = extractOptions(screen)
-          setNeedsInput(a.id, question, options, cursorNum)
-          void monitorEventRef.current(a.id,
-            `A dialog was detected on the session's screen (already flagged as needing input):\n${screen.slice(-14).join('\n')}\n\n` +
-            'This needs the user — report_to_master with what it is asking, including the options if it is a menu.')
-        } else if (a.status === 'needs') {
-          lastFlaggedRef.current.delete(a.id)
-          dispatch(s2 => ({
-            ...s2,
-            agents: s2.agents.map(x => x.id === a.id ? { ...x, status: 'running' as const, escReason: undefined } : x),
-          }))
-        }
+  const scanTui = () => {
+    for (const a of state.get().agents) {
+      if (a.kind !== 'real') continue
+      if (a.status !== 'running' && a.status !== 'needs') continue
+      if (!isAltScreen(a.id)) continue
+      const screen = readScreen(a.id)
+      if (!screen.length) continue
+      const joined = screen.join('\n')
+      if (TUI_PROMPT_RE.test(joined)) {
+        if (a.status !== 'running') continue
+        const question = (
+          screen.find(l => QUESTION_LINE_RE.test(l)) ||
+          screen.find(l => QUESTION_MARK_LINE_RE.test(l.trim())) ||
+          screen[screen.length - 1]
+        ).trim()
+        if (lastFlagged.get(a.id) === question) continue
+        lastFlagged.set(a.id, question)
+        const { options, cursorNum } = extractOptions(screen)
+        setNeedsInput(a.id, question, options, cursorNum)
+        void monitorEventRef.current(a.id,
+          `A dialog was detected on the session's screen (already flagged as needing input):\n${screen.slice(-14).join('\n')}\n\n` +
+          'This needs the user — report_to_master with what it is asking, including the options if it is a menu.')
+      } else if (a.status === 'needs') {
+        lastFlagged.delete(a.id)
+        state.update(s2 => ({
+          ...s2,
+          agents: s2.agents.map(x => x.id === a.id ? { ...x, status: 'running' as const, escReason: undefined } : x),
+        }))
       }
-    }, 4000)
-    return () => window.clearInterval(timer)
-  }, [stateRef, setNeedsInput, monitorEventRef])
+    }
+  }
 
-  const clearFlagged = useCallback((id: string) => { lastFlaggedRef.current.delete(id) }, [])
-  const disposeSettle = useCallback((id: string) => {
-    const st = settleRef.current.get(id)
-    if (st) window.clearTimeout(st.timer)
-    settleRef.current.delete(id)
-    armedRef.current.delete(id)
-    lastFlaggedRef.current.delete(id)
-  }, [])
+  return {
+    armResponseWatch, bumpSettle, clearFlagged, disposeSettle,
+    start() { scan ??= clock.setInterval(scanTui, 4000) },
+    dispose() {
+      scan?.dispose(); scan = undefined
+      for (const { timer } of settle.values()) timer.dispose()
+      settle.clear(); armed.clear(); lastFlagged.clear()
+    },
+  }
+}
 
-  return { armResponseWatch, bumpSettle, clearFlagged, disposeSettle }
+/** React adapter: build the settle runtime over the real store + browser clock
+ *  and bind the TUI-scan interval to the effect lifecycle. */
+export interface SettleCtx {
+  stateRef: MutableRefObject<AppState>
+  later: (ms: number, fn: () => void) => void
+  notify: SettleDeps['notify']
+  setNeedsInput: SettleDeps['setNeedsInput']
+  runMonitor: SettleDeps['runMonitor']
+  taskForSession: SettleDeps['taskForSession']
+  masterEventRef: SettleDeps['masterEventRef']
+  monitorEventRef: SettleDeps['monitorEventRef']
+  runWatcherRef: SettleDeps['runWatcherRef']
+}
+
+export function useSessionSettle(ctx: SettleCtx): SettleApi {
+  const runtime = useMemo(() => createSessionSettle({
+    state: { get: () => ctx.stateRef.current, update: dispatch, subscribe: () => () => {} },
+    clock: browserClock,
+    notify: ctx.notify, setNeedsInput: ctx.setNeedsInput, runMonitor: ctx.runMonitor,
+    taskForSession: ctx.taskForSession, masterEventRef: ctx.masterEventRef,
+    monitorEventRef: ctx.monitorEventRef, runWatcherRef: ctx.runWatcherRef,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [ctx.stateRef, ctx.notify, ctx.setNeedsInput, ctx.runMonitor, ctx.taskForSession, ctx.masterEventRef, ctx.monitorEventRef, ctx.runWatcherRef])
+  useEffect(() => { runtime.start(); return () => runtime.dispose() }, [runtime])
+  return runtime
 }
