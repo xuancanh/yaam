@@ -26,8 +26,14 @@ export interface AddonRuntime {
 }
 
 export function useAddonRuntime(ctx: AddonRuntimeCtx): AddonRuntime {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => createAddonRuntime(ctx), [ctx.stateRef, ctx.flash, ctx.logEvent, ctx.editorHistories])
+}
+
+/** Plain (non-React) factory for the addon editor + install runtime. */
+export function createAddonRuntime(ctx: AddonRuntimeCtx): AddonRuntime {
   const { stateRef, flash, logEvent, editorHistories } = ctx
-  return useMemo(() => ({
+  return {
     sendAddonChat: async (id, text) => {
       const st = stateRef.current.settings
       const addon = stateRef.current.addons.find(a => a.id === id)
@@ -105,5 +111,5 @@ export function useAddonRuntime(ctx: AddonRuntimeCtx): AddonRuntime {
         ? `Installed ${addon.name} · grant ${withheld.join(', ')} in Settings → Addons to enable those features`
         : `Installed ${addon.name} v${addon.version}`)
     },
-  }), [stateRef, flash, logEvent, editorHistories])
+  }
 }

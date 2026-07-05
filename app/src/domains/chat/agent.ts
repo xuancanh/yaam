@@ -196,6 +196,9 @@ export async function runChatTurn(
   persona?: string,
   signal?: AbortSignal,
 ): Promise<void> {
+  // a stopped/aborted turn can leave the history mid-tool-round (assistant
+  // tool_use without its tool_result) — providers reject that; drop the debris
+  while (history.length && typeof history[history.length - 1].content !== 'string') history.pop()
   history.push({ role: 'user', content: userText })
   const tools = [...builtinTools(skills), ...mcpToolDefs(mcp)]
   for (let i = 0; i < 24; i++) {

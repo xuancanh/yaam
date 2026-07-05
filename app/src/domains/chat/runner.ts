@@ -78,6 +78,19 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       if (!ctx.skillCatalogs.current.has(reg.id)) await ctx.refreshSkillCatalog(reg.id)
       skills.push(...(ctx.skillCatalogs.current.get(reg.id) ?? []))
     }
+    // slash-command skill invocation: "/name rest" injects the skill body
+    // deterministically instead of hoping the model calls load_skill
+    let apiText = text
+    const slash = text.match(/^\/([\w][\w.-]*)[ \t]?([\s\S]*)$/)
+    if (slash) {
+      const skill = skills.find(k => k.name.toLowerCase() === slash[1].toLowerCase())
+      if (!skill) {
+        ctx.pushChatLog(agentId, { role: 'assistant', text: `No skill named “${slash[1]}”. Available: ${skills.map(k => `\`${k.name}\``).join(', ') || '(none)'}` })
+        return
+      }
+      const rest = slash[2].trim()
+      apiText = `The user invoked the skill "${skill.name}" with a slash command — follow it now.\n\n<skill name="${skill.name}">\n${skill.body}\n</skill>${rest ? `\n\nUser input: ${rest}` : ''}`
+    }
     const personaBody = ctx.stateRef.current.personas.find(pp => pp.id === agent.personaId)?.body
     const persona = [chatType.systemPrompt, personaBody].filter(Boolean).join('\n\n')
     // streaming: deltas grow one live assistant bubble; a tool round seals
@@ -108,7 +121,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       () => ctx.stateRef.current.agents.find(a => a.id === agentId),
       skills,
       mcp,
-      text,
+      apiText,
       history,
       e => {
         if (e.kind === 'delta') {

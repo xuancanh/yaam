@@ -25,6 +25,9 @@ export interface ChatBoot {
   mcpSessions: IntegrationRuntime['mcpSessions']
   skillCatalogs: IntegrationRuntime['skillCatalogs']
   runChatMessage: ChatRuntime['run']
+  stopChatMessage: ChatRuntime['stop']
+  retryChatMessage: ChatRuntime['retry']
+  resetChatRuntime: ChatRuntime['dispose']
   disposeSessionRuntime: (id: string) => void
 }
 
@@ -71,5 +74,10 @@ export function useChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: Sess
     })
   }
 
-  return { connectMcp, refreshSkillCatalog, mcpSessions, skillCatalogs, runChatMessage: chatRef.current.run, disposeSessionRuntime }
+  return {
+    connectMcp, refreshSkillCatalog, mcpSessions, skillCatalogs,
+    runChatMessage: chatRef.current.run, stopChatMessage: chatRef.current.stop,
+    retryChatMessage: chatRef.current.retry, resetChatRuntime: chatRef.current.dispose,
+    disposeSessionRuntime,
+  }
 }

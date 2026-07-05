@@ -45,6 +45,9 @@ export interface ConductorActionsDeps {
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
   launchFromTemplate: (templateId: string, task?: string) => string | null
   runChatMessage: (agentId: string, text: string) => void
+  stopChatMessage: (agentId: string) => void
+  retryChatMessage: (agentId: string) => void
+  resetChatRuntime: (agentId: string) => void
   // addons
   installPackage: (json: string, source: import('../core/types').Addon['source']) => void
   sendAddonChat: (id: string, text: string) => void
@@ -78,7 +81,11 @@ export function useConductorActions(d: ConductorActionsDeps): ConductorActions {
     disposeWatcher: d.disposeWatcher, taskSessions: d.taskSessions,
   }), [d.stateRef, d.dragId, d.later, d.flash, d.logEvent, d.fireAddonHook, d.spawnSessionForTask, d.startTaskViaWatcher, d.runWatcher, d.pushTaskChat, d.markUserStopped, d.disposeWatcher, d.taskSessions]))
   const schedulesActions = useSchedulesActions(useMemo(() => ({ dispatch, flash: d.flash, logEvent: d.logEvent, launchFromTemplate: d.launchFromTemplate }), [d.flash, d.logEvent, d.launchFromTemplate]))
-  const chatActions = useChatActions(useMemo(() => ({ dispatch, stateRef: d.stateRef, logEvent: d.logEvent, runChatMessage: d.runChatMessage }), [d.stateRef, d.logEvent, d.runChatMessage]))
+  const chatActions = useChatActions(useMemo(() => ({
+    dispatch, stateRef: d.stateRef, logEvent: d.logEvent, runChatMessage: d.runChatMessage,
+    stopChatMessage: d.stopChatMessage, retryChatMessage: d.retryChatMessage,
+    resetChatRuntime: d.resetChatRuntime, skillCatalogs: d.skillCatalogs,
+  }), [d.stateRef, d.logEvent, d.runChatMessage, d.stopChatMessage, d.retryChatMessage, d.resetChatRuntime, d.skillCatalogs]))
   const addonsActions = useAddonsActions(useMemo(() => ({
     dispatch, stateRef: d.stateRef, flash: d.flash, installPackage: d.installPackage, sendAddonChat: d.sendAddonChat,
     makeAddonApi: d.makeAddonApi, disposeAddon: d.disposeAddon,

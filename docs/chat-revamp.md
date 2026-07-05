@@ -112,6 +112,15 @@ the agent becomes a way to *drive* the orchestrator, not just the filesystem):
   rewrite an existing one to fix its weak spots. Saved skills appear in the
   slash menu immediately.
 
+**Interaction & progress (borrowed from Kilo Code's tool set)**:
+- `ask_user(question, options[])` — the agent asks a clarifying question with
+  selectable options rendered as buttons in the chat; the pick returns as the
+  next user message. Essential for non-technical users mid-task.
+- `update_todo_list(items[])` — structured checklist (pending/done) rendered as
+  a card in the chat, replacing a bare status line for multi-step work.
+- `read_file` accepts multiple paths in one call (batch reads keep the tool
+  trail short); Kilo's PDF/DOCX/image handling in read_file matches our plan.
+
 Deliberately *not* tools: git (run_command is fine and terminal sessions own git
 UX), browser automation (out of scope), sub-agents (Master already orchestrates).
 

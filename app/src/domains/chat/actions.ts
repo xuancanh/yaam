@@ -1,9 +1,11 @@
-// Chat-domain actions: create a chat agent, select the active chat, and send a
-// message (the turn itself runs in domains/chat/runner). Composed into the
-// provider's action surface.
+// Chat-domain actions: create a chat agent, select the active chat, send /
+// stop / retry a message (the turn itself runs in domains/chat/runner), clear
+// a conversation, and resolve the skills visible to a chat (for the slash
+// menu). Composed into the provider's action surface.
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { Agent, AppState, EventType } from '../../core/types'
+import type { CatalogSkill } from '../../core/skills'
 import { mkId } from '../../shared/id'
 import { defaultDetail, mkMemory, mkTools } from '../../core/data'
 
@@ -12,12 +14,21 @@ export interface ChatActionsCtx {
   stateRef: MutableRefObject<AppState>
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   runChatMessage: (agentId: string, text: string) => void
+  stopChatMessage: (agentId: string) => void
+  retryChatMessage: (agentId: string) => void
+  resetChatRuntime: (agentId: string) => void
+  skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
 }
 
 export interface ChatActions {
   newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string, personaId?: string, skillSourceIds?: string[]) => string
   openChat: (id: string | null) => void
   sendChatMessage: (agentId: string, text: string) => void
+  stopChat: (agentId: string) => void
+  retryChat: (agentId: string) => void
+  clearChat: (agentId: string) => void
+  /** skills visible to this chat (its sources, cached registry catalogs only) */
+  chatSkills: (agentId: string) => CatalogSkill[]
 }
 
 export function useChatActions(ctx: ChatActionsCtx): ChatActions {
@@ -56,6 +67,33 @@ export function useChatActions(ctx: ChatActionsCtx): ChatActions {
     sendChatMessage: (agentId, text) => {
       const msg = text.trim()
       if (msg) void ctx.runChatMessage(agentId, msg)
+    },
+
+    stopChat: agentId => ctx.stopChatMessage(agentId),
+
+    retryChat: agentId => ctx.retryChatMessage(agentId),
+
+    clearChat: agentId => {
+      ctx.resetChatRuntime(agentId)
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === agentId ? { ...a, chatLog: [], status: 'idle' as const } : a),
+      }))
+    },
+
+    chatSkills: agentId => {
+      const s = stateRef.current
+      const agent = s.agents.find(a => a.id === agentId)
+      const sources = agent?.skillSourceIds
+        ?? ['local', ...s.skillRegistries.filter(r => r.enabled).map(r => r.id)]
+      const out: CatalogSkill[] = []
+      if (sources.includes('local')) {
+        out.push(...s.skills.map(k => ({ name: k.name, description: k.description, body: k.body, source: 'local' })))
+      }
+      for (const reg of s.skillRegistries.filter(r => sources.includes(r.id))) {
+        out.push(...(ctx.skillCatalogs.current.get(reg.id) ?? []))
+      }
+      return out
     },
   }), [dispatch, stateRef, ctx])
 }
