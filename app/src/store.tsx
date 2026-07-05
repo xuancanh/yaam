@@ -53,17 +53,17 @@ import type { PersistenceRuntime } from './infrastructure/persistence/runtime'
 
 export { cronMatches, humanizeCron } from './domains/schedules/cron'
 
-/** Own the complete app state, native/LLM effects, and action surface for the UI. */
+/** Composition root: wires the domain action slices, runtime hooks (settle,
+ *  launch, scheduler, persistence/boot, monitor/watcher/master/chat/addon
+ *  runners), and effects into the single ActionsCtx surface for the UI. State
+ *  lives in the Zustand store; domain logic lives in domains/* and
+ *  infrastructure/*. */
 export function ConductorProvider({ children }: { children: ReactNode }) {
-  // State lives in the Zustand store; the provider subscribes to the whole
-  // state (so its state-dep effects re-run and stateRef stays fresh) and drives
-  // updates through `dispatch`. Selector consumers (useConductorSelector) get
-  // Zustand's per-slice subscriptions instead.
-  // The provider is a pure composition root: it renders only <ActionsCtx> and
-  // reads state through stateRef in callbacks/effects, so it must NOT subscribe
-  // to the whole store (that would re-render it on every terminal line and chat
-  // delta). stateRef is mirrored from the store via a direct subscription; UI
-  // reads reactive state through useConductorSelector in the components.
+  // A pure composition root: it renders only <ActionsCtx> and reads state through
+  // stateRef in callbacks/effects, so it must NOT subscribe to the whole store
+  // (that would re-render it on every terminal line and chat delta). stateRef is
+  // mirrored from the store via a direct subscription; UI components read reactive
+  // state through useConductorSelector.
   const toastTimer = useRef<number | undefined>(undefined)
   const pending = useRef<number[]>([])
   const dragId = useRef<string | null>(null)
@@ -105,12 +105,6 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   // workspaces keep reporting into their own stash)
   const { widOf, logEvent, notify } = useActivityService()
 
-  // Agents → Master / user leg. We never react to individual lines: each
-  // session has a settle watcher, and only once output has been quiet for a
-  // few seconds do we look at the tail. If the LLM Master is enabled, IT
-  // decides whether the session is waiting on the user (flag_needs_input);
-  // without it, a prompt-shaped final line is required.
-  // Prefer the rendered screen for TUI context and fall back to retained log lines.
   // Session output/status/prompt helpers (domains/session/attention). clearNeeds
   // stays below — it needs the settle watcher's clearFlagged.
   const { sessionScreenTail, setNeedsInput, applyAgentStatus, appendTail } = useSessionAttention(useMemo(() => ({
