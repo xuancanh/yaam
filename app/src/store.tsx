@@ -48,6 +48,7 @@ import { useHydration } from './infrastructure/persistence/hydrate-effect'
 import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from './domains/board/task-state'
 import type { LocatedTask } from './domains/board/task-state'
 import type { ConductorActions } from './app/actions'
+import { useGlobalEffects } from './app/global-effects'
 
 
 
@@ -466,33 +467,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     ...masterActions,
   }), [settingsActions, boardActions, schedulesActions, chatActions, addonsActions, workspaceActions, shellActions, sessionLayoutActions, sessionConfigActions, sessionPromptActions, sessionActions, masterActions])
 
-  // surface background failures that would otherwise vanish (the webview
-  // console reaches the dev log / devtools — the app shows no crash UI)
-  useEffect(() => {
-    const onRejection = (e: PromiseRejectionEvent) => console.error('[yaam] unhandled rejection:', e.reason)
-    const onError = (e: ErrorEvent) => console.error('[yaam] uncaught error:', e.message, e.error)
-    window.addEventListener('unhandledrejection', onRejection)
-    window.addEventListener('error', onError)
-    return () => {
-      window.removeEventListener('unhandledrejection', onRejection)
-      window.removeEventListener('error', onError)
-    }
-  }, [])
-
-  // ⌘K / Ctrl+K toggles the command palette; Escape closes overlays
-  useEffect(() => {
-    // Open global UI shortcuts unless an editable control owns the keystroke.
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        dispatch(s => ({ ...s, paletteOpen: !s.paletteOpen, paletteQuery: '' }))
-      } else if (e.key === 'Escape') {
-        dispatch(s => ({ ...s, paletteOpen: false, notifOpen: false, drawer: null, newSessionOpen: false }))
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  useGlobalEffects()
 
   return <ActionsCtx.Provider value={actions}>{children}</ActionsCtx.Provider>
 }
