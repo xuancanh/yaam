@@ -149,8 +149,14 @@ Tauri http plugin to dodge CORS.
   `{task}` and appends the criteria/goal contract after the composed prompt).
 - **Chat agents** (`llm/chat-agent.ts`): Chat-view sessions (`Agent.kind==='chat'`,
   no PTY) with file/exec/skill/MCP tools and streaming; per-type provider config
-  (`chatAgentTypes`, `buildChatCfg`), per-session model. Excluded from workspace
-  tabs/groups/overview; transcripts feed the tantivy index (`chatsearch.rs`).
+  (`chatAgentTypes`, `buildChatCfg`), per-session model, optional persona
+  (`personas`) and chosen skill sources (`skills.ts` registries + local `skills`).
+  File writes are sandboxed to the chat's working folder; truncated tool-call
+  args (`incompleteArgs`) are refused, not run with `{}`. Streaming routes a
+  thinking channel separate from the answer (rendered as a collapsible block);
+  thinking is kept out of replayed API history. Excluded from workspace
+  tabs/groups/overview; transcripts feed the tantivy index (`chatsearch.rs`) and
+  chats auto-title after the first turn unless renamed.
 - **Addon agents** (`llm/addon-agent.ts`): optional per-addon harness whose tools
   are the addon's permission-scoped API; woken by subscribed hooks or `agent.wake`.
 
@@ -217,9 +223,16 @@ with four capability types — a sandboxed iframe **view**, Master **tools**
 **agent** (its own LLM harness). All converge on one permission-enforced
 `AddonApi` built by `makeAddonApi(addonId)` and wrapped by `enforcePermissions()`.
 Scopes: `state:read`, `sessions:send`, `sessions:launch`, `tasks`, `schedules`,
-`agent`, `ui`, `storage`. Views talk to the app over postMessage (`yaam:state`
-push + `yaam:call` RPC, incl. `agent.wake`). Management lives in the Addons
-marketplace view (multi-registry, local folder registries, ✦ Generate).
+`agent`, `master:prompt`, `ui`, `storage`. Views talk to the app over postMessage
+(`yaam:state` push + `yaam:call` RPC, incl. `agent.wake`). Management lives in the
+Addons marketplace view (multi-registry, local folder registries, ✦ Generate).
+
+Security invariants (don't regress): fresh installs auto-grant only low-risk
+scopes (`state:read`, `ui`, `storage`) — the rest (`sessions:*`, `tasks`,
+`schedules`, `agent`, `master:prompt`) start off and are enabled per-addon.
+`masterPromptAppend` only fires for addons holding `master:prompt`. Views get an
+injected `default-src 'none'` CSP (no network) and only receive state snapshots
+when the addon holds `state:read`; disabled addons get an empty grant set.
 
 When extending the addon API surface: add to `AddonApi` → implement in
 `makeAddonApiRaw` → map in `METHOD_PERMISSION`/`ALL_PERMISSIONS` → whitelist in

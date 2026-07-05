@@ -15,12 +15,14 @@ npm run tauri dev
 The normal verification gate is:
 
 ```sh
-npx tsc --noEmit
-npm run lint
+npx tsc --noEmit -p tsconfig.app.json   # NOT bare `tsc --noEmit`
+npm run lint                            # oxlint
 (cd src-tauri && cargo check)
 ```
 
-Use `cargo test --lib` for the Bedrock credential-parser tests and `npm run build` for a production frontend build. `npm run tauri build` creates the desktop bundles.
+`tsconfig.json` is a solution-style config (`references`, empty `files`), so bare `npx tsc --noEmit` type-checks **nothing** and passes even with real errors. Always target `-p tsconfig.app.json`.
+
+Use `cargo test` for the Rust unit tests (Bedrock credential parser, session launch spec) and `npm run build` for a production frontend build. `npm run tauri build` creates the desktop bundles.
 
 ## Repository map
 
@@ -31,11 +33,23 @@ app/src/
   context.ts         stable React context identities; do not move into store.tsx
   terminals.ts       module-level xterm registry and screen inspection
   native.ts          typed frontend wrappers around Tauri commands/events
-  llm/               provider adapters and Master/monitor/watcher harnesses
-  components/        application views and workspace terminal UI
+  mcp.ts             streamable-HTTP MCP client (initialize, tools list/call)
+  skills.ts          skill-registry fetchers (GitHub tree + local folders)
+  addons.ts          addon runtime: package parse, permissions, folder format
+  llm/               provider adapters and agent harnesses:
+                       client.ts      providers/protocols + SSE streaming
+                       master*.ts     Master harness, tools, prompt
+                       monitor.ts     per-session status monitors
+                       watcher.ts     per-task kanban watchers
+                       chat-agent.ts  in-app chat agents (files/exec/skills/MCP)
+                       addon-agent.ts addon mini-Masters; addon-editor/-gen
+  components/        application views and workspace UI (ChatView, ChatPane,
+                     Board, AddonsView, SettingsView, workspace/ pane grid)
 app/src-tauri/src/
-  sessions.rs        PTYs, process events, filesystem/git commands, state file
+  sessions.rs        PTYs, process events, exec_command, git/fs, atomic state file
+  chatsearch.rs      tantivy in-RAM full-text chat index
   bedrock.rs         Bedrock invocation and AWS credential handling
+  lib.rs             Tauri command registration and managed state
 docs/addons.md        addon package, permission, RPC, and lifecycle reference
 registry/             built-in addon registry and example packages
 design/               historical design prototype; not runtime code
@@ -47,7 +61,9 @@ The desktop process has three layers:
 
 1. The React frontend owns all durable application state in `ConductorProvider`. Components read `AppState` and call the `ConductorActions` surface; they do not talk directly to PTYs or LLM providers.
 2. The Tauri bridge exposes typed commands in `native.ts`. Rust owns real PTYs, process lifecycle, filesystem/git access, persisted state, and Bedrock requests.
-3. The LLM layer adapts Anthropic Messages, OpenAI-compatible chat completions, and Bedrock to one internal message/tool shape. Master coordinates sessions; per-session monitors summarize terminal state; per-task watchers own kanban progress.
+3. The LLM layer adapts Anthropic Messages, OpenAI-compatible chat completions, and Bedrock to one internal message/tool shape, with SSE streaming (`callApiStream`) and a reasoning channel that separates thinking from answer text. Several agent kinds share this layer: Master coordinates PTY sessions, per-session monitors summarize terminal state, per-task watchers own kanban progress, chat agents act on the filesystem in-app, and addon agents are permission-scoped mini-Masters.
+
+Agents carry a `kind` (`real` PTY session or `chat` in-app agent). Chat agents run an in-app tool loop (`llm/chat-agent.ts`) with built-in file/exec tools plus tools from connected MCP servers (`mcp.ts`) and loadable skills (`skills.ts`); their file writes are sandboxed to the chat's working folder. Chat transcripts are indexed for full-text search by `chatsearch.rs` (tantivy), reindexed from the frontend on a debounce.
 
 `store.tsx` is intentionally the integration point. `stateRef.current` mirrors reducer state for asynchronous callbacks. Refs such as `masterEventRef`, `onSettleRef`, and `runWatcherRef` break callback declaration cycles without moving side effects into the reducer.
 
@@ -83,7 +99,21 @@ user message or queued event
   -> final visible reply
 ```
 
-The harness caps tool iterations and applies an integrity retry when a model claims it acted without calling an action tool. Master receives structured state and monitor digests, not an unbounded stream of raw terminal bytes.
+The harness caps tool iterations and applies an integrity retry when a model claims it acted without calling an action tool. Master receives structured state and monitor digests, not an unbounded stream of raw terminal bytes. Each side-effecting tool passes through the global tool-permission policy (`catalogGate`): `Off` and `Approval` are refused with an explanation, and `Ask first` is blocked pending a user decision surfaced as Approve/Deny in the Master chat (a granted approval is a consumed one-shot).
+
+### Chat-agent flow
+
+```text
+user message in ChatView
+  -> runChatMessage (assembles skills + persona + MCP tools)
+  -> runChatTurn tool loop (llm/chat-agent.ts)
+  -> callApiStream: delta / thinking / tool events
+  -> ChatPane renders streamed answer, collapsible thinking, ⚙ tool traces
+  -> file/exec/skill/MCP tool calls (writes sandboxed to the working folder)
+  -> transcript persisted + reindexed into tantivy
+```
+
+Chat agents are independent of the PTY layer and the Master harness. Truncated tool-call arguments (token-limit cutoff) are flagged `incompleteArgs` and refused rather than executed with empty input. A chat left mid-reply across a restart is marked interrupted on hydration; a successful first turn auto-titles the chat unless the user renamed it.
 
 ### Monitor and task-watcher flow
 
@@ -93,7 +123,7 @@ Raw PTY activity resets a short settle timer. When output becomes quiet, YAAM re
 
 The active workspace's scoped fields live flat on `AppState`; inactive workspace slices live in `workspaceData`. `switchWorkspaceIn`, `scopedFromState`, and `applyScoped` swap those slices. Agents remain in one global array and carry a `workspaceId`.
 
-State is hydrated from and debounced back to `conductor-state.json`. Adding a persisted top-level field requires all of the following:
+State is hydrated from and debounced back to `conductor-state.json`. The Rust writer is atomic — temp file, `fsync`, rename, keeping a `.bak` — so a crash mid-write cannot truncate the only copy; hydration tolerates a missing or corrupt file by starting fresh. Adding a persisted top-level field requires all of the following:
 
 1. Add it to `PersistedState` and `AppState` in `types.ts`.
 2. Seed it in `seedState()`.
@@ -105,7 +135,9 @@ Do not rename the Tauri identifier `dev.yaam.conductor` or the state filename; b
 
 ### Addon flow
 
-Addon views run in sandboxed iframes and exchange `yaam:state`, `yaam:call`, and `yaam:result` messages with the host. Addon tools and hooks run in the app context through a curated `AddonApi`. Every path converges on `enforcePermissions`; extending the API requires updating its type, implementation, permission map, RPC whitelist, and LLM-facing authoring documentation.
+Addon views run in sandboxed iframes with an injected `default-src 'none'` CSP (no outbound requests) and exchange `yaam:state`, `yaam:call`, and `yaam:result` messages with the host; state snapshots are only pushed to views whose addon holds `state:read`. Addon tools and hooks run in the app context through a curated `AddonApi`. Every path converges on `enforcePermissions`, which checks each method against the addon's granted scopes (and is empty for disabled addons). Packages come as single-file `*.yaam.json` or the readable folder format (`addon.yaml` + referenced files, packed by `scripts/pack-addon.mjs`).
+
+Fresh installs auto-grant only low-risk scopes (`state:read`, `ui`, `storage`); scopes that act on the machine or steer LLMs (`sessions:send`, `sessions:launch`, `tasks`, `schedules`, `agent`, `master:prompt`) start off and are enabled per-addon. Appending to Master's prompt requires the dedicated `master:prompt` scope. Extending the API requires updating its type, implementation, permission map, RPC whitelist, `master-tools.ts`/`addon-editor.ts`/`addon-gen.ts`, and [docs/addons.md](docs/addons.md).
 
 ## State and side-effect rules
 
@@ -125,6 +157,7 @@ Every named module-level function and React component in runtime source should h
 - Run the full verification gate.
 - For terminal changes, test both a plain shell and an alternate-screen CLI.
 - For state changes, test hydration from an older state file and workspace switching.
-- For LLM changes, preserve provider neutrality and tool-result history shape.
-- For addon API changes, update [docs/addons.md](docs/addons.md).
+- For LLM changes, preserve provider neutrality and tool-result history shape; keep thinking blocks out of replayed API history.
+- For chat-transcript changes, keep the tantivy reindex and sidebar snippets excluding `tool`/`thinking` roles.
+- For addon API changes, update [docs/addons.md](docs/addons.md) and default new dangerous scopes off.
 - For Rust command changes, register the command in `lib.rs` and add a typed wrapper in `native.ts`.
