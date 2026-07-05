@@ -58,6 +58,8 @@ pub fn run() {
             domains::mcp::mcp_stdio_notify,
             domains::mcp::mcp_stdio_stop,
             domains::search::chat_search_reindex,
+            domains::search::chat_search_upsert,
+            domains::search::chat_search_remove,
             domains::search::chat_search,
             domains::bedrock::bedrock_invoke,
             domains::secrets::secret_set,
