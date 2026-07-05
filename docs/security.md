@@ -217,25 +217,39 @@ tools can make network requests allowed by their implementation.
 Addon frames do not inherit this HTTP capability because they have an opaque
 origin, a network-denying CSP, and only the host RPC surface.
 
-### Phone remote server
+### Mobile companion server
 
-The opt-in phone remote (Settings → Phone remote) is the one place YAAM
-*listens* on the network: a Rust `tiny_http` server on `0.0.0.0:8712`. Its
-exposure is deliberately narrow:
+The opt-in mobile companion (Settings → Phone remote) is the one place YAAM
+*listens* on the network: a Rust axum server on `0.0.0.0:8712`. Its exposure
+is deliberately layered:
 
-- both API routes require a per-start 24-character random token; wrong or
-  missing tokens get 403;
-- the server executes nothing and holds no credentials — it stores the latest
-  snapshot JSON published by the frontend and a queue of `{ kind, id, ok }`
-  decisions;
-- the only mutation a remote client can cause is an approve/deny decision,
-  which the frontend applies through the same gated conductor actions as the
-  desktop buttons.
+- **Two secrets per request.** State/command routes require the per-start
+  24-character URL token AND a 32-character per-device token. Device tokens
+  are minted only by `remote_approve_pair` — an explicit confirmation dialog
+  the user answers on the desktop. Possessing the connect link alone gets a
+  device only as far as requesting a pairing (pending list capped at 5,
+  device ids validated and deduped).
+- **Revocable on both ends.** Paired devices persist in settings and render
+  as revocable chips; the frontend re-hydrates the server's device set on
+  every start and settings change, so a revoke locks the device out
+  immediately. The phone stores its token in localStorage.
+- **Command queue, not execution.** The server executes nothing and holds no
+  credentials — it stores the frontend-published snapshot and a queue of
+  `{ kind, id, text, ok }` commands. The frontend applies each through the
+  same gated conductor actions as the desktop buttons (chat send, task
+  chat/start, session input/stop/resume, approvals), so a paired phone's
+  authority is exactly the desktop UI's.
 
-Residual risk: the transport is plain HTTP on the local network, so the token
-and snapshot are visible to anyone who can sniff LAN traffic; the snapshot
-contains session names, task titles, status summaries, and approval prompts.
-The feature is off by default and intended for trusted home/office networks.
+Paired phones CAN type into live session terminals and message chat agents —
+pairing a device is trusting its holder with those capabilities; approve
+requests only for devices you recognize.
+
+Residual risk: the built-in transport is plain HTTP, so on an untrusted LAN
+the tokens and snapshot (session names, terminal tails, task/chat content)
+are sniffable. Tailscale/WireGuard interfaces get their own connect URLs and
+encrypt in transit; a Cloudflare Tunnel (public-URL override; the app uses
+only relative paths) terminates TLS at the edge. The feature is off by
+default.
 
 ## Secret handling
 

@@ -498,27 +498,39 @@ they are process-wide effects, not shell state transitions.
 
 ### Purpose
 
-Drive the phone-remote companion: publish fleet snapshots to the Rust LAN
-server and apply decisions phones queue, without granting the remote any
-capability the desktop UI lacks.
+Drive the mobile companion: publish fleet snapshots to the Rust axum server,
+apply commands paired phones queue, and gate pairing behind explicit desktop
+approval — without granting the remote any capability the desktop UI lacks.
 
 ### Implementation
 
 - `snapshot.ts` is the pure builder: it distills `AppState` into the JSON the
-  phone page renders — non-archived sessions (status, task, summary, action
-  needed, cost), live board columns (progress/review/failed), and approvals
-  from both pending Master tool approvals and ask-mode chat approvals.
+  mobile app renders — sessions with a terminal tail (alt-screen read or log
+  tail), the full non-archived board with watcher chats, chat conversations
+  (thinking excluded), and approvals from both pending Master tool approvals
+  and ask-mode chat approvals. Message counts, screen lines, and text lengths
+  are capped so snapshots stay small.
 - `RemoteCompanion.tsx` is a headless component mounted in the shell. While
-  `settings.remoteEnabled` is on it starts the server (storing `{ url, token }`
-  in transient `remoteInfo` state for the Settings row), publishes a debounced
-  snapshot on every store change, and polls the decision queue — routing
-  `master` decisions to `resolveToolApproval` and `chat` decisions to
-  `approveChatTool`.
+  `settings.remoteEnabled` is on it starts the server (storing
+  `{ url, token, urls }` in transient `remoteInfo`), re-hydrates the paired
+  device set from `settings.remoteDevices` (so Settings revokes propagate),
+  publishes a debounced snapshot on every store change, drains the command
+  queue (chat send, task chat/start, session input/stop/resume, approvals)
+  through the normal conductor actions, and turns pairing requests into
+  `confirmAction` dialogs — approval mints the device token and persists it
+  in settings.
+- `src/mobile/` is the phone app itself: a second Vite build target
+  (`vite.mobile.config.ts` + vite-plugin-singlefile, `npm run build:mobile`)
+  that emits one self-contained HTML file embedded by the Rust server. It
+  reuses the shared `Markdown` renderer and snapshot types; `api.ts` keeps
+  all fetches relative (Cloudflare-Tunnel/proxy friendly) and persists the
+  device id/token in localStorage with an in-memory fallback.
 
 ### Tests
 
-Tests cover the snapshot builder: session/task filtering, both approval kinds,
-and the empty-fleet shape.
+Tests cover the snapshot builder (session/chat split, screens, task chats,
+approval kinds, payload caps) and the mobile api layer (relative URLs, token
+parsing, device identity persistence).
 
 ## Persistence infrastructure
 
@@ -548,6 +560,6 @@ debounce, close flush, and cleanup.
 
 Tests are colocated with domains. Pure functions use direct fixtures; effectful
 runtimes use fake `StatePort`, `ClockPort`, process ports, frames, and abort
-signals. The current suite includes 61 files and 289 test cases in this
+signals. The current suite includes 64 files and 305 test cases in this
 snapshot. UI behavior is covered selectively with jsdom and Testing Library;
 most coverage focuses on domain and runtime invariants.

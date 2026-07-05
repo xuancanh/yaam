@@ -35,7 +35,6 @@ tantivy = "0.22.1"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 notify = "8.2.0"
 tauri-plugin-notification = "2.3.3"
-tiny_http = "0.12.0"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 tokio = { version = "1", features = ["macros", "rt"] }
 if-addrs = "0.14"

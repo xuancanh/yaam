@@ -14,7 +14,7 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 - **Worktree isolation + review queue** — sessions and tasks can run in mirrored git worktrees (multi-repo folders supported); review the diff, stage, commit, and merge back from a Fork-style git workbench.
 - **Watcher-driven task board** — a kanban where each card is run by its own mini-Master.
 - **Extensible via addons** — a real plugin system with a marketplace, sandboxed views, Master tools, hooks, and per-addon agents.
-- **Phone remote** — a token-protected LAN companion page: watch the fleet and answer approvals from your phone; execution never leaves the machine.
+- **Mobile companion** — a paired-device web app served from the desktop: drive tasks, chats, and sessions from your phone over LAN, Tailscale/WireGuard, or a Cloudflare Tunnel; execution never leaves the machine.
 - **Workspaces** — isolated sets of sessions, chats, boards, and schedules that keep running in the background.
 - **Multi-provider** — Anthropic, OpenAI, DeepSeek, Kimi, Gemini, GLM, AWS Bedrock, and OpenAI-/Anthropic-compatible custom endpoints.
 
@@ -42,9 +42,13 @@ Master is a Claude model with tools (enable in Settings → Master Brain; model 
 
 Each session's card is kept current by its monitor — the current **task**, a timestamped **summary**, an **action** strip when something needs you, plus per-session spend, a live `git diff` review, and archive/restore. The **Overview** rail is a fleet ops console: stat tiles (running / needs you / watched tasks / chats / spend), a Master routing rail showing which sessions Master is steering, watched-task cards, and live chat cards.
 
-### Phone remote
+### Mobile companion
 
-Flip **Settings → Phone remote** and YAAM serves a token-protected companion page on your local network — open the shown URL on your phone to watch sessions, tasks, and spend, and to answer escalations and ask-mode tool approvals with Allow/Deny. The remote is read-mostly by construction: the only thing it can ever do is queue an approve/deny decision, which the desktop app applies through the same action paths as its own buttons. Execution, credentials, and file access never leave the machine.
+Flip **Settings → Phone remote** and YAAM serves a full mobile web app (embedded in the binary — no hosting) from an axum server on your network. On the phone you get **Tasks** (the whole board, task details with criteria, the watcher chat, start/retry), **Chats** (conversations with a composer and inline Allow/Deny for ask-mode tool calls), **Sessions** (live terminal tail, type into the terminal, stop/resume), and an **Approvals** inbox.
+
+Connecting requires two secrets: the per-start token in the connect link, **and** a per-device token minted only when you explicitly approve that device's pairing request in a dialog on the desktop. Paired devices are stored on both ends (revocable chips in Settings; the phone keeps its token in localStorage) and survive restarts. Every action a phone takes is queued as a command that the desktop applies through the same conductor actions as its own buttons — execution, credentials, and file access never leave the machine.
+
+It's tunnel-friendly by design: each network interface gets its own connect link (LAN, **Tailscale**, **WireGuard**), the app only ever uses relative URLs so it works unchanged behind a **Cloudflare Tunnel** or any HTTPS reverse proxy, and a public-URL override in Settings renders the tokened link for your tunnel hostname.
 
 ## Chat — a desktop Claude in your workspace
 

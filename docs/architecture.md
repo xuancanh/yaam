@@ -339,38 +339,50 @@ not dead-end: it falls back to a standalone folder explorer — the same tree +
 rich file viewer (code, markdown, images, PDF, office) the terminal/chat file
 pane uses — while keeping the host-supplied review actions.
 
-## Phone remote flow
+## Mobile companion flow
 
-An opt-in LAN companion (Settings → Phone remote) lets a phone on the same
-network watch the fleet and answer approvals. The Rust `remote` domain runs a
-tiny token-authenticated `tiny_http` server (default port 8712) that serves an
-embedded mobile page and two JSON endpoints; the token is generated per start
-and carried in the URL's query string.
+An opt-in companion (Settings → Phone remote) serves a full mobile web app for
+tasks, chats, and sessions. The Rust `remote` domain runs an **axum** server
+(default port 8712) that embeds the single-file mobile bundle
+(`npm run build:mobile` → Vite + `vite-plugin-singlefile` →
+`remote-app.html`, `include_str!`-ed into the binary) plus a JSON API.
+
+Access needs two secrets: the per-start URL token (possession of the connect
+link) AND a per-device token minted only by an explicit pairing approval on
+the desktop. Paired devices persist in `settings.remoteDevices` (revocable in
+Settings) and are re-hydrated into the server on every start; the phone keeps
+its token in localStorage.
 
 ```mermaid
 sequenceDiagram
-  participant Phone as Phone browser
-  participant Rust as Rust remote server
+  participant Phone as Mobile app
+  participant Rust as axum remote server
   participant RC as RemoteCompanion (frontend)
   participant Act as Conductor actions
 
-  RC->>Rust: remote_start → { url, token }
-  RC->>Rust: remote_publish(snapshot JSON, debounced on state change)
-  Phone->>Rust: GET /api/state?t=token (poll)
-  Rust-->>Phone: sessions, tasks, approvals
-  Phone->>Rust: POST /api/decision?t=token { kind, id, ok }
-  RC->>Rust: remote_take_decisions (poll)
-  Rust-->>RC: queued decisions
-  RC->>Act: resolveToolApproval / approveChatTool
+  Phone->>Rust: POST /api/pair/request?t {device_id, name}
+  RC->>Rust: remote_pending_pairs (poll)
+  RC->>RC: confirmAction dialog — explicit approval
+  RC->>Rust: remote_approve_pair → device token (persisted in settings)
+  Phone->>Rust: GET /api/pair/status?t&device → token (stored locally)
+  Phone->>Rust: GET /api/state?t&d (poll)
+  Rust-->>Phone: sessions+screens, tasks+chats, chats, approvals
+  Phone->>Rust: POST /api/command?t&d {kind, id, text, ok}
+  RC->>Rust: remote_take_commands (poll)
+  RC->>Act: sendChatMessage / sendTaskChat / startTask / sendInput / stop / resume / approvals
 ```
 
-The design is deliberately read-mostly: the server never executes anything and
-holds no credentials — it stores the latest published snapshot string and a
-queue of approve/deny decisions. The frontend `RemoteCompanion` (a headless
-component) builds snapshots from `AppState` (active sessions, live board
-columns, pending Master tool approvals, and ask-mode chat approvals) and
-applies drained decisions through the same conductor actions the desktop
-buttons use, so the remote can never do anything the UI cannot.
+The server never executes anything and holds no credentials — it stores the
+latest published snapshot string and a command queue. The desktop
+`RemoteCompanion` builds capped snapshots from `AppState` (sessions with
+terminal tails, the full board with watcher chats, chat transcripts,
+approvals) and applies drained commands through the same conductor actions the
+desktop buttons use, so a paired phone can never do anything the UI cannot.
+
+Network reach: connect URLs are enumerated per interface and classified (LAN,
+Tailscale CGNAT, WireGuard, VPN), and the mobile app uses relative API paths
+only, so it works unchanged behind a Cloudflare Tunnel or any HTTPS reverse
+proxy; Settings offers a public-URL override for tunnel hostnames.
 
 ## Addon flow
 
