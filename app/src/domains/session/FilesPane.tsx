@@ -55,7 +55,13 @@ interface GitInfo {
   dirs: Set<string>
 }
 
-const MAX_LINES = 8000
+// Rows are virtualized (only the visible window is in the DOM), so this is a
+// safety ceiling on total rows rather than a render budget — far above the old
+// full-render cap. ROW_H is the fixed per-row height the windowing math relies
+// on; it must match the row styles below.
+const MAX_LINES = 200_000
+const ROW_H = 19
+const OVERSCAN = 24
 
 const IMG_MIME: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
@@ -159,6 +165,9 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   const [mdView, setMdView] = useState<'rendered' | 'raw'>('rendered')
   const [dataUrl, setDataUrl] = useState<string | null>(null)
   const contentRef = useRef<string | null>(null)
+  // virtualized code view: track the scroll viewport so only visible rows render
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [view, setView] = useState({ top: 0, h: 0 })
 
   const status = git?.byPath.get(path)
   const name = path.slice(path.lastIndexOf('/') + 1)
@@ -252,6 +261,29 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
     return { color: null, label: '' }
   }
 
+  // Windowed range: render only the rows in view (plus overscan) so a large file
+  // costs a constant amount of DOM and highlighting regardless of length. Spacers
+  // above/below reserve the full scroll height at the fixed ROW_H.
+  const first = Math.max(0, Math.floor(view.top / ROW_H) - OVERSCAN)
+  const last = Math.min(lines.length, Math.ceil((view.top + (view.h || 600)) / ROW_H) + OVERSCAN)
+
+  // Track the viewport height (for the window size) and reset scroll to the top
+  // when a different file is opened — but not on same-file reloads, so watching
+  // an edited file doesn't yank the reader back to line 1.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const measure = () => setView(v => (v.h === el.clientHeight ? v : { ...v, h: el.clientHeight }))
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    measure()
+    return () => ro.disconnect()
+  }, [content, rendered, err, kind])
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+    setView(v => ({ ...v, top: 0 }))
+  }, [path])
+
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg3)' }}>
       <div style={{
@@ -333,19 +365,25 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
           </div>
         </div>
       ) : (
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+        <div
+          ref={scrollRef}
+          onScroll={e => setView({ top: e.currentTarget.scrollTop, h: e.currentTarget.clientHeight })}
+          style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
+        >
           <div style={{ display: 'inline-block', minWidth: '100%' }}>
-            {lines.map((line, i) => {
-              const n = i + 1
+            {/* spacer reserving the height of the rows scrolled off the top */}
+            <div style={{ height: first * ROW_H }} />
+            {lines.slice(first, last).map((line, i) => {
+              const n = first + i + 1
               const g = gutterFor(n)
               return (
-                <div key={n} style={{ display: 'flex', background: gutter === 'git' && g.color ? `${g.color === 'var(--green)' ? 'rgba(96,211,148,.05)' : g.color === 'var(--amber)' ? 'rgba(255,176,32,.05)' : 'transparent'}` : 'transparent' }}>
+                <div key={n} style={{ display: 'flex', height: ROW_H, background: gutter === 'git' && g.color ? `${g.color === 'var(--green)' ? 'rgba(96,211,148,.05)' : g.color === 'var(--amber)' ? 'rgba(255,176,32,.05)' : 'transparent'}` : 'transparent' }}>
                   <span
                     className="mono"
                     title={gutter === 'git' ? g.label : undefined}
                     style={{
                       width: 50, flexShrink: 0, textAlign: 'right', paddingRight: 8, userSelect: 'none',
-                      fontSize: 11, lineHeight: 1.6, background: 'var(--bg2)',
+                      fontSize: 11, lineHeight: `${ROW_H}px`, background: 'var(--bg2)',
                       borderRight: `2px solid ${gutter === 'git' && g.color ? g.color : 'var(--line-soft)'}`,
                       color: gutter === 'git' ? (g.color ?? 'var(--faint)') : 'var(--faint)',
                       fontWeight: gutter === 'git' && g.color ? 700 : 400,
@@ -355,12 +393,14 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
                   </span>
                   <span
                     className="mono"
-                    style={{ padding: '0 14px', fontSize: 11.5, lineHeight: 1.6, whiteSpace: 'pre', color: 'var(--text2)', userSelect: 'text' }}
+                    style={{ padding: '0 14px', fontSize: 11.5, lineHeight: `${ROW_H}px`, whiteSpace: 'pre', color: 'var(--text2)', userSelect: 'text' }}
                     dangerouslySetInnerHTML={{ __html: highlight(line, lang) || '&nbsp;' }}
                   />
                 </div>
               )
             })}
+            {/* spacer reserving the height of the rows below the viewport */}
+            <div style={{ height: Math.max(0, lines.length - last) * ROW_H }} />
             {truncated && (
               <div style={{ padding: '8px 14px', fontSize: 11.5, color: 'var(--amber)' }}>
                 Showing the first {MAX_LINES.toLocaleString()} of {allLines.length.toLocaleString()} lines.
