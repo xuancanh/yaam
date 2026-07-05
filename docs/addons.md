@@ -29,7 +29,7 @@ the kanban board is fully reproducible as an addon
         ┌─────────────────────┼──────────────────────────────┐
         │                     │                              │
    VIEW (iframe)         TOOLS (Master)                 HOOKS (events)
-   sandbox=allow-scripts new Function(input, api)       new Function(input, api)
+   sandbox=allow-scripts sandboxed iframe + api RPC     sandboxed iframe + api RPC
         │                     │                              │
    postMessage bridge         │  registered as addon_<name>  │  fired on
    yaam:state  (push)         │  in Master's tool list       │  session exit /
@@ -57,11 +57,11 @@ Key properties:
   requests of any kind (fetch/XHR/WebSocket/remote images are all blocked);
   postMessage to the host is the only channel out, and the host only pushes
   state snapshots to views whose addon holds `state:read`. Tool handlers and
-  hooks run in the app's JS context via
-  `new Function('input', 'api', source)` — powerful by design, bounded by the
-  permission grants and by the API surface, but as app-context code they are
-  ultimately trusted: only install packages with tools/hooks that you'd trust
-  like a browser extension.
+  hooks run in that same kind of opaque-origin sandboxed iframe (network denied
+  by CSP, no DOM/Tauri access) and reach the app only through correlated `api`
+  RPC that the host validates and permission-checks — bounded by the permission
+  grants and the API surface. Handler execution is also time-bounded and its
+  results are size-capped; a runaway handler is terminated.
 - **Addons are data.** Installing, exporting, and editing an addon is JSON
   manipulation; there is no build step and no core-code change. Packages are
   validated by `parseAddonPackage()` and persisted with the rest of app state.
@@ -341,17 +341,21 @@ Tools are injected into Master's tool list on its next turn, namespaced
     "type": "object",
     "properties": { "message": { "type": "string" } }
   },
-  "handler": "const s = api.getState(); let n = 0; for (const x of s.sessions) { if (x.status === 'running') { api.sendToSession(x.id, input.message || 'status?'); n++ } } return `pinged ${n}`;"
+  "handler": "const s = api.getState(); let n = 0; for (const x of s.sessions) { if (x.status === 'running') { await api.sendToSession(x.id, input.message || 'status?'); n++ } } return `pinged ${n}`;"
 }]
 ```
 
 Handler contract:
 
-- `handler` is a **function body**, compiled as
-  `new Function('input', 'api', '"use strict";\n' + handler)`.
-- Signature `(input, api) => string | Promise<string>` — `input` is the
-  model-provided arguments object (validate it yourself), `api` is the
-  permission-checked `AddonApi`.
+- `handler` is an **async function body**, run inside an opaque-origin
+  `sandbox="allow-scripts"` iframe under a network-denying CSP — never in the
+  main webview. It has no ambient `fetch`, DOM, or Tauri access; the app is
+  reachable only through `api`.
+- Signature `(input, api) => Promise<string>` — `input` is the model-provided
+  arguments object (validate it yourself), `api` is the permission-checked
+  `AddonApi` reached over correlated RPC.
+- **The api is async.** `api.getState()` is synchronous (an immutable snapshot),
+  but every other method returns a `Promise` — `await` it.
 - The return value (stringified if not a string) becomes the tool result the
   model reads. Thrown errors are caught and returned as
   `addon tool error: <message>` — Master sees them and can react.
@@ -362,8 +366,8 @@ Handler contract:
 
 ```jsonc
 "hooks": {
-  "onSessionExit":  "api.notify(`${input.name} exited`, input.code === 0 ? 'clean' : `code ${input.code}`)",
-  "onNeedsInput":   "api.flash(`${input.name} is waiting: ${String(input.question).slice(0, 40)}`)",
+  "onSessionExit":  "await api.notify(`${input.name} exited`, input.code === 0 ? 'clean' : `code ${input.code}`)",
+  "onNeedsInput":   "await api.flash(`${input.name} is waiting: ${String(input.question).slice(0, 40)}`)",
   "masterPromptAppend": "The user prefers terse, bullet-point replies."
 }
 ```
@@ -376,9 +380,10 @@ Handler contract:
   addon). `input = { taskId, title, col, from }`.
 - `onCronFired` — fired when a schedule fires.
   `input = { name, kind: 'task' | 'command' | 'log' }`.
-- All are JS function bodies `(input, api) => void | Promise<void>`; each
-  addon's hook runs independently and failures are contained (logged to the
-  Activity feed as `addon "<name>" <hook> failed: …`).
+- All are async JS function bodies `(input, api) => Promise<void>` run in the
+  same sandboxed iframe as tool handlers (`await` api calls); each addon's hook
+  runs independently and failures are contained (logged to the Activity feed as
+  `addon "<name>" <hook> failed: …`).
 - `masterPromptAppend` — plain text appended to Master's system prompt under
   an `ADDON DIRECTIVES` section while the addon is enabled **and holds the
   `master:prompt` scope**. This is the sanctioned way to change Master's

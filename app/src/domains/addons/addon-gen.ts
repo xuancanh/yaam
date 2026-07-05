@@ -58,10 +58,15 @@ A complete self-contained document (inline CSS/JS, NO external resources — the
 - RPC: send {type:'yaam:call', callId, method, args} to parent; receive {type:'yaam:result', callId, result|error}. method is the dotted API name above (e.g. 'tasks.add', 'agent.wake').
 Theme: background #0A0B0F, panel #12151C, border #1a1e26/#23272F, text #E7E9F0, muted #8B93A1, accent #F5C451, green #3DDC97, amber #FFB020, red #FF5C5C. Fonts 'IBM Plex Sans',system-ui (UI) / 'JetBrains Mono',monospace (numbers) with fallbacks. Always escape user/session text before innerHTML.
 
-TOOLS (Master calls these)
-handler is a JS FUNCTION BODY compiled as new Function('input','api', body) — signature (input, api) => string | Promise<string>. Validate input yourself; return a string the model reads. Tool names: [a-z0-9_].
+API IS ASYNC: handlers/hooks run in a sandboxed iframe and reach the app only via
+RPC. api.getState() is synchronous (an immutable snapshot passed in), but EVERY
+other api method returns a Promise — you MUST await it (e.g. const id = await
+api.launchSession(cmd)). There is no network, DOM, or Tauri access inside a handler.
 
-HOOKS (JS function bodies, (input, api) => void | Promise<void>)
+TOOLS (Master calls these)
+handler is an async JS FUNCTION BODY — signature (input, api) => Promise<string>. Validate input yourself; await api calls; return a string the model reads. Tool names: [a-z0-9_].
+
+HOOKS (async JS function bodies, (input, api) => Promise<void>; await api calls)
 - onSessionExit  input={sessionId, name, code}
 - onNeedsInput   input={sessionId, name, question}
 - onTaskMoved    input={taskId, title, col, from}

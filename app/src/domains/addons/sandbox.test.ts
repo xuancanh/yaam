@@ -40,7 +40,7 @@ function fakeFrame(): SandboxFrame {
     post: (msg: unknown) => {
       const m = msg as { type: string; id?: number; ok?: boolean; value?: unknown; error?: string }
       if (m.type === 'yaam:api-result') {
-        const p = pending.get(m.id!); if (p) { pending.delete(m.id!); m.ok ? p.res(m.value) : p.rej(new Error(m.error)) }
+        const p = pending.get(m.id!); if (p) { pending.delete(m.id!); if (m.ok) p.res(m.value); else p.rej(new Error(m.error)) }
       } else if (m.type === 'yaam:exec') {
         void runExec(msg as { callId: number; source: string; arg: unknown; snapshot: unknown })
       }

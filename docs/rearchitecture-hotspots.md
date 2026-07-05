@@ -1,5 +1,24 @@
 # Rearchitecture hotspots beyond the store
 
+> **Status addendum (2026-07-05).** In progress. Both **P0 authority gaps are
+> closed**:
+> - **Addon execution isolated.** Tool/hook handlers no longer run via
+>   `new Function` in the main webview — they run in an opaque-origin
+>   `sandbox="allow-scripts"` iframe under a network-denying CSP, reaching the app
+>   only through correlated `api` RPC that the host validates + permission-checks,
+>   with an immutable state snapshot, size-capped results, and a termination
+>   deadline (`domains/addons/sandbox.ts`, tested).
+> - **Filesystem scope enforced in Rust.** `resolve_in_root` canonicalizes the
+>   workspace root and target (resolving symlinks) at the privileged boundary and
+>   rejects `..`/absolute/symlink escapes; the chat write tools pass their working
+>   folder (`src-tauri/.../fs.rs`, tested incl. symlink escapes).
+>
+> Foundation for the runtime work also landed: `StatePort`/`ClockPort`
+> (`core/ports.ts`) with fakes, and the scheduler, activity service, session
+> settle, and chat search-indexer converted to non-React port factories with
+> fake-clock tests. Remaining: P1 (command+policy layer, LLM tool-loop engine,
+> PTY supervisor, native IPC split), P2, P3 — tracked below.
+
 ## Executive assessment
 
 The highest-priority issue is not file size. Installed addon tools and hooks are
