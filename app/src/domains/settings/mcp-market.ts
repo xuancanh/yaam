@@ -38,7 +38,7 @@ export const MCP_CATALOG: McpCandidate[] = [
   { name: 'deepwiki', source: 'marketplace', transport: 'http', url: 'https://mcp.deepwiki.com/mcp', description: 'Ask questions about public GitHub repos.' },
 ]
 
-interface RawEntry {
+export interface RawEntry {
   command?: string
   args?: string[]
   env?: Record<string, string>
@@ -54,7 +54,7 @@ const headersToLines = (headers?: Record<string, string>) =>
   headers ? Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\n') : undefined
 
 /** One mcpServers-style JSON map → candidates. */
-function fromMcpServersMap(source: string, map: Record<string, RawEntry> | undefined, out: McpCandidate[]) {
+export function fromMcpServersMap(source: string, map: Record<string, RawEntry> | undefined, out: McpCandidate[]) {
   for (const [name, e] of Object.entries(map ?? {})) {
     if (!e || typeof e !== 'object') continue
     if (typeof e.url === 'string' && e.url) {

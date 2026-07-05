@@ -210,6 +210,7 @@ export function seedState(): AppState {
       awsRegion: 'us-east-1', awsProfile: '', awsRefreshCmd: '', credCmd: '',
       registryUrl: 'https://raw.githubusercontent.com/xuancanh/yaam/main/registry/index.json',
       registries: [{ name: 'yaam', url: 'https://raw.githubusercontent.com/xuancanh/yaam/main/registry/index.json' }],
+      pluginRegistries: [{ name: 'claude-plugins-official', url: 'https://github.com/anthropics/claude-plugins-official' }],
     },
     tasks: [],
     messages: [

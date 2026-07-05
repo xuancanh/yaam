@@ -45,15 +45,19 @@ async function fetchGithubRegistry(source: string, url: string): Promise<Catalog
     `https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/${gh.path}?ref=${gh.branch}`,
   )) as { name: string; type: string }[]
   if (!Array.isArray(listing)) throw new Error('unexpected GitHub API response')
-  const dirs = listing.filter(e => e.type === 'dir')
-  const raw = (dir: string) => `https://raw.githubusercontent.com/${gh.owner}/${gh.repo}/${gh.branch}/${gh.path}/${dir}/SKILL.md`
-  const skills = await Promise.all(dirs.map(async d => {
+  const raw = (rel: string) => `https://raw.githubusercontent.com/${gh.owner}/${gh.repo}/${gh.branch}/${gh.path}/${rel}`
+  const skills = await Promise.all(listing.map(async e => {
     try {
-      const text = await httpGetText(raw(d.name))
-      return { ...parseSkillMd(text, d.name), source }
-    } catch {
-      return null // dir without a SKILL.md
-    }
+      // skill folders (SKILL.md) — plus loose .md files, the format of Claude
+      // Code plugin `commands/` directories (a command is a prompt pack too)
+      if (e.type === 'dir') {
+        return { ...parseSkillMd(await httpGetText(raw(`${e.name}/SKILL.md`)), e.name), source }
+      }
+      if (e.type === 'file' && /\.md$/i.test(e.name) && e.name.toLowerCase() !== 'readme.md') {
+        return { ...parseSkillMd(await httpGetText(raw(e.name)), e.name.replace(/\.md$/i, '')), source }
+      }
+    } catch { /* not a skill */ }
+    return null
   }))
   return skills.filter((x): x is CatalogSkill => !!x)
 }

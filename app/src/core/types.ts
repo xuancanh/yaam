@@ -359,6 +359,9 @@ export interface OrchestrationSettings {
   registryUrl: string
   /** addon registries: http(s) index URLs or local folder/index.json paths */
   registries?: { name: string; url: string }[]
+  /** Claude plugin marketplaces (repos with .claude-plugin/marketplace.json);
+   *  installing a plugin imports its skills/commands + MCP servers for chat */
+  pluginRegistries?: { name: string; url: string }[]
   /** base URL for the custom provider (OpenAI-compatible) */
   baseUrl: string
   /** AWS region for the bedrock provider */
