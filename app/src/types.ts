@@ -540,6 +540,12 @@ export interface PersistedState {
   notifications?: Notification[]
 }
 
+/** Low-churn on-disk partition: everything durable except the agents/sessions. */
+export type MainPartition = Omit<PersistedState, 'agents'>
+
+/** High-churn on-disk partition: session definitions and their output tails. */
+export type SessionsPartition = Pick<PersistedState, 'schemaVersion' | 'agents'>
+
 export interface Workspace {
   id: string
   name: string

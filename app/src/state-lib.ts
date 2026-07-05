@@ -1,16 +1,27 @@
 // Pure helpers shared by the store: ids, cron parsing, prompt/dialog
 // detection, agent-type utilities, pane focus semantics, and PTY input.
 import * as native from './native'
-import type { AgentTemplate, AgentType, AppState, EscOption, PersistedState, TabGroup, WorkspaceData } from './types'
+import type { AgentTemplate, AgentType, AppState, EscOption, MainPartition, SessionsPartition, TabGroup, WorkspaceData } from './types'
 
 /** Bumped when the persisted shape changes in a way hydration must know about.
  *  Hydration stays defensive per-field, so most additions don't require a bump. */
 export const SCHEMA_VERSION = 1
 
-/** The single source of truth for what gets written to disk. Both the debounced
- *  writer and the teardown flush go through this so the persisted shape can
- *  never drift between them. Logs are capped here, not at each call site. */
-export function selectPersistedState(s: AppState): PersistedState {
+/** The high-churn `sessions` partition: agent definitions and their capped
+ *  output tails. Terminal I/O and chat streaming mutate this constantly, so it
+ *  is written to its own file to keep those writes off the much larger, mostly
+ *  static main partition. Logs are capped here, not at each call site. */
+export function selectSessionsState(s: AppState): SessionsPartition {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    agents: s.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
+  }
+}
+
+/** The low-churn main partition: everything durable except `agents`. Config
+ *  changes rarely, so separating the sessions partition means a terminal line
+ *  no longer rewrites this whole blob. */
+export function selectMainState(s: AppState): MainPartition {
   return {
     schemaVersion: SCHEMA_VERSION,
     tasks: s.tasks,
@@ -27,7 +38,6 @@ export function selectPersistedState(s: AppState): PersistedState {
     workspaces: s.workspaces,
     activeWorkspace: s.activeWorkspace,
     workspaceData: s.workspaceData,
-    agents: s.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
     groups: s.groups,
     activeGroup: s.activeGroup,
     minimizedIds: s.minimizedIds,

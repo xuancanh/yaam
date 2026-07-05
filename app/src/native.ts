@@ -217,39 +217,56 @@ export async function gitDiff(cwd: string): Promise<string> {
   return await invoke<string>('git_diff', { cwd })
 }
 
-// Serialize state writes: a debounced save and a teardown flush can otherwise
-// hit the backend concurrently and race on the temp file. Chaining guarantees
-// one write completes before the next starts, and coalesces queued writes to
-// the latest payload so a burst doesn't pile up stale saves.
-let saveChain: Promise<void> = Promise.resolve()
-let queuedJson: string | null = null
+// Serialize state writes per partition: a debounced save and a teardown flush
+// can otherwise hit the backend concurrently and race on the temp file.
+// Chaining guarantees one write finishes before the next starts, and coalescing
+// to the latest queued payload keeps a burst from piling up stale saves. Each
+// partition (main state, sessions, …) has its own independent chain.
+const saveChains = new Map<string, { chain: Promise<void>; queued: string | null }>()
 
-/** Persist the serialized app state through Tauri, with localStorage fallback.
- *  Rejects on failure so callers can surface the error. */
-export function saveStateFile(json: string): Promise<void> {
-  if (!isTauri) {
-    localStorage.setItem('conductor-state', json)
-    return Promise.resolve()
-  }
-  queuedJson = json
-  saveChain = saveChain.then(async () => {
-    if (queuedJson === null) return // already written by an earlier link
-    const payload = queuedJson
-    queuedJson = null
-    await invoke('save_state', { json: payload })
+/** Persist one state partition through the backend, serialized per partition. */
+function savePartitionSerialized(partition: string, invokeName: string, args: (json: string) => Record<string, unknown>, json: string): Promise<void> {
+  const entry = saveChains.get(partition) ?? { chain: Promise.resolve(), queued: null }
+  entry.queued = json
+  entry.chain = entry.chain.then(async () => {
+    if (entry.queued === null) return // superseded by an earlier link
+    const payload = entry.queued
+    entry.queued = null
+    await invoke(invokeName, args(payload))
   })
-  return saveChain
+  saveChains.set(partition, entry)
+  return entry.chain
 }
 
-/** Load serialized app state through Tauri, with localStorage fallback. */
+/** Persist the main app-state partition, with localStorage fallback.
+ *  Rejects on failure so callers can surface the error. */
+export function saveStateFile(json: string): Promise<void> {
+  if (!isTauri) { localStorage.setItem('conductor-state', json); return Promise.resolve() }
+  return savePartitionSerialized('conductor-state', 'save_state', j => ({ json: j }), json)
+}
+
+/** Load the main app-state partition, with localStorage fallback. */
 export async function loadStateFile(): Promise<string | null> {
   if (!isTauri) return localStorage.getItem('conductor-state')
   return await invoke<string | null>('load_state')
 }
 
-/** Load the previous state snapshot (the .bak) — used to recover when the
- *  primary file is present but unparseable. */
+/** Load the previous main snapshot (the .bak) — recover when the primary
+ *  file is present but unparseable. */
 export async function loadStateBackup(): Promise<string | null> {
   if (!isTauri) return null
   return await invoke<string | null>('load_state_backup')
+}
+
+/** Persist a named high-churn partition (e.g. `sessions`), with localStorage
+ *  fallback. Serialized per partition. */
+export function savePartition(name: string, json: string): Promise<void> {
+  if (!isTauri) { localStorage.setItem(`conductor-${name}`, json); return Promise.resolve() }
+  return savePartitionSerialized(name, 'save_partition', j => ({ name, json: j }), json)
+}
+
+/** Load a named partition, with localStorage fallback. */
+export async function loadPartition(name: string): Promise<string | null> {
+  if (!isTauri) return localStorage.getItem(`conductor-${name}`)
+  return await invoke<string | null>('load_partition', { name })
 }

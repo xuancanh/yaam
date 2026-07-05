@@ -583,22 +583,28 @@ pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&full, contents).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-/// Persist the serialized frontend state under Tauri's application-data directory.
-pub fn save_state(app: AppHandle, json: String) -> Result<(), String> {
+/// Restrict a partition name to a safe file stem (no separators / traversal).
+fn partition_file(name: &str) -> Result<String, String> {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(format!("invalid partition name: {name}"));
+    }
+    Ok(format!("{name}.json"))
+}
+
+/// Atomic write of one state partition: unique temp file + fsync + rename,
+/// rotating the previous copy to `<file>.bak`. Temp-file + rename means a crash
+/// mid-write can never truncate the only good copy, and a unique temp name
+/// keeps concurrent writers from sharing one scratch path.
+fn write_partition(app: &AppHandle, file: &str, json: &str) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join("conductor-state.json");
-    // Unique temp name per write: two concurrent saves must not share one temp
-    // path (the frontend also serializes writes, this is belt-and-suspenders).
+    let path = dir.join(file);
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let tmp = dir.join(format!("conductor-state.json.{nonce}.tmp"));
+    let tmp = dir.join(format!("{file}.{nonce}.tmp"));
     {
-        // temp file + fsync + rename: a crash mid-write can never truncate
-        // the only copy of the state
         let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
         #[cfg(unix)]
         {
@@ -609,24 +615,25 @@ pub fn save_state(app: AppHandle, json: String) -> Result<(), String> {
         f.sync_all().map_err(|e| e.to_string())?;
     }
     if path.exists() {
-        let _ = std::fs::rename(&path, dir.join("conductor-state.json.bak"));
+        let _ = std::fs::rename(&path, dir.join(format!("{file}.bak")));
     }
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-/// Load persisted frontend state, treating a missing file as a fresh install.
-/// If the primary file is unreadable, fall back to the last-good backup.
-pub fn load_state(app: AppHandle) -> Result<Option<String>, String> {
+/// Read a partition file, optionally falling back to its `.bak`.
+fn read_partition(app: &AppHandle, file: &str, with_backup: bool) -> Result<Option<String>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    match std::fs::read_to_string(dir.join("conductor-state.json")) {
+    match std::fs::read_to_string(dir.join(file)) {
         Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // no primary yet — a rename may have left only the backup behind
-            match std::fs::read_to_string(dir.join("conductor-state.json.bak")) {
-                Ok(s) => Ok(Some(s)),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                Err(e) => Err(e.to_string()),
+            if with_backup {
+                match std::fs::read_to_string(dir.join(format!("{file}.bak"))) {
+                    Ok(s) => Ok(Some(s)),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                    Err(e) => Err(e.to_string()),
+                }
+            } else {
+                Ok(None)
             }
         }
         Err(e) => Err(e.to_string()),
@@ -634,15 +641,37 @@ pub fn load_state(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-/// Return the previous state snapshot (the .bak), for recovery when the primary
-/// file exists but the frontend can't parse it.
+/// Persist the main state partition (`conductor-state.json`).
+pub fn save_state(app: AppHandle, json: String) -> Result<(), String> {
+    write_partition(&app, "conductor-state.json", &json)
+}
+
+#[tauri::command]
+/// Load the main state partition, falling back to its backup, treating a
+/// missing file as a fresh install.
+pub fn load_state(app: AppHandle) -> Result<Option<String>, String> {
+    read_partition(&app, "conductor-state.json", true)
+}
+
+#[tauri::command]
+/// Return the main partition's previous snapshot (the `.bak`), for recovery
+/// when the primary file exists but the frontend can't parse it.
 pub fn load_state_backup(app: AppHandle) -> Result<Option<String>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    match std::fs::read_to_string(dir.join("conductor-state.json.bak")) {
-        Ok(s) => Ok(Some(s)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
+    read_partition(&app, "conductor-state.json.bak", false)
+}
+
+#[tauri::command]
+/// Persist a named state partition (e.g. `sessions`) as `<name>.json`.
+pub fn save_partition(app: AppHandle, name: String, json: String) -> Result<(), String> {
+    let file = partition_file(&name)?;
+    write_partition(&app, &file, &json)
+}
+
+#[tauri::command]
+/// Load a named state partition, falling back to its `.bak`.
+pub fn load_partition(app: AppHandle, name: String) -> Result<Option<String>, String> {
+    let file = partition_file(&name)?;
+    read_partition(&app, &file, true)
 }
 
 #[cfg(test)]

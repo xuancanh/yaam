@@ -238,7 +238,7 @@ export interface ConductorActions {
 import {
   KEYMAP, PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
   activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, groupsFromLegacy,
-  humanizeCron, mkGroup, mkId, removeFromGroups, selectPersistedState,
+  humanizeCron, mkGroup, mkId, removeFromGroups, selectMainState, selectSessionsState,
   sendLineToSession, spawnAgentProcess, switchWorkspaceIn, taskContract, taskWorkText, typeForCommand, wait,
 } from './state-lib'
 
@@ -954,10 +954,9 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (hydrateStarted.current) return
     hydrateStarted.current = true
-    // Apply one serialized snapshot; throws if it is not parseable/usable so
-    // the caller can fall back to the backup.
-    const hydrateFrom = (raw: string) => {
-          const p = JSON.parse(raw) as Partial<PersistedState>
+    // Apply one merged snapshot; throws if it is not usable so the caller can
+    // fall back / start fresh.
+    const hydrateFrom = (p: Partial<PersistedState>) => {
           const workspaces = p.workspaces?.length ? p.workspaces : [{ id: 'ws-default', name: 'Default' }]
           const activeWorkspace = p.activeWorkspace && workspaces.some(w => w.id === p.activeWorkspace)
             ? p.activeWorkspace
@@ -1094,63 +1093,99 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
             }
           }).catch(() => {})
     }
-    native.loadStateFile().then(async json => {
-      if (json) {
-        try {
-          hydrateFrom(json)
-        } catch (e) {
-          // primary file present but unreadable — recover from the last-good backup
-          console.error('[yaam] primary state unreadable — trying backup:', e)
-          try {
-            const bak = await native.loadStateBackup()
-            if (bak) {
-              hydrateFrom(bak)
-              dispatch(s => ({ ...s, toast: 'Restored from backup — the main state file was unreadable' }))
-            }
-          } catch (e2) {
-            console.error('[yaam] backup unreadable too — starting fresh:', e2)
-            dispatch(s => ({ ...s, toast: 'Saved state was unreadable — starting fresh' }))
-          }
-        }
+    // Parse the main partition, recovering from its backup if the primary is
+    // unparseable (rethrows if the backup is bad too).
+    const parseMain = async (): Promise<Partial<PersistedState>> => {
+      const raw = await native.loadStateFile()
+      if (!raw) return {}
+      try {
+        return JSON.parse(raw) as Partial<PersistedState>
+      } catch (e) {
+        console.error('[yaam] main state unreadable — trying backup:', e)
+        const bak = await native.loadStateBackup()
+        if (!bak) throw e
+        const parsed = JSON.parse(bak) as Partial<PersistedState>
+        dispatch(s => ({ ...s, toast: 'Restored from backup — the main state file was unreadable' }))
+        return parsed
+      }
+    }
+    // Parse the sessions partition; a bad/absent one just means no restored
+    // sessions (agents also fall back to the legacy embedded field below).
+    const parseSessionAgents = async (): Promise<Agent[] | undefined> => {
+      const raw = await native.loadPartition('sessions')
+      if (!raw) return undefined
+      try {
+        return (JSON.parse(raw) as Partial<PersistedState>).agents
+      } catch (e) {
+        console.error('[yaam] sessions partition unreadable — ignoring:', e)
+        return undefined
+      }
+    }
+    void (async () => {
+      try {
+        const [main, sessionAgents] = await Promise.all([parseMain(), parseSessionAgents()])
+        // agents live in the sessions partition now; legacy saves embed them in main
+        const merged: Partial<PersistedState> = { ...main, agents: sessionAgents ?? main.agents }
+        if (Object.keys(main).length || merged.agents?.length) hydrateFrom(merged)
+      } catch (e) {
+        console.error('[yaam] hydration failed — starting fresh:', e)
+        dispatch(s => ({ ...s, toast: 'Saved state was unreadable — starting fresh' }))
       }
       hydrated.current = true
-    }).catch(() => { hydrated.current = true })
+    })()
   }, [appendTail, armResponseWatch, bumpSettle, clearNeeds])
 
-  const saveTimer = useRef<number | undefined>(undefined)
+  const mainSaveTimer = useRef<number | undefined>(undefined)
+  const sessionSaveTimer = useRef<number | undefined>(undefined)
   const saveFailedRef = useRef(false)
+  // warn once per failure streak, not on every debounced save
+  const onSaveError = useCallback((where: string, e: unknown) => {
+    console.error(`[yaam] ${where} save failed:`, e)
+    if (!saveFailedRef.current) {
+      saveFailedRef.current = true
+      dispatch(s => ({ ...s, toast: 'Could not save state to disk — recent changes may be lost on restart' }))
+    }
+  }, [])
+
+  // Main (low-churn) partition: everything durable except the agents. Its deps
+  // are the curated durable slices only — depending on all of `state` would
+  // re-run on every transient UI change (toast/composer) and thrash the debounce.
   useEffect(() => {
     if (!hydrated.current) return
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    const persisted = selectPersistedState(state)
-    saveTimer.current = window.setTimeout(() => {
-      native.saveStateFile(JSON.stringify(persisted)).then(() => {
-        saveFailedRef.current = false
-      }).catch(e => {
-        console.error('[yaam] state save failed:', e)
-        if (!saveFailedRef.current) {
-          saveFailedRef.current = true // warn once per failure streak, not every keystroke
-          dispatch(s => ({ ...s, toast: 'Could not save state to disk — recent changes may be lost on restart' }))
-        }
-      })
+    if (mainSaveTimer.current) window.clearTimeout(mainSaveTimer.current)
+    const main = selectMainState(state)
+    mainSaveTimer.current = window.setTimeout(() => {
+      native.saveStateFile(JSON.stringify(main)).then(() => { saveFailedRef.current = false }).catch(e => onSaveError('main', e))
     }, 800)
-    // Deps are the curated set of DURABLE slices only — selectPersistedState reads
-    // the whole state, but depending on all of `state` would re-run this on every
-    // transient UI change (toast, composer keystrokes) and thrash the save debounce.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.templates, state.mcpServers, state.skills, state.personas, state.skillRegistries, state.chatAgentTypes,
-    state.agents, state.groups, state.activeGroup, state.minimizedIds,
+    state.groups, state.activeGroup, state.minimizedIds,
     state.addons, state.addonStorage, state.messages, state.events, state.notifications,
     state.workspaces, state.activeWorkspace, state.workspaceData,
   ])
 
+  // Sessions (high-churn) partition: agent definitions + capped output tails.
+  // Terminal I/O and chat streaming fire here constantly, so it writes to its
+  // own file instead of dragging the whole main blob to disk each time.
+  useEffect(() => {
+    if (!hydrated.current) return
+    if (sessionSaveTimer.current) window.clearTimeout(sessionSaveTimer.current)
+    const sessions = selectSessionsState(state)
+    sessionSaveTimer.current = window.setTimeout(() => {
+      native.savePartition('sessions', JSON.stringify(sessions)).then(() => { saveFailedRef.current = false }).catch(e => onSaveError('sessions', e))
+    }, 800)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.agents])
+
   // flush the latest state on quit/reload so nothing inside the debounce window is lost
   useEffect(() => {
-    // Persist from stateRef during page teardown, through the same selector as
-    // the debounced writer so the two can never drift apart.
+    // Persist both partitions from stateRef during page teardown, through the
+    // same selectors as the debounced writers so they can never drift apart.
     const flush = () => {
-      native.saveStateFile(JSON.stringify(selectPersistedState(stateRef.current))).catch(() => {})
+      const st = stateRef.current
+      native.saveStateFile(JSON.stringify(selectMainState(st))).catch(() => {})
+      native.savePartition('sessions', JSON.stringify(selectSessionsState(st))).catch(() => {})
     }
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)
