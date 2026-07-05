@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo } from 'react'
+import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { ActionsCtx } from './core/context'
 import { createAppRuntime } from './app/conductor-runtime'
+import type { AppRuntime } from './app/conductor-runtime'
 import { useGlobalEffects } from './app/global-effects'
 
 export { cronMatches, humanizeCron } from './domains/schedules/cron'
@@ -14,7 +15,10 @@ export { cronMatches, humanizeCron } from './domains/schedules/cron'
  *  store, so terminal output and chat streaming never rerender it; UI components
  *  read reactive state through useConductorSelector. */
 export function ConductorProvider({ children }: { children: ReactNode }) {
-  const runtime = useMemo(() => createAppRuntime(), [])
+  // create-once (survives StrictMode's double render); start/dispose bound to mount
+  const ref = useRef<AppRuntime>(undefined)
+  if (!ref.current) ref.current = createAppRuntime()
+  const runtime = ref.current
   useEffect(() => {
     runtime.start()
     return () => runtime.dispose()

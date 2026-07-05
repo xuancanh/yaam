@@ -86,7 +86,10 @@ export interface AppRuntime {
 export function createAppRuntime(): AppRuntime {
   // ── foundation kernel (no React) ─────────────────────────────────────────
   const stateRef: MutableRefObject<AppState> = { current: useAppStore.getState() }
-  const unsubMirror = useAppStore.subscribe(next => { stateRef.current = next })
+  // The store→stateRef mirror is (un)subscribed in start/dispose, not here, so a
+  // dispose→start cycle (React StrictMode dev remount) re-arms it rather than
+  // leaving stateRef frozen.
+  let unsubMirror: (() => void) | undefined
   const dragId: MutableRefObject<string | null> = { current: null }
 
   // tracked timers so teardown can cancel outstanding work
@@ -119,13 +122,18 @@ export function createAppRuntime(): AppRuntime {
 
   return {
     actions,
-    start() { session.start(); chat.start(); master.start() },
+    start() {
+      // refresh + (re)arm the store mirror in case state moved between build and start
+      stateRef.current = useAppStore.getState()
+      unsubMirror ??= useAppStore.subscribe(next => { stateRef.current = next })
+      session.start(); chat.start(); master.start()
+    },
     dispose() {
       session.dispose(); chat.dispose(); master.dispose()
       toastTimer?.dispose()
       for (const d of timers) d.dispose()
       timers.clear()
-      unsubMirror()
+      unsubMirror?.(); unsubMirror = undefined
     },
   }
 }
