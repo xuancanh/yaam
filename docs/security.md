@@ -217,6 +217,26 @@ tools can make network requests allowed by their implementation.
 Addon frames do not inherit this HTTP capability because they have an opaque
 origin, a network-denying CSP, and only the host RPC surface.
 
+### Phone remote server
+
+The opt-in phone remote (Settings → Phone remote) is the one place YAAM
+*listens* on the network: a Rust `tiny_http` server on `0.0.0.0:8712`. Its
+exposure is deliberately narrow:
+
+- both API routes require a per-start 24-character random token; wrong or
+  missing tokens get 403;
+- the server executes nothing and holds no credentials — it stores the latest
+  snapshot JSON published by the frontend and a queue of `{ kind, id, ok }`
+  decisions;
+- the only mutation a remote client can cause is an approve/deny decision,
+  which the frontend applies through the same gated conductor actions as the
+  desktop buttons.
+
+Residual risk: the transport is plain HTTP on the local network, so the token
+and snapshot are visible to anyone who can sniff LAN traffic; the snapshot
+contains session names, task titles, status summaries, and approval prompts.
+The feature is off by default and intended for trusted home/office networks.
+
 ## Secret handling
 
 Credential-bearing fields include the Master API key, chat-agent keys, and MCP

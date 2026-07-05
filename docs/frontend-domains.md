@@ -203,7 +203,9 @@ ephemeral completion, and ordinary interactive exit. The coordinator then:
 The file pane lists directories, polls git status, loads text or base64 binary
 content, provides image/PDF/office previews, highlights source, and derives
 changed-line markers from zero-context git diffs. It is shared by real sessions
-and chat sessions with a working folder.
+and chat sessions with a working folder. `FolderExplorer` is the standalone
+variant (tree + rich viewer, nothing attached) the git workbench uses as its
+non-git fallback.
 
 ### Worktree isolation and the git workbench
 
@@ -218,7 +220,10 @@ Review tab. It detects multi-repo folders through `shared/git-repos.ts`,
 stages/unstages per file or section, shows per-side diffs (worktree sessions
 review against their fork point in all-files mode), and commits with an
 optionally AI-drafted message. `mergeSessionWorktree` (actions) and
-`approveTaskReview` (board) perform the merge-back + mirror cleanup.
+`approveTaskReview` (board) perform the merge-back + mirror cleanup. When no
+git repository exists anywhere under the reviewed folder, the workbench falls
+back to `FolderExplorer` (whole-folder browse with the rich viewer) while
+keeping the host footer's review actions.
 
 Exit handling restores the terminal modes a dead process left behind (alt
 screen, mouse tracking, bracketed paste), and `resume` fully resets the reused
@@ -246,7 +251,9 @@ per-task watcher agents, diff review, and scheduled task metadata.
 - `task-prompt.ts` builds the worker prompt and acceptance contract.
 - `watcher.ts` defines task drafting and the task-scoped LLM tool loop.
 - `watcher-runner.ts` adapts watcher tools to current state, terminal screens,
-  task messages, and session launches.
+  task messages, and session launches; it also streams the watcher's in-flight
+  reply into the transient `taskStreams` store map (throttled) so the task
+  drawer shows the answer live.
 - `watcher-runtime.ts` owns private histories, busy state, queued notes, and
   keyed cancellation.
 - `Board.tsx` and `TaskSpecForm.tsx` implement kanban and specification UI;
@@ -473,7 +480,9 @@ Own global navigation and overlays rather than feature data.
   drawer, new-session dialog, and needs-attention navigation.
 - `TitleBar.tsx` hosts workspace and appearance controls.
 - `IconRail.tsx` selects top-level built-in/addon views.
-- `Overview.tsx`, `Timeline.tsx`, and `UsageSummary.tsx` present aggregate state.
+- `Overview.tsx` is the fleet ops console (stat tiles, Master routing rail,
+  watched-task and chat cards); `Timeline.tsx` and `UsageSummary.tsx` present
+  aggregate state.
 - `Drawer.tsx` hosts agent detail and live git diff review.
 - `SlideOver.tsx` hosts memory/tool configuration.
 - `CommandPalette.tsx` offers keyboard navigation/actions.
@@ -481,6 +490,32 @@ Own global navigation and overlays rather than feature data.
 
 Global keyboard/error/appearance listeners live in the application layer because
 they are process-wide effects, not shell state transitions.
+
+## Remote domain
+
+### Purpose
+
+Drive the phone-remote companion: publish fleet snapshots to the Rust LAN
+server and apply decisions phones queue, without granting the remote any
+capability the desktop UI lacks.
+
+### Implementation
+
+- `snapshot.ts` is the pure builder: it distills `AppState` into the JSON the
+  phone page renders — non-archived sessions (status, task, summary, action
+  needed, cost), live board columns (progress/review/failed), and approvals
+  from both pending Master tool approvals and ask-mode chat approvals.
+- `RemoteCompanion.tsx` is a headless component mounted in the shell. While
+  `settings.remoteEnabled` is on it starts the server (storing `{ url, token }`
+  in transient `remoteInfo` state for the Settings row), publishes a debounced
+  snapshot on every store change, and polls the decision queue — routing
+  `master` decisions to `resolveToolApproval` and `chat` decisions to
+  `approveChatTool`.
+
+### Tests
+
+Tests cover the snapshot builder: session/task filtering, both approval kinds,
+and the empty-fleet shape.
 
 ## Persistence infrastructure
 
@@ -510,6 +545,6 @@ debounce, close flush, and cleanup.
 
 Tests are colocated with domains. Pure functions use direct fixtures; effectful
 runtimes use fake `StatePort`, `ClockPort`, process ports, frames, and abort
-signals. The current suite includes 36 files and 172 test cases in this
+signals. The current suite includes 61 files and 289 test cases in this
 snapshot. UI behavior is covered selectively with jsdom and Testing Library;
 most coverage focuses on domain and runtime invariants.

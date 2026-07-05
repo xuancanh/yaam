@@ -12,7 +12,8 @@ implemented in the webview:
 - durable files and OS credentials;
 - stdio MCP child processes;
 - embedded chat search;
-- AWS Bedrock authentication and invocation.
+- AWS Bedrock authentication and invocation;
+- the phone-remote LAN server.
 
 Each module under `src-tauri/src/domains` keeps managed state, domain logic,
 Tauri command handlers, and tests together.
@@ -28,7 +29,9 @@ Managed process-wide states are:
 - `SessionManager` — live PTYs keyed by session id;
 - `McpManager` — live stdio MCP processes keyed by server id;
 - `ChatSearchState` — optional in-memory Tantivy engine;
-- `BedrockState` — cached AWS clients keyed by credential configuration.
+- `BedrockState` — cached AWS clients keyed by credential configuration;
+- `RemoteManager` — the optional phone-remote HTTP server, its token, latest
+  published snapshot, and queued decisions.
 
 On `CloseRequested`, Rust prevents the close and emits `close-requested`. The
 frontend flushes state and explicitly destroys the window, avoiding an
@@ -51,6 +54,7 @@ expansion.
 | Search | `chat_search_reindex`, `chat_search` | chat search indexer/view |
 | Bedrock | `bedrock_invoke` | `llm/client.ts` through native adapter |
 | Secrets | `secret_set`, `secret_get`, `secret_delete` | persistence secret mirror |
+| Remote | `remote_start`, `remote_stop`, `remote_publish`, `remote_take_decisions` | `infrastructure/native/remote.ts`, `RemoteCompanion` |
 
 Tauri serializes command input/output with serde. `native.ts` performs any
 snake-case/camel-case conversion required by the frontend.
@@ -302,6 +306,30 @@ Non-authentication failures return immediately.
 Tests cover accepted/rejected credential formats, seconds/milliseconds expiry,
 and auth-error classification.
 
+## Remote domain (`domains/remote.rs`)
+
+The phone-remote companion server. `remote_start` binds a `tiny_http` server on
+`0.0.0.0` (default port 8712), generates a 24-character token, and returns a
+URL built from the machine's best-effort LAN address (UDP-connect trick — no
+packet is sent) with the token in the query string. The accept loop runs on a
+plain thread; `remote_stop` flips a stop flag, unblocks the listener, and
+clears the token, snapshot, and decision queue.
+
+Three routes:
+
+- `GET /api/state?t=<token>` — returns the last snapshot JSON published by the
+  frontend verbatim (the server never inspects it);
+- `POST /api/decision?t=<token>` — parses a `{ kind, id, agent_id, ok }`
+  decision and appends it to the queue;
+- anything else — serves the embedded mobile page (`include_str!`), which reads
+  the token from its own URL and polls the API.
+
+Both API routes reject a missing or wrong token with 403. The server executes
+nothing and holds no credentials; the frontend drains the queue with
+`remote_take_decisions` and applies decisions through normal conductor
+actions. Tests cover token generation, query-token parsing, and decision
+serde.
+
 ## Secrets domain (`domains/secrets.rs`)
 
 Secrets are stored with the `keyring` crate under service
@@ -329,7 +357,7 @@ See [Security model](security.md) for implications.
 
 ## Backend test architecture
 
-There are 42 Rust unit tests in this snapshot. Tests are colocated inside each
+There are 59 Rust unit tests in this snapshot. Tests are colocated inside each
 domain module and call internal implementation functions directly, avoiding a
 running Tauri application where possible. Temporary filesystem fixtures use
 RAII cleanup. MCP uses a shell-based fake server; Bedrock tests focus on pure

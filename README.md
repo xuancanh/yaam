@@ -14,6 +14,7 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 - **Worktree isolation + review queue** — sessions and tasks can run in mirrored git worktrees (multi-repo folders supported); review the diff, stage, commit, and merge back from a Fork-style git workbench.
 - **Watcher-driven task board** — a kanban where each card is run by its own mini-Master.
 - **Extensible via addons** — a real plugin system with a marketplace, sandboxed views, Master tools, hooks, and per-addon agents.
+- **Phone remote** — a token-protected LAN companion page: watch the fleet and answer approvals from your phone; execution never leaves the machine.
 - **Workspaces** — isolated sets of sessions, chats, boards, and schedules that keep running in the background.
 - **Multi-provider** — Anthropic, OpenAI, DeepSeek, Kimi, Gemini, GLM, AWS Bedrock, and OpenAI-/Anthropic-compatible custom endpoints.
 
@@ -39,7 +40,11 @@ Master is a Claude model with tools (enable in Settings → Master Brain; model 
 
 ![Agents overview — monitor-maintained status cards](docs/agents.png)
 
-Each session's card is kept current by its monitor — the current **task**, a timestamped **summary**, an **action** strip when something needs you, plus per-session spend, a live `git diff` review, and archive/restore.
+Each session's card is kept current by its monitor — the current **task**, a timestamped **summary**, an **action** strip when something needs you, plus per-session spend, a live `git diff` review, and archive/restore. The **Overview** rail is a fleet ops console: stat tiles (running / needs you / watched tasks / chats / spend), a Master routing rail showing which sessions Master is steering, watched-task cards, and live chat cards.
+
+### Phone remote
+
+Flip **Settings → Phone remote** and YAAM serves a token-protected companion page on your local network — open the shown URL on your phone to watch sessions, tasks, and spend, and to answer escalations and ask-mode tool approvals with Allow/Deny. The remote is read-mostly by construction: the only thing it can ever do is queue an approve/deny decision, which the desktop app applies through the same action paths as its own buttons. Execution, credentials, and file access never leave the machine.
 
 ## Chat — a desktop Claude in your workspace
 
@@ -52,6 +57,7 @@ The **Chat** rail is a home for **chat agents**: in-app LLM assistants (no PTY) 
 - **File import** — drag & drop or attach files: text inlines, PDFs and office documents (docx/xlsx/pptx) are text-extracted, images go to vision-capable models; a Files toggle mounts the same explorer/rich viewer terminal sessions use (images, PDFs, office previews).
 - **Durable workspace memory** — agents read shared memory each turn and append facts via a `remember` tool; a Memory editor lets you prune what they've learned.
 - **Streaming replies** — token-by-token, with reasoning models' thinking shown in a collapsible block; stop, retry, copy, and a send queue while the agent is busy.
+- **Artifacts pane** — when a reply contains substantial HTML or SVG, an artifact chip opens it rendered live in a sandboxed (no-network) side panel.
 - **Configurable agent types** — each with its own provider, credentials, and a per-chat model list; an optional persona and chosen skill sources.
 - **Full-text search** across every conversation via an embedded tantivy index, rebuilt automatically.
 - Conversations persist and auto-title themselves; transcripts render markdown.
@@ -60,7 +66,7 @@ The **Chat** rail is a home for **chat agents**: in-app LLM assistants (no PTY) 
 
 ![Task board — watcher-driven cards with criteria, chat counts, and Done/Failed columns](docs/board.png)
 
-Drag-and-drop kanban where **each task is driven by its own watcher LLM** (a per-task mini-Master): it drafts the card and acceptance criteria from a rough idea (or asks questions if it's too vague), spawns and steers one-shot sessions, verifies live state before claiming progress, moves the card across columns (backlog → progress → review → done/failed), and chats with you in the card's own thread. Deleting a card **archives** it (recoverable from the Archived viewer, the only place offering permanent deletion); every destructive action across the app asks for confirmation first.
+Drag-and-drop kanban where **each task is driven by its own watcher LLM** (a per-task mini-Master): it drafts the card and acceptance criteria from a rough idea (or asks questions if it's too vague), spawns and steers one-shot sessions, verifies live state before claiming progress, moves the card across columns (backlog → progress → review → done/failed), and chats with you in the card's own thread — replies stream in live, and when a task finishes the watcher posts a results summary and asks you to review. Deleting a card **archives** it (recoverable from the Archived viewer, the only place offering permanent deletion); every destructive action across the app asks for confirmation first.
 
 ## Worktrees & the review queue
 
@@ -68,6 +74,7 @@ Sessions and board tasks can opt into **git worktree isolation**: the working fo
 
 - **Review queue** — cards in "Needs review" open a diff of everything the task changed; **Approve & merge** commits outstanding work and `--no-ff` merges each repo back (conflicts abort safely), **Request changes** bounces the task with your feedback as the watcher's next instruction.
 - **Git workbench** — one Fork-style component on three surfaces (session pane popup, the agents → Review drawer, the task drawer's Review tab): a staged/unstaged file tree with per-file staging, single-file or continuous all-files diff views, a repo picker for multi-repo folders, and a commit box with AI-drafted messages. The review drawer adds a feedback chatbox that types straight into the session's terminal.
+- **Non-git folders review too** — when the reviewed folder has no git repository, the workbench falls back to a full folder tree with the rich file viewer (code, markdown, images, PDF, office), keeping the review actions.
 - A task's follow-up sessions re-enter the same worktree, so work-in-progress carries across relaunches.
 
 ## Addons — a real plugin system
@@ -96,9 +103,9 @@ Work is organized into **workspaces** (switcher in the title bar): each has its 
 - **Schedules** — a 5-field cron scheduler plus one-time runs; can launch sessions or seed board tasks, from the UI or Master.
 - **Templates** — preconfigured launches, one-shot (run a task and exit) or interactive, that feed quick launches, schedules, and tasks.
 - **MCP everywhere** — streamable-HTTP *and* local stdio servers, a curated one-click marketplace, import from Claude Desktop / Claude Code / Cursor / Codex / Windsurf configs, and `.mcpb`/`.dxt` Claude Desktop extension bundles.
-- **Claude plugin marketplaces** — browse repos like `anthropics/claude-plugins-official` and install plugins for chat: skills and commands become slash-invocable skill registries, agents become personas, `.mcp.json` servers register directly.
+- **Claude plugin marketplaces** — browse repos like `anthropics/claude-plugins-official` and install plugins for chat: skills and commands become slash-invocable skill registries, agents become personas, `.mcp.json` servers register directly, and plugin `hooks/` configs are translated into addon hooks (Stop/SessionEnd → session-exit, Notification → needs-input; runs gated behind the never-auto-granted `exec` permission).
 - **Skills** — local instruction packs plus GitHub/local registries (a keychain-backed GitHub token lifts API rate limits).
-- **Appearance** — Dark / Midnight / Light / System themes, interface scale, layout density, UI + mono font choices, and markdown-table typography.
+- **Appearance** — Dark / Midnight / Light / Paper (warm reader-style) / System themes with theme-aware terminal palettes, interface scale, layout density, UI + mono font choices, and markdown-table typography.
 - **Notifications & activity** — session exits, failures, cron runs, and Master decisions in the bell popover and Activity timeline, mirrored to the OS notification center when the app is in the background.
 - **Persistence** — sessions, board, schedules, templates, layouts, settings, memory, and more survive restarts.
 

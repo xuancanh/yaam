@@ -18,7 +18,8 @@ YAAM has two cooperating processes:
    LLM protocol adapters, and domain runtimes.
 2. The Rust host owns privileged OS capabilities: PTYs and child processes,
    filesystem and git operations, state files, the OS keychain, stdio MCP
-   processes, chat search, and AWS Bedrock invocation.
+   processes, chat search, AWS Bedrock invocation, and the phone-remote LAN
+   server.
 
 External systems include agent CLIs, LLM provider APIs, HTTP or stdio MCP
 servers, addon registries, skill/plugin registries, the local filesystem, and
@@ -37,6 +38,7 @@ flowchart LR
   R --> KC[OS keychain]
   R --> MCP[MCP child processes]
   R --> BR[AWS Bedrock]
+  R --> RM[Phone remote LAN server]
   LLM --> API[Anthropic/OpenAI-compatible APIs]
   AR --> HTTP[HTTP MCP and registries]
 ```
@@ -277,6 +279,9 @@ separately, refuses truncated tool arguments, and caps private history. Chat
 runtime state is keyed by chat id and cancellable through `AbortRegistry`.
 Risky built-ins (`run_command`, `run_applescript`, `delete_path`) pause for an
 inline approval in the default Ask mode; Auto mode bypasses that prompt.
+Replies containing substantial HTML or SVG surface an artifact chip that opens
+the content in a sandboxed, network-denied side panel (the same iframe
+hardening the addon sandbox uses).
 
 Visible transcripts are persisted. Tool and thinking messages are excluded
 when reconstructing provider history after restart. Chat transcript changes
@@ -302,6 +307,11 @@ The scheduler ticks every 15 seconds after boot and handles:
 
 One-time entries are disarmed and recurring entries deduplicate by minute.
 
+Watcher replies stream into the task chat while they are generated: the
+watcher's tool loop runs over the streaming transport, throttled deltas land
+in a transient `taskStreams` store map, and the task drawer renders a live
+bubble until the turn settles and the final message is posted.
+
 Deleting a task archives it (recoverable); permanent deletion exists only in
 the board's Archived viewer, and all destructive actions confirm first.
 
@@ -323,6 +333,44 @@ original checkout (conflicts abort per repo and are reported instead of
 leaving the source mid-merge), removes the mirror, and completes the
 task/session; request-changes routes reviewer feedback to the watcher (tasks)
 or straight into the PTY (sessions).
+
+When the reviewed folder contains no git repository at all, the workbench does
+not dead-end: it falls back to a standalone folder explorer — the same tree +
+rich file viewer (code, markdown, images, PDF, office) the terminal/chat file
+pane uses — while keeping the host-supplied review actions.
+
+## Phone remote flow
+
+An opt-in LAN companion (Settings → Phone remote) lets a phone on the same
+network watch the fleet and answer approvals. The Rust `remote` domain runs a
+tiny token-authenticated `tiny_http` server (default port 8712) that serves an
+embedded mobile page and two JSON endpoints; the token is generated per start
+and carried in the URL's query string.
+
+```mermaid
+sequenceDiagram
+  participant Phone as Phone browser
+  participant Rust as Rust remote server
+  participant RC as RemoteCompanion (frontend)
+  participant Act as Conductor actions
+
+  RC->>Rust: remote_start → { url, token }
+  RC->>Rust: remote_publish(snapshot JSON, debounced on state change)
+  Phone->>Rust: GET /api/state?t=token (poll)
+  Rust-->>Phone: sessions, tasks, approvals
+  Phone->>Rust: POST /api/decision?t=token { kind, id, ok }
+  RC->>Rust: remote_take_decisions (poll)
+  Rust-->>RC: queued decisions
+  RC->>Act: resolveToolApproval / approveChatTool
+```
+
+The design is deliberately read-mostly: the server never executes anything and
+holds no credentials — it stores the latest published snapshot string and a
+queue of approve/deny decisions. The frontend `RemoteCompanion` (a headless
+component) builds snapshots from `AppState` (active sessions, live board
+columns, pending Master tool approvals, and ask-mode chat approvals) and
+applies drained decisions through the same conductor actions the desktop
+buttons use, so the remote can never do anything the UI cannot.
 
 ## Addon flow
 
