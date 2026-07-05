@@ -117,16 +117,21 @@ export async function pickFolder(defaultPath?: string): Promise<string | null> {
   return typeof picked === 'string' ? picked : null
 }
 
+// Tauri's HTTP plugin (reqwest) sends NO default User-Agent, and some APIs —
+// notably api.github.com — reject UA-less requests with 403. Browsers set
+// their own UA (and forbid overriding it), so only add ours on the desktop.
+const UA_HEADER: Record<string, string> = isTauri ? { 'user-agent': 'yaam/1.0' } : {}
+
 /** Fetch text through Tauri's HTTP plugin so desktop requests are not blocked by CORS. */
 export async function httpGetText(url: string): Promise<string> {
-  const res = await (isTauri ? tauriFetch : fetch)(url)
+  const res = await (isTauri ? tauriFetch : fetch)(url, { headers: UA_HEADER })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return await res.text()
 }
 
 /** POST text (JSON-RPC etc.) through Tauri's HTTP plugin; returns body + headers of interest. */
 export async function httpPostText(url: string, body: string, headers: Record<string, string>): Promise<{ text: string; contentType: string; mcpSessionId: string | null }> {
-  const res = await (isTauri ? tauriFetch : fetch)(url, { method: 'POST', headers, body })
+  const res = await (isTauri ? tauriFetch : fetch)(url, { method: 'POST', headers: { ...UA_HEADER, ...headers }, body })
   const text = await res.text()
   if (!res.ok) throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`)
   return { text, contentType: res.headers.get('content-type') ?? '', mcpSessionId: res.headers.get('mcp-session-id') }
@@ -138,7 +143,7 @@ export async function httpRequest(method: string, url: string, headers: Record<s
   const m = method.toUpperCase()
   const res = await (isTauri ? tauriFetch : fetch)(url, {
     method: m,
-    headers,
+    headers: { ...UA_HEADER, ...headers },
     ...(body !== undefined && m !== 'GET' && m !== 'HEAD' ? { body } : {}),
   })
   const text = await res.text()
