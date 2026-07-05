@@ -5,7 +5,7 @@ export { mkId } from '../shared/id'
 export { SCHEMA_VERSION, selectSession, selectMainState } from '../infrastructure/persistence/schema'
 export { fieldMatches, cronMatches, humanizeCron } from '../domains/schedules/cron'
 export {
-  PROMPT_RE, TUI_PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, OPTION_RE, extractOptions,
+  PROMPT_RE, TUI_PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, OPTION_RE, extractOptions, detectPrompt,
 } from '../domains/session/prompt-detection'
 export { taskWorkText, taskContract } from '../domains/board/task-prompt'
 export {

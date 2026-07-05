@@ -14,6 +14,36 @@ export const QUESTION_MARK_LINE_RE = /^[^│┌└─]*\S[^?]*\?\s*$/
 // numbered dialog options, with optional ❯ cursor: "❯ 1. Yes" / "2. No"
 export const OPTION_RE = /^\s*[│]?\s*(❯)?\s*(\d+)[.)]\s+(.+?)\s*[│]?\s*$/
 
+export interface PromptDetection {
+  /** true while a TUI shows its generating marker — the turn is not over. */
+  busy: boolean
+  /** true when the settled content looks like it is waiting on the user. */
+  promptDetected: boolean
+  /** best-guess question text (only meaningful when promptDetected). */
+  question: string
+}
+
+/**
+ * Decide whether settled terminal `content` is waiting on the user. `alt` marks
+ * a full-screen TUI (judged by its rendered screen) vs a plain stream tail.
+ * Pure — the caller owns the surrounding session state and dedup.
+ */
+export function detectPrompt(content: string[], alt: boolean): PromptDetection {
+  const lastLine = content[content.length - 1] ?? ''
+  // TUIs show a busy marker while generating — the turn is NOT over, so any
+  // question-looking text on screen is transient.
+  const busy = alt && /esc to interrupt|ctrl\+c to interrupt/i.test(content.join('\n'))
+  const promptDetected = !busy && (alt
+    ? TUI_PROMPT_RE.test(content.join('\n'))
+    : PROMPT_RE.test(content.slice(-3).join('\n')) || /[?:]\s*$/.test(lastLine.trim()))
+  const question = (
+    content.find(l => QUESTION_LINE_RE.test(l)) ||
+    content.find(l => QUESTION_MARK_LINE_RE.test(l.trim())) ||
+    lastLine
+  ).trim()
+  return { busy, promptDetected, question }
+}
+
 /** Extract numbered TUI choices and the visible cursor from settled screen rows. */
 export function extractOptions(lines: string[]): { options: EscOption[]; cursorNum: number } {
   const options: EscOption[] = []

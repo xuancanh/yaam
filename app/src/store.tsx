@@ -44,8 +44,8 @@ import type { ConductorActions } from './app/actions'
 
 
 import {
-  PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
-  activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn,
+  QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
+  activeGroupOf, buildTemplateCommand, cronMatches, detectPrompt, envPrefix, extractOptions, focusSessionIn,
   mkGroup, mkId, removeFromGroups, selectMainState, selectSession,
   sendLineToSession, spawnAgentProcess, taskContract, taskWorkText, typeForCommand,
 } from './core/state-lib'
@@ -294,21 +294,11 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     const content = alt ? readScreen(id) : streamLines.slice(-14)
     if (!content.length) return
     const lastLine = content[content.length - 1] ?? ''
-    // TUIs show a busy marker while generating — the turn is NOT over, so any
-    // question-looking text on screen is transient. Never flag input, and never
-    // relay half-answers, while the marker is visible.
-    const busy = alt && /esc to interrupt|ctrl\+c to interrupt/i.test(content.join('\n'))
-
-    const promptDetected = !busy && (alt
-      ? TUI_PROMPT_RE.test(content.join('\n'))
-      : PROMPT_RE.test(content.slice(-3).join('\n')) || /[?:]\s*$/.test(lastLine.trim()))
+    // Never flag input, and never relay half-answers, while the TUI busy marker
+    // is visible — any question-looking text on screen is transient then.
+    const { busy, promptDetected, question } = detectPrompt(content, alt)
 
     if (promptDetected) {
-      const question = (
-        content.find(l => QUESTION_LINE_RE.test(l)) ||
-        content.find(l => QUESTION_MARK_LINE_RE.test(l.trim())) ||
-        lastLine
-      ).trim()
       const already = agent.status === 'needs' && lastFlaggedRef.current.get(id) === question
       if (!already) {
         lastFlaggedRef.current.set(id, question)
