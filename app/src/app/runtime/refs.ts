@@ -21,19 +21,25 @@ export interface RuntimeRefs {
   taskSessionsRef: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
 }
 
-export function useRuntimeRefs(): RuntimeRefs {
-  const masterEventRef = useRef<(note: string, agentId?: string) => void>(() => {})
-  const monitorEventRef = useRef<(id: string, note: string) => Promise<void> | void>(() => {})
-  const fireAddonHookRef = useRef<(hook: import('../../core/types').AddonHookName, event: Record<string, unknown>) => void>(() => {})
-  const runAddonAgentRef = useRef<(addonId: string, note: string) => Promise<string>>(async () => 'agent not ready')
-  const runWatcherRef = useRef<(taskId: string, note: string) => void>(() => {})
-  const spawnTaskSessionRef = useRef<(taskId: string, extraInstructions?: string) => string | null>(() => null)
-  const startIntegrationsRef = useRef<() => void>(() => {})
-  const userStoppedRef = useRef<Set<string>>(new Set())
-  const toolApprovalsRef = useRef<Set<string>>(new Set())
-  const taskSessionsRef = useRef<Map<string, { taskId: string; workspaceId: string }>>(new Map())
+/** Plain (non-React) construction of the cycle-ref bundle — plain mutable
+ *  `{ current }` cells, since the runtime is created once. */
+export function createRuntimeRefs(): RuntimeRefs {
   return {
-    masterEventRef, monitorEventRef, fireAddonHookRef, runAddonAgentRef, runWatcherRef,
-    spawnTaskSessionRef, startIntegrationsRef, userStoppedRef, toolApprovalsRef, taskSessionsRef,
+    masterEventRef: { current: () => {} },
+    monitorEventRef: { current: () => {} },
+    fireAddonHookRef: { current: () => {} },
+    runAddonAgentRef: { current: async () => 'agent not ready' },
+    runWatcherRef: { current: () => {} },
+    spawnTaskSessionRef: { current: () => null },
+    startIntegrationsRef: { current: () => {} },
+    userStoppedRef: { current: new Set() },
+    toolApprovalsRef: { current: new Set() },
+    taskSessionsRef: { current: new Map() },
   }
+}
+
+export function useRuntimeRefs(): RuntimeRefs {
+  const ref = useRef<RuntimeRefs>(undefined)
+  if (!ref.current) ref.current = createRuntimeRefs()
+  return ref.current
 }
