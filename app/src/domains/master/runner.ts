@@ -35,6 +35,9 @@ export interface MasterCtx {
   applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
   setNeedsInput: (id: string, question: string) => void
   makeAddonApi: (addonId: string) => AddonApi
+  /** write a line to a session's PTY (routes through the shared command as the
+   *  master actor); defaults to the direct PTY line when unwired */
+  sendLine?: (sid: string, text: string) => void
   /** current cancellation signal for the Master turn (aborted on workspace delete) */
   signal?: () => AbortSignal | undefined
 }
@@ -98,7 +101,7 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
       const agent = stateRef.current.agents.find(a => a.id === sid)
       if (!agent) return `no session with id ${sid}`
       ctx.armResponseWatch(sid)
-      sendLineToSession(sid, text)
+      ;(ctx.sendLine ?? sendLineToSession)(sid, text)
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === sid ? { ...a, log: a.log.concat([{ t: 'you', x: `[master] ${text}` }]) } : a),
