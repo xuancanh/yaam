@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { useConductor, useActions } from '../store'
-import { buildTemplateCommand } from '../state-lib'
-import type { AgentTemplate, TemplateApproval, TemplateMode } from '../types'
-import { EditableName, IC, Icon, Switch, ViewHeader } from './ui'
+import { useConductor, useActions } from '../../store'
+import { buildTemplateCommand } from '../../state-lib'
+import type { AgentTemplate, TemplateApproval, TemplateMode } from '../../types'
+import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
 
 const FIELD_STYLE = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,

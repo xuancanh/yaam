@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { useActions, useConductor, humanizeCron } from '../store'
-import { ACCENT, hexToRgba } from '../data'
-import type { Cron } from '../types'
-import { IC, Icon, Switch, ViewHeader } from './ui'
-import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from '../domains/board/TaskSpecForm'
+import { useActions, useConductor, humanizeCron } from '../../store'
+import { ACCENT, hexToRgba } from '../../data'
+import type { Cron } from '../../types'
+import { IC, Icon, Switch, ViewHeader } from '../../components/ui'
+import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from '../board/TaskSpecForm'
 
 /** default for the one-time picker: next full hour, in datetime-local format */
 /** Return the next local clock hour in datetime-local input format. */

@@ -1,6 +1,6 @@
-import { useActions, useConductor } from '../store'
-import { ACCENT, PERM_COLORS, hexToRgba } from '../data'
-import { ViewHeader } from './ui'
+import { useActions, useConductor } from '../../store'
+import { ACCENT, PERM_COLORS, hexToRgba } from '../../data'
+import { ViewHeader } from '../../components/ui'
 
 /** The Master tool permission grid — embedded in Settings → Tools. */
 export function ToolsSection() {
