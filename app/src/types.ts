@@ -505,6 +505,8 @@ export interface Drawer {
 }
 
 export interface PersistedState {
+  /** schema revision of this snapshot; absent in pre-versioning saves */
+  schemaVersion?: number
   tasks: BoardTask[]
   crons: Cron[]
   settings: OrchestrationSettings

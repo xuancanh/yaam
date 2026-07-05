@@ -1,7 +1,43 @@
 // Pure helpers shared by the store: ids, cron parsing, prompt/dialog
 // detection, agent-type utilities, pane focus semantics, and PTY input.
 import * as native from './native'
-import type { AgentTemplate, AgentType, AppState, EscOption, TabGroup, WorkspaceData } from './types'
+import type { AgentTemplate, AgentType, AppState, EscOption, PersistedState, TabGroup, WorkspaceData } from './types'
+
+/** Bumped when the persisted shape changes in a way hydration must know about.
+ *  Hydration stays defensive per-field, so most additions don't require a bump. */
+export const SCHEMA_VERSION = 1
+
+/** The single source of truth for what gets written to disk. Both the debounced
+ *  writer and the teardown flush go through this so the persisted shape can
+ *  never drift between them. Logs are capped here, not at each call site. */
+export function selectPersistedState(s: AppState): PersistedState {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    tasks: s.tasks,
+    crons: s.crons,
+    settings: s.settings,
+    toolsCatalog: s.toolsCatalog,
+    agentTypes: s.agentTypes,
+    templates: s.templates,
+    mcpServers: s.mcpServers,
+    skills: s.skills,
+    personas: s.personas,
+    skillRegistries: s.skillRegistries,
+    chatAgentTypes: s.chatAgentTypes,
+    workspaces: s.workspaces,
+    activeWorkspace: s.activeWorkspace,
+    workspaceData: s.workspaceData,
+    agents: s.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
+    groups: s.groups,
+    activeGroup: s.activeGroup,
+    minimizedIds: s.minimizedIds,
+    addons: s.addons,
+    addonStorage: s.addonStorage,
+    messages: s.messages.slice(-60),
+    events: s.events.slice(0, 60),
+    notifications: s.notifications.slice(0, 30),
+  }
+}
 
 let uid = 0
 /** Generate a short UI identifier with a readable entity prefix. */

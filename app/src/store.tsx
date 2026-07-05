@@ -238,7 +238,7 @@ export interface ConductorActions {
 import {
   KEYMAP, PROMPT_RE, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
   activeGroupOf, buildTemplateCommand, cronMatches, envPrefix, extractOptions, focusSessionIn, groupsFromLegacy,
-  humanizeCron, mkGroup, mkId, removeFromGroups,
+  humanizeCron, mkGroup, mkId, removeFromGroups, selectPersistedState,
   sendLineToSession, spawnAgentProcess, switchWorkspaceIn, taskContract, taskWorkText, typeForCommand, wait,
 } from './state-lib'
 
@@ -266,8 +266,15 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // Schedule a tracked timeout so provider unmount can cancel outstanding work.
+  // The id is removed once it fires so the tracking array can't grow without
+  // bound over a long-lived session (Master turns, watchers, etc. call this a lot).
   const later = useCallback((ms: number, fn: () => void) => {
-    pending.current.push(window.setTimeout(fn, ms))
+    const id = window.setTimeout(() => {
+      const i = pending.current.indexOf(id)
+      if (i !== -1) pending.current.splice(i, 1)
+      fn()
+    }, ms)
+    pending.current.push(id)
   }, [])
 
   // Replace the transient toast and clear it after a short display window.
@@ -947,10 +954,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (hydrateStarted.current) return
     hydrateStarted.current = true
-    native.loadStateFile().then(json => {
-      if (json) {
-        try {
-          const p = JSON.parse(json) as Partial<PersistedState>
+    // Apply one serialized snapshot; throws if it is not parseable/usable so
+    // the caller can fall back to the backup.
+    const hydrateFrom = (raw: string) => {
+          const p = JSON.parse(raw) as Partial<PersistedState>
           const workspaces = p.workspaces?.length ? p.workspaces : [{ id: 'ws-default', name: 'Default' }]
           const activeWorkspace = p.activeWorkspace && workspaces.some(w => w.id === p.activeWorkspace)
             ? p.activeWorkspace
@@ -1086,44 +1093,51 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
               }))
             }
           }).catch(() => {})
-        } catch { /* corrupt state file — start fresh */ }
+    }
+    native.loadStateFile().then(async json => {
+      if (json) {
+        try {
+          hydrateFrom(json)
+        } catch (e) {
+          // primary file present but unreadable — recover from the last-good backup
+          console.error('[yaam] primary state unreadable — trying backup:', e)
+          try {
+            const bak = await native.loadStateBackup()
+            if (bak) {
+              hydrateFrom(bak)
+              dispatch(s => ({ ...s, toast: 'Restored from backup — the main state file was unreadable' }))
+            }
+          } catch (e2) {
+            console.error('[yaam] backup unreadable too — starting fresh:', e2)
+            dispatch(s => ({ ...s, toast: 'Saved state was unreadable — starting fresh' }))
+          }
+        }
       }
       hydrated.current = true
     }).catch(() => { hydrated.current = true })
   }, [appendTail, armResponseWatch, bumpSettle, clearNeeds])
 
   const saveTimer = useRef<number | undefined>(undefined)
+  const saveFailedRef = useRef(false)
   useEffect(() => {
     if (!hydrated.current) return
     if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    const persisted: PersistedState = {
-      tasks: state.tasks,
-      crons: state.crons,
-      settings: state.settings,
-      toolsCatalog: state.toolsCatalog,
-      agentTypes: state.agentTypes,
-      templates: state.templates,
-      mcpServers: state.mcpServers,
-      skills: state.skills,
-      personas: state.personas,
-      skillRegistries: state.skillRegistries,
-      chatAgentTypes: state.chatAgentTypes,
-      workspaces: state.workspaces,
-      activeWorkspace: state.activeWorkspace,
-      workspaceData: state.workspaceData,
-      agents: state.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
-      groups: state.groups,
-      activeGroup: state.activeGroup,
-      minimizedIds: state.minimizedIds,
-      addons: state.addons,
-      addonStorage: state.addonStorage,
-      messages: state.messages.slice(-60),
-      events: state.events.slice(0, 60),
-      notifications: state.notifications.slice(0, 30),
-    }
+    const persisted = selectPersistedState(state)
     saveTimer.current = window.setTimeout(() => {
-      native.saveStateFile(JSON.stringify(persisted)).catch(() => {})
+      native.saveStateFile(JSON.stringify(persisted)).then(() => {
+        saveFailedRef.current = false
+      }).catch(e => {
+        console.error('[yaam] state save failed:', e)
+        if (!saveFailedRef.current) {
+          saveFailedRef.current = true // warn once per failure streak, not every keystroke
+          dispatch(s => ({ ...s, toast: 'Could not save state to disk — recent changes may be lost on restart' }))
+        }
+      })
     }, 800)
+    // Deps are the curated set of DURABLE slices only — selectPersistedState reads
+    // the whole state, but depending on all of `state` would re-run this on every
+    // transient UI change (toast, composer keystrokes) and thrash the save debounce.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     state.tasks, state.crons, state.settings, state.toolsCatalog, state.agentTypes, state.templates, state.mcpServers, state.skills, state.personas, state.skillRegistries, state.chatAgentTypes,
     state.agents, state.groups, state.activeGroup, state.minimizedIds,
@@ -1133,20 +1147,10 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
 
   // flush the latest state on quit/reload so nothing inside the debounce window is lost
   useEffect(() => {
-    // Persist synchronously from stateRef during page teardown.
+    // Persist from stateRef during page teardown, through the same selector as
+    // the debounced writer so the two can never drift apart.
     const flush = () => {
-      const st = stateRef.current
-      const persisted: PersistedState = {
-        tasks: st.tasks, crons: st.crons, settings: st.settings,
-        toolsCatalog: st.toolsCatalog, agentTypes: st.agentTypes, templates: st.templates, mcpServers: st.mcpServers, skills: st.skills, personas: st.personas, skillRegistries: st.skillRegistries, chatAgentTypes: st.chatAgentTypes,
-        workspaces: st.workspaces, activeWorkspace: st.activeWorkspace, workspaceData: st.workspaceData,
-        agents: st.agents.map(a => ({ ...a, log: a.log.slice(-200) })),
-        groups: st.groups, activeGroup: st.activeGroup,
-        minimizedIds: st.minimizedIds, addons: st.addons, addonStorage: st.addonStorage,
-        messages: st.messages.slice(-60), events: st.events.slice(0, 60),
-        notifications: st.notifications.slice(0, 30),
-      }
-      native.saveStateFile(JSON.stringify(persisted)).catch(() => {})
+      native.saveStateFile(JSON.stringify(selectPersistedState(stateRef.current))).catch(() => {})
     }
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)

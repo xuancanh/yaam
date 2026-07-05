@@ -35,6 +35,7 @@ pub fn run() {
       sessions::write_text_file,
       sessions::save_state,
       sessions::load_state,
+      sessions::load_state_backup,
     ])
     .setup(|app| {
       // `tauri dev` runs a bare binary (no .app bundle), so macOS falls back to

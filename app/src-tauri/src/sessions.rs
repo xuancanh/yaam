@@ -589,7 +589,13 @@ pub fn save_state(app: AppHandle, json: String) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("conductor-state.json");
-    let tmp = dir.join("conductor-state.json.tmp");
+    // Unique temp name per write: two concurrent saves must not share one temp
+    // path (the frontend also serializes writes, this is belt-and-suspenders).
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = dir.join(format!("conductor-state.json.{nonce}.tmp"));
     {
         // temp file + fsync + rename: a crash mid-write can never truncate
         // the only copy of the state
@@ -610,9 +616,29 @@ pub fn save_state(app: AppHandle, json: String) -> Result<(), String> {
 
 #[tauri::command]
 /// Load persisted frontend state, treating a missing file as a fresh install.
+/// If the primary file is unreadable, fall back to the last-good backup.
 pub fn load_state(app: AppHandle) -> Result<Option<String>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     match std::fs::read_to_string(dir.join("conductor-state.json")) {
+        Ok(s) => Ok(Some(s)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // no primary yet — a rename may have left only the backup behind
+            match std::fs::read_to_string(dir.join("conductor-state.json.bak")) {
+                Ok(s) => Ok(Some(s)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+/// Return the previous state snapshot (the .bak), for recovery when the primary
+/// file exists but the frontend can't parse it.
+pub fn load_state_backup(app: AppHandle) -> Result<Option<String>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    match std::fs::read_to_string(dir.join("conductor-state.json.bak")) {
         Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.to_string()),

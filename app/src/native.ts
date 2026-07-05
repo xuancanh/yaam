@@ -217,17 +217,39 @@ export async function gitDiff(cwd: string): Promise<string> {
   return await invoke<string>('git_diff', { cwd })
 }
 
-/** Persist the serialized app state through Tauri, with localStorage fallback. */
-export async function saveStateFile(json: string): Promise<void> {
+// Serialize state writes: a debounced save and a teardown flush can otherwise
+// hit the backend concurrently and race on the temp file. Chaining guarantees
+// one write completes before the next starts, and coalesces queued writes to
+// the latest payload so a burst doesn't pile up stale saves.
+let saveChain: Promise<void> = Promise.resolve()
+let queuedJson: string | null = null
+
+/** Persist the serialized app state through Tauri, with localStorage fallback.
+ *  Rejects on failure so callers can surface the error. */
+export function saveStateFile(json: string): Promise<void> {
   if (!isTauri) {
     localStorage.setItem('conductor-state', json)
-    return
+    return Promise.resolve()
   }
-  await invoke('save_state', { json })
+  queuedJson = json
+  saveChain = saveChain.then(async () => {
+    if (queuedJson === null) return // already written by an earlier link
+    const payload = queuedJson
+    queuedJson = null
+    await invoke('save_state', { json: payload })
+  })
+  return saveChain
 }
 
 /** Load serialized app state through Tauri, with localStorage fallback. */
 export async function loadStateFile(): Promise<string | null> {
   if (!isTauri) return localStorage.getItem('conductor-state')
   return await invoke<string | null>('load_state')
+}
+
+/** Load the previous state snapshot (the .bak) — used to recover when the
+ *  primary file is present but unparseable. */
+export async function loadStateBackup(): Promise<string | null> {
+  if (!isTauri) return null
+  return await invoke<string | null>('load_state_backup')
 }
