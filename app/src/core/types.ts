@@ -680,19 +680,94 @@ export interface WorkspaceData {
   pendingMasterNotes: string[]
 }
 
-export interface AppState {
+// AppState is composed from per-domain slices below. Each slice owns the fields
+// its domain reads/writes; the root AppState is their intersection, so the shape
+// is unchanged and every existing `s.<field>` access keeps working — the split is
+// organizational (and a seam for the eventual store-domain extraction). Every
+// field lives in exactly one slice; tsc enforces exhaustiveness at the use sites.
+
+/** Workspaces, tab groups, and the active pane layout. */
+export interface WorkspaceSlice {
   workspaces: Workspace[]
   activeWorkspace: string
   workspaceData: Record<string, WorkspaceData>
-  view: View
   /** Chrome-style tab groups; each keeps its own pane layout. A session lives in at most one group. */
   groups: TabGroup[]
   /** id of the group currently displayed in the workspace grid */
   activeGroup: string | null
-  /** chat session selected in the Chat view */
-  activeChatId: string | null
   /** sessions minimized to the dock strip */
   minimizedIds: string[]
+}
+
+/** Live sessions and session-view selection. */
+export interface SessionSlice {
+  agents: Agent[]
+  /** chat session selected in the Chat view */
+  activeChatId: string | null
+  newSessionOpen: boolean
+}
+
+/** Kanban board state. */
+export interface BoardSlice {
+  tasks: BoardTask[]
+  dragOverCol: BoardCol | null
+}
+
+/** Cron schedules and the agent templates they launch. */
+export interface ScheduleSlice {
+  crons: Cron[]
+  templates: AgentTemplate[]
+}
+
+/** Master orchestrator runtime + conversation. */
+export interface MasterSlice {
+  masterBusy: boolean
+  messages: Message[]
+  /** Master tool calls blocked on the "Ask first" policy, awaiting the user */
+  pendingToolApprovals: { id: string; toolId: string }[]
+  /** in-flight watcher reply text per task, streamed into the task chat
+   *  (transient — cleared when the turn completes) */
+  taskStreams?: Record<string, string>
+}
+
+/** Installed addons and their runtime chat/storage. */
+export interface AddonSlice {
+  addons: Addon[]
+  activeAddon: string | null
+  /** per-addon persistent key-value storage */
+  addonStorage: Record<string, Record<string, unknown>>
+  /** per-addon customization chat (in-memory) */
+  addonChats: Record<string, { role: 'you' | 'master'; text: string }[]>
+  addonChatBusy: string | null
+}
+
+/** Configuration: orchestration policy, agent/chat types, MCP, skills, personas, tools. */
+export interface SettingsSlice {
+  settings: OrchestrationSettings
+  agentTypes: AgentType[]
+  chatAgentTypes: ChatAgentType[]
+  mcpServers: McpServer[]
+  skills: Skill[]
+  personas: Persona[]
+  skillRegistries: SkillRegistry[]
+  toolsCatalog: CatalogTool[]
+}
+
+/** Activity feed and notifications. */
+export interface ActivitySlice {
+  events: EventItem[]
+  notifications: Notification[]
+}
+
+/** Durable chat-agent memory by workspace id: distilled facts every chat agent in
+ *  the workspace reads at turn start and appends to via the remember tool. */
+export interface ChatSlice {
+  chatMemory: Record<string, string>
+}
+
+/** Global shell UI: current view, composer, palette, drawer, toast, remote server. */
+export interface ShellUiSlice {
+  view: View
   composer: string
   panel: Panel | null
   toast: string | null
@@ -700,41 +775,13 @@ export interface AppState {
   paletteOpen: boolean
   paletteQuery: string
   notifOpen: boolean
-  newSessionOpen: boolean
-  masterBusy: boolean
   /** phone remote companion server, when running (transient — not persisted) */
   remoteInfo?: { url: string; token: string; urls: { label: string; url: string }[] } | null
-  /** in-flight watcher reply text per task, streamed into the task chat
-   *  (transient — cleared when the turn completes) */
-  taskStreams?: Record<string, string>
-  dragOverCol: BoardCol | null
-  addons: Addon[]
-  activeAddon: string | null
-  /** per-addon persistent key-value storage */
-  addonStorage: Record<string, Record<string, unknown>>
-  /** durable chat memory by workspace id: distilled facts every chat agent in
-   *  the workspace reads at turn start and appends to via the remember tool */
-  chatMemory: Record<string, string>
-  /** per-addon customization chat (in-memory) */
-  addonChats: Record<string, { role: 'you' | 'master'; text: string }[]>
-  addonChatBusy: string | null
-  /** Master tool calls blocked on the "Ask first" policy, awaiting the user */
-  pendingToolApprovals: { id: string; toolId: string }[]
-  agents: Agent[]
-  messages: Message[]
-  crons: Cron[]
-  toolsCatalog: CatalogTool[]
-  events: EventItem[]
-  notifications: Notification[]
-  agentTypes: AgentType[]
-  templates: AgentTemplate[]
-  mcpServers: McpServer[]
-  skills: Skill[]
-  personas: Persona[]
-  skillRegistries: SkillRegistry[]
-  chatAgentTypes: ChatAgentType[]
-  settings: OrchestrationSettings
-  tasks: BoardTask[]
+}
+
+export interface AppState extends
+  WorkspaceSlice, SessionSlice, BoardSlice, ScheduleSlice, MasterSlice,
+  AddonSlice, SettingsSlice, ActivitySlice, ChatSlice, ShellUiSlice {
   /** transient runtime restoration lifecycle (never persisted). Dependent
    *  runtimes (scheduler, integrations) gate their work on 'ready'. */
   bootStatus: BootStatus
