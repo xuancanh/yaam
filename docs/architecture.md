@@ -38,7 +38,7 @@ flowchart LR
   R --> KC[OS keychain]
   R --> MCP[MCP child processes]
   R --> BR[AWS Bedrock]
-  R --> RM[Phone remote LAN server]
+  R --> RM[Mobile companion server]
   LLM --> API[Anthropic/OpenAI-compatible APIs]
   AR --> HTTP[HTTP MCP and registries]
 ```
@@ -341,7 +341,7 @@ pane uses — while keeping the host-supplied review actions.
 
 ## Mobile companion flow
 
-An opt-in companion (Settings → Phone remote) serves a full mobile web app for
+An opt-in companion (Settings → Remote Control) serves a full mobile web app for
 tasks, chats, and sessions. The Rust `remote` domain runs an **axum** server
 (default port 8712) that embeds the single-file mobile bundle
 (`npm run build:mobile` → Vite + `vite-plugin-singlefile` →
@@ -384,6 +384,10 @@ reader tees raw bytes into a per-session bounded ring + broadcast tap, and
 `GET /api/term` streams backlog-then-live bytes over SSE into the companion's
 own xterm.js — every device's terminal stays live without a desktop-webview
 round trip (the serialized xterm buffer in the snapshot is the fallback).
+Terminal focus is exclusive: the viewing device claims the PTY size
+(`session_focus` → `remoteResize` resizes the real PTY and the desktop xterm
+together, clamped), so TUIs reflow natively for whichever screen is watching;
+leaving or any desktop pane interaction steals the size back.
 Chats and the board stay frontend-authoritative but stream: `remote_publish`
 bumps a watch channel and `GET /api/stream` pushes the snapshot to every
 paired device the moment it changes (chat deltas land in the store per
@@ -393,9 +397,10 @@ answers via its native adapters (path-scoped to session working folders)
 through `remote_respond`, and the phone polls `/api/rpc` for the consumed-on-
 read answer.
 
-The URL token persists in settings so connect links survive restarts (an
-auto-rotate toggle restores per-start minting); paired-device tokens are
-independent, so a rotated link never unpairs a device.
+The URL token persists in settings so connect links survive restarts, with
+optional auto-rotation after a user-chosen number of hours; paired-device
+tokens are independent, so a rotated link never unpairs a device (the phone
+double-checks before ever dropping its pairing).
 
 Network reach: connect URLs are enumerated per interface and classified (LAN,
 Tailscale CGNAT, WireGuard, VPN), and the mobile app uses relative API paths

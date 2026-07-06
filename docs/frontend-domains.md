@@ -521,10 +521,21 @@ approval — without granting the remote any capability the desktop UI lacks.
   in settings.
 - `src/mobile/` is the phone app itself: a second Vite build target
   (`vite.mobile.config.ts` + vite-plugin-singlefile, `npm run build:mobile`)
-  that emits one self-contained HTML file embedded by the Rust server. It
-  reuses the shared `Markdown` renderer and snapshot types; `api.ts` keeps
-  all fetches relative (Cloudflare-Tunnel/proxy friendly) and persists the
-  device id/token in localStorage with an in-memory fallback.
+  that emits one self-contained HTML file embedded by the Rust server, styled
+  in the Conductor Mobile design language (Space Grotesk headers, tinted
+  avatar cards with pulsing status pills, inbox-style approvals, assistant
+  chat, pill composer). `api.ts` keeps all fetches relative
+  (Cloudflare-Tunnel/proxy friendly), persists the device id/token in
+  localStorage, and exposes the rpc round trip; `MobileApp.tsx` owns
+  history-backed navigation (native back closes details), Agents filter
+  chips, chat search, and file attachments (a slide-in files sheet whose
+  preview offers "Add to chat"); `TerminalView.tsx` renders live SSE bytes in
+  its own xterm with manual touch scrolling and bottom-stick auto-follow;
+  `FilesGit.tsx` browses files and reviews git diffs over the rpc bridge.
+- Terminal focus is exclusive: the device viewing a terminal claims it
+  (`session_focus` with its fitted rows/cols → `remoteResize` sizes the real
+  PTY and the desktop xterm alike), and leaving — or any desktop pane
+  interaction — steals it back (`session_blur` / `fitTerminal`).
 
 ### Tests
 

@@ -219,7 +219,7 @@ origin, a network-denying CSP, and only the host RPC surface.
 
 ### Mobile companion server
 
-The opt-in mobile companion (Settings → Phone remote) is the one place YAAM
+The opt-in mobile companion (Settings → Remote Control) is the one place YAAM
 *listens* on the network: a Rust axum server on `0.0.0.0:8712`. Its exposure
 is deliberately layered:
 

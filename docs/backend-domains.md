@@ -312,9 +312,11 @@ and auth-error classification.
 The mobile-companion server, built on **axum** (dedicated thread running a
 current-thread tokio runtime; the listener is bound synchronously so port
 conflicts surface to the caller, and `remote_stop` shuts down gracefully via a
-oneshot). `remote_start` generates a 24-character URL token and returns one
-connect URL per reachable interface, classified via `if-addrs` (LAN private
-ranges, Tailscale's CGNAT 100.64/10, `wg*`/`utun*` for WireGuard/VPN).
+oneshot; the bind retries briefly so a stop→start token change survives the
+old listener's shutdown). `remote_start` accepts the frontend's persisted URL
+token (minting one only when absent) and returns one connect URL per reachable
+interface, classified via `if-addrs` (LAN private ranges, Tailscale's CGNAT
+100.64/10, `wg*`/`utun*` for WireGuard/VPN).
 
 Routes:
 
@@ -325,7 +327,14 @@ Routes:
   pending list capped at 5 and deduped);
 - `GET /api/pair/status?t&device` — pending / paired (+ minted device token);
 - `GET /api/state?t&d` — the last published snapshot, verbatim;
-- `POST /api/command?t&d` — queue a `{ kind, id, agent_id, text, ok }` command.
+- `GET /api/stream?t&d` — SSE: the snapshot pushed on every publish (watch
+  channel bump);
+- `GET /api/term?t&d&id` — SSE: one session's RAW terminal bytes, ring backlog
+  first then live chunks from the session domain's PTY tap;
+- `POST /api/command?t&d` — queue a `{ kind, id, agent_id, text, ok }` command
+  (actions and `rpc_*` browsing requests alike);
+- `GET /api/rpc?t&d&id` — pick up a desktop rpc answer (consumed on read,
+  store capped; answered via the `remote_respond` command).
 
 State and command routes require BOTH the URL token and a paired device token
 (403 otherwise). Device tokens are minted only by `remote_approve_pair` —
@@ -336,7 +345,16 @@ credentials; the frontend drains commands with `remote_take_commands` and
 applies them through normal conductor actions.
 
 Tests cover the token/device auth matrix, the pairing flow end-to-end,
-pending-list caps/dedup, interface classification, and command serde.
+pending-list caps/dedup, interface classification, rpc result gating, and
+command serde.
+
+## Icons domain (`domains/icons.rs`)
+
+`file_icon(path)` returns the OS's own icon for a path — the macOS Finder
+icon via NSWorkspace, converted TIFF→PNG in memory and base64-encoded — so
+the file explorer shows real system icons. Other platforms return an error
+and the frontend falls back to its colored glyph set. Tests assert real PNG
+bytes for real paths.
 
 ## Secrets domain (`domains/secrets.rs`)
 
@@ -365,7 +383,7 @@ See [Security model](security.md) for implications.
 
 ## Backend test architecture
 
-There are 66 Rust unit tests in this snapshot. Tests are colocated inside each
+There are 67 Rust unit tests in this snapshot. Tests are colocated inside each
 domain module and call internal implementation functions directly, avoiding a
 running Tauri application where possible. Temporary filesystem fixtures use
 RAII cleanup. MCP uses a shell-based fake server; Bedrock tests focus on pure
