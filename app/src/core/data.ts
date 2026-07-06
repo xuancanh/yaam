@@ -1,4 +1,8 @@
 import type { Agent, AgentTool, AppState, DiffFile, MemorySource, Perm, Snapshot } from './types'
+import type {
+  WorkspaceSlice, SessionSlice, BoardSlice, ScheduleSlice, MasterSlice,
+  AddonSlice, SettingsSlice, ActivitySlice, ChatSlice, ShellUiSlice,
+} from './types'
 
 export const ACCENT = '#F5C451'
 
@@ -121,17 +125,58 @@ export function defaultDetail(): AgentDetail {
 }
 
 /** Build a complete fresh AppState used before persisted state is hydrated. */
-export function seedState(): AppState {
+// Fresh state is composed from one factory per domain slice, mirroring the
+// AppState slice split in core/types. Each factory is typed to its slice, so the
+// field grouping stays consistent and a slice can move to its domain folder later
+// without disturbing the others.
+
+function freshWorkspaceSlice(): WorkspaceSlice {
   return {
-    bootStatus: 'loading',
-    view: 'workspace',
     workspaces: [{ id: 'ws-default', name: 'Default' }],
     activeWorkspace: 'ws-default',
     workspaceData: {},
     groups: [],
     activeGroup: null,
-    activeChatId: null,
     minimizedIds: [],
+  }
+}
+
+function freshSessionSlice(): SessionSlice {
+  return { agents: [], activeChatId: null, newSessionOpen: false }
+}
+
+function freshBoardSlice(): BoardSlice {
+  return { tasks: [], dragOverCol: null }
+}
+
+function freshMasterSlice(): MasterSlice {
+  return {
+    masterBusy: false,
+    pendingToolApprovals: [],
+    messages: [
+      {
+        id: 'm1', role: 'master', kind: 'text',
+        text: 'I’m Master. Give me a brain in Settings → Master Brain (any supported provider’s API key), then tell me what you need — I launch and command sessions, answer questions about them, and build schedules.',
+      },
+    ],
+  }
+}
+
+function freshAddonSlice(): AddonSlice {
+  return { addons: [], activeAddon: null, addonStorage: {}, addonChats: {}, addonChatBusy: null }
+}
+
+function freshActivitySlice(): ActivitySlice {
+  return { events: [], notifications: [] }
+}
+
+function freshChatSlice(): ChatSlice {
+  return { chatMemory: {} }
+}
+
+function freshShellUiSlice(): ShellUiSlice {
+  return {
+    view: 'workspace',
     composer: '',
     panel: null,
     toast: null,
@@ -139,26 +184,12 @@ export function seedState(): AppState {
     paletteOpen: false,
     paletteQuery: '',
     notifOpen: false,
-    newSessionOpen: false,
-    masterBusy: false,
-    dragOverCol: null,
-    addons: [],
-    activeAddon: null,
-    addonStorage: {},
-    chatMemory: {},
-    addonChats: {},
-    addonChatBusy: null,
-    pendingToolApprovals: [],
-    agents: [],
-    events: [],
-    notifications: [],
-    agentTypes: [
-      { id: 'claude', name: 'Claude Code', color: '#E8A87C', model: 'claude', tools: 6, desc: 'Anthropic CLI — deep multi-file edits, tests, and refactors.', enabled: true, resumeCmd: 'claude --resume {id}', resumeFallbackCmd: 'claude --continue', probe: 'claude' },
-      { id: 'codex', name: 'Codex', color: '#34D399', model: 'codex', tools: 6, desc: 'OpenAI CLI — fast fixes, typechecking, and e2e.', enabled: true, resumeCmd: 'codex resume {id}', resumeFallbackCmd: 'codex resume --last', probe: 'codex' },
-      { id: 'gemini', name: 'Gemini CLI', color: '#6C8EF5', model: 'gemini', tools: 5, desc: 'Google CLI — very large-context refactors.', enabled: true },
-      { id: 'aider', name: 'Aider', color: '#C77DFF', model: 'aider', tools: 6, desc: 'Pair-programming CLI — git-native diffs.', enabled: true, resumeCmd: 'aider --restore-chat-history' },
-      { id: 'cursor', name: 'Cursor Agent', color: 'var(--mut2)', model: 'cursor-agent', tools: 4, desc: 'Background agent — repo-wide autonomous tasks.', enabled: false },
-    ],
+  }
+}
+
+function freshScheduleSlice(): ScheduleSlice {
+  return {
+    crons: [],
     templates: [
       {
         id: 'tpl-claude-oneshot', name: 'claude-one-shot', typeId: 'claude', mode: 'ephemeral' as const,
@@ -170,6 +201,18 @@ export function seedState(): AppState {
         prompt: '{task}', systemPrompt: '', model: '', approval: 'edits' as const,
         cwd: '', extraArgs: '', autoArchive: false,
       },
+    ],
+  }
+}
+
+function freshSettingsSlice(): SettingsSlice {
+  return {
+    agentTypes: [
+      { id: 'claude', name: 'Claude Code', color: '#E8A87C', model: 'claude', tools: 6, desc: 'Anthropic CLI — deep multi-file edits, tests, and refactors.', enabled: true, resumeCmd: 'claude --resume {id}', resumeFallbackCmd: 'claude --continue', probe: 'claude' },
+      { id: 'codex', name: 'Codex', color: '#34D399', model: 'codex', tools: 6, desc: 'OpenAI CLI — fast fixes, typechecking, and e2e.', enabled: true, resumeCmd: 'codex resume {id}', resumeFallbackCmd: 'codex resume --last', probe: 'codex' },
+      { id: 'gemini', name: 'Gemini CLI', color: '#6C8EF5', model: 'gemini', tools: 5, desc: 'Google CLI — very large-context refactors.', enabled: true },
+      { id: 'aider', name: 'Aider', color: '#C77DFF', model: 'aider', tools: 6, desc: 'Pair-programming CLI — git-native diffs.', enabled: true, resumeCmd: 'aider --restore-chat-history' },
+      { id: 'cursor', name: 'Cursor Agent', color: 'var(--mut2)', model: 'cursor-agent', tools: 4, desc: 'Background agent — repo-wide autonomous tasks.', enabled: false },
     ],
     mcpServers: [],
     personas: [
@@ -213,14 +256,6 @@ export function seedState(): AppState {
       registries: [{ name: 'yaam', url: 'https://raw.githubusercontent.com/xuancanh/yaam/main/registry/index.json' }],
       pluginRegistries: [{ name: 'claude-plugins-official', url: 'https://github.com/anthropics/claude-plugins-official' }],
     },
-    tasks: [],
-    messages: [
-      {
-        id: 'm1', role: 'master', kind: 'text',
-        text: 'I’m Master. Give me a brain in Settings → Master Brain (any supported provider’s API key), then tell me what you need — I launch and command sessions, answer questions about them, and build schedules.',
-      },
-    ],
-    crons: [],
     // Master's global tools — permissions here gate its tool executor.
     // Auto: act freely · Ask first: confirm in chat first · Approval/Off: blocked.
     toolsCatalog: [
@@ -233,5 +268,22 @@ export function seedState(): AppState {
       { id: 'set_tool_permission', name: 'Change permissions', desc: 'Master may change its own tool permissions.', perm: 'Ask first', agents: 0 },
       { id: 'create_addon', name: 'Build addons', desc: 'Master may create custom tabs (sandboxed HTML addons).', perm: 'Auto', agents: 0 },
     ],
+  }
+}
+
+/** Fresh AppState = every domain's initial slice plus the transient boot status. */
+export function seedState(): AppState {
+  return {
+    ...freshWorkspaceSlice(),
+    ...freshSessionSlice(),
+    ...freshBoardSlice(),
+    ...freshScheduleSlice(),
+    ...freshMasterSlice(),
+    ...freshAddonSlice(),
+    ...freshSettingsSlice(),
+    ...freshActivitySlice(),
+    ...freshChatSlice(),
+    ...freshShellUiSlice(),
+    bootStatus: 'loading',
   }
 }
