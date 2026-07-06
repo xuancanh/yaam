@@ -162,6 +162,12 @@ function Composer({ placeholder, onSend, onAttach, children }: {
           placeholder={placeholder}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+          onFocus={e => {
+            // iOS overlays the keyboard without resizing the layout — nudge
+            // the composer back into the visible viewport
+            const el = e.currentTarget
+            setTimeout(() => el.scrollIntoView({ block: 'end' }), 250)
+          }}
         />
         <button className="sendbtn" disabled={!draft.trim() && !children} onClick={send} aria-label="Send">↑</button>
       </div>
