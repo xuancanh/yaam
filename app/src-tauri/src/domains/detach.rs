@@ -193,6 +193,23 @@ pub fn run_attach(sock: &PathBuf) -> i32 {
     let mut sock_in = stream.try_clone().expect("socket clone");
     let sock_out = Arc::new(Mutex::new(stream));
 
+    // Raw mode on our own terminal (the app-side PTY slave). Without this the
+    // kernel line discipline echoes every byte xterm sends (arrow keys, DA
+    // responses, focus events show up as literal ^[[A garbage on screen) and
+    // line-buffers input, so the real session only sees keys after Enter. The
+    // host PTY is the one true line discipline; ours must be a dumb pipe.
+    let cooked = unsafe {
+        let mut t: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(0, &mut t) == 0 {
+            let orig = t;
+            libc::cfmakeraw(&mut t);
+            libc::tcsetattr(0, libc::TCSANOW, &t);
+            Some(orig)
+        } else {
+            None
+        }
+    };
+
     // propagate our PTY size (the app resizes it normally) to the host PTY
     let send_size = {
         let sock_out = sock_out.clone();
@@ -239,6 +256,9 @@ pub fn run_attach(sock: &PathBuf) -> i32 {
         if n == 0 { break }
         if stdout.write_all(&buf[..n]).is_err() { break }
         let _ = stdout.flush();
+    }
+    if let Some(orig) = cooked {
+        unsafe { libc::tcsetattr(0, libc::TCSANOW, &orig) };
     }
     take_exit_code(sock).unwrap_or(0)
 }
