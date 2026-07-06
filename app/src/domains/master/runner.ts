@@ -26,7 +26,7 @@ export interface MasterCtx {
   userStoppedRef: MutableRefObject<Set<string>>
   /** tear down an addon's runtime state (agent registries + editor history) on removal */
   disposeAddon: (addonId: string) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }) => string | null
   launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string) => string | null
   armResponseWatch: (id: string) => void
   sessionScreenTail: (id: string) => string

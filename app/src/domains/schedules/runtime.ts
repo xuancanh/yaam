@@ -18,7 +18,7 @@ export interface SchedulerDeps {
   clock: ClockPort
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }) => string | null
   spawnTaskSession: (taskId: string, opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string }) => string | null
   fireAddonHook: (hook: 'onCronFired', event: Record<string, unknown>) => void
   /** whether raw-command / one-shot launches are possible (false in a browser build) */

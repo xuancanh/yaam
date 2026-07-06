@@ -12,7 +12,7 @@ export interface LaunchInput {
   nameHint?: string
   typeId?: string
   workspaceId?: string
-  opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string }
+  opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }
 }
 
 export interface LaunchPlan {
