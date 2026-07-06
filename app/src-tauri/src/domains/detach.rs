@@ -19,6 +19,10 @@ pub struct DetachedSpec {
     pub cols: u16,
     #[serde(default)]
     pub pid: Option<i32>,
+    /// Written by the host before it exits so the attach wrapper can report the
+    /// real command's status through the normal `session-exit` event.
+    #[serde(default)]
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -27,6 +31,9 @@ pub struct DetachedInfo {
     pub command: String,
     pub cwd: Option<String>,
     pub running: bool,
+    /// Rebuilt with the currently-running app binary so upgrades/moves do not
+    /// leave persisted attach commands pointing at an obsolete executable.
+    pub attach: String,
 }
 
 fn dir() -> PathBuf {
@@ -36,6 +43,21 @@ fn dir() -> PathBuf {
 }
 fn spec_path(id: &str) -> PathBuf { dir().join(format!("{id}.json")) }
 fn sock_path(id: &str) -> PathBuf { dir().join(format!("{id}.sock")) }
+
+fn spec_for_sock(sock: &std::path::Path) -> PathBuf { sock.with_extension("json") }
+
+/// Consume a completed host's real exit status. If the socket merely broke
+/// while the host is still alive there is no status yet, so the caller keeps
+/// its historical attach-client behavior instead.
+fn take_exit_code(sock: &std::path::Path) -> Option<i32> {
+    let path = spec_for_sock(sock);
+    let spec = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<DetachedSpec>(&s).ok())?;
+    let code = spec.exit_code?;
+    let _ = std::fs::remove_file(path);
+    Some(code)
+}
 
 // ── wire protocol (client → host): [type u8][len u32 le][payload] ──────────
 const F_DATA: u8 = 0;
@@ -134,8 +156,16 @@ pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
 
     let code = child.wait().ok().map(|s| s.exit_code() as i32).unwrap_or(0);
     let _ = killer.kill();
+    // Publish the real child's exit code before closing the socket/process. The
+    // attach wrapper consumes this file after observing EOF and returns the same
+    // code to SessionManager's ordinary child reaper.
+    let mut completed = spec.clone();
+    completed.exit_code = Some(code);
+    let _ = std::fs::write(
+        spec_for_sock(sock),
+        serde_json::to_string(&completed).unwrap_or_default(),
+    );
     let _ = std::fs::remove_file(sock);
-    let _ = std::fs::remove_file(spec_path(&spec.id));
     code
 }
 
@@ -143,6 +173,9 @@ pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
 /// data frames, socket bytes → stdout, SIGWINCH → resize frames.
 pub fn run_attach(sock: &PathBuf) -> i32 {
     let Ok(stream) = UnixStream::connect(sock) else {
+        if let Some(code) = take_exit_code(sock) {
+            return code;
+        }
         eprintln!("yaam: detached session is gone");
         return 1;
     };
@@ -166,7 +199,7 @@ pub fn run_attach(sock: &PathBuf) -> i32 {
     // SIGWINCH → resize (async-signal-safety shortcut: flag + poll thread)
     static WINCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     unsafe {
-        libc::signal(libc::SIGWINCH, handle_winch as usize);
+        libc::signal(libc::SIGWINCH, handle_winch as *const () as usize);
     }
     extern "C" fn handle_winch(_: i32) { WINCH.store(true, std::sync::atomic::Ordering::Relaxed); }
     {
@@ -196,7 +229,7 @@ pub fn run_attach(sock: &PathBuf) -> i32 {
         if stdout.write_all(&buf[..n]).is_err() { break }
         let _ = stdout.flush();
     }
-    0
+    take_exit_code(sock).unwrap_or(0)
 }
 
 /// Binary entry dispatch: returns true when this invocation was a detached
@@ -228,7 +261,7 @@ pub fn detach_entry() -> bool {
 /// run as a normal PTY session (also the session's resume command).
 #[tauri::command]
 pub fn detached_spawn(id: String, command: String, cwd: Option<String>, rows: Option<u16>, cols: Option<u16>) -> Result<String, String> {
-    let spec = DetachedSpec { id: id.clone(), command, cwd, rows: rows.unwrap_or(24), cols: cols.unwrap_or(80), pid: None };
+    let spec = DetachedSpec { id: id.clone(), command, cwd, rows: rows.unwrap_or(24), cols: cols.unwrap_or(80), pid: None, exit_code: None };
     std::fs::write(spec_path(&id), serde_json::to_string(&spec).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut cmd = std::process::Command::new(&exe);
@@ -260,6 +293,7 @@ pub fn detached_spawn(id: String, command: String, cwd: Option<String>, rows: Op
 #[tauri::command]
 pub fn detached_list() -> Vec<DetachedInfo> {
     let mut out = Vec::new();
+    let exe = std::env::current_exe().ok();
     if let Ok(rd) = std::fs::read_dir(dir()) {
         for e in rd.flatten() {
             let p = e.path();
@@ -270,7 +304,10 @@ pub fn detached_list() -> Vec<DetachedInfo> {
                     let _ = std::fs::remove_file(&p); // stale leftovers
                     continue;
                 }
-                out.push(DetachedInfo { id: spec.id, command: spec.command, cwd: spec.cwd, running });
+                let attach = exe.as_ref()
+                    .map(|exe| format!("\"{}\" --yaam-attach \"{}\"", exe.display(), sock_path(&spec.id).display()))
+                    .unwrap_or_default();
+                out.push(DetachedInfo { id: spec.id, command: spec.command, cwd: spec.cwd, running, attach });
             }
         }
     }
@@ -311,7 +348,7 @@ mod tests {
     fn host_serves_backlog_and_stdin_end_to_end() {
         let id = format!("t-{}", std::process::id());
         let sock = std::env::temp_dir().join(format!("yaam-detach-{id}.sock"));
-        let spec = DetachedSpec { id, command: "printf ready; cat".into(), cwd: None, rows: 24, cols: 80, pid: None };
+        let spec = DetachedSpec { id, command: "printf ready; cat".into(), cwd: None, rows: 24, cols: 80, pid: None, exit_code: None };
         let s2 = spec.clone();
         let sockc = sock.clone();
         std::thread::spawn(move || { run_host(&s2, &sockc); });
@@ -346,5 +383,24 @@ mod tests {
             replay.extend_from_slice(&buf[..n]);
         }
         let _ = write_frame(&mut s2, F_KILL, &[]);
+    }
+
+    #[test]
+    fn host_publishes_the_real_exit_code_for_attach() {
+        let id = format!("exit-{}", std::process::id());
+        let sock = std::env::temp_dir().join(format!("yaam-detach-{id}.sock"));
+        let spec = DetachedSpec {
+            id,
+            command: "exit 23".into(),
+            cwd: None,
+            rows: 24,
+            cols: 80,
+            pid: None,
+            exit_code: None,
+        };
+        std::fs::write(spec_for_sock(&sock), serde_json::to_string(&spec).unwrap()).unwrap();
+        assert_eq!(run_host(&spec, &sock), 23);
+        assert_eq!(take_exit_code(&sock), Some(23));
+        assert!(!spec_for_sock(&sock).exists(), "reading the status consumes the completion record");
     }
 }

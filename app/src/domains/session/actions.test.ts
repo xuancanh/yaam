@@ -124,6 +124,18 @@ describe('createSessionActions', () => {
     expect(get('a1')?.status).toBe('running')
   })
 
+  it('resume reconnects a detached host instead of launching the CLI resume command', () => {
+    const type = { id: 'cli', name: 'CLI', model: 'mycli', env: 'TOKEN=secret', resumeCmd: 'mycli --resume {id}' } as unknown as AgentType
+    const attach = '"/Applications/YAAM.app/Contents/MacOS/YAAM" --yaam-attach "/tmp/a1.sock"'
+    seed([agent({ status: 'idle', detached: true, cmd: attach, cliSessionId: 'sid-9', typeId: 'cli', terminalShell: '/bin/zsh' })], { agentTypes: [type] })
+    const port = fakePort()
+    const c = ctx(port)
+    createSessionActions(c).resume('a1')
+    expect(port.spawnSession).toHaveBeenCalledWith('a1', attach, '/repo', 48, 190, undefined)
+    expect(c.probeCliSession).not.toHaveBeenCalled()
+    expect(get('a1')?.log.at(-1)?.x).toContain('reattaching detached session')
+  })
+
   // resume NEVER wipes the scrollback automatically — the regression was an
   // unconditional reset clearing healthy history. Modes are re-normalized and
   // a corrupted (alt-screen) death only WARNS, pointing at Clear terminal.

@@ -139,11 +139,15 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       const terminalShell = agent?.terminalShell ?? inferLegacyTerminalShell(agent?.cmd)
       let resumeNote = 'session resumed'
       if (agent?.kind === 'real' && agent.cmd && agent.status !== 'running') {
-        // prefer the CLI's own resume flow so the conversation continues
+        // Detached sessions already own the real CLI in their host process:
+        // their persisted command is the attach wrapper and must never be
+        // replaced with the agent type's normal resume command.
         let cmd = agent.cmd
         const type = stateRef.current.agentTypes.find(t => t.id === agent.typeId)
           ?? typeForCommand(agent.cmd, stateRef.current.agentTypes)
-        if (type?.resumeCmd) {
+        if (agent.detached) {
+          resumeNote = 'reattaching detached session'
+        } else if (type?.resumeCmd) {
           if (type.resumeCmd.includes('{id}')) {
             if (agent.cliSessionId) {
               cmd = type.resumeCmd.replace('{id}', agent.cliSessionId)
@@ -169,14 +173,17 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         // resume, so nothing would ever correct the backend's 24×80 default
         // and the CLI would keep rendering for the wrong terminal
         const size = port.terminalSize(id)
-        port.spawnSession(id, `${envPrefix(type?.env)}${cmd}`.trim(), agent.cwd || undefined, size?.rows, size?.cols, terminalShell)
+        const spawnCommand = agent.detached ? cmd : `${envPrefix(type?.env)}${cmd}`.trim()
+        // A detached attach command must run as a command, even when the
+        // original session was created from a configured terminal shell.
+        port.spawnSession(id, spawnCommand, agent.cwd || undefined, size?.rows, size?.cols, agent.detached ? undefined : terminalShell)
           .then(() => {
             // …and nudge a repaint once the CLI has booted, so resumed TUIs
             // draw a correct first frame even if layout shifted meanwhile
             setTimeout(() => port.repaintTerminal(id), 400)
           })
           .catch(() => {})
-        probeCliSession(id, cmd, agent.cwd || '', true)
+        if (!agent.detached) probeCliSession(id, cmd, agent.cwd || '', true)
       }
       dispatch(s => focusSessionIn({
         ...s,

@@ -9,6 +9,8 @@ export interface DetachedInfo {
   command: string
   cwd: string | null
   running: boolean
+  /** reconnect command rebuilt with the currently running YAAM binary */
+  attach: string
 }
 
 /** Start the detached host; returns the attach command to run as the session

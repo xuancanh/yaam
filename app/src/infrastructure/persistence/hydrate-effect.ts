@@ -45,16 +45,40 @@ export function runHydration(ctx: HydrationCtx): void {
       const { next, restoredAgents } = buildHydration(p, stateRef.current)
       // pure snapshot applied — now rebuilding terminals + resolving secrets
       dispatch(() => ({ ...next, bootStatus: 'restoring-runtime' }))
-      // rebuild each restored session's terminal with its saved tail, and
-      // reattach to PTYs that are still alive in the backend (webview reload)
-      native.liveSessions().then(liveIds => {
+      // Rebuild restored terminals. A webview reload sees its wrapper in
+      // liveSessions; a full app restart instead discovers surviving detached
+      // hosts and recreates the wrapper automatically.
+      Promise.all([native.liveSessions(), native.detachedList()]).then(([liveIds, detachedHosts]) => {
         const alive = new Set(liveIds)
+        const hosts = new Map(detachedHosts.filter(h => h.running).map(h => [h.id, h]))
         for (const a of restoredAgents) {
           const { term } = getTerminal(a.id, line => appendTail(a.id, line), () => clearNeeds(a.id), () => bumpSettle(a.id), () => armResponseWatch(a.id))
           if (alive.has(a.id)) {
             // live PTY: never inject text (it corrupts TUI screens) —
             // nudge the app to repaint itself once the pane has mounted
             window.setTimeout(() => repaintSession(a.id), 1200)
+          } else if (a.detached && hosts.has(a.id)) {
+            const host = hosts.get(a.id)!
+            const attach = host.attach || a.cmd!
+            native.spawnSession(a.id, attach, a.cwd || undefined, term.rows, term.cols, undefined)
+              .then(() => {
+                dispatch(s2 => ({
+                  ...s2,
+                  agents: s2.agents.map(agent => agent.id === a.id
+                    ? { ...agent, cmd: attach, status: 'running' as const, log: agent.log.concat([{ t: 'sys' as const, x: 'reattached · detached host still running' }]) }
+                    : agent),
+                }))
+                window.setTimeout(() => repaintSession(a.id), 1200)
+              })
+              .catch(e => {
+                term.writeln(`\x1b[31m── could not reattach detached session · ${String(e)} ──\x1b[0m`)
+                dispatch(s2 => ({
+                  ...s2,
+                  agents: s2.agents.map(agent => agent.id === a.id
+                    ? { ...agent, status: 'error' as const, log: agent.log.concat([{ t: 'err' as const, x: `detached reattach failed · ${String(e)}` }]) }
+                    : agent),
+                }))
+              })
           } else {
             for (const l of a.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
             term.writeln('\x1b[33m── restored from previous run · press ▶ to relaunch ──\x1b[0m')
