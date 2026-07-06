@@ -8,6 +8,7 @@ import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import type { CatalogSkill } from '../../core/skills'
 import type { Agent, ChatMsg } from '../../core/types'
 import type { ChatAttachment } from './runner'
+import { onAttachRequest } from './attach-bus'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
 import { artifactSrcDoc, extractArtifact } from './artifacts'
@@ -334,6 +335,12 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
       }
     }
   }
+
+  // file-explorer attach requests (click a file's ＋ in the Files panel)
+  useEffect(() => {
+    return onAttachRequest(agent.id, path => void addPaths([path]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.id, atts.length])
 
   // native drag & drop: Tauri reports OS file drops with real paths
   useEffect(() => {

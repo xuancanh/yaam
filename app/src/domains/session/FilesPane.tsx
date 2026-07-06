@@ -14,6 +14,7 @@ import { IC, Icon } from '../../components/ui'
 import { FileIcon } from '../../components/FileIcon'
 import { Markdown } from '../../components/Markdown'
 import { ChatPane } from '../chat/ChatPane'
+import { requestAttach } from '../chat/attach-bus'
 import { TerminalPane } from './TerminalPane'
 
 export type FilesMode = 'split' | 'replace'
@@ -81,7 +82,7 @@ function viewKind(name: string): 'image' | 'pdf' | 'office' | 'text' {
 // ---------------------------------------------------------------- tree
 
 /** Recursively render one directory level and lazily loaded descendants. */
-function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git }: {
+function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, onAttachFile }: {
   dir: string
   depth: number
   expanded: Set<string>
@@ -89,6 +90,8 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git }:
   openFile: (path: string) => void
   selected: string | null
   git: GitInfo | null
+  /** chat hosts: attach this file to the conversation (design's ＋ chip) */
+  onAttachFile?: (path: string) => void
 }) {
   const [entries, setEntries] = useState<DirEntryInfo[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -132,9 +135,23 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git }:
               <FileIcon name={e.name} path={e.path} isDir={e.isDir} size={13} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</span>
               {!e.isDir && color && <span style={{ marginLeft: 'auto', fontSize: 9.5, flexShrink: 0, color }}>●</span>}
+              {!e.isDir && onAttachFile && (
+                <span
+                  role="button"
+                  title="Attach to chat"
+                  onClick={ev => { ev.stopPropagation(); onAttachFile(e.path) }}
+                  style={{
+                    marginLeft: color ? 4 : 'auto', flexShrink: 0, width: 18, height: 18, borderRadius: 5,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(245,196,81,.14)', color: 'var(--accent)', fontSize: 12, fontWeight: 700,
+                  }}
+                >
+                  +
+                </span>
+              )}
             </button>
             {e.isDir && isOpen && (
-              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} />
+              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} onAttachFile={onAttachFile} />
             )}
           </div>
         )
@@ -149,7 +166,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git }:
 // ---------------------------------------------------------------- viewer
 
 /** Load and display one file with syntax highlighting and optional diff gutter. */
-function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose, git }: {
+function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose, git, onAttachFile }: {
   path: string
   gutter: 'numbers' | 'git'
   onToggleGutter: () => void
@@ -158,6 +175,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   onToggleMode?: () => void
   onClose: () => void
   git: GitInfo | null
+  onAttachFile?: (path: string) => void
 }) {
   const [content, setContent] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -304,6 +322,16 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         )}
         {content !== null && <span className="mono" style={{ fontSize: 10, color: 'var(--faint)', flexShrink: 0 }}>{allLines.length} lines{kind === 'office' ? ' · extracted text' : ''}</span>}
         <div style={{ flex: 1 }} />
+        {onAttachFile && (
+          <button
+            className="open-btn"
+            title="Attach this file to the chat"
+            onClick={() => onAttachFile(path)}
+            style={{ padding: '4px 10px', fontSize: 11, flexShrink: 0 }}
+          >
+            ＋ Add to chat
+          </button>
+        )}
         {isMd && (
           <button
             className="icon-btn"
@@ -440,6 +468,9 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
   const [git, setGit] = useState<GitInfo | null>(null)
   const [treeKey, setTreeKey] = useState(0)
   const root = agent.cwd || '~'
+  // chat hosts: files can be attached to the conversation with one click —
+  // the ChatPane below subscribes on the attach bus and chips the file
+  const attachToChat = agent.kind === 'chat' ? (path: string) => { requestAttach(agent.id, path) } : undefined
 
   // persist UI state across remounts
   useEffect(() => {
@@ -523,6 +554,7 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
             openFile={setFile}
             selected={file}
             git={git}
+            onAttachFile={attachToChat}
           />
         </div>
       </div>
@@ -537,6 +569,7 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
             onToggleMode={() => setMode(m => (m === 'split' ? 'replace' : 'split'))}
             onClose={() => setFile(null)}
             git={git}
+            onAttachFile={attachToChat}
           />
         )}
         {(!file || mode === 'split') && (
