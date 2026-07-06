@@ -158,6 +158,8 @@ describe('detached launches', () => {
     expect(port.spawnSession).toHaveBeenCalledWith(id, 'attach-cmd', '/repo', undefined, undefined, undefined, undefined)
     const a = useAppStore.getState().agents.find(x => x.id === id)
     expect(a?.detached).toBe(true)
-    expect(a?.cmd).toBe('attach-cmd') // resume = reattach
+    // cmd keeps the ORIGINAL command — resume re-derives the attach wrapper
+    // (and relaunches the command if the host ended)
+    expect(a?.cmd).toBe('sleep 999')
   })
 })

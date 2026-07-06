@@ -124,16 +124,41 @@ describe('createSessionActions', () => {
     expect(get('a1')?.status).toBe('running')
   })
 
-  it('resume reconnects a detached host instead of launching the CLI resume command', () => {
+  it('resume ensures the detached host and spawns the returned attach command', async () => {
     const type = { id: 'cli', name: 'CLI', model: 'mycli', env: 'TOKEN=secret', resumeCmd: 'mycli --resume {id}' } as unknown as AgentType
-    const attach = '"/Applications/YAAM.app/Contents/MacOS/YAAM" --yaam-attach "/tmp/a1.sock"'
-    seed([agent({ status: 'idle', detached: true, cmd: attach, cliSessionId: 'sid-9', typeId: 'cli', terminalShell: '/bin/zsh' })], { agentTypes: [type] })
+    seed([agent({ status: 'idle', detached: true, cmd: 'mycli run', cliSessionId: 'sid-9', typeId: 'cli' })], { agentTypes: [type] })
     const port = fakePort()
     const c = ctx(port)
     createSessionActions(c).resume('a1')
-    expect(port.spawnSession).toHaveBeenCalledWith('a1', attach, '/repo', 48, 190, undefined, undefined)
+    await Promise.resolve(); await Promise.resolve()
+    // the ORIGINAL command goes to detachedSpawn — a live host reattaches,
+    // a dead one is relaunched from this command; never the CLI resume command
+    expect(port.detachedSpawn).toHaveBeenCalledWith('a1', expect.stringContaining('mycli run'), '/repo', 'zsh', 48, 190)
+    expect(port.spawnSession).toHaveBeenCalledWith('a1', 'attach-cmd', '/repo', 48, 190, undefined, undefined)
     expect(c.probeCliSession).not.toHaveBeenCalled()
     expect(get('a1')?.log.at(-1)?.x).toContain('reattaching detached session')
+  })
+
+  it('resume of a legacy detached agent (attach wrapper as cmd) reuses the stored host spec', async () => {
+    const attach = '"/Applications/YAAM.app/Contents/MacOS/YAAM" --yaam-attach "/tmp/a1.sock"'
+    seed([agent({ status: 'idle', detached: true, cmd: attach })])
+    const port = fakePort()
+    createSessionActions(ctx(port)).resume('a1')
+    await Promise.resolve(); await Promise.resolve()
+    // '' tells the backend to relaunch from the host's on-disk spec, which
+    // still holds the real command the legacy agent never persisted
+    expect(port.detachedSpawn).toHaveBeenCalledWith('a1', '', '/repo', 'zsh', 48, 190)
+    expect(port.spawnSession).toHaveBeenCalledWith('a1', 'attach-cmd', '/repo', 48, 190, undefined, undefined)
+  })
+
+  it('resume surfaces a detached relaunch failure as a session error', async () => {
+    seed([agent({ status: 'idle', detached: true, cmd: 'mycli run' })])
+    const port = fakePort({ detachedSpawn: vi.fn(async () => { throw new Error('detached session ended and its command was not recorded') }) })
+    createSessionActions(ctx(port)).resume('a1')
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    expect(port.spawnSession).not.toHaveBeenCalled()
+    expect(get('a1')?.status).toBe('error')
+    expect(get('a1')?.log.at(-1)?.x).toContain('not recorded')
   })
 
   // resume NEVER wipes the scrollback automatically — the regression was an

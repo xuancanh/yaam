@@ -117,14 +117,15 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', spawnCwd ?? '', false)
         if (opts?.detached) {
           // the PTY moves into a detached host process; the app runs a small
-          // attach client instead — the session outlives the app, and the
-          // attach command doubles as the resume/reconnect command
+          // attach client instead. agent.cmd keeps the ORIGINAL command —
+          // resume re-derives the attach wrapper via detachedSpawn, which
+          // reattaches a live host or relaunches this command if it ended.
           port.detachedSpawn(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd, commandShell)
             .then(attachCmd => {
               dispatch(s => ({
                 ...s,
                 agents: s.agents.map(a => a.id === id
-                  ? { ...a, detached: true, cmd: attachCmd, log: a.log.concat([{ t: 'sys' as const, x: 'detached session — survives closing the app; ▶ reattaches' }]) }
+                  ? { ...a, detached: true, log: a.log.concat([{ t: 'sys' as const, x: 'detached session — survives closing the app; ▶ reattaches' }]) }
                   : a),
               }))
               port.spawnSession(id, attachCmd, spawnCwd || undefined, undefined, undefined, undefined, undefined).catch(fail)

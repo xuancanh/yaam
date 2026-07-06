@@ -29,8 +29,8 @@ export interface SessionProcessPort {
   detectCliSession: (kind: string, cwd: string | undefined, sinceMs: number, exclude?: string[]) => Promise<string | null>
   /** isolate a working folder in git worktree(s); returns where to run */
   createWorktree: (baseCwd: string, slug: string) => Promise<native.WorktreeInfo>
-  /** start a detached host process; returns the attach command to spawn */
-  detachedSpawn: (id: string, command: string, cwd?: string, commandShell?: string) => Promise<string>
+  /** ensure a detached host (reattach live, relaunch dead); returns the attach command to spawn */
+  detachedSpawn: (id: string, command: string, cwd?: string, commandShell?: string, rows?: number, cols?: number) => Promise<string>
   /** end a detached session for real */
   detachedKill: (id: string) => Promise<void>
   /** create (or reuse) the xterm terminal for a session and wire its callbacks */
@@ -66,7 +66,7 @@ export const realSessionProcessPort: SessionProcessPort = {
   sendLine: (id, text) => sendLineToSession(id, text),
   detectCliSession: (kind, cwd, sinceMs, exclude) => native.detectCliSession(kind, cwd, sinceMs, exclude),
   createWorktree: (baseCwd, slug) => native.worktreeCreate(baseCwd, slug),
-  detachedSpawn: (id, command, cwd, commandShell) => native.detachedSpawn(id, command, cwd, commandShell),
+  detachedSpawn: (id, command, cwd, commandShell, rows, cols) => native.detachedSpawn(id, command, cwd, commandShell, rows, cols),
   detachedKill: id => native.detachedKill(id),
   attachTerminal: (id, onPlainLine, onUserInput, onActivity, onUserSubmit) => {
     const { term } = getTerminal(id, onPlainLine, onUserInput, onActivity, onUserSubmit)

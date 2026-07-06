@@ -169,14 +169,22 @@ pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
     let _ = killer.kill();
     // Publish the real child's exit code before closing the socket/process. The
     // attach wrapper consumes this file after observing EOF and returns the same
-    // code to SessionManager's ordinary child reaper.
-    let mut completed = spec.clone();
-    completed.exit_code = Some(code);
-    let _ = std::fs::write(
-        spec_for_sock(sock),
-        serde_json::to_string(&completed).unwrap_or_default(),
-    );
-    let _ = std::fs::remove_file(sock);
+    // code to SessionManager's ordinary child reaper. Only write while the spec
+    // on disk is still ours — after a stop + quick relaunch it belongs to the
+    // replacement host, and a late write here would clobber its command.
+    let ours = std::fs::read_to_string(spec_for_sock(sock))
+        .ok()
+        .and_then(|s| serde_json::from_str::<DetachedSpec>(&s).ok())
+        .is_none_or(|d| d.pid == spec.pid);
+    if ours {
+        let mut completed = spec.clone();
+        completed.exit_code = Some(code);
+        let _ = std::fs::write(
+            spec_for_sock(sock),
+            serde_json::to_string(&completed).unwrap_or_default(),
+        );
+        let _ = std::fs::remove_file(sock); // a replacement host may own this path now
+    }
     code
 }
 
@@ -288,13 +296,32 @@ pub fn detach_entry() -> bool {
 
 // ── tauri commands ──────────────────────────────────────────────────────────
 
-/// Start the detached host and return the attach command line the app should
-/// run as a normal PTY session (also the session's resume command).
+/// Ensure a detached host exists and return the attach command line the app
+/// should run as a normal PTY session (also the session's resume command).
+/// Idempotent: a live host is reattached as-is; a dead/stopped one is
+/// relaunched fresh. An empty `command` reuses the stored spec (legacy agents
+/// that only persisted the attach wrapper).
 #[tauri::command]
 pub fn detached_spawn(id: String, command: String, cwd: Option<String>, command_shell: Option<String>, rows: Option<u16>, cols: Option<u16>) -> Result<String, String> {
-    let spec = DetachedSpec { id: id.clone(), command, cwd, command_shell, rows: rows.unwrap_or(24), cols: cols.unwrap_or(80), pid: None, exit_code: None };
-    std::fs::write(spec_path(&id), serde_json::to_string(&spec).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let sock = sock_path(&id);
+    let attach = format!("\"{}\" --yaam-attach \"{}\"", exe.display(), sock.display());
+    if UnixStream::connect(&sock).is_ok() {
+        return Ok(attach); // still running — just reattach
+    }
+    let _ = std::fs::remove_file(&sock); // stale socket from a dead host
+    let spec = if command.trim().is_empty() {
+        let mut old = std::fs::read_to_string(spec_path(&id))
+            .ok()
+            .and_then(|s| serde_json::from_str::<DetachedSpec>(&s).ok())
+            .ok_or("detached session ended and its command was not recorded — start a new session")?;
+        old.pid = None;
+        old.exit_code = None;
+        old
+    } else {
+        DetachedSpec { id: id.clone(), command, cwd, command_shell, rows: rows.unwrap_or(24), cols: cols.unwrap_or(80), pid: None, exit_code: None }
+    };
+    std::fs::write(spec_path(&id), serde_json::to_string(&spec).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let mut cmd = std::process::Command::new(&exe);
     cmd.args(["--yaam-host", &id])
         .stdin(std::process::Stdio::null())
@@ -312,12 +339,11 @@ pub fn detached_spawn(id: String, command: String, cwd: Option<String>, command_
     }
     cmd.spawn().map_err(|e| format!("could not start session host: {e}"))?;
     // wait for the socket so the attach client doesn't race the host
-    let sock = sock_path(&id);
     for _ in 0..50 {
         if UnixStream::connect(&sock).is_ok() { break }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    Ok(format!("\"{}\" --yaam-attach \"{}\"", exe.display(), sock.display()))
+    Ok(attach)
 }
 
 /// Detached sessions on disk, with a liveness probe per socket.
@@ -373,6 +399,23 @@ mod tests {
         assert_eq!((t1, p1.as_slice()), (F_RESIZE, &[40u8, 0, 120, 0][..]));
         let (t2, p2) = read_frame(&mut r).unwrap();
         assert_eq!((t2, p2.as_slice()), (F_DATA, b"ls -la\n".as_slice()));
+    }
+
+    #[test]
+    fn dying_host_does_not_clobber_a_replacement_spec() {
+        let id = format!("t-clobber-{}", std::process::id());
+        let sock = std::env::temp_dir().join(format!("yaam-detach-{id}.sock"));
+        let spec = DetachedSpec { id: id.clone(), command: "true".into(), cwd: None, command_shell: None, rows: 24, cols: 80, pid: Some(4242), exit_code: None };
+        // stop + quick relaunch: a replacement host's fresh spec (pid not yet
+        // recorded) is already on disk when the old host finally exits
+        let replacement = DetachedSpec { pid: None, exit_code: None, ..spec.clone() };
+        std::fs::write(spec_for_sock(&sock), serde_json::to_string(&replacement).unwrap()).unwrap();
+        run_host(&spec, &sock);
+        let on_disk: DetachedSpec = serde_json::from_str(&std::fs::read_to_string(spec_for_sock(&sock)).unwrap()).unwrap();
+        assert_eq!(on_disk.exit_code, None, "old host must not write its exit code over the replacement's spec");
+        assert_eq!(on_disk.pid, None);
+        let _ = std::fs::remove_file(spec_for_sock(&sock));
+        let _ = std::fs::remove_file(&sock);
     }
 
     #[test]
