@@ -25,7 +25,11 @@ function Crumbs({ root, path, onGo }: { root: string; path: string; onGo: (p: st
   )
 }
 
-export function FilesBrowser({ root }: { root: string }) {
+export function FilesBrowser({ root, onAttach }: {
+  root: string
+  /** when provided, the preview offers "Add to chat" with the loaded content */
+  onAttach?: (a: { name: string; path: string; text: string }) => void
+}) {
   const [path, setPath] = useState(root)
   const [entries, setEntries] = useState<FsEntry[] | null>(null)
   const [file, setFile] = useState<{ path: string; text: string } | null>(null)
@@ -64,6 +68,16 @@ export function FilesBrowser({ root }: { root: string }) {
         {isMd
           ? <div style={{ fontSize: 13.5, lineHeight: 1.6 }}><Markdown text={file.text} /></div>
           : <pre className="filetext mono">{file.text || '(empty file)'}</pre>}
+        {onAttach && (
+          <div className="btnrow">
+            <button
+              className="btn accent"
+              onClick={() => onAttach({ name: file.path.slice(file.path.lastIndexOf('/') + 1), path: file.path, text: file.text })}
+            >
+              ＋ Add to chat
+            </button>
+          </div>
+        )}
       </div>
     )
   }

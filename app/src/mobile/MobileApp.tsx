@@ -1,7 +1,7 @@
-// The phone companion app: pairing handshake, then tabs for Tasks / Chats /
-// Sessions / Approvals. Pure polling client of the desktop's remote server —
-// every action becomes a queued command the desktop applies through its own
-// conductor actions.
+// The phone companion — Conductor Mobile design: Space Grotesk headers, agent
+// cards with tinted avatars and pulsing status pills, inbox-style approvals,
+// free-flowing assistant chat, and a pill composer with file attachments
+// pulled from the working folder via the rpc bridge.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Markdown } from '../components/Markdown'
 import { TerminalView } from './TerminalView'
@@ -12,10 +12,12 @@ import {
 } from './api'
 
 const POLL_MS = 2000
+const ATT_CONTENT_CAP = 6000
 
 type Pairing = 'checking' | 'bad-token' | 'unpaired' | 'waiting' | 'paired'
 type Tab = 'tasks' | 'chats' | 'sessions' | 'approvals'
 type Detail = { kind: 'task' | 'chat' | 'session'; id: string } | null
+interface Attachment { name: string; path: string; text: string }
 
 /** Wide viewport → desktop-style icon rail + master-detail instead of tabs. */
 function useWide(): boolean {
@@ -29,9 +31,7 @@ function useWide(): boolean {
   return wide
 }
 
-/** Real device + browser name from the user agent (e.g. "Pixel 8 · Chrome",
- *  "iPhone · Safari", "Mac · Firefox") — refined further via UA-Client-Hints
- *  where available. */
+/** Real device + browser name from the user agent (e.g. "Pixel 8 · Chrome"). */
 function detectDeviceName(): string {
   const ua = navigator.userAgent
   const browser = /Edg\//.test(ua) ? 'Edge'
@@ -44,11 +44,9 @@ function detectDeviceName(): string {
   if (/iPhone/.test(ua)) device = 'iPhone'
   else if (/iPad/.test(ua)) device = 'iPad'
   else if (/Android/.test(ua)) {
-    // the Android UA carries the actual model: "(Linux; Android 14; Pixel 8)"
     const m = ua.match(/Android [^;)]+; ([^;)]+)/)
     device = m ? m[1].replace(/ Build\/.*/, '').trim() : 'Android'
   } else if (/Macintosh/.test(ua)) {
-    // iPadOS Safari masquerades as a Mac but keeps its touchscreen
     device = navigator.maxTouchPoints > 1 ? 'iPad' : 'Mac'
   } else if (/Windows/.test(ua)) device = 'Windows PC'
   else if (/Linux/.test(ua)) device = 'Linux'
@@ -59,13 +57,47 @@ interface UADataNavigator {
   userAgentData?: { getHighEntropyValues?: (hints: string[]) => Promise<{ model?: string }> }
 }
 
+/** Deterministic tint for an avatar, from the design's agent palette. */
+const AVATAR_COLORS = ['#E8A87C', '#34D399', '#B692F6', '#6C8EF5', '#F5C451', '#7FD1FF']
+function tint(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return AVATAR_COLORS[h % AVATAR_COLORS.length]
+}
+const soft = (hex: string) => {
+  const n = parseInt(hex.slice(1), 16)
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},.14)`
+}
+const border = (hex: string) => {
+  const n = parseInt(hex.slice(1), 16)
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},.4)`
+}
+const initials = (name: string) => name.split(/[\s-_]+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '??'
+
+function Avatar({ name, size = 40 }: { name: string; size?: number }) {
+  const c = tint(name)
+  return (
+    <div className="avatar" style={{ width: size, height: size, background: soft(c), border: `1px solid ${border(c)}`, color: c }}>
+      {initials(name)}
+    </div>
+  )
+}
+
+function StatusPill({ status }: { status: string }) {
+  const label: Record<string, string> = { running: 'Running', needs: 'Blocked', idle: 'Idle', error: 'Failed', progress: 'In progress', review: 'Review', backlog: 'Backlog', done: 'Done', failed: 'Failed' }
+  return (
+    <span className={`statuspill ${status}`}>
+      <span className="sdot" />
+      {label[status] ?? status}
+    </span>
+  )
+}
+
 // ---------------------------------------------------------------- pairing
 
 function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) => void }) {
   const [name, setName] = useState(detectDeviceName())
   const edited = useRef(false)
-  // Chromium exposes the precise model via UA-Client-Hints — refine the
-  // suggestion unless the user already typed their own name
   useEffect(() => {
     const uad = (navigator as UADataNavigator).userAgentData
     uad?.getHighEntropyValues?.(['model'])
@@ -76,9 +108,7 @@ function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) 
       })
       .catch(() => {})
   }, [])
-  if (state === 'checking') {
-    return <div className="pairwrap"><div className="spinner" /></div>
-  }
+  if (state === 'checking') return <div className="pairwrap"><div className="spinner" /></div>
   if (state === 'bad-token') {
     return (
       <div className="pairwrap">
@@ -101,58 +131,69 @@ function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) 
       <h2>Pair this device</h2>
       <p>YAAM pairs devices explicitly: send a request, then approve it on your desktop. The minted device token is stored on both ends until you revoke it.</p>
       <input value={name} onChange={e => { edited.current = true; setName(e.target.value) }} placeholder="Device name" maxLength={40} />
-      <button className="btn primary" onClick={() => onPair(name.trim() || detectDeviceName())}>Request pairing</button>
+      <button className="btn accent" onClick={() => onPair(name.trim() || detectDeviceName())}>Request pairing</button>
     </div>
   )
 }
 
 // ---------------------------------------------------------------- shared
 
-function Composer({ placeholder, onSend }: { placeholder: string; onSend: (text: string) => void }) {
+function Composer({ placeholder, onSend, onAttach, children }: {
+  placeholder: string
+  onSend: (text: string) => void
+  onAttach?: () => void
+  children?: React.ReactNode
+}) {
   const [draft, setDraft] = useState('')
   const send = () => {
     const text = draft.trim()
-    if (!text) return
+    if (!text && !children) return
     onSend(text)
     setDraft('')
   }
   return (
-    <div className="composer">
-      <textarea
-        rows={1}
-        value={draft}
-        placeholder={placeholder}
-        onChange={e => setDraft(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-      />
-      <button disabled={!draft.trim()} onClick={send} aria-label="Send">↑</button>
+    <div className="composerwrap">
+      {children && <div className="attbar">{children}</div>}
+      <div className="composer">
+        {onAttach && <button className="attachbtn" title="Attach a file from the working folder" onClick={onAttach}>＋</button>}
+        <textarea
+          rows={1}
+          value={draft}
+          placeholder={placeholder}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+        />
+        <button className="sendbtn" disabled={!draft.trim() && !children} onClick={send} aria-label="Send">↑</button>
+      </div>
     </div>
   )
 }
 
-/** Chat transcript with optimistic local echoes for messages sent from here. */
-function Messages({ msgs, echoes, whoFor }: {
+/** Chat transcript in the assistant design: user bubbles right, bot content
+ *  free-flowing beside a small avatar, system lines centered mono. */
+function Messages({ msgs, echoes, botWho }: {
   msgs: { id: string; role: string; text: string }[]
   echoes: string[]
-  whoFor?: (role: string) => string | null
+  botWho?: string
 }) {
   const endRef = useRef<HTMLDivElement>(null)
   const count = msgs.length + echoes.length
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [count])
+  const lastLen = msgs.length ? msgs[msgs.length - 1].text.length : 0
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [count, lastLen])
   return (
     <div className="msgs">
       {msgs.filter(m => m.text).map(m => {
-        const cls = m.role === 'user' ? 'user' : m.role === 'system' || m.role === 'tool' ? 'sys' : 'other'
-        const who = whoFor?.(m.role)
+        if (m.role === 'user') return <div key={m.id} className="bubble-user">{m.text}</div>
+        if (m.role === 'system' || m.role === 'tool') return <div key={m.id} className="sysline">· {m.text.slice(0, 200)} ·</div>
         return (
-          <div key={m.id} className={`bubble ${cls}`}>
-            {who && <div className="who">{who}</div>}
-            {cls === 'sys' ? `· ${m.text.slice(0, 200)} ·` : <Markdown text={m.text} />}
+          <div key={m.id} className="botrow">
+            <div className="botavatar" title={botWho}>⚡</div>
+            <div className="botbody"><Markdown text={m.text} /></div>
           </div>
         )
       })}
       {echoes.map((text, i) => (
-        <div key={`echo-${i}`} className="bubble user" style={{ opacity: 0.55 }}>{text}</div>
+        <div key={`echo-${i}`} className="bubble-user" style={{ opacity: 0.55 }}>{text}</div>
       ))}
       <div ref={endRef} />
     </div>
@@ -163,9 +204,28 @@ function Messages({ msgs, echoes, whoFor }: {
 function useEchoes(msgs: { role: string; text: string }[]) {
   const [echoes, setEchoes] = useState<string[]>([])
   useEffect(() => {
-    setEchoes(cur => cur.filter(text => !msgs.some(m => m.role === 'user' && m.text === text)))
+    setEchoes(cur => cur.filter(text => !msgs.some(m => m.role === 'user' && m.text.startsWith(text.slice(0, 80)))))
   }, [msgs])
   return { echoes, addEcho: (text: string) => setEchoes(cur => cur.concat([text])) }
+}
+
+/** Slide-in files sheet for browsing + attaching from a working folder. */
+function FilesSheet({ root, onClose, onAttach }: { root: string; onClose: () => void; onAttach?: (a: Attachment) => void }) {
+  return (
+    <>
+      <div className="sheetveil" onClick={onClose} />
+      <div className="sheet">
+        <div className="sheethead">
+          <span style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>📁</span>
+          <span className="stitle">{root.slice(root.lastIndexOf('/') + 1) || root}</span>
+          <button className="sclose" onClick={onClose}>✕</button>
+        </div>
+        <div className="sheetbody">
+          <FilesBrowser root={root} onAttach={onAttach && (a => { onAttach(a); onClose() })} />
+        </div>
+      </div>
+    </>
+  )
 }
 
 // ---------------------------------------------------------------- screens
@@ -177,11 +237,12 @@ function TaskDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   return (
     <>
       <div className="body">
-        <div className="row" style={{ marginBottom: 8 }}>
-          <span className="name" style={{ fontSize: 16, whiteSpace: 'normal' }}>{t.title}</span>
-          <span className={`pill ${t.col}`}>{t.col}</span>
+        <div className="row" style={{ alignItems: 'flex-start' }}>
+          <span className="name" style={{ fontSize: 17, whiteSpace: 'normal', fontFamily: 'var(--font-title)' }}>{t.title}</span>
+          <StatusPill status={t.col} />
         </div>
-        {t.description && <p style={{ color: 'var(--text2)', fontSize: 13.5, marginBottom: 8 }}>{t.description}</p>}
+        {t.description && <p style={{ color: 'var(--text2)', fontSize: 13.5, marginTop: 8, lineHeight: 1.55 }}>{t.description}</p>}
+        {t.criteria.length > 0 && <div className="section">ACCEPTANCE CRITERIA</div>}
         {t.criteria.map((c, i) => <div key={i} className="crit"><span style={{ color: 'var(--green)' }}>✓</span>{c}</div>)}
         {t.watcherNote && <div className="warn">⌁ {t.watcherNote}</div>}
         {(t.col === 'backlog' || t.col === 'failed') && (
@@ -191,10 +252,10 @@ function TaskDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
             </button>
           </div>
         )}
-        <div className="section">WATCHER CHAT</div>
-        <Messages msgs={t.chat} echoes={echoes} whoFor={r => (r === 'watcher' ? 'WATCHER' : null)} />
+        <div className="section">WATCHER</div>
+        <Messages msgs={t.chat.map(m => ({ ...m, role: m.role === 'watcher' ? 'assistant' : m.role }))} echoes={echoes} botWho="watcher" />
       </div>
-      <Composer placeholder="Message the watcher…" onSend={text => { addEcho(text); void sendCommand({ kind: 'task_chat', id: t.id, text }) }} />
+      <Composer placeholder="Message the watcher…" onSend={text => { if (!text) return; addEcho(text); void sendCommand({ kind: 'task_chat', id: t.id, text }) }} />
     </>
   )
 }
@@ -202,12 +263,32 @@ function TaskDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
 function ChatDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   const c = snap.chats.find(x => x.id === id)
   const { echoes, addEcho } = useEchoes(c?.msgs ?? [])
+  const [atts, setAtts] = useState<Attachment[]>([])
+  const [filesOpen, setFilesOpen] = useState(false)
+  // any session sharing the workspace gives us a browsable folder
+  const folder = snap.sessions.find(s => s.cwd)?.cwd ?? ''
   if (!c) return <div className="empty">This chat is gone.</div>
   const pending = c.msgs.find(m => m.approval === 'pending')
+  const send = (text: string) => {
+    if (!text && atts.length === 0) return
+    const payload = atts.length
+      ? `${text}\n\n${atts.map(a => `Attached file \`${a.path}\`:\n\`\`\`\n${a.text.slice(0, ATT_CONTENT_CAP)}\n\`\`\``).join('\n\n')}`
+      : text
+    addEcho(text || `(attached ${atts.map(a => a.name).join(', ')})`)
+    setAtts([])
+    void sendCommand({ kind: 'chat_send', id: c.id, text: payload })
+  }
   return (
     <>
       <div className="body">
-        <Messages msgs={c.msgs} echoes={echoes} />
+        {c.msgs.length === 0 && echoes.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '56px 20px 24px' }}>
+            <div className="botavatar" style={{ width: 50, height: 50, borderRadius: 15, margin: '0 auto 16px', fontSize: 24 }}>⚡</div>
+            <div style={{ fontFamily: 'var(--font-title)', fontSize: 20, fontWeight: 600 }}>How can I help?</div>
+            {folder && <div style={{ fontSize: 13, color: 'var(--mut)', marginTop: 6 }}>Working in <span className="mono" style={{ color: 'var(--text2)' }}>{folder.slice(folder.lastIndexOf('/') + 1)}</span></div>}
+          </div>
+        )}
+        <Messages msgs={c.msgs} echoes={echoes} botWho={c.name} />
         {pending && (
           <div className="btnrow">
             <button className="btn ghost" onClick={() => void sendCommand({ kind: 'approve_chat', id: pending.id, agent_id: c.id, ok: false })}>Deny</button>
@@ -215,7 +296,22 @@ function ChatDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
           </div>
         )}
       </div>
-      <Composer placeholder={`Message ${c.name}…`} onSend={text => { addEcho(text); void sendCommand({ kind: 'chat_send', id: c.id, text }) }} />
+      <Composer
+        placeholder="Ask anything"
+        onSend={send}
+        onAttach={folder ? () => setFilesOpen(true) : undefined}
+      >
+        {atts.length > 0 && atts.map((a, i) => (
+          <div key={i} className="attchip">
+            <span className="aicon">📄</span>
+            <span className="aname">{a.name}</span>
+            <button className="arm" onClick={() => setAtts(cur => cur.filter((_, idx) => idx !== i))}>✕</button>
+          </div>
+        ))}
+      </Composer>
+      {filesOpen && folder && (
+        <FilesSheet root={folder} onClose={() => setFilesOpen(false)} onAttach={a => setAtts(cur => cur.concat([a]))} />
+      )}
     </>
   )
 }
@@ -228,13 +324,12 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   return (
     <>
       <div className="body">
-        <div className="row" style={{ marginBottom: 6 }}>
-          <span className="name" style={{ fontSize: 16 }}>{s.name}</span>
-          <span className="spend">${s.cost.toFixed(2)}</span>
-          <span className={`pill ${s.status}`}>{s.status}</span>
+        <div className="cardmeta" style={{ marginTop: 0 }}>
+          <span>{s.repo}</span>
+          {s.task && <span>{s.task.slice(0, 40)}</span>}
+          <span style={{ marginLeft: 'auto' }}>${s.cost.toFixed(2)}</span>
         </div>
-        {s.task && <div className="meta">task · {s.task}</div>}
-        {s.summary && <div className="meta" style={{ whiteSpace: 'normal' }}>{s.summary}</div>}
+        {s.summary && <div style={{ fontSize: 13, color: 'var(--mut)', marginTop: 8, lineHeight: 1.5 }}>{s.summary}</div>}
         {s.actionNeeded && <div className="warn">⚠ {s.actionNeeded}</div>}
         <div className="subtabs">
           {(['term', 'files', 'git'] as const).map(v => (
@@ -256,63 +351,99 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
         {view === 'files' && (s.cwd ? <FilesBrowser root={s.cwd} /> : <div className="empty">No working folder.</div>)}
         {view === 'git' && (s.cwd ? <GitReview root={s.cwd} /> : <div className="empty">No working folder.</div>)}
       </div>
-      {live && view === 'term' && <Composer placeholder="Type into the terminal…" onSend={text => void sendCommand({ kind: 'session_input', id: s.id, text })} />}
+      {live && view === 'term' && <Composer placeholder="Message this agent…" onSend={text => { if (text) void sendCommand({ kind: 'session_input', id: s.id, text }) }} />}
     </>
   )
 }
 
+// ---------------------------------------------------------------- lists
+
 const COL_ORDER = ['progress', 'review', 'backlog', 'done', 'failed']
 
 function Lists({ tab, snap, open, selected }: { tab: Tab; snap: RemoteSnapshot; open: (d: Detail) => void; selected?: string }) {
-  const cardCls = (id: string) => `card${selected === id ? ' sel' : ''}`
+  const cardCls = (id: string, attn = false) => `card${selected === id ? ' sel' : ''}${attn ? ' attn' : ''}`
+  // design pickups: status filter chips on Agents, live search on Chat
+  const [filter, setFilter] = useState<'all' | 'running' | 'needs' | 'idle'>('all')
+  const [query, setQuery] = useState('')
   if (tab === 'tasks') {
     const tasks = [...snap.tasks].sort((a, b) => COL_ORDER.indexOf(a.col) - COL_ORDER.indexOf(b.col))
     return (
       <div className="body">
         {tasks.length === 0 && <div className="empty">No tasks on the board.</div>}
         {tasks.map(t => (
-          <button key={t.id} className={cardCls(t.id)} onClick={() => open({ kind: 'task', id: t.id })}>
+          <button key={t.id} className={cardCls(t.id, t.awaitingUser)} onClick={() => open({ kind: 'task', id: t.id })}>
             <div className="row">
               <span className="name">{t.title}</span>
-              {t.chat.length > 0 && <span className="spend">💬 {t.chat.length}</span>}
-              <span className={`pill ${t.col}`}>{t.col}</span>
+              <StatusPill status={t.col} />
             </div>
-            {t.watcherNote && <div className="meta">⌁ {t.watcherNote}</div>}
-            {t.awaitingUser && <div className="warn">? waiting on you</div>}
+            {t.watcherNote && <div className="lastline">⌁ {t.watcherNote}</div>}
+            <div className="cardmeta">
+              {t.chat.length > 0 && <span>💬 {t.chat.length}</span>}
+              {t.criteria.length > 0 && <span>{t.criteria.length} criteria</span>}
+              {t.awaitingUser && <span style={{ color: 'var(--amber)' }}>waiting on you</span>}
+            </div>
           </button>
         ))}
       </div>
     )
   }
   if (tab === 'chats') {
+    const q = query.trim().toLowerCase()
+    const chats = q
+      ? snap.chats.filter(c => (c.name + ' ' + (c.msgs[c.msgs.length - 1]?.text ?? '')).toLowerCase().includes(q))
+      : snap.chats
     return (
       <div className="body">
-        {snap.chats.length === 0 && <div className="empty">No chat conversations.</div>}
-        {snap.chats.map(c => (
+        <div className="composer" style={{ borderRadius: 12, marginBottom: 12, padding: '2px 6px 2px 12px' }}>
+          <textarea rows={1} value={query} placeholder="Search chats" onChange={e => setQuery(e.target.value.replace(/\n/g, ''))} style={{ maxHeight: 24 }} />
+        </div>
+        {chats.length === 0 && <div className="empty">{q ? 'No chats match.' : 'No chat conversations.'}</div>}
+        {chats.map(c => (
           <button key={c.id} className={cardCls(c.id)} onClick={() => open({ kind: 'chat', id: c.id })}>
             <div className="row">
-              <span className="name">{c.name}</span>
+              <Avatar name={c.name} size={34} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="name">{c.name}</div>
+                {c.msgs.length > 0 && <div className="meta">{c.msgs[c.msgs.length - 1].text.slice(0, 80)}</div>}
+              </div>
               <span className="pill">{c.model}</span>
             </div>
-            {c.msgs.length > 0 && <div className="meta">{c.msgs[c.msgs.length - 1].text.slice(0, 90)}</div>}
           </button>
         ))}
       </div>
     )
   }
   if (tab === 'sessions') {
+    const sessions = filter === 'all' ? snap.sessions
+      : filter === 'idle' ? snap.sessions.filter(s => s.status !== 'running' && s.status !== 'needs')
+      : snap.sessions.filter(s => s.status === filter)
     return (
       <div className="body">
-        {snap.sessions.length === 0 && <div className="empty">No live sessions.</div>}
-        {snap.sessions.map(s => (
-          <button key={s.id} className={cardCls(s.id)} onClick={() => open({ kind: 'session', id: s.id })}>
+        <div className="chips" style={{ margin: '0 0 12px' }}>
+          {([['all', 'All'], ['running', 'Running'], ['needs', 'Blocked'], ['idle', 'Idle']] as const).map(([id, label]) => (
+            <button key={id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>{label}</button>
+          ))}
+        </div>
+        {sessions.length === 0 && <div className="empty">No sessions{filter !== 'all' ? ' in this state' : ''}.</div>}
+        {sessions.map(s => (
+          <button key={s.id} className={cardCls(s.id, !!s.actionNeeded)} onClick={() => open({ kind: 'session', id: s.id })}>
             <div className="row">
-              <span className="name">{s.name}</span>
-              <span className="spend">${s.cost.toFixed(2)}</span>
-              <span className={`pill ${s.status}`}>{s.status}</span>
+              <Avatar name={s.name} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="name">{s.name}</div>
+                <div className="meta">{s.repo}{s.task ? ` · ${s.task}` : ''}</div>
+              </div>
+              <StatusPill status={s.status} />
             </div>
-            {(s.task || s.summary) && <div className="meta">{s.task || s.summary}</div>}
-            {s.actionNeeded && <div className="warn">⚠ {s.actionNeeded}</div>}
+            {(s.summary || s.actionNeeded) && (
+              <div className="lastline" style={s.actionNeeded ? { color: 'var(--amber)' } : undefined}>
+                {s.actionNeeded ? `⚠ ${s.actionNeeded}` : s.summary}
+              </div>
+            )}
+            <div className="cardmeta">
+              <span>${s.cost.toFixed(2)}</span>
+              <span style={{ marginLeft: 'auto', color: 'var(--faint)' }}>{s.kind}</span>
+            </div>
           </button>
         ))}
       </div>
@@ -320,24 +451,18 @@ function Lists({ tab, snap, open, selected }: { tab: Tab; snap: RemoteSnapshot; 
   }
   return (
     <div className="body">
-      {snap.approvals.length === 0 && <div className="empty">Nothing waiting on you. 🎉</div>}
+      {snap.approvals.length === 0 && <div className="empty">All clear — nothing waiting on you. 🎉</div>}
       {snap.approvals.map(a => (
-        <div key={`${a.kind}:${a.id}`} className="card" style={{ borderColor: 'rgba(255,176,32,.45)' }}>
-          <div className="name" style={{ whiteSpace: 'normal' }}>{a.label}</div>
-          <div className="mono" style={{ fontSize: 12, color: '#b7bdc9', margin: '6px 0 10px', maxHeight: 90, overflow: 'auto' }}>{a.detail}</div>
-          <div className="btnrow" style={{ marginTop: 0 }}>
-            <button
-              className="btn ghost"
-              onClick={() => void sendCommand({ kind: a.kind === 'master' ? 'approve_master' : 'approve_chat', id: a.id, agent_id: a.agentId, ok: false })}
-            >
-              Deny
-            </button>
-            <button
-              className="btn primary"
-              onClick={() => void sendCommand({ kind: a.kind === 'master' ? 'approve_master' : 'approve_chat', id: a.id, agent_id: a.agentId, ok: true })}
-            >
-              Allow
-            </button>
+        <div key={`${a.kind}:${a.id}`} className="inboxcard">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="tag">DECISION</span>
+            <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--mut2)' }}>{a.kind === 'master' ? 'Master' : 'Chat agent'}</span>
+          </div>
+          <div className="ititle">{a.label}</div>
+          <div className="icmd">{a.detail}</div>
+          <div className="btnrow">
+            <button className="btn primary" onClick={() => void sendCommand({ kind: a.kind === 'master' ? 'approve_master' : 'approve_chat', id: a.id, agent_id: a.agentId, ok: true })}>Approve</button>
+            <button className="btn ghost" onClick={() => void sendCommand({ kind: a.kind === 'master' ? 'approve_master' : 'approve_chat', id: a.id, agent_id: a.agentId, ok: false })}>Deny</button>
           </div>
         </div>
       ))}
@@ -348,11 +473,18 @@ function Lists({ tab, snap, open, selected }: { tab: Tab; snap: RemoteSnapshot; 
 // ---------------------------------------------------------------- app
 
 const TABS: { id: Tab; label: string; glyph: string }[] = [
-  { id: 'tasks', label: 'TASKS', glyph: '▦' },
-  { id: 'chats', label: 'CHATS', glyph: '💬' },
-  { id: 'sessions', label: 'SESSIONS', glyph: '❯_' },
-  { id: 'approvals', label: 'APPROVALS', glyph: '✋' },
+  { id: 'tasks', label: 'Tasks', glyph: '▦' },
+  { id: 'chats', label: 'Chat', glyph: '◍' },
+  { id: 'sessions', label: 'Agents', glyph: '⌘' },
+  { id: 'approvals', label: 'Inbox', glyph: '◔' },
 ]
+
+const HEAD_SUB: Record<Tab, (s: RemoteSnapshot) => string> = {
+  tasks: s => `${s.tasks.length} on the board`,
+  chats: s => `${s.chats.length} conversations`,
+  sessions: s => `${s.sessions.length} sessions`,
+  approvals: s => (s.approvals.length ? `${s.approvals.length} waiting on you` : 'all clear'),
+}
 
 export function MobileApp() {
   const [pairing, setPairing] = useState<Pairing>('checking')
@@ -363,7 +495,6 @@ export function MobileApp() {
   const wide = useWide()
   const pickTab = (t: Tab) => { setTab(t); setDetail(null) }
 
-  // resolve the initial pairing state from the stored token
   useEffect(() => {
     void (async () => {
       if (!urlToken()) { setPairing('bad-token'); return }
@@ -379,13 +510,12 @@ export function MobileApp() {
     })
   }, [])
 
-  // waiting → poll pairing status; paired → poll state (a 403 means revoked)
   useEffect(() => {
     if (pairing === 'waiting') {
       const iv = setInterval(() => {
         void pairingStatus().then(s => {
           if (s === 'paired') setPairing('paired')
-          if (s === 'unknown') setPairing('unpaired') // denied on the desktop
+          if (s === 'unknown') setPairing('unpaired')
         }).catch(() => {})
       }, 1500)
       return () => clearInterval(iv)
@@ -397,23 +527,16 @@ export function MobileApp() {
           .catch(e => {
             setOnline(false)
             if (!String(e).includes('403')) return
-            // a 403 is NOT automatically a lost pairing — the desktop may have
-            // restarted with a rotated URL token. Drop the device token only
-            // when the server explicitly no longer knows this device.
             void pairingStatus()
               .then(async st => {
                 if (st !== 'unknown') return
-                // the server may be mid-restart with an empty device map —
-                // confirm before dropping the stored pairing
                 await new Promise(r => setTimeout(r, 1500))
                 const again = await pairingStatus().catch(() => 'pending' as const)
                 if (again === 'unknown') { forgetPairing(); setPairing('unpaired'); setSnap(null) }
               })
-              .catch(() => setPairing('bad-token')) // stale link — pairing kept
+              .catch(() => setPairing('bad-token'))
           })
       }
-      // prefer SSE (the server pushes on every publish — chats/tasks stream
-      // live); fall back to polling when the stream can't be established
       let es: EventSource | null = null
       let iv: ReturnType<typeof setInterval> | null = null
       const startPolling = () => {
@@ -426,36 +549,35 @@ export function MobileApp() {
         es.onmessage = e => {
           try { setSnap(JSON.parse(String(e.data)) as RemoteSnapshot); setOnline(true) } catch { /* partial frame */ }
         }
-        es.onerror = () => {
-          es?.close()
-          es = null
-          startPolling()
-        }
-        tick() // immediate first paint while the stream connects
+        es.onerror = () => { es?.close(); es = null; startPolling() }
+        tick()
       } catch {
         startPolling()
       }
-      return () => {
-        es?.close()
-        if (iv) clearInterval(iv)
-      }
+      return () => { es?.close(); if (iv) clearInterval(iv) }
     }
   }, [pairing])
 
   if (pairing !== 'paired') {
     return (
       <div className="shell">
-        <div className="topbar"><span className={`dot${pairing === 'bad-token' ? ' off' : ''}`} /><h1>YAAM Remote</h1></div>
+        <div className="pagehead"><div className="titlerow"><h1>YAAM</h1><span className="sub">remote</span><span className={`dot${pairing === 'bad-token' ? ' off' : ''}`} /></div></div>
         <PairScreen state={pairing} onPair={pair} />
       </div>
     )
   }
 
-  const title = detail
+  const detailTitle = detail
     ? (detail.kind === 'task' ? snap?.tasks.find(t => t.id === detail.id)?.title
       : detail.kind === 'chat' ? snap?.chats.find(c => c.id === detail.id)?.name
       : snap?.sessions.find(s => s.id === detail.id)?.name) ?? '…'
-    : snap?.workspace ?? 'YAAM'
+    : ''
+  const detailSub = detail?.kind === 'session'
+    ? snap?.sessions.find(s => s.id === detail.id)?.repo ?? ''
+    : detail?.kind === 'chat'
+      ? snap?.chats.find(c => c.id === detail.id)?.model ?? ''
+      : ''
+  const detailStatus = detail?.kind === 'session' ? snap?.sessions.find(s => s.id === detail.id)?.status : undefined
 
   const detailView = !snap ? null
     : detail?.kind === 'task' ? <TaskDetail snap={snap} id={detail.id} />
@@ -469,11 +591,10 @@ export function MobileApp() {
         {t.glyph}
         {t.id === 'approvals' && (snap?.approvals.length ?? 0) > 0 && <span className="badge">{snap!.approvals.length}</span>}
       </span>
-      {t.label}
+      <span className="tlabel">{t.label}</span>
     </button>
   ))
 
-  // wide viewport: desktop-app shell — icon rail, list column, detail pane
   if (wide) {
     return (
       <div className="shell">
@@ -488,7 +609,7 @@ export function MobileApp() {
             {snap ? <Lists tab={tab} snap={snap} open={setDetail} selected={detail?.id} /> : <div className="pairwrap"><div className="spinner" /></div>}
           </div>
           <div className="detailcol">
-            {detailView ?? <div className="placeholder">{snap ? (tab === 'approvals' ? 'Approvals are answered directly in the list' : `Select a ${tab.slice(0, -1)} on the left`) : ''}</div>}
+            {detailView ?? <div className="placeholder">{snap ? (tab === 'approvals' ? 'Decisions are answered directly in the list' : `Select a ${tab.slice(0, -1)} on the left`) : ''}</div>}
           </div>
         </div>
       </div>
@@ -497,11 +618,25 @@ export function MobileApp() {
 
   return (
     <div className="shell">
-      <div className="topbar">
-        {detail && <button className="back" onClick={() => setDetail(null)}>‹ Back</button>}
-        <h1>{title}</h1>
-        <span className={`dot${online ? '' : ' off'}`} />
-      </div>
+      {detail ? (
+        <div className="detailhead">
+          <button className="back" onClick={() => setDetail(null)}>‹</button>
+          {detail.kind !== 'task' && <Avatar name={detailTitle} size={34} />}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="htitle">{detailTitle}</div>
+            {detailSub && <div className="hsub">{detailSub}</div>}
+          </div>
+          {detailStatus && <StatusPill status={detailStatus} />}
+        </div>
+      ) : (
+        <div className="pagehead">
+          <div className="titlerow">
+            <h1>{TABS.find(t => t.id === tab)?.label}</h1>
+            {snap && <span className="sub">{HEAD_SUB[tab](snap)}</span>}
+            <span className={`dot${online ? '' : ' off'}`} />
+          </div>
+        </div>
+      )}
       {!snap ? (
         <div className="pairwrap"><div className="spinner" /></div>
       ) : (
