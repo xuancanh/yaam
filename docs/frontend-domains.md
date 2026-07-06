@@ -161,6 +161,14 @@ injects a UUID for new Claude sessions. `createLaunchRuntime` attaches xterm,
 spawns through `SessionProcessPort`, probes Codex/OpenCode session files when
 needed, and records errors on the agent.
 
+Detached launches (`opts.detached`, New-session dialog checkbox) call the
+port's `detachedSpawn` first — the PTY moves into a setsid host process — and
+spawn the returned attach command as the session instead. The agent is marked
+`detached` and its `cmd` IS the attach command, so resume after an app
+restart reattaches to the still-running host (output ring replayed).
+`stopSession` is detached-aware: it also `detachedKill`s the host's process
+group, ending the session for real.
+
 Templates build CLI-specific shell-safe commands. Task runs are forced to
 one-shot mode and use the same path for active and background workspaces.
 Resume prefers a captured CLI id and falls back to each agent type's configured
@@ -571,6 +579,6 @@ debounce, close flush, and cleanup.
 
 Tests are colocated with domains. Pure functions use direct fixtures; effectful
 runtimes use fake `StatePort`, `ClockPort`, process ports, frames, and abort
-signals. The current suite includes 64 files and 305 test cases in this
+signals. The current suite includes 64 files and 306 test cases in this
 snapshot. UI behavior is covered selectively with jsdom and Testing Library;
 most coverage focuses on domain and runtime invariants.

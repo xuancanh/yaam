@@ -26,6 +26,7 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 - Full terminal emulation: prompts, colors, TUIs, keystrokes to the PTY, resize handling. Commands run through a login-shell wrapper so PATH from nvm/Homebrew/Cargo resolves.
 - **Persistent split-pane layouts** — a Chrome-style menu arranges 1–4 panes (single, split, three-up, or 2×2); the layout and orientation are saved and restored on restart.
 - Per-pane stop/resume/exit-code status, maximize/restore, and rename.
+- **Detachable sessions** — start a session in detached mode and its PTY lives in a separate host process with its own lifecycle: it keeps running when YAAM quits, and the app reattaches later (▶) with the recent output replayed. Stop ends it for real; everything else (monitors, remote companion, resize) works as usual.
 
 ## Master — orchestration with monitors
 

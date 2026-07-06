@@ -186,6 +186,13 @@ On Unix, normal stop sends SIGTERM to the child and process group, followed by
 SIGKILL after a two-second grace period. This is lifecycle hygiene and resume
 file protection, not privilege isolation.
 
+Detached sessions deliberately escape the app's lifecycle: the host process
+runs in its own session/process group (`setsid`) with the user's full
+authority and keeps running after YAAM quits. Its unix socket
+(`~/.yaam/detached/<id>.sock`) accepts any local process with filesystem
+access to it — the boundary is the user account, same as the PTY itself.
+Stopping a detached session from the app SIGTERMs the host's process group.
+
 ### One-shot execution
 
 Chat/utility commands run in a separate process group on Unix, with null stdin,

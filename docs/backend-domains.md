@@ -55,7 +55,8 @@ expansion.
 | Search | `chat_search_reindex`, `chat_search` | chat search indexer/view |
 | Bedrock | `bedrock_invoke` | `llm/client.ts` through native adapter |
 | Secrets | `secret_set`, `secret_get`, `secret_delete` | persistence secret mirror |
-| Remote | `remote_start`, `remote_stop`, `remote_publish`, `remote_take_commands`, `remote_pending_pairs`, `remote_approve_pair`, `remote_deny_pair`, `remote_set_devices` | `infrastructure/native/remote.ts`, `RemoteCompanion` |
+| Remote | `remote_start`, `remote_stop`, `remote_publish`, `remote_take_commands`, `remote_pending_pairs`, `remote_approve_pair`, `remote_deny_pair`, `remote_set_devices`, `remote_respond` | `infrastructure/native/remote.ts`, `RemoteCompanion` |
+| Detach | `detached_spawn`, `detached_list`, `detached_kill` | `infrastructure/native/detach.ts`, launch runtime + session actions |
 
 Tauri serializes command input/output with serde. `native.ts` performs any
 snake-case/camel-case conversion required by the frontend.
@@ -348,6 +349,27 @@ Tests cover the token/device auth matrix, the pairing flow end-to-end,
 pending-list caps/dedup, interface classification, rpc result gating, and
 command serde.
 
+## Detach domain (`domains/detach.rs`)
+
+Detachable sessions. The binary's entry point dispatches on `--yaam-host` /
+`--yaam-attach` before Tauri boots (`app_lib::detach_entry`). The host owns a
+`portable-pty` pair running `/bin/sh -lc <cmd>`, a 200 KB output ring, and a
+unix-socket accept loop serving one client at a time (client frames:
+`[type u8][len u32][payload]` — DATA, RESIZE, KILL; server side is raw PTY
+bytes with ring replay on connect). The attach client bridges its own
+stdio/SIGWINCH to that socket and runs inside a normal app PTY session.
+
+Commands: `detached_spawn` writes the spec (`~/.yaam/detached/<id>.json`),
+launches the host with `setsid` + null stdio, waits for the socket, and
+returns the attach command line; `detached_list` probes sockets and prunes
+stale specs; `detached_kill` SIGTERMs the host's process group and removes
+the files. The host records its pid into the spec at startup and deletes
+socket + spec on child exit.
+
+Tests cover frame round trips and a real end-to-end host: backlog replay,
+stdin echo through the PTY, a second client reconnecting (the app-restart
+case), and the kill frame.
+
 ## Icons domain (`domains/icons.rs`)
 
 `file_icon(path)` returns the OS's own icon for a path — the macOS Finder
@@ -383,7 +405,7 @@ See [Security model](security.md) for implications.
 
 ## Backend test architecture
 
-There are 67 Rust unit tests in this snapshot. Tests are colocated inside each
+There are 69 Rust unit tests in this snapshot. Tests are colocated inside each
 domain module and call internal implementation functions directly, avoiding a
 running Tauri application where possible. Temporary filesystem fixtures use
 RAII cleanup. MCP uses a shell-based fake server; Bedrock tests focus on pure

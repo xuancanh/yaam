@@ -230,6 +230,41 @@ child before replacing its handle. On Unix, stop/replacement first sends SIGTERM
 to the child and process group, then forces SIGKILL after a two-second grace
 period so CLIs can flush resume data.
 
+## Detachable sessions
+
+A session started in detached mode splits into two processes so it outlives
+the app. A **host process** (the same binary re-invoked with `--yaam-host`,
+daemonized via `setsid` into its own session/process group) owns the PTY and
+the child command, keeps a 200 KB output ring, and serves one client at a
+time on `~/.yaam/detached/<id>.sock` (frames in: DATA · RESIZE · KILL; raw
+PTY bytes out, ring replayed on connect). The app runs a tiny **attach
+client** (`--yaam-attach`) inside a completely ordinary app PTY session —
+stdin becomes data frames, SIGWINCH becomes resize frames, socket bytes go to
+stdout — so xterm, remote-companion taps, monitors, resize, and exit events
+all operate unchanged on the attach client while lifecycle authority lives
+one process further out (the tmux model, per session).
+
+```mermaid
+flowchart LR
+  subgraph App[YAAM app process]
+    XT[xterm / monitors] --- SM[SessionManager PTY]
+    SM --- AC[attach client\n--yaam-attach]
+  end
+  AC -- unix socket --> H
+  subgraph H[detached host — setsid]
+    RING[200KB ring] --- PTY2[PTY owner]
+    PTY2 --- CMD[/bin/sh -lc cmd/]
+  end
+```
+
+Quitting the app only kills the attach client (= detach). Reconnect is just
+resume: the agent's `cmd` IS the attach command, so ▶ after a restart
+reattaches with backlog. Stop is detached-aware (`detached_kill` SIGTERMs the
+host's process group — the real end); when the command exits by itself the
+host cleans up socket/spec and the attach client's EOF fires the normal
+session-exit flow. `detached_list` probes sockets for liveness and prunes
+stale leftovers.
+
 ## Settle, prompt, monitor, and watcher flow
 
 Raw PTY activity resets a three-second quiet timer. On settle, YAAM examines the
