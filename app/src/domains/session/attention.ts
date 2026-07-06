@@ -35,6 +35,38 @@ export function useSessionAttention(ctx: SessionAttentionCtx): SessionAttention 
 /** Plain (non-React) factory for the attention/output helpers. */
 export function createSessionAttention(ctx: SessionAttentionCtx): SessionAttention {
   const { stateRef, widOf, logEvent, notify, fireAddonHook } = ctx
+
+  // Output lines are batched into ONE store dispatch per flush window. A busy
+  // CLI emits dozens of lines a second, and dispatching per line re-rendered
+  // every store subscriber at PTY speed — felt as typing lag in the terminal.
+  const pendingTail = new Map<string, string[]>()
+  let tailTimer: ReturnType<typeof setTimeout> | null = null
+  const flushTail = () => {
+    tailTimer = null
+    const batch = new Map(pendingTail)
+    pendingTail.clear()
+    dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => {
+        const lines = batch.get(a.id)
+        if (!lines?.length) return a
+        // Old releases added a fixed 10 tokens for every line. Rebase those
+        // counters on the retained output tail before using the character estimate.
+        const base = a.usageVersion === 1 ? a : estimateLogUsage(a.log)
+        let used = base.used
+        let cost = base.cost
+        for (const line of lines) {
+          const delta = estimateOutputUsage(line)
+          used += delta.used
+          cost += delta.cost
+        }
+        const log = a.log.concat(lines.map(x => ({ t: 'out' as const, x })))
+        if (log.length > 200) log.splice(0, log.length - 200)
+        return { ...a, log, used, cost, usageVersion: 1 }
+      }),
+    }))
+  }
+
   return {
     // Prefer the rendered screen for TUI context and fall back to retained log lines.
     sessionScreenTail: (id: string): string => {
@@ -91,27 +123,18 @@ export function createSessionAttention(ctx: SessionAttentionCtx): SessionAttenti
       }))
     },
 
-    // Retain a bounded plain-text output tail and update character usage estimates.
+    // Retain a bounded plain-text output tail and update character usage
+    // estimates — batched (see flushTail) so output volume never dictates
+    // render frequency.
     appendTail: (id, line) => {
-      dispatch(s => ({
-        ...s,
-        agents: s.agents.map(a => {
-          if (a.id !== id) return a
-          // Old releases added a fixed 10 tokens for every line. Rebase those
-          // counters on the retained output tail before using the character estimate.
-          const base = a.usageVersion === 1 ? a : estimateLogUsage(a.log)
-          const delta = estimateOutputUsage(line)
-          const log = a.log.concat([{ t: 'out' as const, x: line }])
-          if (log.length > 200) log.splice(0, log.length - 200)
-          return {
-            ...a,
-            log,
-            used: base.used + delta.used,
-            cost: base.cost + delta.cost,
-            usageVersion: 1,
-          }
-        }),
-      }))
+      const q = pendingTail.get(id)
+      if (q) {
+        q.push(line)
+        if (q.length > 400) q.splice(0, q.length - 200) // runaway output — the log keeps 200 anyway
+      } else {
+        pendingTail.set(id, [line])
+      }
+      if (!tailTimer) tailTimer = setTimeout(flushTail, 100)
     },
   }
 }

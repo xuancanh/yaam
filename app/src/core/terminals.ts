@@ -4,6 +4,7 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SerializeAddon } from '@xterm/addon-serialize'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { onSessionData, resizeSession, writeSession } from './native'
 
@@ -12,6 +13,8 @@ interface Entry {
   fit: FitAddon
   /** lazily loaded — only when something (the mobile companion) serializes */
   serializer?: SerializeAddon
+  /** GPU renderer, held only while the terminal's pane is mounted */
+  gl?: WebglAddon
   onPlainLine: ((line: string) => void) | null
   onUserInput: (() => void) | null
   /** Enter pressed — the user submitted something to the session */
@@ -142,6 +145,29 @@ export function getTerminal(
     if (onUserSubmit) entry.onUserSubmit = onUserSubmit
   }
   return entry
+}
+
+/** Switch a mounted terminal to the WebGL renderer. The DOM renderer re-lays
+ *  out a span per row on every frame, which stutters under fast TUI output and
+ *  competes with keystroke handling. Contexts are a browser-capped resource
+ *  (~16), so panes enable this on mount and release it on unmount. */
+export function enableGpuRenderer(id: string) {
+  const entry = entries.get(id)
+  if (!entry || entry.gl || !entry.term.element) return
+  try {
+    const gl = new WebglAddon()
+    gl.onContextLoss(() => { gl.dispose(); entry.gl = undefined }) // xterm falls back to DOM
+    entry.term.loadAddon(gl)
+    entry.gl = gl
+  } catch { /* no WebGL — DOM renderer still works */ }
+}
+
+/** Release a pane's WebGL context (pane unmounted; terminal stays alive). */
+export function disableGpuRenderer(id: string) {
+  const entry = entries.get(id)
+  if (!entry?.gl) return
+  try { entry.gl.dispose() } catch { /* already lost */ }
+  entry.gl = undefined
 }
 
 /** Read the currently rendered screen as normalized, non-empty visible rows. */

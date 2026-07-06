@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { fitTerminal, getTerminal } from '../../core/terminals'
+import { disableGpuRenderer, enableGpuRenderer, fitTerminal, getTerminal } from '../../core/terminals'
 import type { Agent } from '../../core/types'
 
 /** Attach a session's registry-owned xterm instance to the current pane DOM. */
@@ -19,6 +19,7 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
     } else {
       el.appendChild(term.element)
     }
+    enableGpuRenderer(agent.id)
     // fit again after layout settles — fitting synchronously on reattach
     // measures a zero-height container and breaks the viewport
     const raf = requestAnimationFrame(() => {
@@ -37,6 +38,7 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
       cancelAnimationFrame(raf)
       window.clearTimeout(late)
       ro.disconnect()
+      disableGpuRenderer(agent.id)
       if (term.element && term.element.parentElement === el) el.removeChild(term.element)
     }
   }, [agent.id])

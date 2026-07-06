@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { apiUrl, deviceToken, sendCommand } from './api'
 
@@ -46,6 +47,14 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(hostRef.current!)
+    // GPU rendering: the DOM renderer re-lays-out a span per row on every
+    // scroll step, which is what made touch scrolling stutter. One terminal
+    // is on screen at a time, so a single WebGL context is safe here.
+    try {
+      const gl = new WebglAddon()
+      gl.onContextLoss(() => gl.dispose()) // xterm falls back to the DOM renderer
+      term.loadAddon(gl)
+    } catch { /* no WebGL (old webview) — DOM renderer still works */ }
     termRef.current = term
     // exclusive terminal focus: viewing this terminal steals it — the desktop
     // resizes the REAL PTY (and its own xterm) to our dimensions, so the byte
@@ -73,25 +82,63 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
     const cellH = Math.max(10, 11 * 1.25) // fontSize × lineHeight
     let tracking = false
     let lastY = 0
-    let carry = 0
-    const onDown = (e: PointerEvent) => {
-      if (e.pointerType === 'mouse') return // desktop keeps native wheel/select
-      tracking = true
-      lastY = e.clientY
-      carry = 0
-      try { host.setPointerCapture(e.pointerId) } catch { /* unsupported */ }
-    }
-    const onMove = (e: PointerEvent) => {
-      if (!tracking) return
-      carry += (lastY - e.clientY) / cellH
-      lastY = e.clientY
+    let lastT = 0
+    let carry = 0 // fractional lines not yet applied
+    let vel = 0 // smoothed velocity, lines per ms
+    let raf = 0
+    // apply accumulated drag once per frame — scrollLines per pointermove
+    // (60–120Hz) forced extra renders between frames and stuttered
+    const flush = () => {
+      raf = 0
       const lines = Math.trunc(carry)
       if (lines !== 0) {
         carry -= lines
         term.scrollLines(lines)
       }
     }
-    const onUp = () => { tracking = false }
+    const queue = () => { if (!raf) raf = requestAnimationFrame(flush) }
+    // momentum: keep scrolling after the finger lifts, decaying like a native
+    // fling — the dead stop on release is most of what felt non-native
+    const fling = () => {
+      raf = 0
+      if (tracking || Math.abs(vel) < 0.002) return
+      carry += vel * 16.7
+      vel *= 0.94
+      const lines = Math.trunc(carry)
+      if (lines !== 0) {
+        carry -= lines
+        term.scrollLines(lines)
+      }
+      raf = requestAnimationFrame(fling)
+    }
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse') return // desktop keeps native wheel/select
+      if (raf) { cancelAnimationFrame(raf); raf = 0 } // grab a live fling
+      tracking = true
+      lastY = e.clientY
+      lastT = e.timeStamp
+      carry = 0
+      vel = 0
+      try { host.setPointerCapture(e.pointerId) } catch { /* unsupported */ }
+    }
+    const onMove = (e: PointerEvent) => {
+      if (!tracking) return
+      const dLines = (lastY - e.clientY) / cellH
+      const dt = e.timeStamp - lastT
+      if (dt > 0) vel = 0.75 * vel + 0.25 * (dLines / dt)
+      carry += dLines
+      lastY = e.clientY
+      lastT = e.timeStamp
+      queue()
+    }
+    const onUp = (e: PointerEvent) => {
+      if (!tracking) return
+      tracking = false
+      // a pause before lifting means "hold", not "fling"
+      if (e.timeStamp - lastT > 80) vel = 0
+      if (raf) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(fling)
+    }
     // belt for older iOS: keep the browser from rubber-banding the page
     const onTouchMove = (e: TouchEvent) => e.preventDefault()
     host.addEventListener('pointerdown', onDown)
@@ -105,6 +152,7 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
       host.removeEventListener('pointerup', onUp)
       host.removeEventListener('pointercancel', onUp)
       host.removeEventListener('touchmove', onTouchMove)
+      if (raf) cancelAnimationFrame(raf)
       ro.disconnect()
       if (focusTimer) clearTimeout(focusTimer)
       void sendCommand({ kind: 'session_blur', id: sessionId }) // desktop reclaims

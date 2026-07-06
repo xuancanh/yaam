@@ -8,8 +8,8 @@ import { dispatch, useAppStore } from '../../core/store'
 import { useActions, useConductorSelector } from '../../store'
 import {
   gitFileDiffSide, gitStatus, listDir, readFileB64, readTextFile,
-  remoteApprovePair, remoteDenyPair, remotePendingPairs, remotePublish, remoteRespond,
-  remoteSetDevices, remoteStart, remoteStop, remoteTakeCommands,
+  remoteActive, remoteApprovePair, remoteDenyPair, remotePendingPairs, remotePublish,
+  remoteRespond, remoteSetDevices, remoteStart, remoteStop, remoteTakeCommands,
 } from '../../core/native'
 import type { RemoteCommand } from '../../core/native'
 import { fitTerminal, remoteResize, serializeScreen, terminalSize } from '../../core/terminals'
@@ -143,9 +143,18 @@ export function RemoteCompanion() {
     let dead = false
     let debounce: ReturnType<typeof setTimeout> | null = null
 
+    let wasActive = false
     const publish = () => {
       if (dead) return
-      void remotePublish(JSON.stringify(buildRemoteSnapshot(useAppStore.getState(), termFor)))
+      // snapshots serialize every session's terminal — skip all of it while
+      // no phone is connected, or the desktop pays that tax on every store
+      // change for nobody (felt as typing lag in busy terminals)
+      void remoteActive().then(active => {
+        if (dead) return
+        wasActive = active
+        if (!active) return
+        void remotePublish(JSON.stringify(buildRemoteSnapshot(useAppStore.getState(), termFor)))
+      }).catch(() => {})
     }
 
     // stable connect links: always run on the persisted token (minted once,
@@ -236,6 +245,9 @@ export function RemoteCompanion() {
         if (dead) return
         for (const r of reqs) promptPair(r)
       }).catch(() => {})
+      // a phone (re)connected while publishing was idle — hand it a fresh
+      // snapshot now instead of waiting for the next store change
+      void remoteActive().then(a => { if (!dead && a && !wasActive) publish() }).catch(() => {})
     }, POLL_MS)
 
     return () => {

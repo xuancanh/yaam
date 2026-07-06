@@ -56,6 +56,13 @@ export async function remotePublish(json: string): Promise<void> {
   await invoke('remote_publish', { json })
 }
 
+/** True while a phone is plausibly watching (SSE subscriber or recent poll) —
+ *  building/serializing snapshots for nobody is pure main-thread waste. */
+export async function remoteActive(): Promise<boolean> {
+  if (!isTauri) return false
+  return await invoke<boolean>('remote_active')
+}
+
 /** Drain commands queued by paired devices. */
 export async function remoteTakeCommands(): Promise<RemoteCommand[]> {
   if (!isTauri) return []

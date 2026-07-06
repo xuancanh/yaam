@@ -83,6 +83,7 @@ pub fn run() {
             domains::remote::remote_start,
             domains::remote::remote_stop,
             domains::remote::remote_publish,
+            domains::remote::remote_active,
             domains::remote::remote_take_commands,
             domains::remote::remote_pending_pairs,
             domains::remote::remote_approve_pair,

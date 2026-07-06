@@ -66,6 +66,9 @@ pub struct RemoteShared {
     snap_tx: tokio::sync::watch::Sender<u64>,
     /// rpc answers keyed by request id (fs/git browsing) — small and capped
     responses: Mutex<HashMap<String, String>>,
+    /// ms timestamp of the last authenticated device request — lets the
+    /// desktop skip building snapshots while no phone is actually connected
+    last_seen: std::sync::atomic::AtomicU64,
 }
 
 impl Default for RemoteShared {
@@ -78,6 +81,7 @@ impl Default for RemoteShared {
             pending: Mutex::new(Vec::new()),
             snap_tx: tokio::sync::watch::channel(0).0,
             responses: Mutex::new(HashMap::new()),
+            last_seen: std::sync::atomic::AtomicU64::new(0),
         }
     }
 }
@@ -202,9 +206,13 @@ fn check_base(shared: &RemoteShared, q: &AuthQuery) -> bool {
 
 /// URL token + paired-device token (everything else).
 fn check_device(shared: &RemoteShared, q: &AuthQuery) -> bool {
-    check_base(shared, q)
+    let ok = check_base(shared, q)
         && !q.d.is_empty()
-        && shared.devices.lock().unwrap().values().any(|dev| dev.token == q.d)
+        && shared.devices.lock().unwrap().values().any(|dev| dev.token == q.d);
+    if ok {
+        shared.last_seen.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
+    }
+    ok
 }
 
 type Shared = State<Arc<RemoteShared>>;
@@ -444,6 +452,15 @@ pub fn remote_stop(state: tauri::State<'_, RemoteManager>) {
 pub fn remote_publish(state: tauri::State<'_, RemoteManager>, json: String) {
     *state.shared.snapshot.lock().unwrap() = json;
     state.shared.snap_tx.send_modify(|v| *v = v.wrapping_add(1));
+}
+
+/// Whether any phone is plausibly watching: a live SSE subscriber, or an
+/// authenticated request in the last 15s (covers the polling fallback). The
+/// desktop skips the serialize+publish work entirely while this is false.
+#[tauri::command]
+pub fn remote_active(state: tauri::State<'_, RemoteManager>) -> bool {
+    state.shared.snap_tx.receiver_count() > 0
+        || now_ms().saturating_sub(state.shared.last_seen.load(std::sync::atomic::Ordering::Relaxed)) < 15_000
 }
 
 #[tauri::command]
