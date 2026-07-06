@@ -29,6 +29,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
 
   const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
   const [isolate, setIsolate] = useState(false)
+  const [detached, setDetached] = useState(false)
 
   const isShell = typeId === 'shell'
   const isCustom = typeId === 'custom'
@@ -63,7 +64,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
       return
     }
     if (!effectiveCommand.trim()) return
-    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined, isolate || undefined)
+    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined, isolate || undefined, detached || undefined)
     onClose()
   }
 
@@ -162,6 +163,15 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               <span style={{ fontSize: 12.5, fontWeight: 600 }}>Isolate in a git worktree</span>
               <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
                 Runs on a branch in a mirrored copy — supports multi-repo folders; review &amp; merge when done.
+              </span>
+            </span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none', marginTop: 10 }} title="The session's process runs in a detached host with its own lifecycle — it keeps working after you quit YAAM. Reopen the app and press ▶ to reattach; Stop ends it for real.">
+            <input type="checkbox" checked={detached} onChange={e => setDetached(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
+            <span>
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>Detached (survives closing the app)</span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                Runs in its own host process; the app attaches to it and can reattach, monitor, and stop it later.
               </span>
             </span>
           </label>

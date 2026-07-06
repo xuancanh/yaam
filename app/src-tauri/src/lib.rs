@@ -13,6 +13,11 @@ use domains::watch::WatchManager;
 use tauri::{Emitter, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// True when this process is a detached host/attach invocation (no Tauri).
+pub fn detach_entry() -> bool {
+    domains::detach::detach_entry()
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -72,6 +77,9 @@ pub fn run() {
             domains::mcp::mcp_stdio_notify,
             domains::mcp::mcp_stdio_stop,
             domains::icons::file_icon,
+            domains::detach::detached_spawn,
+            domains::detach::detached_list,
+            domains::detach::detached_kill,
             domains::remote::remote_start,
             domains::remote::remote_stop,
             domains::remote::remote_publish,

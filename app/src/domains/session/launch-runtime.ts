@@ -35,7 +35,7 @@ export interface LaunchRuntimeCtx {
 
 export interface LaunchRuntime {
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean }) => string | null
   launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string) => string | null
   spawnTaskSession: (taskId: string, opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string }) => string | null
   spawnSessionForTask: (taskId: string, workspaceId?: string) => void
@@ -87,7 +87,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
     }
 
     // Create optimistic session state, spawn its PTY, and attach lifecycle tracking.
-    const launchSession = (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }): string | null => {
+    const launchSession = (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean }): string | null => {
       const plan = buildLaunch({ command, cwd, nameHint, typeId, workspaceId, opts }, stateRef.current.agentTypes, stateRef.current.activeWorkspace)
       if (!plan) return null
       const { agent, spawnCommand, knownSessionId, launchType } = plan
@@ -110,6 +110,23 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       const spawn = (spawnCwd: string | undefined) => {
         // Claude's id is known up front; only codex/opencode need file detection.
         if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', spawnCwd ?? '', false)
+        if (opts?.detached) {
+          // the PTY moves into a detached host process; the app runs a small
+          // attach client instead — the session outlives the app, and the
+          // attach command doubles as the resume/reconnect command
+          port.detachedSpawn(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd)
+            .then(attachCmd => {
+              dispatch(s => ({
+                ...s,
+                agents: s.agents.map(a => a.id === id
+                  ? { ...a, detached: true, cmd: attachCmd, log: a.log.concat([{ t: 'sys' as const, x: 'detached session — survives closing the app; ▶ reattaches' }]) }
+                  : a),
+              }))
+              port.spawnSession(id, attachCmd, spawnCwd || undefined, undefined, undefined, undefined).catch(fail)
+            })
+            .catch(fail)
+          return
+        }
         port.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd || undefined, undefined, undefined, opts?.terminalShell).catch(fail)
       }
       if (opts?.isolate && agent.cwd) {

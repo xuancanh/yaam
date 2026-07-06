@@ -20,7 +20,7 @@ export interface SessionActionsCtx {
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   markUserStopped: (id: string) => void
   disposeSessionRuntime: (id: string) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean }) => string | null
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
   armResponseWatch: (id: string) => void
   appendTail: (id: string, line: string) => void
@@ -43,7 +43,7 @@ export interface SessionActions {
   /** user-initiated full terminal reset (modes + scrollback) — the manual fix
    *  for a corrupted pane; never triggered automatically */
   refreshTerminal: (id: string) => void
-  newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean) => void
+  newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean, detached?: boolean) => void
   sendInput: (id: string, text: string) => void
   stopSession: (id: string) => void
 }
@@ -194,8 +194,8 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       flash('Terminal cleared')
     },
 
-    newRealSession: (command, cwd, terminalShell, isolate) => {
-      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell, isolate })
+    newRealSession: (command, cwd, terminalShell, isolate, detached) => {
+      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell, isolate, detached })
       if (id) {
         logEvent('route', id, `Launched session · ${command.trim()}`)
         flash('Session launched')
@@ -218,6 +218,9 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
     },
 
     stopSession: id => {
+      // a detached session's PTY lives in the host process — stopping means
+      // ending it for real, not just dropping the attach client
+      if (stateRef.current.agents.find(a => a.id === id)?.detached) void port.detachedKill(id)
       // stop-flag + kill go through the shared command (user actor); the UI
       // status/log/toast stay here. Fall back to the port when unwired.
       if (ctx.execCommand) void ctx.execCommand('stop_session', { sessionId: id }, { actor: { kind: 'user' } })

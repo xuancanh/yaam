@@ -46,7 +46,7 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         <div style={{ minWidth: 0, overflow: 'hidden' }}>
           <EditableName name={agent.name} onRename={name => renameSession(agent.id, name)} fontSize={12.5} />
           <div className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {agent.repo} · {agent.branch}{agent.worktree ? <span style={{ color: 'var(--amber)' }}> · isolated</span> : null}
+            {agent.repo} · {agent.branch}{agent.worktree ? <span style={{ color: 'var(--amber)' }}> · isolated</span> : null}{agent.detached ? <span style={{ color: 'var(--green)' }}> · detached</span> : null}
           </div>
         </div>
         <div style={{ marginLeft: 6 }}>

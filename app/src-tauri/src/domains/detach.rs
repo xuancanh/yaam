@@ -1,0 +1,350 @@
+//! Detachable sessions: the PTY lives in a separate daemonized host process
+//! (spawned with setsid), so the session survives the app. The app talks to
+//! it through a per-session unix socket via a tiny attach client that runs
+//! INSIDE a normal app PTY session — all existing terminal machinery (xterm,
+//! taps, monitors, resize, exit events) works unchanged. Killing the attach
+//! client merely detaches; `detached_kill` ends the real session.
+use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DetachedSpec {
+    pub id: String,
+    pub command: String,
+    pub cwd: Option<String>,
+    pub rows: u16,
+    pub cols: u16,
+    #[serde(default)]
+    pub pid: Option<i32>,
+}
+
+#[derive(Serialize)]
+pub struct DetachedInfo {
+    pub id: String,
+    pub command: String,
+    pub cwd: Option<String>,
+    pub running: bool,
+}
+
+fn dir() -> PathBuf {
+    let d = PathBuf::from(crate::util::expand_tilde("~/.yaam/detached"));
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
+fn spec_path(id: &str) -> PathBuf { dir().join(format!("{id}.json")) }
+fn sock_path(id: &str) -> PathBuf { dir().join(format!("{id}.sock")) }
+
+// ── wire protocol (client → host): [type u8][len u32 le][payload] ──────────
+const F_DATA: u8 = 0;
+const F_RESIZE: u8 = 1;
+const F_KILL: u8 = 2;
+
+pub(crate) fn write_frame(w: &mut impl Write, t: u8, payload: &[u8]) -> std::io::Result<()> {
+    w.write_all(&[t])?;
+    w.write_all(&(payload.len() as u32).to_le_bytes())?;
+    w.write_all(payload)?;
+    w.flush()
+}
+
+pub(crate) fn read_frame(r: &mut impl Read) -> std::io::Result<(u8, Vec<u8>)> {
+    let mut h = [0u8; 5];
+    r.read_exact(&mut h)?;
+    let len = u32::from_le_bytes([h[1], h[2], h[3], h[4]]) as usize;
+    if len > 1_000_000 {
+        return Err(std::io::Error::other("frame too large"));
+    }
+    let mut p = vec![0u8; len];
+    r.read_exact(&mut p)?;
+    Ok((h[0], p))
+}
+
+// ── host process: owns the PTY, survives the app ────────────────────────────
+
+/// Core host loop, factored for tests (the `--yaam-host` entry daemonizes
+/// around it). Serves one attach client at a time; the ring replays recent
+/// output on connect.
+pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    let _ = std::fs::remove_file(sock);
+    let listener = match UnixListener::bind(sock) { Ok(l) => l, Err(_) => return 1 };
+    let pair = match native_pty_system().openpty(PtySize { rows: spec.rows, cols: spec.cols, pixel_width: 0, pixel_height: 0 }) {
+        Ok(p) => p,
+        Err(_) => return 1,
+    };
+    let mut cb = CommandBuilder::new("/bin/sh");
+    cb.args(["-lc", &spec.command]);
+    cb.env("TERM", "xterm-256color");
+    if let Some(cwd) = spec.cwd.as_ref().filter(|c| !c.is_empty()) {
+        cb.cwd(PathBuf::from(crate::util::expand_tilde(cwd)));
+    }
+    let mut child = match pair.slave.spawn_command(cb) { Ok(c) => c, Err(_) => return 1 };
+    let mut reader = pair.master.try_clone_reader().expect("pty reader");
+    let writer = Arc::new(Mutex::new(pair.master.take_writer().expect("pty writer")));
+    let master = Arc::new(Mutex::new(pair.master));
+    let ring: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let client: Arc<Mutex<Option<UnixStream>>> = Arc::new(Mutex::new(None));
+    let mut killer = child.clone_killer();
+    let mut frame_killer = child.clone_killer();
+
+    // PTY → ring + connected client
+    let (ring2, client2) = (ring.clone(), client.clone());
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 { break }
+            let mut r = ring2.lock().unwrap();
+            r.extend_from_slice(&buf[..n]);
+            let excess = r.len().saturating_sub(200_000);
+            if excess > 0 { r.drain(..excess); }
+            drop(r);
+            let mut c = client2.lock().unwrap();
+            if let Some(s) = c.as_mut() {
+                if s.write_all(&buf[..n]).is_err() { *c = None; } // client left — keep running
+            }
+        }
+    });
+
+    // accept loop: replay ring, then process control frames
+    let (ring3, client3, writer3, master3) = (ring, client, writer, master);
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut out = match stream.try_clone() { Ok(s) => s, Err(_) => continue };
+            let backlog = ring3.lock().unwrap().clone();
+            if out.write_all(&backlog).is_err() { continue }
+            *client3.lock().unwrap() = Some(out);
+            let mut inp = stream;
+            loop {
+                match read_frame(&mut inp) {
+                    Ok((F_DATA, p)) => { let _ = writer3.lock().unwrap().write_all(&p); let _ = writer3.lock().unwrap().flush(); }
+                    Ok((F_RESIZE, p)) if p.len() >= 4 => {
+                        let rows = u16::from_le_bytes([p[0], p[1]]);
+                        let cols = u16::from_le_bytes([p[2], p[3]]);
+                        let _ = master3.lock().unwrap().resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+                    }
+                    Ok((F_KILL, _)) => { let _ = frame_killer.kill(); } // child.wait() unblocks → clean exit
+                    Ok(_) => {}
+                    Err(_) => break, // client disconnected — stay alive, await the next
+                }
+            }
+        }
+    });
+
+    let code = child.wait().ok().map(|s| s.exit_code() as i32).unwrap_or(0);
+    let _ = killer.kill();
+    let _ = std::fs::remove_file(sock);
+    let _ = std::fs::remove_file(spec_path(&spec.id));
+    code
+}
+
+/// Attach-client loop (runs inside a normal app PTY session): raw stdin →
+/// data frames, socket bytes → stdout, SIGWINCH → resize frames.
+pub fn run_attach(sock: &PathBuf) -> i32 {
+    let Ok(stream) = UnixStream::connect(sock) else {
+        eprintln!("yaam: detached session is gone");
+        return 1;
+    };
+    let mut sock_in = stream.try_clone().expect("socket clone");
+    let sock_out = Arc::new(Mutex::new(stream));
+
+    // propagate our PTY size (the app resizes it normally) to the host PTY
+    let send_size = {
+        let sock_out = sock_out.clone();
+        move || {
+            let mut ws = libc::winsize { ws_row: 0, ws_col: 0, ws_xpixel: 0, ws_ypixel: 0 };
+            if unsafe { libc::ioctl(0, libc::TIOCGWINSZ, &mut ws) } == 0 && ws.ws_row > 0 {
+                let mut p = Vec::with_capacity(4);
+                p.extend_from_slice(&ws.ws_row.to_le_bytes());
+                p.extend_from_slice(&ws.ws_col.to_le_bytes());
+                let _ = write_frame(&mut *sock_out.lock().unwrap(), F_RESIZE, &p);
+            }
+        }
+    };
+    send_size();
+    // SIGWINCH → resize (async-signal-safety shortcut: flag + poll thread)
+    static WINCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    unsafe {
+        libc::signal(libc::SIGWINCH, handle_winch as usize);
+    }
+    extern "C" fn handle_winch(_: i32) { WINCH.store(true, std::sync::atomic::Ordering::Relaxed); }
+    {
+        let send_size = send_size.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if WINCH.swap(false, std::sync::atomic::Ordering::Relaxed) { send_size(); }
+        });
+    }
+
+    // stdin → host
+    let sock_out2 = sock_out.clone();
+    std::thread::spawn(move || {
+        let mut stdin = std::io::stdin();
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = stdin.read(&mut buf) {
+            if n == 0 { break }
+            if write_frame(&mut *sock_out2.lock().unwrap(), F_DATA, &buf[..n]).is_err() { break }
+        }
+    });
+
+    // host → stdout (ends when the host/session exits)
+    let mut stdout = std::io::stdout();
+    let mut buf = [0u8; 8192];
+    while let Ok(n) = sock_in.read(&mut buf) {
+        if n == 0 { break }
+        if stdout.write_all(&buf[..n]).is_err() { break }
+        let _ = stdout.flush();
+    }
+    0
+}
+
+/// Binary entry dispatch: returns true when this invocation was a detached
+/// host/attach process (the caller must NOT start Tauri then).
+pub fn detach_entry() -> bool {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--yaam-host") {
+        let id = args.get(i + 1).cloned().unwrap_or_default();
+        let spec: DetachedSpec = std::fs::read_to_string(spec_path(&id))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(|| std::process::exit(1));
+        // record our pid for kill/monitor
+        let mut spec2 = spec.clone();
+        spec2.pid = Some(std::process::id() as i32);
+        let _ = std::fs::write(spec_path(&id), serde_json::to_string(&spec2).unwrap_or_default());
+        std::process::exit(run_host(&spec2, &sock_path(&id)));
+    }
+    if let Some(i) = args.iter().position(|a| a == "--yaam-attach") {
+        let sock = PathBuf::from(args.get(i + 1).cloned().unwrap_or_default());
+        std::process::exit(run_attach(&sock));
+    }
+    false
+}
+
+// ── tauri commands ──────────────────────────────────────────────────────────
+
+/// Start the detached host and return the attach command line the app should
+/// run as a normal PTY session (also the session's resume command).
+#[tauri::command]
+pub fn detached_spawn(id: String, command: String, cwd: Option<String>, rows: Option<u16>, cols: Option<u16>) -> Result<String, String> {
+    let spec = DetachedSpec { id: id.clone(), command, cwd, rows: rows.unwrap_or(24), cols: cols.unwrap_or(80), pid: None };
+    std::fs::write(spec_path(&id), serde_json::to_string(&spec).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.args(["--yaam-host", &id])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid(); // own session — detached from the app's lifecycle
+                Ok(())
+            });
+        }
+    }
+    cmd.spawn().map_err(|e| format!("could not start session host: {e}"))?;
+    // wait for the socket so the attach client doesn't race the host
+    let sock = sock_path(&id);
+    for _ in 0..50 {
+        if UnixStream::connect(&sock).is_ok() { break }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Ok(format!("\"{}\" --yaam-attach \"{}\"", exe.display(), sock.display()))
+}
+
+/// Detached sessions on disk, with a liveness probe per socket.
+#[tauri::command]
+pub fn detached_list() -> Vec<DetachedInfo> {
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir()) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) != Some("json") { continue }
+            if let Some(spec) = std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str::<DetachedSpec>(&s).ok()) {
+                let running = UnixStream::connect(sock_path(&spec.id)).is_ok();
+                if !running {
+                    let _ = std::fs::remove_file(&p); // stale leftovers
+                    continue;
+                }
+                out.push(DetachedInfo { id: spec.id, command: spec.command, cwd: spec.cwd, running });
+            }
+        }
+    }
+    out
+}
+
+/// End a detached session for real (SIGTERM its host's process group).
+#[tauri::command]
+pub fn detached_kill(id: String) -> Result<(), String> {
+    if let Some(spec) = std::fs::read_to_string(spec_path(&id)).ok().and_then(|s| serde_json::from_str::<DetachedSpec>(&s).ok()) {
+        if let Some(pid) = spec.pid {
+            unsafe { libc::kill(-pid, libc::SIGTERM) };
+            unsafe { libc::kill(pid, libc::SIGTERM) };
+        }
+    }
+    let _ = std::fs::remove_file(sock_path(&id));
+    let _ = std::fs::remove_file(spec_path(&id));
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frames_round_trip() {
+        let mut buf = Vec::new();
+        write_frame(&mut buf, F_RESIZE, &[40, 0, 120, 0]).unwrap();
+        write_frame(&mut buf, F_DATA, b"ls -la\n").unwrap();
+        let mut r = std::io::Cursor::new(buf);
+        let (t1, p1) = read_frame(&mut r).unwrap();
+        assert_eq!((t1, p1.as_slice()), (F_RESIZE, &[40u8, 0, 120, 0][..]));
+        let (t2, p2) = read_frame(&mut r).unwrap();
+        assert_eq!((t2, p2.as_slice()), (F_DATA, b"ls -la\n".as_slice()));
+    }
+
+    #[test]
+    fn host_serves_backlog_and_stdin_end_to_end() {
+        let id = format!("t-{}", std::process::id());
+        let sock = std::env::temp_dir().join(format!("yaam-detach-{id}.sock"));
+        let spec = DetachedSpec { id, command: "printf ready; cat".into(), cwd: None, rows: 24, cols: 80, pid: None };
+        let s2 = spec.clone();
+        let sockc = sock.clone();
+        std::thread::spawn(move || { run_host(&s2, &sockc); });
+        // wait for the socket, connect, expect the ring backlog
+        let mut stream = None;
+        for _ in 0..50 {
+            if let Ok(s) = UnixStream::connect(&sock) { stream = Some(s); break }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let mut stream = stream.expect("host socket");
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let mut got = Vec::new();
+        let mut buf = [0u8; 256];
+        while !String::from_utf8_lossy(&got).contains("ready") {
+            let n = stream.read(&mut buf).expect("backlog");
+            got.extend_from_slice(&buf[..n]);
+        }
+        // stdin frame → cat echoes it back through the pty
+        write_frame(&mut stream, F_DATA, b"hello-detach\r").unwrap();
+        let mut echoed = String::new();
+        while !echoed.contains("hello-detach") {
+            let n = stream.read(&mut buf).expect("echo");
+            echoed.push_str(&String::from_utf8_lossy(&buf[..n]));
+        }
+        // a SECOND client reconnects and gets the ring replay (app restart)
+        drop(stream);
+        let mut s2 = UnixStream::connect(&sock).expect("reconnect");
+        s2.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let mut replay = Vec::new();
+        while !String::from_utf8_lossy(&replay).contains("ready") {
+            let n = s2.read(&mut buf).expect("replay");
+            replay.extend_from_slice(&buf[..n]);
+        }
+        let _ = write_frame(&mut s2, F_KILL, &[]);
+    }
+}

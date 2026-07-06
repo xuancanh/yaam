@@ -110,6 +110,9 @@ export interface Agent {
   permMode?: 'ask' | 'auto'
   /** git-worktree isolation this session runs in (cwd === workdir) */
   worktree?: { root: string; base: string; workdir: string }
+  /** the PTY lives in a detached host process that outlives the app; the
+   *  session command is an attach client (resume = reconnect) */
+  detached?: boolean
 }
 
 /** one message in a chat-mode session */

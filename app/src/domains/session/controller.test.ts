@@ -13,6 +13,8 @@ function fakePort(): SessionProcessPort {
     spawnSession: vi.fn(async () => {}), killSession: vi.fn(async () => {}), removeSession: vi.fn(async () => {}),
     writeSession: vi.fn(async () => {}), sendLine: vi.fn(), detectCliSession: vi.fn(async () => null),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
+    detachedSpawn: vi.fn(async () => 'attach-cmd'),
+    detachedKill: vi.fn(async () => {}),
     restoreTerminalModes: vi.fn(),
     quiesceTerminal: vi.fn(),
     repaintTerminal: vi.fn(),

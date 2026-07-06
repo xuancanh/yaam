@@ -23,6 +23,8 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     sendLine: vi.fn(),
     detectCliSession: vi.fn(async () => null),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
+    detachedSpawn: vi.fn(async () => 'attach-cmd'),
+    detachedKill: vi.fn(async () => {}),
     restoreTerminalModes: vi.fn(),
     quiesceTerminal: vi.fn(),
     repaintTerminal: vi.fn(),
@@ -134,5 +136,20 @@ describe('createLaunchRuntime.launchSession', () => {
     expect(useAppStore.getState().newSessionOpen).toBe(true)
     rt.launchSession('mycli run', '/repo', 'Fg', 'cli', 'ws')
     expect(useAppStore.getState().newSessionOpen).toBe(false)
+  })
+})
+
+describe('detached launches', () => {
+  it('spawns the attach client from detachedSpawn and marks the agent detached', async () => {
+    const port = fakePort()
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('sleep 999', '/repo', undefined, undefined, undefined, { detached: true })
+    expect(id).toBeTruthy()
+    await Promise.resolve(); await Promise.resolve()
+    expect(port.detachedSpawn).toHaveBeenCalledWith(id, expect.stringContaining('sleep 999'), '/repo')
+    expect(port.spawnSession).toHaveBeenCalledWith(id, 'attach-cmd', '/repo', undefined, undefined, undefined)
+    const a = useAppStore.getState().agents.find(x => x.id === id)
+    expect(a?.detached).toBe(true)
+    expect(a?.cmd).toBe('attach-cmd') // resume = reattach
   })
 })
