@@ -4,6 +4,7 @@
 // renders here. Markdown files render rich; diffs get the usual +/- coloring.
 import { useCallback, useEffect, useState } from 'react'
 import { Markdown } from '../components/Markdown'
+import { CodeLines, IMG_MIME, isMarkdown, viewKind } from '../shared/file-preview'
 import { rpc } from './api'
 
 interface FsEntry { name: string; path: string; isDir: boolean }
@@ -25,6 +26,16 @@ function Crumbs({ root, path, onGo }: { root: string; path: string; onGo: (p: st
   )
 }
 
+type FileKind = ReturnType<typeof viewKind>
+
+/** Rich text/code rendering: shared markdown + highlighter components. */
+function RichText({ name, text }: { name: string; text: string }) {
+  if (isMarkdown(name)) return <div style={{ fontSize: 13.5, lineHeight: 1.6 }}><Markdown text={text} /></div>
+  return <pre className="filetext">{text ? <CodeLines name={name} text={text} /> : '(empty file)'}</pre>
+}
+
+interface Loaded { path: string; text?: string; b64?: string; kind: FileKind }
+
 export function FilesBrowser({ root, onAttach }: {
   root: string
   /** when provided, the preview offers "Add to chat" with the loaded content */
@@ -32,7 +43,7 @@ export function FilesBrowser({ root, onAttach }: {
 }) {
   const [path, setPath] = useState(root)
   const [entries, setEntries] = useState<FsEntry[] | null>(null)
-  const [file, setFile] = useState<{ path: string; text: string } | null>(null)
+  const [file, setFile] = useState<Loaded | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -51,28 +62,50 @@ export function FilesBrowser({ root, onAttach }: {
   const openFile = (p: string) => {
     setBusy(true)
     setErr('')
-    rpc<{ text: string }>('rpc_fs_read', p)
-      .then(r => setFile({ path: p, text: r.text }))
-      .catch(e => setErr(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false))
+    const kind = viewKind(p)
+    const req = kind === 'image' || kind === 'pdf'
+      ? rpc<{ b64: string }>('rpc_fs_b64', p).then(r => setFile({ path: p, b64: r.b64, kind }))
+      : rpc<{ text: string }>('rpc_fs_read', p).then(r => setFile({ path: p, text: r.text, kind }))
+    req.catch(e => setErr(e instanceof Error ? e.message : String(e))).finally(() => setBusy(false))
   }
 
   if (file) {
-    const isMd = /\.(md|markdown|mdx)$/i.test(file.path)
+    const name = file.path.slice(file.path.lastIndexOf('/') + 1)
+    const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
     return (
       <div>
         <div className="row" style={{ marginBottom: 8 }}>
           <button className="back" onClick={() => setFile(null)}>‹ Files</button>
-          <span className="name mono" style={{ fontSize: 12 }}>{file.path.slice(file.path.lastIndexOf('/') + 1)}</span>
+          <span className="name mono" style={{ fontSize: 12 }}>{name}</span>
         </div>
-        {isMd
-          ? <div style={{ fontSize: 13.5, lineHeight: 1.6 }}><Markdown text={file.text} /></div>
-          : <pre className="filetext mono">{file.text || '(empty file)'}</pre>}
-        {onAttach && (
+        {err && <div className="warn">{err}</div>}
+        {file.kind === 'image' && file.b64 && (
+          <img
+            src={`data:${IMG_MIME[ext] ?? 'image/png'};base64,${file.b64}`}
+            alt={name}
+            style={{ maxWidth: '100%', borderRadius: 12, border: '1px solid var(--line-soft)', display: 'block', margin: '0 auto' }}
+          />
+        )}
+        {file.kind === 'pdf' && file.b64 && (
+          <div className="btnrow" style={{ marginTop: 4 }}>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                const bytes = Uint8Array.from(atob(file.b64!), c => c.charCodeAt(0))
+                const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+                window.open(url, '_blank')
+              }}
+            >
+              📄 Open PDF
+            </button>
+          </div>
+        )}
+        {(file.kind === 'text' || file.kind === 'office') && <RichText name={name} text={file.text ?? ''} />}
+        {onAttach && file.kind !== 'image' && file.kind !== 'pdf' && (
           <div className="btnrow">
             <button
               className="btn accent"
-              onClick={() => onAttach({ name: file.path.slice(file.path.lastIndexOf('/') + 1), path: file.path, text: file.text })}
+              onClick={() => onAttach({ name, path: file.path, text: file.text ?? '' })}
             >
               ＋ Add to chat
             </button>

@@ -8,6 +8,7 @@ import { highlight, langForFile } from '../../core/highlight'
 import { gitFileDiff, gitStatus, isTauri, listDir, onFsChange, readFileB64, readTextFile, unwatchDir, watchDir } from '../../core/native'
 import type { DirEntryInfo } from '../../core/native'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
+import { IMG_MIME, viewKind } from '../../shared/file-preview'
 import { parseDiffLines } from './diff-marks'
 import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
@@ -64,20 +65,6 @@ interface GitInfo {
 const MAX_LINES = 200_000
 const ROW_H = 19
 const OVERSCAN = 24
-
-const IMG_MIME: Record<string, string> = {
-  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
-  webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
-}
-
-/** How the viewer should treat one file, by extension. */
-function viewKind(name: string): 'image' | 'pdf' | 'office' | 'text' {
-  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
-  if (IMG_MIME[ext]) return 'image'
-  if (ext === 'pdf') return 'pdf'
-  if (ext === 'docx' || ext === 'xlsx' || ext === 'pptx') return 'office'
-  return 'text'
-}
 
 // ---------------------------------------------------------------- tree
 

@@ -7,13 +7,14 @@ import { useEffect, useRef } from 'react'
 import { dispatch, useAppStore } from '../../core/store'
 import { useActions, useConductorSelector } from '../../store'
 import {
-  gitFileDiffSide, gitStatus, listDir, readTextFile,
+  gitFileDiffSide, gitStatus, listDir, readFileB64, readTextFile,
   remoteApprovePair, remoteDenyPair, remotePendingPairs, remotePublish, remoteRespond,
   remoteSetDevices, remoteStart, remoteStop, remoteTakeCommands,
 } from '../../core/native'
 import type { RemoteCommand } from '../../core/native'
 import { fitTerminal, remoteResize, serializeScreen, terminalSize } from '../../core/terminals'
 import { confirmAction } from '../../components/Confirm'
+import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import { buildRemoteSnapshot } from './snapshot'
 
 // short debounce: chat deltas land in the store per animation frame, and the
@@ -57,8 +58,21 @@ async function answerRpc(kind: string, requestId: string, payload: string): Prom
       }
       case 'rpc_fs_read': {
         if (!pathAllowed(payload)) return await respond({ error: 'path outside session folders' })
+        const name = payload.slice(payload.lastIndexOf('/') + 1)
+        // office docs: extract readable text desktop-side (same as the chat pipeline)
+        if (/\.(docx|xlsx|pptx)$/i.test(name)) {
+          const extracted = await extractFileText(name, b64ToBytes(await readFileB64(payload)))
+          return await respond({ text: extracted.text ?? '(no text extracted)', kind: 'office' })
+        }
         const text = await readTextFile(payload)
         return await respond({ text: text.length > RPC_READ_CAP ? `${text.slice(0, RPC_READ_CAP)}\n… (truncated)` : text })
+      }
+      case 'rpc_fs_b64': {
+        // binary payloads for the rich viewer (images, PDFs) — size-capped
+        if (!pathAllowed(payload)) return await respond({ error: 'path outside session folders' })
+        const b64 = await readFileB64(payload)
+        if (b64.length > 8_000_000) return await respond({ error: 'file too large to preview remotely' })
+        return await respond({ b64 })
       }
       case 'rpc_git_status': {
         if (!pathAllowed(payload)) return await respond({ error: 'path outside session folders' })
