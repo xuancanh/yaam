@@ -119,6 +119,9 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
   useEffect(() => {
     if (!live) return
     let es: EventSource | null = null
+    // the first live chunk replays the tap's ring backlog — clear whatever the
+    // snapshot fallback painted meanwhile, atomically with the backlog itself
+    let fresh = true
     try {
       es = new EventSource(apiUrl('/api/term', { d: deviceToken(), id: sessionId }))
       es.onmessage = e => {
@@ -127,7 +130,8 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
         // stick to the bottom only when the user is already there — scrolling
         // back through history must not get yanked down by live output
         const buf = term.buffer.active
-        const wasAtBottom = buf.viewportY >= buf.baseY
+        const wasAtBottom = fresh || buf.viewportY >= buf.baseY
+        if (fresh) { fresh = false; lastRef.current = ''; term.write('\x1bc') }
         term.write(b64Bytes(String(e.data)), () => { if (wasAtBottom) term.scrollToBottom() })
       }
       es.onerror = () => { es?.close(); setLive(false) } // fall back to snapshots
@@ -137,13 +141,28 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
     return () => es?.close()
   }, [live, sessionId])
 
+  // a dropped live stream falls back to snapshots but keeps retrying — one
+  // transient blip must not lock the view into flicker-prone full repaints
+  useEffect(() => {
+    if (live) return
+    const t = setTimeout(() => setLive(true), 8000)
+    return () => clearTimeout(t)
+  }, [live])
+
   // snapshot fallback: replay the serialized buffer whenever it changes
   useEffect(() => {
     const term = termRef.current
     if (!term || live || data === lastRef.current) return
     lastRef.current = data
-    term.reset()
-    term.write(data, () => term.scrollToBottom())
+    // repaint atomically: reset + rewrite in ONE parsed chunk, guarded by DEC
+    // 2026 synchronized updates, so the renderer never shows the blank frame
+    // that term.reset() + a separate async write used to flash on every push
+    const buf = term.buffer.active
+    const fromBottom = buf.baseY - buf.viewportY
+    term.write('\x1bc\x1b[?2026h' + data + '\x1b[?2026l', () => {
+      // keep the reading position when the user has scrolled back
+      term.scrollToLine(Math.max(0, term.buffer.active.baseY - fromBottom))
+    })
   }, [data, live])
 
   return <div ref={hostRef} className="termfill" />
