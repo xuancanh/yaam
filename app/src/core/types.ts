@@ -43,14 +43,27 @@ export interface Snapshot {
   time: string
 }
 
-export interface Agent {
+/** Transient per-session runtime state — NOT persisted. Hydration re-derives it
+ *  (restored sessions always start idle). Split out from the durable SessionRecord
+ *  so the persistence boundary is explicit and type-enforced rather than an ad-hoc
+ *  field list. Other runtime concerns (active request, terminal attachment,
+ *  pending approval) live outside the store in their own registries. */
+export interface SessionRuntimeState {
+  status: AgentStatus
+  /** transient escalation reason shown while a session waits on the user */
+  escReason?: string
+}
+
+/** The durable configuration + history of a session: everything that is
+ *  persisted (see `selectSession`). Combined with SessionRuntimeState to form the
+ *  working `Agent` type used across the app. */
+export interface SessionRecord {
   id: string
   name: string
   short: string
   color: string
   repo: string
   branch: string
-  status: AgentStatus
   model: string
   /** 'real' = PTY process · 'chat' = in-app LLM chat agent (Claude-Desktop-style) */
   kind?: 'sim' | 'real' | 'chat'
@@ -61,7 +74,6 @@ export interface Agent {
   memory: MemorySource[]
   tools: AgentTool[]
   log: LogLine[]
-  escReason?: string
   used: number
   cost: number
   budget: number
@@ -114,6 +126,16 @@ export interface Agent {
    *  session command is an attach client (resume = reconnect) */
   detached?: boolean
 }
+
+/** A session as the app works with it: durable record plus live runtime state.
+ *  Remains the single working type across the UI and actions; the record/runtime
+ *  split is the persistence and domain boundary, not a call-site concern. */
+export type Agent = SessionRecord & SessionRuntimeState
+
+/** The runtime-only keys, as a value — the single source of truth persistence
+ *  uses to strip transient fields. Typed as keyof SessionRuntimeState so it stays
+ *  in sync if the runtime shape changes. */
+export const SESSION_RUNTIME_KEYS: ReadonlyArray<keyof SessionRuntimeState> = ['status', 'escReason']
 
 /** one message in a chat-mode session */
 export interface ChatMsg {

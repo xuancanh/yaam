@@ -1,18 +1,19 @@
 // Persisted-state schema: version stamp and the selectors that project the
 // live AppState into its on-disk partitions (main blob + per-session files).
-import type { AppState, MainPartition } from '../../core/types'
+import type { AppState, MainPartition, SessionRecord } from '../../core/types'
+import { SESSION_RUNTIME_KEYS } from '../../core/types'
 
 /** Bumped when the persisted shape changes in a way hydration must know about.
  *  Hydration stays defensive per-field, so most additions don't require a bump. */
 export const SCHEMA_VERSION = 1
 
-/** One session's persisted form: the agent's DURABLE config + output tail
- *  (capped). Runtime-only status (`status`, `escReason`) is dropped — hydration
- *  always restores sessions as idle. Written to its own file (`sessions/<id>.json`). */
+/** One session's persisted form: the agent's DURABLE SessionRecord + output tail
+ *  (capped). The SessionRuntimeState keys (status, escReason) are dropped —
+ *  hydration always restores sessions as idle. Written to `sessions/<id>.json`. */
 export function selectSession(a: AppState['agents'][number]) {
-  const { status: _status, escReason: _escReason, ...durable } = a
-  void _status; void _escReason
-  return { schemaVersion: SCHEMA_VERSION, agent: { ...durable, log: a.log.slice(-200) } }
+  const durable = { ...a } as Partial<Record<keyof typeof a, unknown>>
+  for (const k of SESSION_RUNTIME_KEYS) delete durable[k]
+  return { schemaVersion: SCHEMA_VERSION, agent: { ...(durable as SessionRecord), log: a.log.slice(-200) } }
 }
 
 /** The low-churn main partition: everything durable except `agents`. */
