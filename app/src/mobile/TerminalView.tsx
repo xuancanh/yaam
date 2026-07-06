@@ -65,27 +65,45 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
     const ro = new ResizeObserver(refit)
     ro.observe(hostRef.current!)
     // touch scrolling: xterm's canvas eats the touches before its scrollable
-    // viewport sees them — translate vertical drags into scrollLines ourselves
+    // viewport sees them — translate vertical drags into scrollLines ourselves.
+    // Pointer Events (with capture) work on BOTH Android Chrome and iOS Safari
+    // (13+ honors touch-action: none for them); plain touch handlers were
+    // Android-only in practice.
     const host = hostRef.current!
+    const cellH = Math.max(10, 11 * 1.25) // fontSize × lineHeight
+    let tracking = false
     let lastY = 0
     let carry = 0
-    const cellH = Math.max(10, 11 * 1.25) // fontSize × lineHeight
-    const onTouchStart = (e: TouchEvent) => { lastY = e.touches[0].clientY; carry = 0 }
-    const onTouchMove = (e: TouchEvent) => {
-      const y = e.touches[0].clientY
-      carry += (lastY - y) / cellH
-      lastY = y
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse') return // desktop keeps native wheel/select
+      tracking = true
+      lastY = e.clientY
+      carry = 0
+      try { host.setPointerCapture(e.pointerId) } catch { /* unsupported */ }
+    }
+    const onMove = (e: PointerEvent) => {
+      if (!tracking) return
+      carry += (lastY - e.clientY) / cellH
+      lastY = e.clientY
       const lines = Math.trunc(carry)
       if (lines !== 0) {
         carry -= lines
         term.scrollLines(lines)
       }
-      e.preventDefault() // we own the pan — no page bounce
     }
-    host.addEventListener('touchstart', onTouchStart, { passive: true })
+    const onUp = () => { tracking = false }
+    // belt for older iOS: keep the browser from rubber-banding the page
+    const onTouchMove = (e: TouchEvent) => e.preventDefault()
+    host.addEventListener('pointerdown', onDown)
+    host.addEventListener('pointermove', onMove)
+    host.addEventListener('pointerup', onUp)
+    host.addEventListener('pointercancel', onUp)
     host.addEventListener('touchmove', onTouchMove, { passive: false })
     return () => {
-      host.removeEventListener('touchstart', onTouchStart)
+      host.removeEventListener('pointerdown', onDown)
+      host.removeEventListener('pointermove', onMove)
+      host.removeEventListener('pointerup', onUp)
+      host.removeEventListener('pointercancel', onUp)
       host.removeEventListener('touchmove', onTouchMove)
       ro.disconnect()
       if (focusTimer) clearTimeout(focusTimer)
