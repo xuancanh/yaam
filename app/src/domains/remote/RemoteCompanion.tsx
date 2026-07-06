@@ -12,7 +12,7 @@ import {
   remoteSetDevices, remoteStart, remoteStop, remoteTakeCommands,
 } from '../../core/native'
 import type { RemoteCommand } from '../../core/native'
-import { serializeScreen, terminalSize } from '../../core/terminals'
+import { fitTerminal, remoteResize, serializeScreen, terminalSize } from '../../core/terminals'
 import { confirmAction } from '../../components/Confirm'
 import { buildRemoteSnapshot } from './snapshot'
 
@@ -168,6 +168,15 @@ export function RemoteCompanion() {
         case 'task_chat': return a.sendTaskChat(c.id, c.text)
         case 'task_start': return a.startTask(c.id)
         case 'session_input': return a.sendInput(c.id, c.text)
+        // exclusive terminal focus: the focused device owns the PTY size
+        case 'session_focus': {
+          try {
+            const d = JSON.parse(c.text || '{}') as { rows?: number; cols?: number }
+            if (d.rows && d.cols) remoteResize(c.id, d.rows, d.cols)
+          } catch { /* malformed dims */ }
+          return
+        }
+        case 'session_blur': return fitTerminal(c.id) // desktop reclaims its size
         case 'session_stop': return a.stopSession(c.id)
         case 'session_resume': return a.resume(c.id)
         case 'approve_master': return a.resolveToolApproval(c.id, c.ok)

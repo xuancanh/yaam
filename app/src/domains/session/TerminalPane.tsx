@@ -48,7 +48,12 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
   return (
     <div
       ref={ref}
-      onMouseDown={() => getTerminal(agent.id).term.focus()}
+      onMouseDown={() => {
+        // interacting with the pane steals terminal focus back from any
+        // remote device — refit to the desktop's own size
+        fitTerminal(agent.id)
+        getTerminal(agent.id).term.focus()
+      }}
       style={{
         flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden',
         background: 'var(--bg2)', padding: '8px 2px 2px 10px',

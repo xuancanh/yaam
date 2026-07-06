@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { apiUrl, deviceToken } from './api'
+import { apiUrl, deviceToken, sendCommand } from './api'
 
 // desktop dark terminal palette (core/terminals.ts DARK_TERM)
 const THEME = {
@@ -46,19 +46,34 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(hostRef.current!)
-    try { fit.fit() } catch { /* not laid out yet */ }
     termRef.current = term
-    const ro = new ResizeObserver(() => {
+    // exclusive terminal focus: viewing this terminal steals it — the desktop
+    // resizes the REAL PTY (and its own xterm) to our dimensions, so the byte
+    // stream is laid out for this screen. Leaving hands it back (blur).
+    let focusTimer: ReturnType<typeof setTimeout> | null = null
+    const claimFocus = () => {
+      if (focusTimer) clearTimeout(focusTimer)
+      focusTimer = setTimeout(() => {
+        void sendCommand({ kind: 'session_focus', id: sessionId, text: JSON.stringify({ rows: term.rows, cols: term.cols }) })
+      }, 250)
+    }
+    const refit = () => {
       try { fit.fit(); term.scrollToBottom() } catch { /* mid-unmount */ }
-    })
+      claimFocus()
+    }
+    refit()
+    const ro = new ResizeObserver(refit)
     ro.observe(hostRef.current!)
     return () => {
       ro.disconnect()
+      if (focusTimer) clearTimeout(focusTimer)
+      void sendCommand({ kind: 'session_blur', id: sessionId }) // desktop reclaims
       term.dispose()
       termRef.current = null
       lastRef.current = ''
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
 
   // live mode: raw PTY bytes over SSE, straight from the Rust session tap
   useEffect(() => {

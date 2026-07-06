@@ -165,6 +165,19 @@ export function isAltScreen(id: string): boolean {
   return entries.get(id)?.term.buffer.active.type === 'alternate'
 }
 
+/** A remote device takes terminal focus: size BOTH the desktop xterm and the
+ *  PTY to the remote's dimensions so every device renders the same layout.
+ *  The desktop steals focus back simply by fitting again (pane interaction,
+ *  layout change, or an explicit remote blur). */
+export function remoteResize(id: string, rows: number, cols: number) {
+  const entry = entries.get(id)
+  if (!entry) return
+  const r = Math.min(120, Math.max(8, Math.round(rows)))
+  const c = Math.min(400, Math.max(20, Math.round(cols)))
+  try { entry.term.resize(c, r) } catch { /* not attached yet */ }
+  resizeSession(id, r, c).catch(() => {})
+}
+
 /** Serialize a session's terminal buffer to ANSI text (colors, layout, and a
  *  bounded scrollback intact) so another xterm — the mobile companion's — can
  *  replay it pixel-faithfully. Empty string when the terminal doesn't exist. */
