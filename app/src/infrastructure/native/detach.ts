@@ -15,9 +15,9 @@ export interface DetachedInfo {
 
 /** Start the detached host; returns the attach command to run as the session
  *  (also its natural resume/reconnect command). */
-export async function detachedSpawn(id: string, command: string, cwd?: string): Promise<string> {
+export async function detachedSpawn(id: string, command: string, cwd?: string, commandShell?: string): Promise<string> {
   if (!isTauri) throw new Error('detached sessions require the desktop app')
-  return await invoke<string>('detached_spawn', { id, command, cwd: cwd ?? null, rows: null, cols: null })
+  return await invoke<string>('detached_spawn', { id, command, cwd: cwd ?? null, commandShell: commandShell ?? null, rows: null, cols: null })
 }
 
 /** Detached sessions still alive on this machine. */

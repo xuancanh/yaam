@@ -58,6 +58,7 @@ function ctx(port: SessionProcessPort, over: Partial<LaunchRuntimeCtx> = {}): La
 beforeEach(() => {
   useAppStore.setState({
     agents: [], agentTypes: [agentType()], activeWorkspace: 'ws',
+    settings: { shell: 'zsh' } as AppState['settings'],
     groups: [], activeGroup: null, minimizedIds: [], newSessionOpen: true,
   } as Partial<AppState> as AppState)
 })
@@ -71,9 +72,16 @@ describe('createLaunchRuntime.launchSession', () => {
     const agent = useAppStore.getState().agents.find(a => a.id === id)
     expect(agent).toMatchObject({ status: 'running', name: 'Worker', ephemeral: true })
     expect(port.attachTerminal).toHaveBeenCalledWith(id, expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function))
-    expect(port.spawnSession).toHaveBeenCalledWith(id, expect.stringContaining('mycli run'), '/repo', undefined, undefined, undefined)
+    expect(port.spawnSession).toHaveBeenCalledWith(id, expect.stringContaining('mycli run'), '/repo', undefined, undefined, undefined, 'zsh')
     await Promise.resolve()
     expect(useAppStore.getState().agents.find(a => a.id === id)?.status).toBe('running')
+  })
+
+  it('launches a plain terminal directly without a command-shell wrapper', () => {
+    const port = fakePort()
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('zsh -i', '/repo', 'Terminal', undefined, undefined, { terminalShell: 'zsh' })
+    expect(port.spawnSession).toHaveBeenCalledWith(id, 'zsh -i', '/repo', undefined, undefined, 'zsh', undefined)
   })
 
   it('rolls the session into an error state when the PTY spawn rejects', async () => {
@@ -114,7 +122,7 @@ describe('createLaunchRuntime.launchSession', () => {
     const agent = useAppStore.getState().agents.find(a => a.id === id)
     expect(agent?.cwd).toBe(`/home/.yaam/worktrees/${id}/repo`)
     expect(agent?.worktree?.root).toBe(`/home/.yaam/worktrees/${id}`)
-    expect(port.spawnSession).toHaveBeenCalledWith(id, expect.any(String), `/home/.yaam/worktrees/${id}/repo`, undefined, undefined, undefined)
+    expect(port.spawnSession).toHaveBeenCalledWith(id, expect.any(String), `/home/.yaam/worktrees/${id}/repo`, undefined, undefined, undefined, 'zsh')
   })
 
   it('isolate: a worktree failure marks the session errored without spawning', async () => {
@@ -146,8 +154,8 @@ describe('detached launches', () => {
     const id = rt.launchSession('sleep 999', '/repo', undefined, undefined, undefined, { detached: true })
     expect(id).toBeTruthy()
     await Promise.resolve(); await Promise.resolve()
-    expect(port.detachedSpawn).toHaveBeenCalledWith(id, expect.stringContaining('sleep 999'), '/repo')
-    expect(port.spawnSession).toHaveBeenCalledWith(id, 'attach-cmd', '/repo', undefined, undefined, undefined)
+    expect(port.detachedSpawn).toHaveBeenCalledWith(id, expect.stringContaining('sleep 999'), '/repo', 'zsh')
+    expect(port.spawnSession).toHaveBeenCalledWith(id, 'attach-cmd', '/repo', undefined, undefined, undefined, undefined)
     const a = useAppStore.getState().agents.find(x => x.id === id)
     expect(a?.detached).toBe(true)
     expect(a?.cmd).toBe('attach-cmd') // resume = reattach

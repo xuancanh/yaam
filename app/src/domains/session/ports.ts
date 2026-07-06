@@ -16,7 +16,7 @@ export interface SessionProcessPort {
   /** true when running inside the Tauri shell (CLI probing is a no-op otherwise) */
   readonly isTauri: boolean
   /** spawn the backend PTY for a session */
-  spawnSession: (id: string, command: string, cwd?: string, rows?: number, cols?: number, terminalShell?: string) => Promise<void>
+  spawnSession: (id: string, command: string, cwd?: string, rows?: number, cols?: number, terminalShell?: string, commandShell?: string) => Promise<void>
   /** kill a session's live PTY process */
   killSession: (id: string) => Promise<void>
   /** drop a session's persisted file */
@@ -30,7 +30,7 @@ export interface SessionProcessPort {
   /** isolate a working folder in git worktree(s); returns where to run */
   createWorktree: (baseCwd: string, slug: string) => Promise<native.WorktreeInfo>
   /** start a detached host process; returns the attach command to spawn */
-  detachedSpawn: (id: string, command: string, cwd?: string) => Promise<string>
+  detachedSpawn: (id: string, command: string, cwd?: string, commandShell?: string) => Promise<string>
   /** end a detached session for real */
   detachedKill: (id: string) => Promise<void>
   /** create (or reuse) the xterm terminal for a session and wire its callbacks */
@@ -59,14 +59,14 @@ export interface SessionProcessPort {
 
 export const realSessionProcessPort: SessionProcessPort = {
   isTauri: native.isTauri,
-  spawnSession: (id, command, cwd, rows, cols, terminalShell) => native.spawnSession(id, command, cwd, rows, cols, terminalShell),
+  spawnSession: (id, command, cwd, rows, cols, terminalShell, commandShell) => native.spawnSession(id, command, cwd, rows, cols, terminalShell, commandShell),
   killSession: id => native.killSession(id),
   removeSession: id => native.removeSession(id),
   writeSession: (id, data) => native.writeSession(id, data),
   sendLine: (id, text) => sendLineToSession(id, text),
   detectCliSession: (kind, cwd, sinceMs, exclude) => native.detectCliSession(kind, cwd, sinceMs, exclude),
   createWorktree: (baseCwd, slug) => native.worktreeCreate(baseCwd, slug),
-  detachedSpawn: (id, command, cwd) => native.detachedSpawn(id, command, cwd),
+  detachedSpawn: (id, command, cwd, commandShell) => native.detachedSpawn(id, command, cwd, commandShell),
   detachedKill: id => native.detachedKill(id),
   attachTerminal: (id, onPlainLine, onUserInput, onActivity, onUserSubmit) => {
     const { term } = getTerminal(id, onPlainLine, onUserInput, onActivity, onUserSubmit)

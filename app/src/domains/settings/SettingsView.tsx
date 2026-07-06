@@ -280,7 +280,7 @@ export function SettingsView() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Terminal shell</div>
-                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Used when launching a plain terminal session.</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Used for plain terminals and to run session commands with your normal login environment.</div>
               </div>
               <select
                 value={s.settings.shell}

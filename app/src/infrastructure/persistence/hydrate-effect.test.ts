@@ -60,7 +60,7 @@ describe('detached runtime hydration', () => {
     }])
     runHydration(context())
     await vi.waitFor(() => expect(nativeMocks.spawnSession).toHaveBeenCalledWith(
-      'det-1', 'current-attach-command', '/repo', 31, 97, undefined,
+      'det-1', 'current-attach-command', '/repo', 31, 97, undefined, undefined,
     ))
     await vi.waitFor(() => expect(useAppStore.getState().agents[0]).toMatchObject({
       id: 'det-1', cmd: 'current-attach-command', status: 'running',

@@ -94,10 +94,33 @@ fn resolve_login_executable(executable: &str) -> Result<String, String> {
     Ok(resolved)
 }
 
+/// Build a command invocation through the selected user shell. Without an
+/// explicit selection, retain the legacy POSIX-sh fallback for old callers and
+/// detached specs created by earlier releases.
+pub(crate) fn command_launch_spec(
+    command: &str,
+    command_shell: Option<&str>,
+) -> Result<(String, Vec<String>, Option<String>), String> {
+    if let Some(shell) = command_shell.filter(|shell| !shell.trim().is_empty()) {
+        let executable = resolve_login_executable(shell)?;
+        return Ok((
+            executable.clone(),
+            vec!["-l".to_string(), "-i".to_string(), "-c".to_string(), command.to_string()],
+            Some(executable),
+        ));
+    }
+    Ok((
+        "/bin/sh".to_string(),
+        vec!["-lc".to_string(), command.to_string()],
+        None,
+    ))
+}
+
 /// Select the executable, arguments, and SHELL value for command or terminal mode.
 fn session_launch_spec(
     command: &str,
     terminal_shell: Option<&str>,
+    command_shell: Option<&str>,
 ) -> Result<(String, Vec<String>, Option<String>), String> {
     if let Some(shell) = terminal_shell.filter(|shell| !shell.trim().is_empty()) {
         let executable = resolve_login_executable(shell)?;
@@ -107,11 +130,7 @@ fn session_launch_spec(
             Some(executable),
         ));
     }
-    Ok((
-        "/bin/sh".to_string(),
-        vec!["-lc".to_string(), command.to_string()],
-        None,
-    ))
+    command_launch_spec(command, command_shell)
 }
 
 struct SessionHandle {
@@ -214,6 +233,7 @@ impl SessionManager {
         id: String,
         command: String,
         terminal_shell: Option<String>,
+        command_shell: Option<String>,
         cwd: Option<String>,
         rows: Option<u16>,
         cols: Option<u16>,
@@ -228,10 +248,11 @@ impl SessionManager {
             })
             .map_err(|e| e.to_string())?;
 
-        // Plain terminals run the selected shell directly. Arbitrary commands still
-        // need a login-shell parser for quoting, operators, and the user's GUI PATH.
+        // Plain terminals run the selected shell directly. Commands run through
+        // the separately selected shell as login+interactive so GUI launches load
+        // the same PATH/toolchain setup as a real terminal.
         let (executable, args, shell_env) =
-            session_launch_spec(&command, terminal_shell.as_deref())?;
+            session_launch_spec(&command, terminal_shell.as_deref(), command_shell.as_deref())?;
         let launch_label = if shell_env.is_some() {
             format!("{executable} -l -i")
         } else {
@@ -528,11 +549,12 @@ pub fn spawn_session(
     id: String,
     command: String,
     terminal_shell: Option<String>,
+    command_shell: Option<String>,
     cwd: Option<String>,
     rows: Option<u16>,
     cols: Option<u16>,
 ) -> Result<(), String> {
-    state.spawn(app, id, command, terminal_shell, cwd, rows, cols)
+    state.spawn(app, id, command, terminal_shell, command_shell, cwd, rows, cols)
 }
 
 #[tauri::command]
@@ -603,7 +625,7 @@ mod tests {
     #[test]
     /// A wrapped command runs through `/bin/sh -lc` with no SHELL override.
     fn builds_wrapped_command_launch_spec() {
-        let (exe, args, shell) = session_launch_spec("echo hi", None).unwrap();
+        let (exe, args, shell) = session_launch_spec("echo hi", None, None).unwrap();
         assert_eq!(exe, "/bin/sh");
         assert_eq!(args, vec!["-lc".to_string(), "echo hi".to_string()]);
         assert!(shell.is_none());
@@ -612,9 +634,19 @@ mod tests {
     #[test]
     /// A terminal shell launches directly as a login+interactive shell.
     fn builds_direct_terminal_launch_spec() {
-        let (exe, args, shell) = session_launch_spec("", Some("/bin/sh")).unwrap();
+        let (exe, args, shell) = session_launch_spec("", Some("/bin/sh"), None).unwrap();
         assert_eq!(exe, "/bin/sh");
         assert_eq!(args, vec!["-l".to_string(), "-i".to_string()]);
+        assert_eq!(shell.as_deref(), Some("/bin/sh"));
+    }
+
+    #[test]
+    /// A selected command shell loads its login and interactive environment
+    /// before executing the requested command.
+    fn builds_selected_shell_command_launch_spec() {
+        let (exe, args, shell) = session_launch_spec("echo hi", None, Some("/bin/sh")).unwrap();
+        assert_eq!(exe, "/bin/sh");
+        assert_eq!(args, vec!["-l", "-i", "-c", "echo hi"]);
         assert_eq!(shell.as_deref(), Some("/bin/sh"));
     }
 

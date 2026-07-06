@@ -15,6 +15,9 @@ pub struct DetachedSpec {
     pub id: String,
     pub command: String,
     pub cwd: Option<String>,
+    /// Shell selected in YAAM for loading the user's command environment.
+    #[serde(default)]
+    pub command_shell: Option<String>,
     pub rows: u16,
     pub cols: u16,
     #[serde(default)]
@@ -96,9 +99,17 @@ pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
         Ok(p) => p,
         Err(_) => return 1,
     };
-    let mut cb = CommandBuilder::new("/bin/sh");
-    cb.args(["-lc", &spec.command]);
+    let (executable, args, shell_env) = match crate::domains::session::command_launch_spec(
+        &spec.command,
+        spec.command_shell.as_deref(),
+    ) {
+        Ok(spec) => spec,
+        Err(_) => return 1,
+    };
+    let mut cb = CommandBuilder::new(executable);
+    cb.args(args);
     cb.env("TERM", "xterm-256color");
+    if let Some(shell) = shell_env { cb.env("SHELL", shell); }
     if let Some(cwd) = spec.cwd.as_ref().filter(|c| !c.is_empty()) {
         cb.cwd(PathBuf::from(crate::util::expand_tilde(cwd)));
     }
@@ -260,8 +271,8 @@ pub fn detach_entry() -> bool {
 /// Start the detached host and return the attach command line the app should
 /// run as a normal PTY session (also the session's resume command).
 #[tauri::command]
-pub fn detached_spawn(id: String, command: String, cwd: Option<String>, rows: Option<u16>, cols: Option<u16>) -> Result<String, String> {
-    let spec = DetachedSpec { id: id.clone(), command, cwd, rows: rows.unwrap_or(24), cols: cols.unwrap_or(80), pid: None, exit_code: None };
+pub fn detached_spawn(id: String, command: String, cwd: Option<String>, command_shell: Option<String>, rows: Option<u16>, cols: Option<u16>) -> Result<String, String> {
+    let spec = DetachedSpec { id: id.clone(), command, cwd, command_shell, rows: rows.unwrap_or(24), cols: cols.unwrap_or(80), pid: None, exit_code: None };
     std::fs::write(spec_path(&id), serde_json::to_string(&spec).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut cmd = std::process::Command::new(&exe);
@@ -348,7 +359,7 @@ mod tests {
     fn host_serves_backlog_and_stdin_end_to_end() {
         let id = format!("t-{}", std::process::id());
         let sock = std::env::temp_dir().join(format!("yaam-detach-{id}.sock"));
-        let spec = DetachedSpec { id, command: "printf ready; cat".into(), cwd: None, rows: 24, cols: 80, pid: None, exit_code: None };
+        let spec = DetachedSpec { id, command: "printf ready; cat".into(), cwd: None, command_shell: None, rows: 24, cols: 80, pid: None, exit_code: None };
         let s2 = spec.clone();
         let sockc = sock.clone();
         std::thread::spawn(move || { run_host(&s2, &sockc); });
@@ -393,6 +404,7 @@ mod tests {
             id,
             command: "exit 23".into(),
             cwd: None,
+            command_shell: None,
             rows: 24,
             cols: 80,
             pid: None,

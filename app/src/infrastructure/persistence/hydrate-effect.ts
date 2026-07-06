@@ -60,7 +60,7 @@ export function runHydration(ctx: HydrationCtx): void {
           } else if (a.detached && hosts.has(a.id)) {
             const host = hosts.get(a.id)!
             const attach = host.attach || a.cmd!
-            native.spawnSession(a.id, attach, a.cwd || undefined, term.rows, term.cols, undefined)
+            native.spawnSession(a.id, attach, a.cwd || undefined, term.rows, term.cols, undefined, undefined)
               .then(() => {
                 dispatch(s2 => ({
                   ...s2,

@@ -108,13 +108,18 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         }))
       }
       const spawn = (spawnCwd: string | undefined) => {
+        // Command sessions use the configured shell as login+interactive so a
+        // GUI-launched app gets the same PATH/toolchain setup as the user's
+        // terminal. Plain terminal sessions already carry terminalShell and
+        // launch that shell directly instead.
+        const commandShell = opts?.terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
         // Claude's id is known up front; only codex/opencode need file detection.
         if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', spawnCwd ?? '', false)
         if (opts?.detached) {
           // the PTY moves into a detached host process; the app runs a small
           // attach client instead — the session outlives the app, and the
           // attach command doubles as the resume/reconnect command
-          port.detachedSpawn(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd)
+          port.detachedSpawn(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd, commandShell)
             .then(attachCmd => {
               dispatch(s => ({
                 ...s,
@@ -122,12 +127,12 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
                   ? { ...a, detached: true, cmd: attachCmd, log: a.log.concat([{ t: 'sys' as const, x: 'detached session — survives closing the app; ▶ reattaches' }]) }
                   : a),
               }))
-              port.spawnSession(id, attachCmd, spawnCwd || undefined, undefined, undefined, undefined).catch(fail)
+              port.spawnSession(id, attachCmd, spawnCwd || undefined, undefined, undefined, undefined, undefined).catch(fail)
             })
             .catch(fail)
           return
         }
-        port.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd || undefined, undefined, undefined, opts?.terminalShell).catch(fail)
+        port.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd || undefined, undefined, undefined, opts?.terminalShell, commandShell).catch(fail)
       }
       if (opts?.isolate && agent.cwd) {
         // isolation: mirror the working folder (a repo, or a folder of repos)

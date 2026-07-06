@@ -176,7 +176,8 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         const spawnCommand = agent.detached ? cmd : `${envPrefix(type?.env)}${cmd}`.trim()
         // A detached attach command must run as a command, even when the
         // original session was created from a configured terminal shell.
-        port.spawnSession(id, spawnCommand, agent.cwd || undefined, size?.rows, size?.cols, agent.detached ? undefined : terminalShell)
+        const commandShell = agent.detached || terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
+        port.spawnSession(id, spawnCommand, agent.cwd || undefined, size?.rows, size?.cols, agent.detached ? undefined : terminalShell, commandShell)
           .then(() => {
             // …and nudge a repaint once the CLI has booted, so resumed TUIs
             // draw a correct first frame even if layout shifted meanwhile
