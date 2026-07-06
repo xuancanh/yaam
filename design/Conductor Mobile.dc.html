@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:#050607;font-family:'IBM Plex Sans',system-ui,sans-serif}
+  ::selection{background:rgba(245,196,81,.28)}
+  .cscroll::-webkit-scrollbar{width:0;height:0}
+  @keyframes cpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.78)}}
+  @keyframes cblink{0%,49%{opacity:1}50%,100%{opacity:0}}
+  @keyframes cfade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @keyframes cpush{from{transform:translateX(26px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes cdraw{from{transform:translateX(-100%)}to{transform:none}}
+  @keyframes cattn{0%,100%{box-shadow:0 0 0 0 rgba(255,176,32,0)}50%{box-shadow:0 0 0 3px rgba(255,176,32,.14)}}
+</style>
+</helmet>
+
+<div style="height:100vh;width:100%;max-width:460px;margin:0 auto;display:flex;flex-direction:column;background:#08090C;color:#E7E9F0;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;position:relative;overflow:hidden;border-left:1px solid #14171d;border-right:1px solid #14171d;">
+
+  <!-- STATUS BAR -->
+  <div style="height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 22px;background:#08090C;">
+    <span style="font-size:14px;font-weight:600;letter-spacing:.3px;">{{ statusTime }}</span>
+    <div style="display:flex;align-items:center;gap:7px;color:#E7E9F0;">
+      <svg width="17" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"></rect><rect x="5" y="4" width="3" height="8" rx="1"></rect><rect x="10" y="1.5" width="3" height="10.5" rx="1"></rect><rect x="15" y="0" width="3" height="12" rx="1" opacity="0.35"></rect></svg>
+      <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 4.2A10 10 0 0115 4.2"></path><path d="M3.4 6.8A6.4 6.4 0 0112.6 6.8"></path><path d="M5.8 9.3A2.9 2.9 0 0110.2 9.3"></path><circle cx="8" cy="11" r="0.9" fill="currentColor" stroke="none"></circle></svg>
+      <div style="display:flex;align-items:center;gap:2px;"><div style="width:22px;height:11px;border:1.3px solid rgba(231,233,240,.5);border-radius:3px;padding:1.4px;"><div style="width:72%;height:100%;background:#E7E9F0;border-radius:1px;"></div></div><div style="width:1.6px;height:4px;background:rgba(231,233,240,.5);border-radius:0 1px 1px 0;"></div></div>
+    </div>
+  </div>
+
+  <!-- ===== HEADERS ===== -->
+  <sc-if value="{{ isMaster }}" hint-placeholder-val="{{ true }}">
+    <div style="flex-shrink:0;padding:6px 16px 12px;border-bottom:1px solid #1a1e26;display:flex;align-items:center;gap:12px;">
+      <div style="width:38px;height:38px;border-radius:11px;background:{{ accentGrad }};display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 18px {{ accentGlow }};">
+        <div style="width:3px;height:16px;border-radius:2px;background:#0D0F14;transform:rotate(-38deg);"></div>
+      </div>
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-family:'Space Grotesk';font-weight:600;font-size:19px;letter-spacing:.2px;">Master</span>
+          <span style="font-size:9.5px;color:#0D0F14;background:{{ accent }};border-radius:5px;padding:2px 6px;font-weight:700;font-family:'JetBrains Mono';">ORCHESTRATOR</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:2px;">
+          <span style="width:6px;height:6px;border-radius:50%;background:#3DDC97;animation:cpulse 1.7s ease-in-out infinite;"></span>
+          <span style="font-size:12px;color:#8B93A1;">{{ masterActivity }}</span>
+        </div>
+      </div>
+      <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(140deg,#3a4150,#20242d);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#C7CCD6;font-family:'Space Grotesk';border:1px solid #2C313B;flex-shrink:0;">KP</div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isChat }}" hint-placeholder-val="{{ false }}">
+    <div style="flex-shrink:0;padding:6px 12px 11px;border-bottom:1px solid #1a1e26;display:flex;align-items:center;gap:9px;">
+      <button onClick="{{ openSessions }}" title="Chats" style="width:36px;height:36px;border-radius:10px;border:1px solid #23272F;background:transparent;color:#C7CCD6;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-active="background:#171B23;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"></path></svg>
+      </button>
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:'Space Grotesk';font-weight:600;font-size:17px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ activeTitle }}</div>
+        <button onClick="{{ openFilesFromHeader }}" style="margin-top:2px;display:inline-flex;align-items:center;gap:5px;background:transparent;border:none;padding:0;color:#8B93A1;font-size:11px;cursor:pointer;font-family:'JetBrains Mono';" style-active="color:#C7CCD6;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path></svg>
+          {{ activeFolder }}
+        </button>
+      </div>
+      <button onClick="{{ newChat }}" title="New chat" style="width:36px;height:36px;border-radius:10px;border:1px solid #23272F;background:transparent;color:#9AA3B2;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-active="background:#171B23;color:#E7E9F0;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"></path></svg>
+      </button>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isAgents }}" hint-placeholder-val="{{ false }}">
+    <div style="flex-shrink:0;padding:6px 16px 10px;border-bottom:1px solid #1a1e26;">
+      <div style="display:flex;align-items:baseline;gap:9px;">
+        <span style="font-family:'Space Grotesk';font-weight:600;font-size:22px;">Agents</span>
+        <span style="font-size:12px;color:#626B79;font-family:'JetBrains Mono';">{{ agentCount }} sessions</span>
+      </div>
+      <div class="cscroll" style="display:flex;gap:7px;margin-top:11px;overflow-x:auto;">
+        <sc-for list="{{ filters }}" as="f" hint-placeholder-count="4">
+          <button onClick="{{ f.onClick }}" style="flex-shrink:0;background:{{ f.bg }};border:1px solid {{ f.border }};border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;color:{{ f.color }};cursor:pointer;font-family:'IBM Plex Sans';">{{ f.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isInbox }}" hint-placeholder-val="{{ false }}">
+    <div style="flex-shrink:0;padding:6px 16px 12px;border-bottom:1px solid #1a1e26;display:flex;align-items:baseline;gap:9px;">
+      <span style="font-family:'Space Grotesk';font-weight:600;font-size:22px;">Inbox</span>
+      <span style="font-size:12px;color:#626B79;">{{ inboxSub }}</span>
+    </div>
+  </sc-if>
+
+  <!-- ===== SCROLL BODY ===== -->
+  <div class="cscroll" data-auto="1" style="flex:1;overflow-y:auto;min-height:0;">
+
+    <!-- MASTER CHAT -->
+    <sc-if value="{{ isMaster }}" hint-placeholder-val="{{ true }}">
+      <div style="padding:16px 15px 18px;display:flex;flex-direction:column;gap:15px;">
+        <sc-for list="{{ masterView }}" as="msg" hint-placeholder-count="4">
+          <sc-if value="{{ msg.isYou }}" hint-placeholder-val="{{ false }}">
+            <div style="align-self:flex-end;max-width:86%;background:#171B23;border:1px solid #2C313B;border-radius:14px 14px 4px 14px;padding:10px 13px;font-size:14px;line-height:1.5;color:#E7E9F0;animation:cfade .25s ease;">{{ msg.text }}</div>
+          </sc-if>
+          <sc-if value="{{ msg.isMaster }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;gap:10px;animation:cfade .25s ease;">
+              <div style="width:26px;height:26px;border-radius:8px;background:{{ accentGrad }};flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-top:1px;">
+                <div style="width:2.5px;height:12px;border-radius:2px;background:#0D0F14;transform:rotate(-38deg);"></div>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <sc-if value="{{ msg.isText }}" hint-placeholder-val="{{ true }}">
+                  <div style="font-size:14px;line-height:1.55;color:#C7CCD6;padding-top:3px;">{{ msg.text }}</div>
+                </sc-if>
+                <sc-if value="{{ msg.isRoute }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:14px;line-height:1.5;color:#C7CCD6;margin-bottom:9px;">{{ msg.text }}</div>
+                  <div style="background:#12151C;border:1px solid #23272F;border-radius:13px;overflow:hidden;">
+                    <div style="display:flex;align-items:center;gap:7px;padding:9px 13px;border-bottom:1px solid #23272F;font-size:10.5px;font-weight:600;letter-spacing:.4px;color:{{ accent }};font-family:'JetBrains Mono';">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9"></path><path d="M4 18h6"></path><path d="M13 6l3 3-3 3"></path><path d="M20 6v12"></path></svg>
+                      AUTO-ROUTED
+                    </div>
+                    <sc-for list="{{ msg.routes }}" as="r" hint-placeholder-count="2">
+                      <div style="display:flex;align-items:center;gap:10px;padding:11px 13px;">
+                        <span style="width:26px;height:26px;border-radius:7px;background:{{ r.soft }};border:1px solid {{ r.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:10px;font-weight:600;color:{{ r.color }};flex-shrink:0;">{{ r.initials }}</span>
+                        <div style="flex:1;min-width:0;">
+                          <div style="font-size:13px;font-weight:600;color:#E7E9F0;">{{ r.name }}</div>
+                          <div style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;margin-top:1px;">{{ r.repo }}</div>
+                        </div>
+                        <span style="font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:{{ r.color }};background:{{ r.soft }};border-radius:6px;padding:3px 7px;">{{ r.action }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ msg.isEscalate }}" hint-placeholder-val="{{ false }}">
+                  <div style="background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.35);border-left:3px solid #FFB020;border-radius:12px;padding:13px;animation:cattn 2.6s ease-in-out infinite;">
+                    <div style="display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:700;letter-spacing:.4px;color:#FFB020;font-family:'JetBrains Mono';margin-bottom:9px;">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"></path><path d="M12 10v4"></path><path d="M12 17.5v.1"></path></svg>
+                      NEEDS YOUR DECISION
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+                      <span style="width:22px;height:22px;border-radius:6px;background:{{ msg.esc.soft }};border:1px solid {{ msg.esc.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:9.5px;font-weight:600;color:{{ msg.esc.color }};">{{ msg.esc.initials }}</span>
+                      <span style="font-size:14px;font-weight:600;">{{ msg.esc.name }}</span>
+                      <span style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;">{{ msg.esc.repo }}</span>
+                    </div>
+                    <div style="font-size:13px;line-height:1.5;color:#C7CCD6;margin-bottom:12px;">{{ msg.esc.reason }}</div>
+                    <sc-if value="{{ msg.escOpen }}" hint-placeholder-val="{{ true }}">
+                      <div style="display:flex;gap:9px;">
+                        <button onClick="{{ msg.onApprove }}" style="flex:1;background:#3DDC97;color:#04240F;border:none;border-radius:10px;padding:11px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-active="filter:brightness(.94);">Approve</button>
+                        <button onClick="{{ msg.onDeny }}" style="flex:1;background:transparent;color:#9AA3B2;border:1px solid #2C313B;border-radius:10px;padding:11px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-active="border-color:#FF5C5C;color:#FF7A7A;">Deny</button>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ msg.escResolved }}" hint-placeholder-val="{{ false }}">
+                      <div style="font-size:12.5px;font-weight:600;color:{{ msg.decisionColor }};display:flex;align-items:center;gap:7px;">
+                        <span style="width:7px;height:7px;border-radius:50%;background:{{ msg.decisionColor }};"></span>{{ msg.decisionTxt }}
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- ASSISTANT CHAT -->
+    <sc-if value="{{ isChat }}" hint-placeholder-val="{{ false }}">
+      <sc-if value="{{ chatEmpty }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:64px 26px 30px;text-align:center;">
+          <div style="width:50px;height:50px;border-radius:15px;background:linear-gradient(150deg,#2B313D,#15181F);border:1px solid #2C313B;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#D7DBE3" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13.5H11l-1 8.5L19.5 10H13z"></path></svg>
+          </div>
+          <div style="font-family:'Space Grotesk';font-size:20px;font-weight:600;">How can I help?</div>
+          <div style="font-size:13px;color:#8B93A1;margin-top:6px;">Working in <span style="color:#C7CCD6;font-family:'JetBrains Mono';">{{ activeFolder }}</span></div>
+          <div style="display:flex;flex-direction:column;gap:9px;margin-top:22px;">
+            <sc-for list="{{ suggestions }}" as="s" hint-placeholder-count="3">
+              <button onClick="{{ s.onClick }}" style="background:#12151C;border:1px solid #23272F;border-radius:12px;padding:12px 14px;font-size:13px;color:#C7CCD6;cursor:pointer;font-family:'IBM Plex Sans';text-align:left;" style-active="border-color:#2C313B;background:#171B23;">{{ s.text }}</button>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+      <div style="padding:18px 16px 20px;display:flex;flex-direction:column;gap:22px;">
+        <sc-for list="{{ assistantView }}" as="m" hint-placeholder-count="4">
+          <sc-if value="{{ m.isUser }}" hint-placeholder-val="{{ false }}">
+            <div style="align-self:flex-end;max-width:86%;display:flex;flex-direction:column;align-items:flex-end;gap:7px;animation:cfade .25s ease;">
+              <sc-if value="{{ m.hasAtts }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;">
+                  <sc-for list="{{ m.atts }}" as="at" hint-placeholder-count="1">
+                    <div style="display:flex;align-items:center;gap:7px;background:#12151C;border:1px solid #2C313B;border-radius:10px;padding:7px 10px;">
+                      <span style="width:26px;height:26px;border-radius:7px;background:{{ at.soft }};display:flex;align-items:center;justify-content:center;color:{{ at.color }};flex-shrink:0;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ at.icon }}"></path></svg>
+                      </span>
+                      <span style="font-family:'JetBrains Mono';font-size:11.5px;color:#C7CCD6;">{{ at.name }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{ m.hasText }}" hint-placeholder-val="{{ true }}">
+                <div style="background:#171B23;border:1px solid #2C313B;border-radius:16px 16px 5px 16px;padding:11px 14px;font-size:14.5px;line-height:1.5;color:#E7E9F0;">{{ m.text }}</div>
+              </sc-if>
+            </div>
+          </sc-if>
+          <sc-if value="{{ m.isBot }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;gap:11px;animation:cfade .25s ease;">
+              <div style="width:28px;height:28px;border-radius:9px;background:linear-gradient(150deg,#2B313D,#15181F);border:1px solid #2C313B;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D7DBE3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13.5H11l-1 8.5L19.5 10H13z"></path></svg>
+              </div>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:12px;padding-top:2px;">
+                <sc-for list="{{ m.blocks }}" as="b" hint-placeholder-count="2">
+                  <sc-if value="{{ b.isThinking }}" hint-placeholder-val="{{ false }}">
+                    <div style="border-left:2px solid #2C313B;padding-left:12px;">
+                      <button onClick="{{ b.onToggle }}" style="background:none;border:none;padding:0;display:flex;align-items:center;gap:7px;cursor:pointer;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B93A1" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l1.4 3.9L17 9l-3.6 1.1L12 14l-1.4-3.9L7 9l3.6-1.1z"></path></svg>
+                        <span style="font-size:12.5px;font-weight:600;font-style:italic;color:#8B93A1;">{{ b.summary }}</span>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ b.chevron }}"></path></svg>
+                      </button>
+                      <sc-if value="{{ b.open }}" hint-placeholder-val="{{ false }}">
+                        <div style="font-size:13px;line-height:1.6;color:#7E8794;font-style:italic;margin-top:8px;">{{ b.text }}</div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ b.isTool }}" hint-placeholder-val="{{ false }}">
+                    <div style="background:#0A0B0F;border:1px solid #23272F;border-radius:11px;overflow:hidden;">
+                      <button onClick="{{ b.onToggle }}" style="width:100%;display:flex;align-items:center;gap:9px;padding:10px 12px;background:none;border:none;cursor:pointer;text-align:left;">
+                        <span style="width:24px;height:24px;border-radius:7px;background:{{ accentSoft }};display:flex;align-items:center;justify-content:center;color:{{ accent }};flex-shrink:0;">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5-5-5-5"></path><path d="M12 19h8"></path></svg>
+                        </span>
+                        <span style="flex:1;min-width:0;">
+                          <span style="display:block;font-size:12.5px;font-weight:600;color:#C7CCD6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ b.label }}</span>
+                          <span style="display:block;font-size:10.5px;color:#626B79;font-family:'JetBrains Mono';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ b.detail }}</span>
+                        </span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3DDC97" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M5 12l5 5L20 6"></path></svg>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="{{ b.chevron }}"></path></svg>
+                      </button>
+                      <sc-if value="{{ b.open }}" hint-placeholder-val="{{ false }}">
+                        <div style="border-top:1px solid #1a1e26;padding:11px 13px;font-family:'JetBrains Mono';font-size:11.5px;line-height:1.65;color:#9AA3B2;white-space:pre-wrap;word-break:break-word;">{{ b.result }}</div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ b.isText }}" hint-placeholder-val="{{ true }}">
+                    <div style="font-size:14.5px;line-height:1.62;color:#D7DBE3;">{{ b.text }}</div>
+                  </sc-if>
+                  <sc-if value="{{ b.isBullets }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;flex-direction:column;gap:9px;">
+                      <sc-for list="{{ b.items }}" as="it" hint-placeholder-count="2">
+                        <div style="display:flex;gap:10px;font-size:14px;line-height:1.55;color:#C7CCD6;">
+                          <span style="width:5px;height:5px;border-radius:50%;background:{{ accent }};margin-top:8px;flex-shrink:0;"></span>
+                          <span style="flex:1;">{{ it }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ b.isCode }}" hint-placeholder-val="{{ false }}">
+                    <div style="background:#0A0B0F;border:1px solid #23272F;border-radius:11px;padding:12px 13px;font-family:'JetBrains Mono';font-size:12.5px;line-height:1.65;color:#9DE3C0;white-space:pre-wrap;word-break:break-word;">{{ b.code }}</div>
+                  </sc-if>
+                </sc-for>
+                <sc-if value="{{ m.showActions }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;gap:14px;margin-top:1px;">
+                    <button onClick="{{ noop }}" style="background:none;border:none;color:#626B79;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:12px;font-family:'IBM Plex Sans';" style-active="color:#9AA3B2;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a2 2 0 012-2h10"></path></svg>Copy</button>
+                    <button onClick="{{ noop }}" style="background:none;border:none;color:#626B79;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:12px;font-family:'IBM Plex Sans';" style-active="color:#9AA3B2;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v6h6"></path><path d="M20 20v-6h-6"></path><path d="M4 10a8 8 0 0114-3M20 14a8 8 0 01-14 3"></path></svg>Retry</button>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- AGENTS LIST -->
+    <sc-if value="{{ isAgents }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:14px 15px 18px;display:flex;flex-direction:column;gap:11px;">
+        <sc-for list="{{ agentsView }}" as="a" hint-placeholder-count="4">
+          <button onClick="{{ a.onOpen }}" style="text-align:left;background:#0D0F14;border:1px solid {{ a.cardBorder }};border-radius:15px;padding:14px;cursor:pointer;display:block;width:100%;" style-active="background:#12151C;">
+            <div style="display:flex;align-items:center;gap:11px;">
+              <div style="width:40px;height:40px;border-radius:11px;background:{{ a.soft }};border:1px solid {{ a.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:13px;font-weight:600;color:{{ a.color }};flex-shrink:0;">{{ a.initials }}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:15px;font-weight:600;line-height:1.2;">{{ a.name }}</div>
+                <div style="font-family:'JetBrains Mono';font-size:11px;color:#626B79;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.repo }} · {{ a.branch }}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;background:{{ a.statusSoft }};border:1px solid {{ a.statusBorder }};border-radius:20px;padding:4px 10px;flex-shrink:0;">
+                <span style="width:6px;height:6px;border-radius:50%;background:{{ a.statusColor }};animation:{{ a.dotAnim }};"></span>
+                <span style="font-size:10.5px;font-weight:600;color:{{ a.statusColor }};">{{ a.statusLabel }}</span>
+              </div>
+            </div>
+            <div style="background:#08090C;border:1px solid #1a1e26;border-radius:9px;padding:8px 11px;margin-top:12px;font-family:'JetBrains Mono';font-size:11.5px;color:{{ a.lastColor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.last }}</div>
+            <div style="display:flex;gap:15px;margin-top:11px;font-size:11px;color:#626B79;font-family:'JetBrains Mono';">
+              <span>{{ a.mem }} mem</span><span>{{ a.tools }} tools</span><span>{{ a.cost }}</span>
+              <span style="margin-left:auto;color:#4a5262;">{{ a.model }}</span>
+            </div>
+          </button>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- INBOX -->
+    <sc-if value="{{ isInbox }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:14px 15px 18px;display:flex;flex-direction:column;gap:13px;">
+        <sc-for list="{{ inboxView }}" as="i" hint-placeholder-count="3">
+          <div style="background:#0D0F14;border:1px solid {{ i.cardBorder }};border-left:3px solid {{ i.accentEdge }};border-radius:14px;padding:14px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+              <span style="font-size:9.5px;font-weight:700;letter-spacing:.4px;color:{{ i.tagColor }};background:{{ i.tagSoft }};border-radius:5px;padding:3px 7px;font-family:'JetBrains Mono';">{{ i.tag }}</span>
+              <span style="width:22px;height:22px;border-radius:6px;background:{{ i.soft }};border:1px solid {{ i.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:9.5px;font-weight:600;color:{{ i.color }};margin-left:auto;">{{ i.initials }}</span>
+              <span style="font-size:12px;color:#9AA3B2;">{{ i.agentName }}</span>
+            </div>
+            <div style="font-size:15px;font-weight:600;color:#E7E9F0;line-height:1.35;">{{ i.title }}</div>
+            <div style="font-size:13px;color:#8B93A1;margin-top:5px;line-height:1.5;">{{ i.reason }}</div>
+            <sc-if value="{{ i.hasCmd }}" hint-placeholder-val="{{ false }}">
+              <div style="background:#08090C;border:1px solid #1a1e26;border-radius:8px;padding:8px 11px;margin-top:11px;font-family:'JetBrains Mono';font-size:12px;color:#C7CCD6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><span style="color:#4a5262;">$ </span>{{ i.cmd }}</div>
+            </sc-if>
+            <sc-if value="{{ i.open }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;gap:9px;margin-top:13px;">
+                <button onClick="{{ i.onPrimary }}" style="flex:1;background:{{ i.primaryBg }};color:{{ i.primaryColor }};border:none;border-radius:10px;padding:11px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-active="filter:brightness(.94);">{{ i.primaryLabel }}</button>
+                <button onClick="{{ i.onSecondary }}" style="flex:1;background:transparent;color:#9AA3B2;border:1px solid #2C313B;border-radius:10px;padding:11px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-active="border-color:#3a4150;color:#E7E9F0;">{{ i.secondaryLabel }}</button>
+              </div>
+            </sc-if>
+            <sc-if value="{{ i.resolved }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:7px;margin-top:13px;font-size:13px;font-weight:600;color:{{ i.resolvedColor }};">
+                <span style="width:7px;height:7px;border-radius:50%;background:{{ i.resolvedColor }};"></span>{{ i.resolvedTxt }}
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+  </div>
+
+  <!-- ===== COMPOSERS ===== -->
+  <sc-if value="{{ isMaster }}" hint-placeholder-val="{{ true }}">
+    <div style="flex-shrink:0;padding:10px 14px 12px;border-top:1px solid #1a1e26;background:#08090C;">
+      <div style="background:#12151C;border:1px solid #2C313B;border-radius:16px;padding:6px 6px 6px 14px;display:flex;align-items:flex-end;gap:8px;">
+        <textarea data-composer="1" value="{{ masterComposer }}" onChange="{{ onMasterComposer }}" onKeyDown="{{ onMasterKey }}" placeholder="Route a task to your agents…" rows="1" style="flex:1;background:transparent;border:none;outline:none;resize:none;color:#E7E9F0;font-family:'IBM Plex Sans';font-size:14.5px;line-height:1.5;padding:7px 0;max-height:96px;"></textarea>
+        <button onClick="{{ sendMaster }}" style="width:38px;height:38px;border-radius:12px;border:none;background:{{ accent }};color:#1a1400;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-active="filter:brightness(1.08);">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V5"></path><path d="M6 11l6-6 6 6"></path></svg>
+        </button>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isChat }}" hint-placeholder-val="{{ false }}">
+    <div style="flex-shrink:0;padding:8px 14px 12px;border-top:1px solid #1a1e26;background:#08090C;position:relative;">
+      <sc-if value="{{ hasAttachments }}" hint-placeholder-val="{{ false }}">
+        <div class="cscroll" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:9px;">
+          <sc-for list="{{ attachmentChips }}" as="c" hint-placeholder-count="1">
+            <div style="flex-shrink:0;display:flex;align-items:center;gap:8px;background:#12151C;border:1px solid #2C313B;border-radius:11px;padding:7px 9px 7px 8px;">
+              <span style="width:26px;height:26px;border-radius:7px;background:{{ c.soft }};display:flex;align-items:center;justify-content:center;color:{{ c.color }};flex-shrink:0;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ c.icon }}"></path></svg>
+              </span>
+              <span style="font-family:'JetBrains Mono';font-size:11.5px;color:#C7CCD6;white-space:nowrap;">{{ c.name }}</span>
+              <button onClick="{{ c.onRemove }}" style="width:18px;height:18px;border-radius:5px;border:none;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-active="background:#23272F;color:#FF7A7A;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+              </button>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ attachMenuOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;left:16px;bottom:64px;width:214px;background:#12151C;border:1px solid #2C313B;border-radius:14px;box-shadow:0 16px 44px rgba(0,0,0,.55);overflow:hidden;z-index:12;animation:cfade .16s ease;">
+          <sc-for list="{{ attachOptions }}" as="o" hint-placeholder-count="3">
+            <button onClick="{{ o.onClick }}" style="width:100%;display:flex;align-items:center;gap:12px;padding:12px 14px;background:transparent;border:none;border-bottom:1px solid #1a1e26;cursor:pointer;text-align:left;" style-active="background:#171B23;">
+              <span style="width:30px;height:30px;border-radius:8px;background:#0A0B0F;border:1px solid #23272F;display:flex;align-items:center;justify-content:center;color:{{ accent }};flex-shrink:0;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ o.icon }}"></path></svg>
+              </span>
+              <span style="font-size:13.5px;font-weight:500;color:#E7E9F0;">{{ o.label }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showSuggestions }}" hint-placeholder-val="{{ true }}">
+        <div class="cscroll" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:10px;">
+          <sc-for list="{{ suggestions }}" as="s" hint-placeholder-count="3">
+            <button onClick="{{ s.onClick }}" style="flex-shrink:0;background:#12151C;border:1px solid #23272F;border-radius:12px;padding:8px 13px;font-size:12.5px;color:#C7CCD6;cursor:pointer;font-family:'IBM Plex Sans';white-space:nowrap;" style-active="border-color:#2C313B;">{{ s.text }}</button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <div style="background:#12151C;border:1px solid #2C313B;border-radius:18px;padding:6px 6px 6px 8px;display:flex;align-items:flex-end;gap:8px;">
+        <button onClick="{{ toggleAttachMenu }}" style="width:36px;height:36px;border-radius:12px;border:none;background:{{ attachBtnBg }};color:{{ attachBtnColor }};display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:transform .15s;transform:{{ attachBtnRotate }};" style-active="background:#1B1F27;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+        </button>
+        <textarea data-composer="1" value="{{ assistantComposer }}" onChange="{{ onAssistantComposer }}" onKeyDown="{{ onAssistantKey }}" placeholder="Ask anything" rows="1" style="flex:1;background:transparent;border:none;outline:none;resize:none;color:#E7E9F0;font-family:'IBM Plex Sans';font-size:14.5px;line-height:1.5;padding:8px 0;max-height:110px;"></textarea>
+        <button onClick="{{ sendAssistant }}" style="width:38px;height:38px;border-radius:13px;border:none;background:{{ accent }};color:#1a1400;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-active="filter:brightness(1.08);">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V5"></path><path d="M6 11l6-6 6 6"></path></svg>
+        </button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== BOTTOM TAB BAR ===== -->
+  <div style="flex-shrink:0;height:70px;background:#0A0B0F;border-top:1px solid #1a1e26;display:flex;align-items:flex-start;padding:8px 6px 0;">
+    <button onClick="{{ tabMaster }}" style="flex:1;background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 0;color:{{ cMaster }};">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18V7"></path><path d="M12 18V4"></path><path d="M19 18v-8"></path></svg>
+      <span style="font-size:10.5px;font-weight:600;letter-spacing:.1px;">Master</span>
+    </button>
+    <button onClick="{{ tabChat }}" style="flex:1;background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 0;color:{{ cChat }};">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 01-11.7 7.9L4 21l1.6-4.9A8.5 8.5 0 1121 11.5z"></path></svg>
+      <span style="font-size:10.5px;font-weight:600;letter-spacing:.1px;">Chat</span>
+    </button>
+    <button onClick="{{ tabAgents }}" style="flex:1;background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 0;color:{{ cAgents }};">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="6" r="2.4"></circle><circle cx="6" cy="17" r="2.4"></circle><circle cx="18" cy="17" r="2.4"></circle><path d="M12 8.4v3M10.4 15.4l-2.8-2M13.6 15.4l2.8-2"></path></svg>
+      <span style="font-size:10.5px;font-weight:600;letter-spacing:.1px;">Agents</span>
+    </button>
+    <button onClick="{{ tabInbox }}" style="flex:1;background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 0;color:{{ cInbox }};position:relative;">
+      <div style="position:relative;">
+        <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4a5 5 0 015 5v4l1.8 2.6H5.2L7 13V9a5 5 0 015-5z"></path><path d="M10 20a2 2 0 004 0"></path></svg>
+        <sc-if value="{{ showInboxBadge }}" hint-placeholder-val="{{ true }}">
+          <span style="position:absolute;top:-5px;right:-6px;min-width:16px;height:16px;border-radius:8px;background:#FF5C5C;color:#fff;font-size:9.5px;font-weight:700;font-family:'IBM Plex Sans';display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid #0A0B0F;">{{ inboxBadge }}</span>
+        </sc-if>
+      </div>
+      <span style="font-size:10.5px;font-weight:600;letter-spacing:.1px;">Inbox</span>
+    </button>
+  </div>
+
+  <!-- ===== CHAT DRAWER (sessions + file explorer) ===== -->
+  <sc-if value="{{ chatDrawerOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeDrawer }}" style="position:absolute;inset:0;background:rgba(4,5,8,.6);z-index:35;"></div>
+    <div style="position:absolute;top:0;left:0;bottom:0;width:87%;max-width:380px;background:#0A0B0F;border-right:1px solid #1a1e26;z-index:36;display:flex;flex-direction:column;animation:cdraw .24s ease;box-shadow:26px 0 60px rgba(0,0,0,.55);">
+      <div style="height:44px;flex-shrink:0;"></div>
+      <div style="flex-shrink:0;padding:4px 12px 12px;display:flex;align-items:center;gap:9px;border-bottom:1px solid #1a1e26;">
+        <div style="flex:1;display:flex;background:#12151C;border:1px solid #23272F;border-radius:11px;padding:3px;">
+          <button onClick="{{ setChats }}" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:{{ chatsTabBg }};border:none;border-radius:8px;padding:8px;font-size:12.5px;font-weight:600;color:{{ chatsTabColor }};cursor:pointer;font-family:'IBM Plex Sans';">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 01-11.7 7.9L4 21l1.6-4.9A8.5 8.5 0 1121 11.5z"></path></svg>Chats
+          </button>
+          <button onClick="{{ setFiles }}" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:{{ filesTabBg }};border:none;border-radius:8px;padding:8px;font-size:12.5px;font-weight:600;color:{{ filesTabColor }};cursor:pointer;font-family:'IBM Plex Sans';">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path></svg>Files
+          </button>
+        </div>
+        <button onClick="{{ closeDrawer }}" style="width:34px;height:34px;border-radius:10px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-active="background:#171B23;color:#E7E9F0;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </button>
+      </div>
+
+      <!-- CHATS PANEL -->
+      <sc-if value="{{ drawerChats }}" hint-placeholder-val="{{ true }}">
+        <div class="cscroll" style="flex:1;overflow-y:auto;padding:12px 11px 18px;">
+          <button onClick="{{ newChat }}" style="width:100%;display:flex;align-items:center;gap:9px;background:{{ accentSoft }};border:1px solid {{ accentBorder }};border-radius:12px;padding:11px 13px;font-size:13.5px;font-weight:600;color:{{ accent }};cursor:pointer;font-family:'IBM Plex Sans';margin-bottom:12px;" style-active="filter:brightness(1.1);">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>New chat
+          </button>
+          <div style="display:flex;align-items:center;gap:9px;background:#12151C;border:1px solid #23272F;border-radius:11px;padding:9px 12px;margin-bottom:14px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3-3"></path></svg>
+            <input value="{{ sessionQuery }}" onInput="{{ onSessionQuery }}" placeholder="Search chats" style="flex:1;background:transparent;border:none;outline:none;color:#E7E9F0;font-size:13px;font-family:'IBM Plex Sans';" />
+          </div>
+          <sc-for list="{{ sessionGroups }}" as="g" hint-placeholder-count="2">
+            <div style="font-size:10.5px;font-weight:700;letter-spacing:.5px;color:#626B79;font-family:'JetBrains Mono';padding:6px 4px 8px;">{{ g.label }}</div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+              <sc-for list="{{ g.items }}" as="c" hint-placeholder-count="2">
+                <button onClick="{{ c.onClick }}" style="text-align:left;background:{{ c.bg }};border:1px solid {{ c.border }};border-radius:11px;padding:11px 12px;cursor:pointer;display:block;width:100%;" style-active="background:#12151C;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:13.5px;font-weight:600;color:{{ c.titleColor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;">{{ c.title }}</span>
+                    <span style="font-size:10.5px;color:#626B79;font-family:'JetBrains Mono';flex-shrink:0;">{{ c.time }}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;margin-top:5px;">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#5A6473" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path></svg>
+                    <span style="font-size:10.5px;color:#5A6473;font-family:'JetBrains Mono';flex-shrink:0;">{{ c.folder }}</span>
+                    <span style="font-size:11.5px;color:#8B93A1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">· {{ c.preview }}</span>
+                  </div>
+                </button>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- FILES PANEL -->
+      <sc-if value="{{ drawerFiles }}" hint-placeholder-val="{{ false }}">
+        <sc-if value="{{ filesBrowseOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="flex-shrink:0;padding:12px 13px 10px;border-bottom:1px solid #1a1e26;">
+          <div style="display:flex;align-items:center;gap:7px;">
+            <span style="width:26px;height:26px;border-radius:7px;background:{{ accentSoft }};display:flex;align-items:center;justify-content:center;color:{{ accent }};flex-shrink:0;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path></svg>
+            </span>
+            <div style="min-width:0;">
+              <div style="font-size:13.5px;font-weight:600;color:#E7E9F0;font-family:'JetBrains Mono';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ crumb }}</div>
+              <div style="font-size:10.5px;color:#626B79;">Working folder · {{ activeTitle }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="cscroll" style="flex:1;overflow-y:auto;padding:8px 11px 18px;">
+          <sc-if value="{{ canUp }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ upDir }}" style="width:100%;display:flex;align-items:center;gap:11px;background:transparent;border:none;border-radius:10px;padding:11px 11px;cursor:pointer;color:#8B93A1;" style-active="background:#12151C;">
+              <span style="width:28px;height:28px;border-radius:8px;background:#12151C;border:1px solid #23272F;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+              </span>
+              <span style="font-size:13px;font-family:'JetBrains Mono';">..</span>
+            </button>
+          </sc-if>
+          <sc-for list="{{ curFiles }}" as="f" hint-placeholder-count="5">
+            <button onClick="{{ f.onClick }}" style="width:100%;display:flex;align-items:center;gap:11px;background:transparent;border:none;border-radius:10px;padding:10px 11px;cursor:pointer;text-align:left;" style-active="background:#12151C;">
+              <span style="width:28px;height:28px;border-radius:8px;background:{{ f.iconBg }};border:1px solid {{ f.iconBorder }};display:flex;align-items:center;justify-content:center;color:{{ f.iconColor }};flex-shrink:0;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ f.icon }}"></path><sc-if value="{{ f.icon2has }}" hint-placeholder-val="{{ false }}"><path d="{{ f.icon2 }}"></path></sc-if></svg>
+              </span>
+              <span style="flex:1;min-width:0;font-size:13.5px;color:#E7E9F0;font-family:'JetBrains Mono';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ f.name }}</span>
+              <sc-if value="{{ f.isDir }}" hint-placeholder-val="{{ true }}">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5A6473" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M9 6l6 6-6 6"></path></svg>
+              </sc-if>
+              <sc-if value="{{ f.isFile }}" hint-placeholder-val="{{ false }}">
+                <span style="font-size:10.5px;color:#5A6473;font-family:'JetBrains Mono';flex-shrink:0;">{{ f.size }}</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5A6473" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M9 6l6 6-6 6"></path></svg>
+              </sc-if>
+            </button>
+          </sc-for>
+          <div style="font-size:11px;color:#4a5262;text-align:center;padding:16px 10px 4px;font-family:'IBM Plex Sans';">Tap a file to preview it</div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ filePreviewOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="flex-shrink:0;padding:10px 12px 12px;border-bottom:1px solid #1a1e26;display:flex;align-items:center;gap:9px;">
+            <button onClick="{{ closePreview }}" title="Back" style="width:32px;height:32px;border-radius:9px;border:none;background:transparent;color:#C7CCD6;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-active="background:#171B23;">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>
+            </button>
+            <span style="width:28px;height:28px;border-radius:8px;background:#12151C;border:1px solid #23272F;display:flex;align-items:center;justify-content:center;color:#9AA3B2;flex-shrink:0;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"></path><path d="M14 3v4h4"></path></svg>
+            </span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13.5px;font-weight:600;color:#E7E9F0;font-family:'JetBrains Mono';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ previewName }}</div>
+              <div style="font-size:10.5px;color:#626B79;font-family:'JetBrains Mono';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ previewPath }} · {{ previewSize }}</div>
+            </div>
+          </div>
+          <div class="cscroll" style="flex:1;overflow:auto;padding:14px 14px;background:#08090C;min-height:0;">
+            <pre style="margin:0;font-family:'JetBrains Mono';font-size:12px;line-height:1.7;color:#C7CCD6;white-space:pre;">{{ previewContent }}</pre>
+          </div>
+          <div style="flex-shrink:0;padding:12px 13px 14px;border-top:1px solid #1a1e26;display:flex;gap:9px;">
+            <button onClick="{{ addPreviewToChat }}" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;background:{{ accent }};color:#1a1400;border:none;border-radius:11px;padding:12px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-active="filter:brightness(1.08);">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Add to chat
+            </button>
+            <button onClick="{{ closePreview }}" style="background:transparent;color:#9AA3B2;border:1px solid #2C313B;border-radius:11px;padding:12px 16px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-active="border-color:#3a4150;color:#E7E9F0;">Back</button>
+          </div>
+        </sc-if>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <!-- ===== AGENT SESSION (push overlay) ===== -->
+  <sc-if value="{{ sessionOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;background:#08090C;z-index:30;display:flex;flex-direction:column;animation:cpush .22s ease;">
+      <div style="height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 22px;">
+        <span style="font-size:14px;font-weight:600;letter-spacing:.3px;">{{ statusTime }}</span>
+        <div style="display:flex;align-items:center;gap:7px;color:#E7E9F0;">
+          <svg width="17" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"></rect><rect x="5" y="4" width="3" height="8" rx="1"></rect><rect x="10" y="1.5" width="3" height="10.5" rx="1"></rect><rect x="15" y="0" width="3" height="12" rx="1" opacity="0.35"></rect></svg>
+          <div style="display:flex;align-items:center;gap:2px;"><div style="width:22px;height:11px;border:1.3px solid rgba(231,233,240,.5);border-radius:3px;padding:1.4px;"><div style="width:72%;height:100%;background:#E7E9F0;border-radius:1px;"></div></div><div style="width:1.6px;height:4px;background:rgba(231,233,240,.5);border-radius:0 1px 1px 0;"></div></div>
+        </div>
+      </div>
+      <div style="flex-shrink:0;padding:2px 12px 12px;border-bottom:1px solid #1a1e26;display:flex;align-items:center;gap:10px;">
+        <button onClick="{{ closeAgent }}" style="width:34px;height:34px;border-radius:10px;border:none;background:transparent;color:#C7CCD6;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-active="background:#171B23;">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>
+        </button>
+        <div style="width:34px;height:34px;border-radius:10px;background:{{ sessAgent.soft }};border:1px solid {{ sessAgent.border }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:12px;font-weight:600;color:{{ sessAgent.color }};flex-shrink:0;">{{ sessAgent.initials }}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:15px;font-weight:600;line-height:1.15;">{{ sessAgent.name }}</div>
+          <div style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ sessAgent.repo }} · {{ sessAgent.branch }}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;background:{{ sessAgent.statusSoft }};border:1px solid {{ sessAgent.statusBorder }};border-radius:20px;padding:4px 10px;flex-shrink:0;">
+          <span style="width:6px;height:6px;border-radius:50%;background:{{ sessAgent.statusColor }};animation:{{ sessAgent.dotAnim }};"></span>
+          <span style="font-size:10.5px;font-weight:600;color:{{ sessAgent.statusColor }};">{{ sessAgent.statusLabel }}</span>
+        </div>
+      </div>
+      <div style="flex-shrink:0;display:flex;gap:14px;padding:9px 16px;border-bottom:1px solid #1a1e26;font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;">
+        <span>{{ sessAgent.model }}</span><span>{{ sessAgent.mem }} memories</span><span>{{ sessAgent.tools }} tools</span><span style="margin-left:auto;">{{ sessAgent.cost }}</span>
+      </div>
+      <div class="cscroll" data-auto="1" style="flex:1;overflow-y:auto;padding:14px 16px;font-family:'JetBrains Mono';font-size:12.5px;line-height:1.65;background:#08090C;">
+        <sc-for list="{{ sessAgent.log }}" as="line" hint-placeholder-count="8">
+          <div style="color:{{ line.color }};font-style:{{ line.fs }};white-space:pre-wrap;word-break:break-word;padding:1.5px 0;">{{ line.text }}</div>
+        </sc-for>
+        <sc-if value="{{ sessAgent.isRunning }}" hint-placeholder-val="{{ true }}">
+          <div style="padding-top:3px;color:{{ sessAgent.statusColor }};"><span style="animation:cblink 1s step-end infinite;">▋</span> <span style="color:#4a5262;font-size:11px;">streaming</span></div>
+        </sc-if>
+      </div>
+      <sc-if value="{{ sessAgent.isBlocked }}" hint-placeholder-val="{{ false }}">
+        <div style="flex-shrink:0;border-top:1px solid rgba(255,176,32,.4);background:rgba(255,176,32,.07);padding:14px 16px;display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:#FFB020;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"></path><path d="M12 10v4M12 17.5v.1"></path></svg>
+            Blocked — waiting for approval
+          </div>
+          <div style="font-size:13px;line-height:1.5;color:#C7CCD6;">{{ sessAgent.escReason }}</div>
+          <div style="display:flex;gap:9px;">
+            <button onClick="{{ sessAgent.onApprove }}" style="flex:1;background:#3DDC97;color:#04240F;border:none;border-radius:10px;padding:11px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-active="filter:brightness(.94);">Approve</button>
+            <button onClick="{{ sessAgent.onDeny }}" style="flex:1;background:transparent;color:#9AA3B2;border:1px solid #2C313B;border-radius:10px;padding:11px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-active="border-color:#FF5C5C;color:#FF7A7A;">Deny</button>
+          </div>
+        </div>
+      </sc-if>
+      <div style="flex-shrink:0;padding:10px 14px 14px;border-top:1px solid #1a1e26;background:#08090C;">
+        <div style="background:#12151C;border:1px solid #2C313B;border-radius:15px;padding:6px 6px 6px 14px;display:flex;align-items:flex-end;gap:8px;">
+          <textarea data-composer="1" value="{{ sessionComposer }}" onChange="{{ onSessionComposer }}" onKeyDown="{{ onSessionKey }}" placeholder="{{ sessPlaceholder }}" rows="1" style="flex:1;background:transparent;border:none;outline:none;resize:none;color:#E7E9F0;font-family:'IBM Plex Sans';font-size:14px;line-height:1.5;padding:7px 0;max-height:88px;"></textarea>
+          <button onClick="{{ sendSession }}" style="width:37px;height:37px;border-radius:12px;border:none;background:{{ accent }};color:#1a1400;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-active="filter:brightness(1.08);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V5"></path><path d="M6 11l6-6 6 6"></path></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:430,&quot;height&quot;:900},&quot;masterAccent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#F5C451&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Appearance&quot;},&quot;startTab&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;master&quot;,&quot;options&quot;:[&quot;master&quot;,&quot;chat&quot;,&quot;agents&quot;,&quot;inbox&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Behavior&quot;}}">
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    this.ICON = {
+      folder:'M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z',
+      file:'M7 3h7l4 4v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z',
+      fileFold:'M14 3v4h4',
+      code:'M9 8l-4 4 4 4M15 8l4 4-4 4',
+      image:'M4 6a1 1 0 011-1h14a1 1 0 011 1v12a1 1 0 01-1 1H5a1 1 0 01-1-1zM4 15l4-4 3 3 4-4 5 5',
+      md:'M5 5h14v14H5zM8 15V9l3 3 3-3v6',
+      camera:'M4 8a1 1 0 011-1h2l1.4-2h7.2L18 7h2a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1zM12 15.5a3 3 0 100-6 3 3 0 000 6z',
+    };
+    this.FILE_CONTENT = {
+      'rateLimit.ts': `import { redis } from '../redis'
+
+const LIMIT = 100        // requests
+const WINDOW = 60        // seconds
+
+export async function rateLimit(ip) {
+  const key = \`rl:\${ip}\`
+  const hits = await redis.incr(key)
+  if (hits === 1) await redis.expire(key, WINDOW)
+  return hits <= LIMIT
+}`,
+      'index.ts': `export { rateLimit } from './rateLimit'
+export { auth } from './auth'
+export { logger } from './logger'`,
+      'pipeline.ts': `import { rateLimit, auth, logger } from './middleware'
+
+export const pipeline = [
+  logger,
+  auth,
+  rateLimit,
+  handler,
+]`,
+      'callback.ts': `export async function callback(req, res) {
+  const session = await exchangeCode(req.query.code)
+  if (!session) return res.redirect('/login')
+  setCookie(res, session)
+  return res.redirect('/app')
+}`,
+      'CLAUDE.md': `# api-gateway
+
+Conventions for agents working here.
+
+- Use pnpm, not npm.
+- Middleware lives in src/server/middleware.
+- Rate limits are Redis-backed (rateLimit.ts).
+- Run \`pnpm test\` before committing.`,
+      'package.json': `{
+  "name": "api-gateway",
+  "version": "2.4.0",
+  "scripts": {
+    "dev": "tsx watch src/server",
+    "test": "vitest run"
+  }
+}`,
+      'slow_query.sql': `SELECT * FROM orders
+WHERE status = 'refunded'
+ORDER BY created_at DESC
+LIMIT 50;`,
+      'Dockerfile': `FROM node:20
+WORKDIR /app
+COPY . .
+RUN npm ci && npm run build
+CMD ["node","dist/server.js"]`,
+    };
+    this.state = this.seed();
+  }
+  getFileContent(name){ return this.FILE_CONTENT[name] || ('// '+name+'\n// preview unavailable — open in the workspace to view full contents'); }
+
+  hexToRgba(hex,a){ const n=parseInt(hex.slice(1),16); return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')'; }
+
+  seed(){
+    const L=(t,x)=>({t,x});
+    const B=(o)=>o;
+    return {
+      tab:(this.props.startTab||'master'),
+      agentOpen:null,
+      masterComposer:'', assistantComposer:'', sessionComposer:'',
+      agentFilter:'all', blockResolved:null, inboxState:{}, escResolved:null,
+      // chat
+      activeSession:'s1',
+      chatDrawerOpen:false, drawerMode:'chats', sessionQuery:'', filePath:[], filePreview:null,
+      attachments:[], attachMenuOpen:false, openBlocks:{},
+      chatSessions:[
+        {id:'s1', title:'Rate limiting strategy', time:'now', group:'Today', folder:'api-gateway',
+          tree:[
+            {type:'dir', name:'src', children:[
+              {type:'dir', name:'server', children:[
+                {type:'dir', name:'middleware', children:[
+                  {type:'file', name:'rateLimit.ts', size:'2.1 KB', kind:'code'},
+                  {type:'file', name:'index.ts', size:'0.8 KB', kind:'code'},
+                ]},
+                {type:'file', name:'pipeline.ts', size:'3.4 KB', kind:'code'},
+              ]},
+              {type:'dir', name:'auth', children:[
+                {type:'file', name:'callback.ts', size:'1.6 KB', kind:'code'},
+              ]},
+            ]},
+            {type:'file', name:'CLAUDE.md', size:'4.0 KB', kind:'md'},
+            {type:'file', name:'package.json', size:'1.1 KB', kind:'code'},
+          ],
+          msgs:[
+            {role:'user', text:"What's the difference between a token bucket and a leaky bucket rate limiter?"},
+            {role:'bot', blocks:[
+              {type:'thinking', summary:'Thought for 3s', text:'Both are classic shaping algorithms. I\u2019ll contrast how each handles bursts versus steady state, then give a rule of thumb.'},
+              {type:'text', text:'Both smooth traffic, but they shape it differently:'},
+              {type:'bullets', items:[
+                'Token bucket \u2014 tokens refill at a steady rate and each request spends one. Idle time banks tokens, so it allows short bursts up to the bucket size.',
+                'Leaky bucket \u2014 requests queue and drain at a fixed rate. Output is perfectly smooth; bursts just get delayed (or dropped when the queue is full).'
+              ]},
+              {type:'text', text:'Rule of thumb: token bucket favors bursty-but-bounded traffic, leaky bucket favors a strictly constant outflow.'}
+            ]},
+            {role:'user', text:'Here\u2019s our current middleware \u2014 does it actually handle bursts?', atts:[{name:'rateLimit.ts', kind:'code'}]},
+            {role:'bot', blocks:[
+              {type:'thinking', summary:'Thought for 5s', text:'Let me read the attached file and check whether it refills tokens over time or just counts within a fixed window.'},
+              {type:'tool', name:'read_file', label:'Read rateLimit.ts', detail:'48 lines · src/server/middleware', result:'const key = `rl:${ip}`\nconst hits = await redis.incr(key)\nif (hits === 1) await redis.expire(key, 60)\nreturn hits <= LIMIT'},
+              {type:'text', text:'Not quite \u2014 this is a fixed-window counter, not a token bucket.'},
+              {type:'bullets', items:[
+                'It resets every 60s, so a client can spend the full limit at 0:59 and again at 1:00 \u2014 a 2\u00d7 burst at the boundary.',
+                'There\u2019s no gradual refill, so bursts inside the window are all-or-nothing.'
+              ]},
+              {type:'text', text:'Swap the counter for a token bucket in a small Lua script:'},
+              {type:'code', code:'-- refill, then try-consume one token\nlocal now  = tonumber(ARGV[1])\nlocal rate = tonumber(ARGV[2])\nlocal t = redis.call("HMGET", KEYS[1], "tokens", "ts")\n-- refill by elapsed * rate, cap at burst, then\nreturn (tokens >= 1) and 1 or 0'}
+            ]},
+          ]},
+        {id:'s2', title:'Postgres index tuning', time:'2h', group:'Today', folder:'billing-service',
+          tree:[
+            {type:'dir', name:'db', children:[
+              {type:'file', name:'schema.sql', size:'6.2 KB', kind:'code'},
+              {type:'file', name:'slow_query.sql', size:'0.4 KB', kind:'code'},
+            ]},
+            {type:'dir', name:'migrations', children:[
+              {type:'file', name:'0007_webhook_events.py', size:'1.2 KB', kind:'code'},
+            ]},
+            {type:'file', name:'README.md', size:'2.0 KB', kind:'md'},
+          ],
+          msgs:[
+            {role:'user', text:'Why is this query doing a seq scan?', atts:[{name:'slow_query.sql', kind:'code'}]},
+            {role:'bot', blocks:[
+              {type:'thinking', summary:'Thought for 2s', text:'A seq scan usually means no usable index, or a low-selectivity predicate the planner ignores.'},
+              {type:'tool', name:'run_sql', label:'EXPLAIN ANALYZE', detail:'planner output', result:'Seq Scan on orders  (cost=0.00..24110 rows=1)\n  Filter: (status = \'refunded\')\n  Rows Removed by Filter: 482913'},
+              {type:'text', text:'There\u2019s no index on status, and it\u2019s low-cardinality. Add a partial index so only refunded rows are stored:'},
+              {type:'code', code:'CREATE INDEX idx_orders_refunded\n  ON orders (created_at)\n  WHERE status = \'refunded\';'}
+            ]},
+          ]},
+        {id:'s3', title:'Dockerfile multi-stage build', time:'Yesterday', group:'Yesterday', folder:'web-dashboard',
+          tree:[
+            {type:'file', name:'Dockerfile', size:'0.9 KB', kind:'code'},
+            {type:'file', name:'.dockerignore', size:'0.2 KB', kind:'code'},
+            {type:'dir', name:'src', children:[
+              {type:'file', name:'server.ts', size:'1.4 KB', kind:'code'},
+            ]},
+            {type:'file', name:'package.json', size:'1.3 KB', kind:'code'},
+          ],
+          msgs:[
+            {role:'user', text:'Make this Dockerfile smaller', atts:[{name:'Dockerfile', kind:'code'}]},
+            {role:'bot', blocks:[
+              {type:'text', text:'Use a multi-stage build so the final image only ships the runtime and built output:'},
+              {type:'code', code:'FROM node:20 AS build\nWORKDIR /app\nCOPY . .\nRUN npm ci && npm run build\n\nFROM node:20-slim\nWORKDIR /app\nCOPY --from=build /app/dist ./dist\nCMD ["node","dist/server.js"]'}
+            ]},
+          ]},
+        {id:'s4', title:'Debounce vs throttle', time:'Mon', group:'Previous 7 days', folder:'web-dashboard',
+          tree:[
+            {type:'dir', name:'src', children:[
+              {type:'dir', name:'hooks', children:[
+                {type:'file', name:'useDebounce.ts', size:'0.5 KB', kind:'code'},
+              ]},
+            ]},
+            {type:'file', name:'README.md', size:'1.0 KB', kind:'md'},
+          ],
+          msgs:[
+            {role:'user', text:'debounce vs throttle in one line each?'},
+            {role:'bot', blocks:[
+              {type:'bullets', items:[
+                'Debounce \u2014 wait until activity stops, then fire once (search-as-you-type).',
+                'Throttle \u2014 fire at most once per interval no matter how often called (scroll handlers).'
+              ]}
+            ]},
+          ]},
+      ],
+      // master / agents / inbox
+      masterMsgs:[
+        {role:'you', text:'Ship rate limiting on the gateway and fix the OAuth redirect loop on the dashboard.'},
+        {role:'master', type:'route', text:"On it \u2014 routing to two agents and picking up their sessions.",
+          routes:[{id:'cc', action:'assigned'},{id:'cx', action:'assigned'}]},
+        {role:'master', type:'text', text:'Aider hit an approval gate on the billing migration. Pulling you in.'},
+        {role:'master', type:'escalate', agent:'ad', reason:'Wants to run `alembic upgrade head` on staging \u2014 this alters 3 tables (webhook_events, charges, refunds).'},
+      ],
+      agents:[
+        {id:'cc', name:'Claude Code', initials:'CC', color:'#E8A87C', repo:'api-gateway', branch:'feat/rate-limiter', status:'running', model:'claude-sonnet-4.5', mem:6, tools:4, cost:'$1.42',
+          last:'~ src/server/pipeline.ts  (+6 \u22121)',
+          log:[L('sys','session resumed · api-gateway @ feat/rate-limiter'),L('you','add token-bucket rate limiting to the gateway middleware'),L('run','$ rg "middleware" src/ -l'),L('out','src/server/pipeline.ts'),L('out','src/server/middleware/index.ts'),L('think','Adding a Redis-backed token bucket limiter\u2026'),L('edit','+ src/server/middleware/rateLimit.ts  (48 lines)'),L('edit','~ src/server/pipeline.ts  (+6 \u22121)'),L('run','$ pnpm test middleware/rateLimit'),L('out','PASS  4 passed · 212ms')]},
+        {id:'cx', name:'Codex', initials:'CX', color:'#34D399', repo:'web-dashboard', branch:'fix/auth-redirect', status:'running', model:'gpt-5-codex', mem:5, tools:4, cost:'$0.86',
+          last:'\u2713 auth › redirects to /app after login (1.2s)',
+          log:[L('sys','session resumed · web-dashboard @ fix/auth-redirect'),L('you','fix the infinite redirect after OAuth login'),L('think','Tracing the redirect chain from /callback\u2026'),L('run','$ npm run typecheck'),L('out','tsc --noEmit  \u2713  0 errors'),L('edit','~ src/auth/callback.ts  (+11 \u22124)'),L('run','$ npm run test:e2e auth'),L('out','\u2713 auth › redirects to /app after login (1.2s)')]},
+        {id:'ad', name:'Aider', initials:'AD', color:'#B692F6', repo:'billing-service', branch:'migrate/webhooks', status:'blocked', model:'claude-sonnet-4.5', mem:5, tools:5, cost:'$0.61',
+          last:'\u26a0 waiting: alembic upgrade head',
+          escReason:'Wants to run `alembic upgrade head` on staging. This alters 3 tables: webhook_events, charges, refunds.',
+          log:[L('sys','session resumed · billing-service @ migrate/webhooks'),L('you','add stripe webhook events table + migration'),L('edit','~ billing/webhooks/stripe.py  (+34 \u22122)'),L('edit','+ migrations/0007_webhook_events.py  (28 lines)'),L('run','$ alembic upgrade head'),L('out','INFO  detected 1 pending migration'),L('warn','\u26a0 blocked \u2014 approval required to alter tables on staging')]},
+        {id:'gm', name:'Gemini CLI', initials:'GM', color:'#6C8EF5', repo:'data-pipeline', branch:'chore/etl-refactor', status:'idle', model:'gemini-2.5-pro', mem:5, tools:3, cost:'$0.23',
+          last:'idle · last run 14m ago',
+          log:[L('sys','session paused · data-pipeline @ chore/etl-refactor'),L('you','dedupe join keys before the load step'),L('run','$ python -m etl.run --dry'),L('out','planned 14 stages · 3 sources'),L('think','Deduping join keys before the load step\u2026'),L('out','idle · resume to continue')]},
+      ],
+      inbox:[
+        {id:'i1', agentId:'ad', kind:'decision', title:'Run database migration', reason:'`alembic upgrade head` will alter 3 tables on staging. Aider is blocked until you decide.', cmd:'alembic upgrade head'},
+        {id:'i2', agentId:'cc', kind:'decision', title:'Force-push rebased branch', reason:'Claude Code rebased onto main and wants to force-push, rewriting 4 commits on the remote branch.', cmd:'git push --force-with-lease origin feat/rate-limiter'},
+        {id:'i3', agentId:'cx', kind:'review', title:'Ready for review', reason:'3 files changed · +46 \u221218 on fix/auth-redirect. The OAuth redirect loop is fixed and e2e tests pass.', cmd:null},
+      ],
+    };
+  }
+
+  accent(){ return this.props.masterAccent || '#F5C451'; }
+  tokens(){ const a=this.accent(); return {accent:a, accentGrad:'linear-gradient(140deg,'+a+',#E0A93B)', accentGlow:this.hexToRgba(a,.35), accentSoft:this.hexToRgba(a,.14), accentBorder:this.hexToRgba(a,.4)}; }
+  agentById(id){ return this.state.agents.find(x=>x.id===id); }
+  activeSess(){ return this.state.chatSessions.find(c=>c.id===this.state.activeSession) || this.state.chatSessions[0]; }
+  effStatus(a){ if(a.id==='ad'){ return this.state.blockResolved==='approve'?'running':(this.state.blockResolved==='deny'?'idle':'blocked'); } return a.status; }
+  statusPack(s){ if(s==='running')return{color:'#3DDC97',label:'Running',soft:'rgba(61,220,151,.12)',border:'rgba(61,220,151,.32)',dot:'cpulse 1.7s ease-in-out infinite'}; if(s==='blocked')return{color:'#FFB020',label:'Blocked',soft:'rgba(255,176,32,.12)',border:'rgba(255,176,32,.35)',dot:'cpulse 1.4s ease-in-out infinite'}; return{color:'#8B93A1',label:'Idle',soft:'rgba(139,147,161,.1)',border:'#2C313B',dot:'none'}; }
+  logColor(t){ if(t==='sys')return{c:'#626B79',fs:'italic'}; if(t==='you')return{c:this.accent(),fs:'normal'}; if(t==='run')return{c:'#C7CCD6',fs:'normal'}; if(t==='out')return{c:'#8B93A1',fs:'normal'}; if(t==='think')return{c:'#8B93A1',fs:'italic'}; if(t==='edit')return{c:'#7FE3B0',fs:'normal'}; if(t==='warn')return{c:'#FFB020',fs:'normal'}; return{c:'#C7CCD6',fs:'normal'}; }
+  attIcon(kind){ if(kind==='image')return this.ICON.image; if(kind==='md')return this.ICON.md; return this.ICON.file; }
+
+  // resolve current directory within active session's tree
+  curDir(){ let cur=this.activeSess().tree||[]; for(const p of this.state.filePath){ const d=cur.find(x=>x.type==='dir'&&x.name===p); cur=d?d.children:[]; } return cur; }
+
+  // ---- actions ----
+  setTab(t){ this.setState({tab:t, agentOpen:null, chatDrawerOpen:false, attachMenuOpen:false}); }
+  openAgent(id){ this.setState({agentOpen:id, sessionComposer:''}); }
+  closeAgent(){ this.setState({agentOpen:null}); }
+  openSessions(){ this.setState({chatDrawerOpen:true, drawerMode:'chats', attachMenuOpen:false}); }
+  openFiles(){ this.setState({chatDrawerOpen:true, drawerMode:'files', filePath:[], filePreview:null, attachMenuOpen:false}); }
+  closeDrawer(){ this.setState({chatDrawerOpen:false, filePreview:null}); }
+  selectSession(id){ this.setState({activeSession:id, chatDrawerOpen:false, filePath:[], filePreview:null, attachments:[]}); }
+  newChat(){ const id='s'+Date.now(); const folder=this.activeSess().folder; this.setState(s=>({chatSessions:[{id, title:'New chat', time:'now', group:'Today', folder, tree:this.activeSess().tree, msgs:[]}, ...s.chatSessions], activeSession:id, chatDrawerOpen:false, attachments:[], attachMenuOpen:false})); }
+  toggleBlock(id){ this.setState(s=>({openBlocks:{...s.openBlocks,[id]:!s.openBlocks[id]}})); }
+  enterDir(name){ this.setState(s=>({filePath:[...s.filePath,name], filePreview:null})); }
+  upDir(){ this.setState(s=>({filePath:s.filePath.slice(0,-1), filePreview:null})); }
+  previewFile(f){ this.setState({filePreview:f}); }
+  closePreview(){ this.setState({filePreview:null}); }
+  addPreviewToChat(){ const f=this.state.filePreview; if(!f) return; this.setState(s=>({attachments:[...s.attachments,{name:f.name,kind:f.kind||'code'}], filePreview:null, chatDrawerOpen:false, attachMenuOpen:false})); }
+  addAttachment(name,kind){ this.setState(s=>({attachments:[...s.attachments,{name,kind}], attachMenuOpen:false})); }
+  removeAttachment(i){ this.setState(s=>({attachments:s.attachments.filter((_,idx)=>idx!==i)})); }
+  toggleAttachMenu(){ this.setState(s=>({attachMenuOpen:!s.attachMenuOpen})); }
+
+  sendMaster(){ const t=this.state.masterComposer.trim(); if(!t)return; this.setState(s=>({masterComposer:'', masterMsgs:[...s.masterMsgs,{role:'you',text:t},{role:'master',type:'text',text:'Got it \u2014 I\u2019ll route that to the right agent and keep this thread posted.'}]})); }
+  sendAssistant(){ const t=this.state.assistantComposer.trim(); const atts=this.state.attachments; if(!t&&atts.length===0)return;
+    const um={role:'user', text:t, atts:atts.slice()};
+    const bm={role:'bot', blocks:[{type:'text', text:'Here\u2019s how I\u2019d approach that \u2014 want me to go deeper on any part?'}]};
+    const aid=this.state.activeSession;
+    this.setState(s=>({assistantComposer:'', attachments:[], attachMenuOpen:false, chatSessions:s.chatSessions.map(cs=> cs.id===aid ? {...cs, title:(cs.title==='New chat'&&t)?t.slice(0,34):cs.title, msgs:[...cs.msgs, um, bm]} : cs)})); }
+  sendSession(){ const t=this.state.sessionComposer.trim(); if(!t)return; const id=this.state.agentOpen; const agents=this.state.agents.map(a=>a.id===id?{...a,log:[...a.log,{t:'you',x:t},{t:'think',x:'Working on it\u2026'}]}:a); this.setState({sessionComposer:'', agents}); }
+
+  resolveBlock(decision){ const agents=this.state.agents.map(a=> a.id==='ad' ? {...a, status:(decision==='approve'?'running':'idle'), log: decision==='approve' ? [...a.log.filter(l=>l.t!=='warn'),{t:'sys',x:'approved · running migration'},{t:'run',x:'$ alembic upgrade head'},{t:'out',x:'INFO  migration 0007_webhook_events complete \u2713'}] : [...a.log.filter(l=>l.t!=='warn'),{t:'sys',x:'denied · migration cancelled, session paused'}] } : a); this.setState({blockResolved:decision, escResolved:decision, agents}); }
+  resolveInbox(id,choice){ this.setState(s=>({inboxState:{...s.inboxState,[id]:choice}})); }
+
+  renderVals(){
+    const tk=this.tokens(), S=this.state, tab=S.tab, activeColor=tk.accent, idle='#5A6473', noop=()=>{};
+
+    // master
+    const masterView=S.masterMsgs.map(m=>{
+      if(m.role==='you') return {isYou:true,isMaster:false,text:m.text};
+      const base={isYou:false,isMaster:true,isText:false,isRoute:false,isEscalate:false,text:m.text||''};
+      if(m.type==='text') base.isText=true;
+      if(m.type==='route'){ base.isRoute=true; base.routes=m.routes.map(r=>{const a=this.agentById(r.id);return{initials:a.initials,name:a.name,repo:a.repo+' · '+a.branch,action:r.action,color:a.color,soft:this.hexToRgba(a.color,.14),border:this.hexToRgba(a.color,.4)};}); }
+      if(m.type==='escalate'){ base.isEscalate=true; const a=this.agentById(m.agent); base.esc={initials:a.initials,name:a.name,repo:a.repo,color:a.color,soft:this.hexToRgba(a.color,.14),border:this.hexToRgba(a.color,.4),reason:m.reason}; base.escOpen=S.escResolved==null; base.escResolved=S.escResolved!=null; base.decisionColor=S.escResolved==='approve'?'#3DDC97':'#FF7A7A'; base.decisionTxt=S.escResolved==='approve'?'Approved \u2014 Aider resumed the migration':'Denied \u2014 migration cancelled'; base.onApprove=()=>this.resolveBlock('approve'); base.onDeny=()=>this.resolveBlock('deny'); }
+      return base;
+    });
+
+    // assistant chat
+    const active=this.activeSess();
+    const assistantView=active.msgs.map((m,mi)=>{
+      if(m.role==='user'){ const atts=(m.atts||[]).map(a=>({name:a.name, icon:this.attIcon(a.kind), color:tk.accent, soft:tk.accentSoft})); return {isUser:true,isBot:false,text:m.text,hasText:!!(m.text&&m.text.length),hasAtts:atts.length>0,atts}; }
+      const blocks=m.blocks.map((b,bi)=>{ const id=active.id+':'+mi+':'+bi; const open=!!S.openBlocks[id]; return {isText:b.type==='text',isBullets:b.type==='bullets',isCode:b.type==='code',isThinking:b.type==='thinking',isTool:b.type==='tool',text:b.text,items:b.items,code:b.code,summary:b.summary,name:b.name,label:b.label,detail:b.detail,result:b.result,open,onToggle:()=>this.toggleBlock(id),chevron:open?'M6 9l6 6 6-6':'M9 6l6 6-6 6'}; });
+      return {isUser:false,isBot:true,blocks,showActions:mi===active.msgs.length-1};
+    });
+    const chatEmpty=active.msgs.length===0;
+    const lastIsBot=active.msgs.length>0 && active.msgs[active.msgs.length-1].role==='bot';
+    const suggestions=['Explain the auth redirect fix','Add rate-limit headers in Express','Write a Redis token-bucket script'].map(t=>({text:t,onClick:()=>this.setState({assistantComposer:t})}));
+
+    // attachments (composer)
+    const attachmentChips=S.attachments.map((a,i)=>({name:a.name, icon:this.attIcon(a.kind), color:tk.accent, soft:tk.accentSoft, onRemove:()=>this.removeAttachment(i)}));
+    const attachOptions=[
+      {label:'Browse files', icon:this.ICON.folder, onClick:()=>this.openFiles()},
+      {label:'Photo library', icon:this.ICON.image, onClick:()=>this.addAttachment('screenshot.png','image')},
+      {label:'Take photo', icon:this.ICON.camera, onClick:()=>this.addAttachment('photo.jpg','image')},
+    ];
+
+    // drawer — sessions grouped
+    const q=S.sessionQuery.trim().toLowerCase();
+    const groups=['Today','Yesterday','Previous 7 days'];
+    const sessionGroups=groups.map(g=>({label:g, items:S.chatSessions.filter(c=>c.group===g).filter(c=>{ if(!q)return true; const prev=((c.msgs.find(m=>m.role==='user')||{}).text||''); return (c.title+' '+prev+' '+c.folder).toLowerCase().includes(q); }).map(c=>{ const on=c.id===S.activeSession; return {id:c.id, title:c.title, time:c.time, folder:c.folder, preview:((c.msgs.find(m=>m.role==='user')||{}).text)||'New conversation', bg:on?tk.accentSoft:'#0D0F14', border:on?tk.accentBorder:'#1a1e26', titleColor:on?tk.accent:'#E7E9F0', onClick:()=>this.selectSession(c.id)}; })})).filter(g=>g.items.length>0);
+
+    // drawer — files (active session's folder)
+    const curFiles=this.curDir().map(f=> f.type==='dir'
+      ? {isDir:true, isFile:false, name:f.name, icon:this.ICON.folder, icon2:'', icon2has:false, iconBg:tk.accentSoft, iconBorder:'transparent', iconColor:tk.accent, onClick:()=>this.enterDir(f.name)}
+      : {isDir:false, isFile:true, name:f.name, size:f.size, icon:this.ICON.file, icon2:this.ICON.fileFold, icon2has:true, iconBg:'#12151C', iconBorder:'#23272F', iconColor:'#9AA3B2', onClick:()=>this.previewFile(f)});
+    const crumb=active.folder + (S.filePath.length? ' / '+S.filePath.join(' / ') : '');
+
+    // filters
+    const fdefs=[['all','All'],['running','Running'],['idle','Idle'],['blocked','Blocked']];
+    const filters=fdefs.map(([id,label])=>{ const on=S.agentFilter===id; return {label,onClick:()=>this.setState({agentFilter:id}),bg:on?tk.accentSoft:'#12151C',border:on?tk.accentBorder:'#23272F',color:on?tk.accent:'#9AA3B2'}; });
+
+    // agents
+    const agentsView=S.agents.filter(a=>{const st=this.effStatus(a);return S.agentFilter==='all'||S.agentFilter===st;}).map(a=>{ const st=this.effStatus(a); const sp=this.statusPack(st); return {id:a.id,name:a.name,initials:a.initials,color:a.color,soft:this.hexToRgba(a.color,.14),border:this.hexToRgba(a.color,.4),repo:a.repo,branch:a.branch,model:a.model,mem:a.mem,tools:a.tools,cost:a.cost,last:a.last,lastColor:st==='blocked'?'#FFB020':'#8B93A1',cardBorder:st==='blocked'?'rgba(255,176,32,.3)':'#23272F',statusColor:sp.color,statusLabel:sp.label,statusSoft:sp.soft,statusBorder:sp.border,dotAnim:sp.dot,onOpen:()=>this.openAgent(a.id)}; });
+
+    // inbox
+    const inboxView=S.inbox.map(i=>{ const a=this.agentById(i.agentId); let choice=i.id==='i1'?(S.blockResolved==='approve'?'primary':(S.blockResolved==='deny'?'secondary':null)):(S.inboxState[i.id]||null); const isReview=i.kind==='review'; const v={id:i.id,title:i.title,reason:i.reason,cmd:i.cmd,hasCmd:!!i.cmd,agentName:a.name,initials:a.initials,color:a.color,soft:this.hexToRgba(a.color,.14),border:this.hexToRgba(a.color,.4),tag:isReview?'REVIEW':'DECISION',tagColor:isReview?'#6C8EF5':'#FFB020',tagSoft:isReview?'rgba(108,142,245,.14)':'rgba(255,176,32,.12)',accentEdge:isReview?'#6C8EF5':'#FFB020',cardBorder:choice?'#23272F':(isReview?'rgba(108,142,245,.28)':'rgba(255,176,32,.28)'),open:choice==null,resolved:choice!=null,primaryLabel:isReview?'Approve & merge':'Approve',secondaryLabel:isReview?'Open diff':'Deny',primaryBg:'#3DDC97',primaryColor:'#04240F'}; if(i.id==='i1'){v.onPrimary=()=>this.resolveBlock('approve');v.onSecondary=()=>this.resolveBlock('deny');}else{v.onPrimary=()=>this.resolveInbox(i.id,'primary');v.onSecondary=()=>this.resolveInbox(i.id,'secondary');} v.resolvedColor=choice==='primary'?'#3DDC97':'#FF7A7A'; v.resolvedTxt=choice==='primary'?(isReview?'Approved & merged':'Approved'):(isReview?'Kept open for changes':'Denied'); return v; });
+    const unresolvedCount=(S.blockResolved==null?1:0)+(S.inboxState['i2']?0:1)+(S.inboxState['i3']?0:1);
+
+    // session overlay
+    let sessAgent=null;
+    if(S.agentOpen){ const a=this.agentById(S.agentOpen); const st=this.effStatus(a); const sp=this.statusPack(st); sessAgent={initials:a.initials,name:a.name,color:a.color,soft:this.hexToRgba(a.color,.14),border:this.hexToRgba(a.color,.4),repo:a.repo,branch:a.branch,model:a.model,mem:a.mem,tools:a.tools,cost:a.cost,statusColor:sp.color,statusLabel:sp.label,statusSoft:sp.soft,statusBorder:sp.border,dotAnim:sp.dot,isRunning:st==='running',isBlocked:st==='blocked',escReason:a.escReason,log:a.log.map(l=>{const lc=this.logColor(l.t);return{text:l.x,color:lc.c,fs:lc.fs};}),onApprove:()=>this.resolveBlock('approve'),onDeny:()=>this.resolveBlock('deny')}; }
+
+    const running=S.agents.filter(a=>this.effStatus(a)==='running').length, blocked=S.agents.filter(a=>this.effStatus(a)==='blocked').length;
+    const masterActivity=blocked>0?('Routing · '+running+' running · '+blocked+' blocked'):('Routing · '+running+' running');
+
+    return {
+      ...tk, noop, statusTime:'9:41',
+      isMaster:tab==='master', isChat:tab==='chat', isAgents:tab==='agents', isInbox:tab==='inbox',
+      cMaster:tab==='master'?activeColor:idle, cChat:tab==='chat'?activeColor:idle, cAgents:tab==='agents'?activeColor:idle, cInbox:tab==='inbox'?activeColor:idle,
+      tabMaster:()=>this.setTab('master'), tabChat:()=>this.setTab('chat'), tabAgents:()=>this.setTab('agents'), tabInbox:()=>this.setTab('inbox'),
+      // master
+      masterView, masterActivity, masterComposer:S.masterComposer,
+      onMasterComposer:(e)=>this.setState({masterComposer:e.target.value}),
+      onMasterKey:(e)=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();this.sendMaster();} }, sendMaster:()=>this.sendMaster(),
+      // chat header
+      activeTitle:active.title, activeFolder:active.folder,
+      openSessions:()=>this.openSessions(), openFilesFromHeader:()=>this.openFiles(), newChat:()=>this.newChat(),
+      // chat body
+      assistantView, chatEmpty, suggestions, showSuggestions:lastIsBot,
+      assistantComposer:S.assistantComposer,
+      onAssistantComposer:(e)=>this.setState({assistantComposer:e.target.value}),
+      onAssistantKey:(e)=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();this.sendAssistant();} }, sendAssistant:()=>this.sendAssistant(),
+      // attachments
+      hasAttachments:S.attachments.length>0, attachmentChips, attachMenuOpen:S.attachMenuOpen, attachOptions, toggleAttachMenu:()=>this.toggleAttachMenu(),
+      attachBtnBg:S.attachMenuOpen?'#1B1F27':'transparent', attachBtnColor:S.attachMenuOpen?tk.accent:'#8B93A1', attachBtnRotate:S.attachMenuOpen?'rotate(45deg)':'none',
+      // drawer
+      chatDrawerOpen:S.chatDrawerOpen, drawerChats:S.drawerMode==='chats', drawerFiles:S.drawerMode==='files',
+      closeDrawer:()=>this.closeDrawer(), setChats:()=>this.setState({drawerMode:'chats',filePreview:null}), setFiles:()=>this.setState({drawerMode:'files',filePath:[],filePreview:null}),
+      chatsTabBg:S.drawerMode==='chats'?tk.accentSoft:'transparent', chatsTabColor:S.drawerMode==='chats'?tk.accent:'#8B93A1',
+      filesTabBg:S.drawerMode==='files'?tk.accentSoft:'transparent', filesTabColor:S.drawerMode==='files'?tk.accent:'#8B93A1',
+      sessionQuery:S.sessionQuery, onSessionQuery:(e)=>this.setState({sessionQuery:e.target.value}), sessionGroups,
+      curFiles, crumb, canUp:S.filePath.length>0, upDir:()=>this.upDir(),
+      filesBrowseOpen:!S.filePreview, filePreviewOpen:!!S.filePreview,
+      previewName:S.filePreview?S.filePreview.name:'', previewSize:S.filePreview?S.filePreview.size:'',
+      previewPath:S.filePreview?(active.folder+(S.filePath.length?'/'+S.filePath.join('/'):'')+'/'+S.filePreview.name):'',
+      previewContent:S.filePreview?this.getFileContent(S.filePreview.name):'',
+      closePreview:()=>this.closePreview(), addPreviewToChat:()=>this.addPreviewToChat(),
+      // agents / inbox
+      agentCount:S.agents.length, filters, agentsView,
+      inboxView, inboxSub:unresolvedCount>0?(unresolvedCount+' waiting on you'):'all clear', inboxBadge:unresolvedCount, showInboxBadge:unresolvedCount>0,
+      // session
+      sessionOpen:!!S.agentOpen, sessAgent, closeAgent:()=>this.closeAgent(),
+      sessionComposer:S.sessionComposer, sessPlaceholder:'Message this agent…',
+      onSessionComposer:(e)=>this.setState({sessionComposer:e.target.value}),
+      onSessionKey:(e)=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();this.sendSession();} }, sendSession:()=>this.sendSession(),
+    };
+  }
+}
+</script>
+</body>
+</html>

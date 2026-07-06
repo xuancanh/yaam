@@ -342,6 +342,244 @@
         </div>
       </sc-if>
 
+      <!-- ASSISTANT (CHATGPT-STYLE) VIEW -->
+      <sc-if value="{{ isAssistant }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Assistant" style="flex:1;display:flex;min-height:0;background:#08090C;">
+
+          <!-- SESSIONS SIDEBAR -->
+          <div style="width:250px;flex-shrink:0;background:#0B0C10;border-right:1px solid #23272F;display:flex;flex-direction:column;min-height:0;">
+            <div style="padding:12px 12px 10px;border-bottom:1px solid #1a1e26;">
+              <button onClick="{{ newAsstChat }}" style="width:100%;display:flex;align-items:center;gap:8px;background:{{ accentSoft }};border:1px solid {{ accentBorder }};border-radius:10px;padding:9px 12px;font-size:13px;font-weight:600;color:{{ accent }};cursor:pointer;font-family:'IBM Plex Sans';" style-hover="filter:brightness(1.1);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>New chat
+              </button>
+              <div style="display:flex;align-items:center;gap:8px;background:#12151C;border:1px solid #23272F;border-radius:9px;padding:7px 11px;margin-top:10px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3-3"></path></svg>
+                <input value="{{ asstQuery }}" onInput="{{ onAsstQuery }}" placeholder="Search chats" style="flex:1;min-width:0;background:transparent;border:none;outline:none;color:#E7E9F0;font-size:12.5px;font-family:'IBM Plex Sans';" />
+              </div>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:10px 9px 16px;">
+              <sc-for list="{{ asstSessionGroups }}" as="g" hint-placeholder-count="2">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.5px;color:#626B79;font-family:'JetBrains Mono';padding:6px 5px 7px;">{{ g.label }}</div>
+                <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:9px;">
+                  <sc-for list="{{ g.items }}" as="c" hint-placeholder-count="2">
+                    <button onClick="{{ c.onClick }}" style="text-align:left;background:{{ c.bg }};border:1px solid {{ c.border }};border-radius:9px;padding:9px 10px;cursor:pointer;display:block;width:100%;" style-hover="background:#12151C;">
+                      <div style="font-size:12.5px;font-weight:600;color:{{ c.titleColor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ c.title }}</div>
+                      <div style="display:flex;align-items:center;gap:5px;margin-top:4px;">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5A6473" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path></svg>
+                        <span style="font-size:10px;color:#5A6473;font-family:'JetBrains Mono';flex-shrink:0;">{{ c.folder }}</span>
+                        <span style="font-size:11px;color:#8B93A1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">· {{ c.preview }}</span>
+                      </div>
+                    </button>
+                  </sc-for>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- CHAT COLUMN -->
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;min-height:0;background:#08090C;">
+            <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:11px;padding:0 16px;">
+              <div style="width:26px;height:26px;border-radius:8px;background:linear-gradient(150deg,#2B313D,#15181F);border:1px solid #2C313B;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D7DBE3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13.5H11l-1 8.5L19.5 10H13z"></path></svg>
+              </div>
+              <div style="min-width:0;">
+                <div style="font-family:'Space Grotesk';font-weight:600;font-size:14px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ asstTitle }}</div>
+                <div style="display:flex;align-items:center;gap:5px;margin-top:1px;">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path></svg>
+                  <span style="font-size:10.5px;color:#626B79;font-family:'JetBrains Mono';">{{ asstFolder }}</span>
+                </div>
+              </div>
+              <div style="flex:1;"></div>
+              <button onClick="{{ noop }}" style="display:flex;align-items:center;gap:6px;background:#12151C;border:1px solid #23272F;border-radius:8px;padding:5px 11px;color:#9AA3B2;font-size:12px;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#2C313B;color:#C7CCD6;">Claude · Sonnet 4.5<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></button>
+              <button onClick="{{ toggleAsstFiles }}" title="Toggle file explorer" style="display:flex;align-items:center;gap:6px;background:{{ asstFilesBtnBg }};border:1px solid {{ asstFilesBtnBorder }};border-radius:8px;padding:5px 11px;color:{{ asstFilesBtnColor }};font-size:12px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="filter:brightness(1.08);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path></svg>Files
+              </button>
+            </div>
+
+            <div data-auto="1" style="flex:1;overflow-y:auto;">
+              <sc-if value="{{ asstEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="max-width:600px;margin:0 auto;padding:88px 24px 40px;text-align:center;">
+                  <div style="width:52px;height:52px;border-radius:15px;background:linear-gradient(150deg,#2B313D,#15181F);border:1px solid #2C313B;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#D7DBE3" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13.5H11l-1 8.5L19.5 10H13z"></path></svg>
+                  </div>
+                  <div style="font-family:'Space Grotesk';font-size:22px;font-weight:600;color:#E7E9F0;">How can I help?</div>
+                  <div style="font-size:13.5px;color:#8B93A1;margin-top:6px;">Working in <span style="color:#C7CCD6;font-family:'JetBrains Mono';">{{ asstFolder }}</span></div>
+                  <div style="display:flex;flex-wrap:wrap;gap:9px;justify-content:center;margin-top:22px;">
+                    <sc-for list="{{ asstSuggestions }}" as="s" hint-placeholder-count="3">
+                      <button onClick="{{ s.onClick }}" style="background:#12151C;border:1px solid #23272F;border-radius:11px;padding:9px 14px;font-size:12.5px;color:#C7CCD6;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#2C313B;background:#171B23;">{{ s.text }}</button>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-if>
+              <div style="max-width:760px;margin:0 auto;padding:26px 24px 30px;display:flex;flex-direction:column;gap:26px;">
+                <sc-for list="{{ asstView }}" as="m" hint-placeholder-count="4">
+                  <sc-if value="{{ m.isUser }}" hint-placeholder-val="{{ false }}">
+                    <div style="align-self:flex-end;max-width:80%;display:flex;flex-direction:column;align-items:flex-end;gap:7px;animation:cfade .25s ease;">
+                      <sc-if value="{{ m.hasAtts }}" hint-placeholder-val="{{ false }}">
+                        <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;">
+                          <sc-for list="{{ m.atts }}" as="at" hint-placeholder-count="1">
+                            <div style="display:flex;align-items:center;gap:8px;background:#12151C;border:1px solid #2C313B;border-radius:10px;padding:7px 11px;">
+                              <span style="width:26px;height:26px;border-radius:7px;background:{{ at.soft }};display:flex;align-items:center;justify-content:center;color:{{ at.color }};flex-shrink:0;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ at.icon }}"></path></svg>
+                              </span>
+                              <span style="font-family:'JetBrains Mono';font-size:12px;color:#C7CCD6;">{{ at.name }}</span>
+                            </div>
+                          </sc-for>
+                        </div>
+                      </sc-if>
+                      <sc-if value="{{ m.hasText }}" hint-placeholder-val="{{ true }}">
+                        <div style="background:#171B23;border:1px solid #2C313B;border-radius:16px 16px 5px 16px;padding:11px 15px;font-size:14.5px;line-height:1.5;color:#E7E9F0;">{{ m.text }}</div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ m.isBot }}" hint-placeholder-val="{{ true }}">
+                    <div style="display:flex;gap:13px;animation:cfade .25s ease;">
+                      <div style="width:30px;height:30px;border-radius:9px;background:linear-gradient(150deg,#2B313D,#15181F);border:1px solid #2C313B;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D7DBE3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13.5H11l-1 8.5L19.5 10H13z"></path></svg>
+                      </div>
+                      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:13px;padding-top:3px;">
+                        <sc-for list="{{ m.blocks }}" as="b" hint-placeholder-count="2">
+                          <sc-if value="{{ b.isThinking }}" hint-placeholder-val="{{ false }}">
+                            <div style="border-left:2px solid #2C313B;padding-left:13px;">
+                              <button onClick="{{ b.onToggle }}" style="background:none;border:none;padding:0;display:flex;align-items:center;gap:7px;cursor:pointer;" style-hover="opacity:.85;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B93A1" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l1.4 3.9L17 9l-3.6 1.1L12 14l-1.4-3.9L7 9l3.6-1.1z"></path></svg>
+                                <span style="font-size:12.5px;font-weight:600;font-style:italic;color:#8B93A1;">{{ b.summary }}</span>
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ b.chevron }}"></path></svg>
+                              </button>
+                              <sc-if value="{{ b.open }}" hint-placeholder-val="{{ false }}">
+                                <div style="font-size:13px;line-height:1.6;color:#7E8794;font-style:italic;margin-top:8px;">{{ b.text }}</div>
+                              </sc-if>
+                            </div>
+                          </sc-if>
+                          <sc-if value="{{ b.isTool }}" hint-placeholder-val="{{ false }}">
+                            <div style="background:#0A0B0F;border:1px solid #23272F;border-radius:11px;overflow:hidden;">
+                              <button onClick="{{ b.onToggle }}" style="width:100%;display:flex;align-items:center;gap:10px;padding:10px 13px;background:none;border:none;cursor:pointer;text-align:left;" style-hover="background:#12151C;">
+                                <span style="width:24px;height:24px;border-radius:7px;background:{{ accentSoft }};display:flex;align-items:center;justify-content:center;color:{{ accent }};flex-shrink:0;">
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5-5-5-5"></path><path d="M12 19h8"></path></svg>
+                                </span>
+                                <span style="flex:1;min-width:0;">
+                                  <span style="display:block;font-size:12.5px;font-weight:600;color:#C7CCD6;">{{ b.label }}</span>
+                                  <span style="display:block;font-size:10.5px;color:#626B79;font-family:'JetBrains Mono';">{{ b.detail }}</span>
+                                </span>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3DDC97" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M5 12l5 5L20 6"></path></svg>
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="{{ b.chevron }}"></path></svg>
+                              </button>
+                              <sc-if value="{{ b.open }}" hint-placeholder-val="{{ false }}">
+                                <div style="border-top:1px solid #1a1e26;padding:12px 14px;font-family:'JetBrains Mono';font-size:12px;line-height:1.65;color:#9AA3B2;white-space:pre-wrap;word-break:break-word;">{{ b.result }}</div>
+                              </sc-if>
+                            </div>
+                          </sc-if>
+                          <sc-if value="{{ b.isText }}" hint-placeholder-val="{{ true }}">
+                            <div style="font-size:14.5px;line-height:1.62;color:#D7DBE3;">{{ b.text }}</div>
+                          </sc-if>
+                          <sc-if value="{{ b.isBullets }}" hint-placeholder-val="{{ false }}">
+                            <div style="display:flex;flex-direction:column;gap:9px;">
+                              <sc-for list="{{ b.items }}" as="it" hint-placeholder-count="2">
+                                <div style="display:flex;gap:11px;font-size:14px;line-height:1.55;color:#C7CCD6;">
+                                  <span style="width:5px;height:5px;border-radius:50%;background:{{ accent }};margin-top:8px;flex-shrink:0;"></span>
+                                  <span style="flex:1;">{{ it }}</span>
+                                </div>
+                              </sc-for>
+                            </div>
+                          </sc-if>
+                          <sc-if value="{{ b.isCode }}" hint-placeholder-val="{{ false }}">
+                            <div style="background:#0A0B0F;border:1px solid #23272F;border-radius:11px;padding:13px 15px;font-family:'JetBrains Mono';font-size:12.5px;line-height:1.7;color:#9DE3C0;white-space:pre-wrap;word-break:break-word;">{{ b.code }}</div>
+                          </sc-if>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-if>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="border-top:1px solid #23272F;padding:12px 0 16px;background:#08090C;flex-shrink:0;">
+              <div style="max-width:760px;margin:0 auto;padding:0 24px;">
+                <sc-if value="{{ asstHasAtt }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                    <sc-for list="{{ asstAttachChips }}" as="c" hint-placeholder-count="1">
+                      <div style="display:flex;align-items:center;gap:8px;background:#12151C;border:1px solid #2C313B;border-radius:10px;padding:6px 8px 6px 7px;">
+                        <span style="width:24px;height:24px;border-radius:7px;background:{{ c.soft }};display:flex;align-items:center;justify-content:center;color:{{ c.color }};flex-shrink:0;">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ c.icon }}"></path></svg>
+                        </span>
+                        <span style="font-family:'JetBrains Mono';font-size:11.5px;color:#C7CCD6;">{{ c.name }}</span>
+                        <button onClick="{{ c.onRemove }}" style="width:18px;height:18px;border-radius:5px;border:none;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#23272F;color:#FF7A7A;">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+                        </button>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ showAsstSuggestions }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:11px;">
+                    <sc-for list="{{ asstSuggestions }}" as="s" hint-placeholder-count="3">
+                      <button onClick="{{ s.onClick }}" style="background:#12151C;border:1px solid #23272F;border-radius:11px;padding:8px 13px;font-size:12.5px;color:#C7CCD6;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#2C313B;background:#171B23;">{{ s.text }}</button>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <div style="background:#12151C;border:1px solid #2C313B;border-radius:16px;padding:8px 8px 8px 10px;display:flex;align-items:flex-end;gap:10px;">
+                  <button onClick="{{ toggleAsstFiles }}" title="Attach from files" style="width:36px;height:36px;border-radius:11px;border:none;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-hover="background:#1B1F27;color:#C7CCD6;">
+                    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11l-8.5 8.5a4 4 0 01-6-6L14 5a2.5 2.5 0 013.5 3.5l-8 8a1 1 0 01-1.5-1.5L14 8"></path></svg>
+                  </button>
+                  <textarea value="{{ asstInput }}" onChange="{{ onAsstInput }}" onKeyDown="{{ onAsstKey }}" placeholder="Ask anything" rows="1" style="flex:1;background:transparent;border:none;outline:none;resize:none;color:#E7E9F0;font-family:'IBM Plex Sans';font-size:14.5px;line-height:1.5;padding:8px 0;max-height:150px;"></textarea>
+                  <button onClick="{{ sendAsst }}" style="width:38px;height:38px;border-radius:12px;border:none;background:{{ accent }};color:#1a1400;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-hover="filter:brightness(1.08);">
+                    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V5"></path><path d="M6 11l6-6 6 6"></path></svg>
+                  </button>
+                </div>
+                <div style="text-align:center;font-size:10.5px;color:#4a5262;margin-top:9px;font-family:'JetBrains Mono';">Scoped to {{ asstFolder }} · attach files from the explorer</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- FILE EXPLORER PANEL -->
+          <sc-if value="{{ asstFilesOpen }}" hint-placeholder-val="{{ true }}">
+            <div style="width:300px;flex-shrink:0;background:#0B0C10;border-left:1px solid #23272F;display:flex;flex-direction:column;min-height:0;">
+              <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:9px;padding:0 14px;">
+                <span style="width:24px;height:24px;border-radius:7px;background:{{ accentSoft }};display:flex;align-items:center;justify-content:center;color:{{ accent }};flex-shrink:0;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path></svg>
+                </span>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-family:'JetBrains Mono';font-size:12px;font-weight:600;color:#E7E9F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ asstCrumb }}</div>
+                  <div style="font-size:10px;color:#626B79;">Working folder</div>
+                </div>
+                <button onClick="{{ toggleAsstFiles }}" title="Hide" style="width:28px;height:28px;border-radius:7px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-hover="background:#171B23;color:#E7E9F0;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+                </button>
+              </div>
+              <div style="flex:1;overflow-y:auto;padding:8px 9px 16px;">
+                <sc-if value="{{ asstCanUp }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ asstUpDir }}" style="width:100%;display:flex;align-items:center;gap:10px;background:transparent;border:none;border-radius:9px;padding:9px 10px;cursor:pointer;color:#8B93A1;" style-hover="background:#12151C;">
+                    <span style="width:26px;height:26px;border-radius:7px;background:#12151C;border:1px solid #23272F;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+                    </span>
+                    <span style="font-size:12.5px;font-family:'JetBrains Mono';">..</span>
+                  </button>
+                </sc-if>
+                <sc-for list="{{ asstFiles }}" as="f" hint-placeholder-count="5">
+                  <button onClick="{{ f.onClick }}" style="width:100%;display:flex;align-items:center;gap:10px;background:transparent;border:none;border-radius:9px;padding:8px 10px;cursor:pointer;text-align:left;" style-hover="background:#12151C;">
+                    <span style="width:26px;height:26px;border-radius:7px;background:{{ f.iconBg }};display:flex;align-items:center;justify-content:center;color:{{ f.iconColor }};flex-shrink:0;">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ f.icon }}"></path></svg>
+                    </span>
+                    <span style="flex:1;min-width:0;font-size:13px;color:#E7E9F0;font-family:'JetBrains Mono';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ f.name }}</span>
+                    <sc-if value="{{ f.isDir }}" hint-placeholder-val="{{ true }}">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5A6473" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M9 6l6 6-6 6"></path></svg>
+                    </sc-if>
+                    <sc-if value="{{ f.isFile }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:10px;color:#5A6473;font-family:'JetBrains Mono';flex-shrink:0;">{{ f.size }}</span>
+                      <span style="width:22px;height:22px;border-radius:6px;background:{{ accentSoft }};display:flex;align-items:center;justify-content:center;color:{{ accent }};flex-shrink:0;" title="Attach">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+                      </span>
+                    </sc-if>
+                  </button>
+                </sc-for>
+                <div style="font-size:11px;color:#4a5262;text-align:center;padding:16px 10px 4px;font-family:'IBM Plex Sans';">Click a file to attach it to this chat</div>
+              </div>
+            </div>
+          </sc-if>
+
+        </div>
+      </sc-if>
+
       <!-- OVERVIEW VIEW -->
       <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ false }}">
         <div data-screen-label="Overview" style="flex:1;display:flex;flex-direction:column;min-height:0;">
@@ -1008,6 +1246,89 @@ class Component extends DCLogic {
       activePane:0, splitCount:2, focusedIds:['a-claude','a-aider'],
       composer:'', mode:'route', panel:null, toast:null, dragOverCol:null,
       drawer:null, paletteOpen:false, paletteQuery:'', notifOpen:false,
+      asstInput:'', asstActive:'s1', asstFilePath:[], asstAttachments:[], asstFilesOpen:true, asstOpenBlocks:{}, asstQuery:'',
+      asstSessions:[
+        {id:'s1', title:'Rate limiting strategy', time:'now', group:'Today', folder:'api-gateway',
+          tree:[
+            {type:'dir', name:'src', children:[
+              {type:'dir', name:'server', children:[
+                {type:'dir', name:'middleware', children:[
+                  {type:'file', name:'rateLimit.ts', size:'2.1 KB', kind:'code'},
+                  {type:'file', name:'index.ts', size:'0.8 KB', kind:'code'},
+                ]},
+                {type:'file', name:'pipeline.ts', size:'3.4 KB', kind:'code'},
+              ]},
+              {type:'dir', name:'auth', children:[{type:'file', name:'callback.ts', size:'1.6 KB', kind:'code'}]},
+            ]},
+            {type:'file', name:'CLAUDE.md', size:'4.0 KB', kind:'md'},
+            {type:'file', name:'package.json', size:'1.1 KB', kind:'code'},
+          ],
+          msgs:[
+            {role:'user', text:"What's the difference between a token bucket and a leaky bucket rate limiter?"},
+            {role:'bot', blocks:[
+              {type:'thinking', summary:'Thought for 3s', text:'Both are classic shaping algorithms. I’ll contrast how each handles bursts versus steady state, then give a rule of thumb.'},
+              {type:'text', text:'Both smooth traffic, but they shape it differently:'},
+              {type:'bullets', items:[
+                'Token bucket — tokens refill at a steady rate and each request spends one. Idle time banks tokens, so it allows short bursts up to the bucket size.',
+                'Leaky bucket — requests queue and drain at a fixed rate. Output is perfectly smooth; bursts just get delayed (or dropped when the queue is full).'
+              ]},
+              {type:'text', text:'Rule of thumb: token bucket favors bursty-but-bounded traffic, leaky bucket favors a strictly constant outflow.'}
+            ]},
+            {role:'user', text:'Here’s our current middleware — does it actually handle bursts?', atts:[{name:'rateLimit.ts', kind:'code'}]},
+            {role:'bot', blocks:[
+              {type:'thinking', summary:'Thought for 5s', text:'Let me read the attached file and check whether it refills tokens over time or just counts within a fixed window.'},
+              {type:'tool', name:'read_file', label:'Read rateLimit.ts', detail:'48 lines · src/server/middleware', result:'const key = `rl:${ip}`\nconst hits = await redis.incr(key)\nif (hits === 1) await redis.expire(key, 60)\nreturn hits <= LIMIT'},
+              {type:'text', text:'Not quite — this is a fixed-window counter, not a token bucket.'},
+              {type:'bullets', items:[
+                'It resets every 60s, so a client can spend the full limit at 0:59 and again at 1:00 — a 2× burst at the boundary.',
+                'There’s no gradual refill, so bursts inside the window are all-or-nothing.'
+              ]},
+              {type:'text', text:'Swap the counter for a token bucket in a small Lua script:'},
+              {type:'code', code:'-- refill, then try-consume one token\nlocal now  = tonumber(ARGV[1])\nlocal rate = tonumber(ARGV[2])\n-- refill by elapsed * rate, cap at burst, then\nreturn (tokens >= 1) and 1 or 0'}
+            ]},
+          ]},
+        {id:'s2', title:'Postgres index tuning', time:'2h', group:'Today', folder:'billing-service',
+          tree:[
+            {type:'dir', name:'db', children:[
+              {type:'file', name:'schema.sql', size:'6.2 KB', kind:'code'},
+              {type:'file', name:'slow_query.sql', size:'0.4 KB', kind:'code'},
+            ]},
+            {type:'dir', name:'migrations', children:[{type:'file', name:'0007_webhook_events.py', size:'1.2 KB', kind:'code'}]},
+            {type:'file', name:'README.md', size:'2.0 KB', kind:'md'},
+          ],
+          msgs:[
+            {role:'user', text:'Why is this query doing a seq scan?', atts:[{name:'slow_query.sql', kind:'code'}]},
+            {role:'bot', blocks:[
+              {type:'thinking', summary:'Thought for 2s', text:'A seq scan usually means no usable index, or a low-selectivity predicate the planner ignores.'},
+              {type:'tool', name:'run_sql', label:'EXPLAIN ANALYZE', detail:'planner output', result:'Seq Scan on orders  (cost=0.00..24110 rows=1)\n  Filter: (status = \'refunded\')\n  Rows Removed by Filter: 482913'},
+              {type:'text', text:'There’s no index on status, and it’s low-cardinality. Add a partial index so only refunded rows are stored:'},
+              {type:'code', code:"CREATE INDEX idx_orders_refunded\n  ON orders (created_at)\n  WHERE status = 'refunded';"}
+            ]},
+          ]},
+        {id:'s3', title:'Dockerfile multi-stage build', time:'Yesterday', group:'Yesterday', folder:'web-dashboard',
+          tree:[
+            {type:'file', name:'Dockerfile', size:'0.9 KB', kind:'code'},
+            {type:'file', name:'.dockerignore', size:'0.2 KB', kind:'code'},
+            {type:'dir', name:'src', children:[{type:'file', name:'server.ts', size:'1.4 KB', kind:'code'}]},
+            {type:'file', name:'package.json', size:'1.3 KB', kind:'code'},
+          ],
+          msgs:[
+            {role:'user', text:'Make this Dockerfile smaller', atts:[{name:'Dockerfile', kind:'code'}]},
+            {role:'bot', blocks:[
+              {type:'text', text:'Use a multi-stage build so the final image only ships the runtime and built output:'},
+              {type:'code', code:'FROM node:20 AS build\nWORKDIR /app\nCOPY . .\nRUN npm ci && npm run build\n\nFROM node:20-slim\nWORKDIR /app\nCOPY --from=build /app/dist ./dist\nCMD ["node","dist/server.js"]'}
+            ]},
+          ]},
+        {id:'s4', title:'Debounce vs throttle', time:'Mon', group:'Previous 7 days', folder:'web-dashboard',
+          tree:[
+            {type:'dir', name:'src', children:[{type:'dir', name:'hooks', children:[{type:'file', name:'useDebounce.ts', size:'0.5 KB', kind:'code'}]}]},
+            {type:'file', name:'README.md', size:'1.0 KB', kind:'md'},
+          ],
+          msgs:[
+            {role:'user', text:'debounce vs throttle in one line each?'},
+            {role:'bot', blocks:[{type:'bullets', items:['Debounce — wait until activity stops, then fire once (search-as-you-type).','Throttle — fire at most once per interval no matter how often called (scroll handlers).']}]},
+          ]},
+      ],
       events:[
         {id:'e1',type:'route',agentId:'a-claude',text:'Routed “token-bucket rate limiting” to Claude Code',time:'12m ago'},
         {id:'e2',type:'route',agentId:'a-codex',text:'Assigned “auth redirect fix” to Codex',time:'12m ago'},
@@ -1099,6 +1420,53 @@ class Component extends DCLogic {
   push=(m)=>{ this.setState(s=>({messages:s.messages.concat([{id:'m'+Date.now()+Math.random(),...m}])})); };
 
   setView=(v)=>this.setState({view:v});
+  ASSTICON={folder:'M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z',file:'M7 3h7l4 4v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z',image:'M4 6a1 1 0 011-1h14a1 1 0 011 1v12a1 1 0 01-1 1H5a1 1 0 01-1-1zM4 15l4-4 3 3 4-4 5 5',md:'M5 5h14v14H5zM8 15V9l3 3 3-3v6'};
+  asstSess=()=>this.state.asstSessions.find(c=>c.id===this.state.asstActive)||this.state.asstSessions[0];
+  asstCurDir=()=>{ let cur=this.asstSess().tree||[]; for(const p of this.state.asstFilePath){ const d=cur.find(x=>x.type==='dir'&&x.name===p); cur=d?d.children:[]; } return cur; };
+  asstAttIcon=(k)=>k==='image'?this.ASSTICON.image:(k==='md'?this.ASSTICON.md:this.ASSTICON.file);
+  onAsstInput=(e)=>this.setState({asstInput:e.target.value});
+  onAsstKey=(e)=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); this.sendAsst(); } };
+  onAsstQuery=(e)=>this.setState({asstQuery:e.target.value});
+  selectAsstSession=(id)=>this.setState({asstActive:id, asstFilePath:[], asstAttachments:[]});
+  newAsstChat=()=>{ const id='as'+Date.now(); const folder=this.asstSess().folder, tree=this.asstSess().tree; this.setState(st=>({asstSessions:[{id,title:'New chat',time:'now',group:'Today',folder,tree,msgs:[]},...st.asstSessions],asstActive:id,asstFilePath:[],asstAttachments:[]})); };
+  toggleAsstFiles=()=>this.setState(st=>({asstFilesOpen:!st.asstFilesOpen}));
+  toggleAsstBlock=(id)=>this.setState(st=>({asstOpenBlocks:{...st.asstOpenBlocks,[id]:!st.asstOpenBlocks[id]}}));
+  asstEnterDir=(name)=>this.setState(st=>({asstFilePath:[...st.asstFilePath,name]}));
+  asstUpDir=()=>this.setState(st=>({asstFilePath:st.asstFilePath.slice(0,-1)}));
+  asstAttachFile=(f)=>this.setState(st=>({asstAttachments:[...st.asstAttachments,{name:f.name,kind:f.kind||'code'}]}));
+  asstRemoveAtt=(i)=>this.setState(st=>({asstAttachments:st.asstAttachments.filter((_,idx)=>idx!==i)}));
+  fillAsst=(t)=>this.setState({asstInput:t});
+  sendAsst=()=>{ const t=this.state.asstInput.trim(); const atts=this.state.asstAttachments; if(!t&&atts.length===0) return; const aid=this.state.asstActive; const um={role:'user',text:t,atts:atts.slice()}; const bm={role:'bot',blocks:[{type:'text',text:'Here’s how I’d approach that — want me to go deeper on any part?'}]}; this.setState(st=>({asstInput:'',asstAttachments:[],asstSessions:st.asstSessions.map(cs=>cs.id===aid?{...cs,title:(cs.title==='New chat'&&t)?t.slice(0,34):cs.title,msgs:[...cs.msgs,um,bm]}:cs)})); };
+  asstVals=(accent)=>{
+    const S=this.state, soft=this.hexToRgba(accent,.14), border=this.hexToRgba(accent,.4);
+    const active=this.asstSess();
+    const asstView=active.msgs.map((m,mi)=>{
+      if(m.role==='user'){ const atts=(m.atts||[]).map(a=>({name:a.name,icon:this.asstAttIcon(a.kind),color:accent,soft})); return {isUser:true,isBot:false,text:m.text,hasText:!!(m.text&&m.text.length),hasAtts:atts.length>0,atts}; }
+      const blocks=m.blocks.map((b,bi)=>{ const id=active.id+':'+mi+':'+bi; const open=!!S.asstOpenBlocks[id]; return {isText:b.type==='text',isBullets:b.type==='bullets',isCode:b.type==='code',isThinking:b.type==='thinking',isTool:b.type==='tool',text:b.text,items:b.items,code:b.code,summary:b.summary,name:b.name,label:b.label,detail:b.detail,result:b.result,open,onToggle:()=>this.toggleAsstBlock(id),chevron:open?'M6 9l6 6 6-6':'M9 6l6 6-6 6'}; });
+      return {isUser:false,isBot:true,blocks,showActions:mi===active.msgs.length-1};
+    });
+    const q=S.asstQuery.trim().toLowerCase();
+    const groups=['Today','Yesterday','Previous 7 days'];
+    const asstSessionGroups=groups.map(g=>({label:g,items:S.asstSessions.filter(c=>c.group===g).filter(c=>{ if(!q)return true; const prev=((c.msgs.find(m=>m.role==='user')||{}).text||''); return (c.title+' '+prev+' '+c.folder).toLowerCase().includes(q); }).map(c=>{ const on=c.id===S.asstActive; return {id:c.id,title:c.title,time:c.time,folder:c.folder,preview:((c.msgs.find(m=>m.role==='user')||{}).text)||'New conversation',bg:on?soft:'transparent',border:on?border:'transparent',titleColor:on?accent:'#E7E9F0',onClick:()=>this.selectAsstSession(c.id)}; })})).filter(g=>g.items.length>0);
+    const asstFiles=this.asstCurDir().map(f=> f.type==='dir'
+      ? {isDir:true,isFile:false,name:f.name,icon:this.ASSTICON.folder,iconColor:accent,iconBg:soft,onClick:()=>this.asstEnterDir(f.name)}
+      : {isDir:false,isFile:true,name:f.name,size:f.size,icon:this.ASSTICON.file,iconColor:'#9AA3B2',iconBg:'#12151C',onClick:()=>this.asstAttachFile(f)});
+    const asstCrumb=active.folder+(S.asstFilePath.length?' / '+S.asstFilePath.join(' / '):'');
+    const asstAttachChips=S.asstAttachments.map((a,i)=>({name:a.name,icon:this.asstAttIcon(a.kind),color:accent,soft,onRemove:()=>this.asstRemoveAtt(i)}));
+    const lastIsBot=active.msgs.length>0 && active.msgs[active.msgs.length-1].role==='bot';
+    return {
+      asstView, asstEmpty:active.msgs.length===0,
+      asstTitle:active.title, asstFolder:active.folder,
+      asstInput:S.asstInput, onAsstInput:this.onAsstInput, onAsstKey:this.onAsstKey, sendAsst:this.sendAsst, newAsstChat:this.newAsstChat,
+      asstSuggestions:['Explain the auth redirect fix','Add rate-limit headers in Express','Write a Redis token-bucket script'].map(t=>({text:t,onClick:()=>this.fillAsst(t)})),
+      showAsstSuggestions:lastIsBot,
+      asstSessionGroups, asstQuery:S.asstQuery, onAsstQuery:this.onAsstQuery,
+      asstFilesOpen:S.asstFilesOpen, toggleAsstFiles:this.toggleAsstFiles,
+      asstFiles, asstCrumb, asstCanUp:S.asstFilePath.length>0, asstUpDir:this.asstUpDir,
+      asstHasAtt:S.asstAttachments.length>0, asstAttachChips,
+      asstFilesBtnBg:S.asstFilesOpen?soft:'transparent', asstFilesBtnColor:S.asstFilesOpen?accent:'#9AA3B2', asstFilesBtnBorder:S.asstFilesOpen?border:'#23272F',
+    };
+  };
   setMode=(m)=>this.setState({mode:m});
   onComposer=(e)=>this.setState({composer:e.target.value});
   onKey=(e)=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); this.send(); } };
@@ -1341,6 +1709,7 @@ class Component extends DCLogic {
 
     const nav=[
       {id:'workspace',label:'Work',paths:['M3 5.5h18v13H3z','M9.5 5.5v13']},
+      {id:'assistant',label:'Chat',paths:['M21 11.5a8.5 8.5 0 01-11.7 7.9L4 21l1.6-4.9A8.5 8.5 0 1121 11.5z']},
       {id:'overview',label:'Agents',paths:['M4 4h6.5v6.5H4z','M13.5 4H20v6.5h-6.5z','M4 13.5h6.5V20H4z','M13.5 13.5H20V20h-6.5z']},
       {id:'board',label:'Board',paths:['M4 5h4v14H4z','M10 5h4v9h-4z','M16 5h4v12h-4z']},
       {id:'timeline',label:'Activity',paths:['M3 12h4l2.5 6 5-12 2.5 6h4']},
@@ -1448,6 +1817,8 @@ class Component extends DCLogic {
     return {
       accent, accentGlow, accentSoft, accentGrad,
       view:s.view, isWorkspace:s.view==='workspace', isOverview:s.view==='overview', isBoard:s.view==='board', isCrons:s.view==='crons', isTools:s.view==='tools',
+      isAssistant:s.view==='assistant', noop:()=>{},
+      ...this.asstVals(accent),
       isTimeline:s.view==='timeline', isUsage:s.view==='usage', isSettings:s.view==='settings',
       events, usageAgents, usageTotals,
       paletteOpen:s.paletteOpen, paletteQuery:s.paletteQuery, paletteCommands, onPaletteQuery:this.onPaletteQuery, onPaletteKey:this.onPaletteKey, closePalette:this.closePalette, openPalette:this.openPalette,
