@@ -335,7 +335,7 @@ export function AddonsView() {
               ? <MarketDetail e={sel as RegistryEntry} installed={byName.get((sel as RegistryEntry).name.toLowerCase())} />
               : (
                 <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ fontSize: 30, opacity: 0.5 }}>🧩</div>
+                  <Icon paths={IC.addon} size={30} stroke={1.5} style={{ color: 'var(--mut)', opacity: 0.65 }} />
                   <div className="grotesk" style={{ fontSize: 15, fontWeight: 600, color: 'var(--mut)' }}>Pick an addon</div>
                   <div style={{ fontSize: 12, color: 'var(--dim)', maxWidth: 340, textAlign: 'center', lineHeight: 1.6 }}>
                     Install from a registry, a file, or a folder — or describe one and let ✦ Generate build it against the full addon API.
