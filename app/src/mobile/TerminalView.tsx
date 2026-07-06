@@ -84,7 +84,11 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
       es.onmessage = e => {
         const term = termRef.current
         if (!term || !e.data) return
-        term.write(b64Bytes(String(e.data)), () => term.scrollToBottom())
+        // stick to the bottom only when the user is already there — scrolling
+        // back through history must not get yanked down by live output
+        const buf = term.buffer.active
+        const wasAtBottom = buf.viewportY >= buf.baseY
+        term.write(b64Bytes(String(e.data)), () => { if (wasAtBottom) term.scrollToBottom() })
       }
       es.onerror = () => { es?.close(); setLive(false) } // fall back to snapshots
     } catch {
