@@ -64,7 +64,29 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
     refit()
     const ro = new ResizeObserver(refit)
     ro.observe(hostRef.current!)
+    // touch scrolling: xterm's canvas eats the touches before its scrollable
+    // viewport sees them — translate vertical drags into scrollLines ourselves
+    const host = hostRef.current!
+    let lastY = 0
+    let carry = 0
+    const cellH = Math.max(10, 11 * 1.25) // fontSize × lineHeight
+    const onTouchStart = (e: TouchEvent) => { lastY = e.touches[0].clientY; carry = 0 }
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0].clientY
+      carry += (lastY - y) / cellH
+      lastY = y
+      const lines = Math.trunc(carry)
+      if (lines !== 0) {
+        carry -= lines
+        term.scrollLines(lines)
+      }
+      e.preventDefault() // we own the pan — no page bounce
+    }
+    host.addEventListener('touchstart', onTouchStart, { passive: true })
+    host.addEventListener('touchmove', onTouchMove, { passive: false })
     return () => {
+      host.removeEventListener('touchstart', onTouchStart)
+      host.removeEventListener('touchmove', onTouchMove)
       ro.disconnect()
       if (focusTimer) clearTimeout(focusTimer)
       void sendCommand({ kind: 'session_blur', id: sessionId }) // desktop reclaims

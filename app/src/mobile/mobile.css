@@ -244,9 +244,9 @@ button.card.slim:active { background: var(--panel2); }
 .termarea { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 8px 4px; }
 .termfill { flex: 1; min-height: 0; width: 100%; background: #0A0B0F; border: 1px solid var(--line-soft); border-radius: 12px; padding: 6px; overflow: hidden; }
 .termfill .xterm { height: 100%; }
-/* touch scrolling through the terminal history */
-.termfill .xterm-viewport { overflow-y: auto !important; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
-.termfill .xterm-screen { touch-action: pan-y; }
+/* touch scrolling is handled manually (drag → scrollLines); stop the browser
+   from panning/bouncing the page underneath */
+.termfill, .termfill .xterm, .termfill .xterm-screen { touch-action: none; }
 .subtabs button { background: var(--panel2); border: 1px solid var(--line); border-radius: 20px; color: var(--mut2); padding: 6px 13px; font-size: 11px; font-weight: 600; letter-spacing: .3px; font-family: var(--font-mono); }
 .subtabs button.on { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
 .termscroll { overflow-x: auto; border: 1px solid var(--line-soft); border-radius: 13px; background: #0A0B0F; padding: 7px; }
