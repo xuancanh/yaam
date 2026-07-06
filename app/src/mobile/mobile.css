@@ -240,6 +240,10 @@ button.card.slim:active { background: var(--panel2); }
 
 /* session sub-tabs + terminal */
 .subtabs { display: flex; gap: 6px; margin: 13px 0 11px; }
+.subtabs.bar { margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0; background: var(--bg); }
+.termarea { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 8px 4px; }
+.termfill { flex: 1; min-height: 0; width: 100%; background: #0A0B0F; border: 1px solid var(--line-soft); border-radius: 12px; padding: 6px; overflow: hidden; }
+.termfill .xterm { height: 100%; }
 .subtabs button { background: var(--panel2); border: 1px solid var(--line); border-radius: 20px; color: var(--mut2); padding: 6px 13px; font-size: 11px; font-weight: 600; letter-spacing: .3px; font-family: var(--font-mono); }
 .subtabs button.on { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
 .termscroll { overflow-x: auto; border: 1px solid var(--line-soft); border-radius: 13px; background: #0A0B0F; padding: 7px; }

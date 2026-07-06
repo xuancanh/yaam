@@ -323,36 +323,57 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   const live = s.status === 'running' || s.status === 'needs'
   return (
     <>
-      <div className="body">
-        <div className="cardmeta" style={{ marginTop: 0 }}>
-          <span>{s.repo}</span>
-          {s.task && <span>{s.task.slice(0, 40)}</span>}
-          <span style={{ marginLeft: 'auto' }}>${s.cost.toFixed(2)}</span>
-        </div>
-        {s.summary && <div style={{ fontSize: 13, color: 'var(--mut)', marginTop: 8, lineHeight: 1.5 }}>{s.summary}</div>}
-        {s.actionNeeded && <div className="warn">⚠ {s.actionNeeded}</div>}
-        <div className="subtabs">
-          {(['term', 'files', 'git'] as const).map(v => (
-            <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
-              {v === 'term' ? 'TERMINAL' : v === 'files' ? 'FILES' : 'CHANGES'}
-            </button>
-          ))}
-        </div>
-        {view === 'term' && (
-          <>
-            <TerminalView sessionId={s.id} data={s.term} cols={s.cols} />
-            <div className="btnrow">
-              {live
-                ? <button className="btn danger" onClick={() => void sendCommand({ kind: 'session_stop', id: s.id })}>Stop session</button>
-                : <button className="btn primary" onClick={() => void sendCommand({ kind: 'session_resume', id: s.id })}>Resume session</button>}
-            </div>
-          </>
-        )}
-        {view === 'files' && (s.cwd ? <FilesBrowser root={s.cwd} /> : <div className="empty">No working folder.</div>)}
-        {view === 'git' && (s.cwd ? <GitReview root={s.cwd} /> : <div className="empty">No working folder.</div>)}
+      <div className="subtabs bar">
+        {(['term', 'files', 'git'] as const).map(v => (
+          <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
+            {v === 'term' ? 'TERMINAL' : v === 'files' ? 'FILES' : 'CHANGES'}
+          </button>
+        ))}
+        {s.actionNeeded && view === 'term' && <span className="warn" style={{ margin: '0 0 0 auto', fontSize: 11, alignSelf: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>⚠ {s.actionNeeded}</span>}
       </div>
-      {live && view === 'term' && <Composer placeholder="Message this agent…" onSend={text => { if (text) void sendCommand({ kind: 'session_input', id: s.id, text }) }} />}
+      {view === 'term' ? (
+        <>
+          <div className="termarea">
+            <TerminalView sessionId={s.id} data={s.term} />
+          </div>
+          {live
+            ? <Composer placeholder="Message this agent…" onSend={text => { if (text) void sendCommand({ kind: 'session_input', id: s.id, text }) }} />
+            : (
+              <div className="composerwrap">
+                <button className="btn primary" style={{ width: '100%' }} onClick={() => void sendCommand({ kind: 'session_resume', id: s.id })}>Resume session</button>
+              </div>
+            )}
+        </>
+      ) : (
+        <div className="body">
+          {s.cwd
+            ? (view === 'files' ? <FilesBrowser root={s.cwd} /> : <GitReview root={s.cwd} />)
+            : <div className="empty">No working folder.</div>}
+        </div>
+      )}
     </>
+  )
+}
+
+/** Top-bar stop control: first tap arms it, second tap within 3s confirms. */
+function StopButton({ onStop }: { onStop: () => void }) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const to = setTimeout(() => setArmed(false), 3000)
+    return () => clearTimeout(to)
+  }, [armed])
+  return (
+    <button
+      onClick={() => { if (armed) { onStop(); setArmed(false) } else setArmed(true) }}
+      style={{
+        flexShrink: 0, border: `1px solid ${armed ? 'var(--red)' : 'rgba(255,92,92,.4)'}`, borderRadius: 10,
+        background: armed ? 'var(--red)' : 'rgba(255,92,92,.12)', color: armed ? '#fff' : 'var(--red-soft)',
+        padding: '7px 12px', fontSize: 12, fontWeight: 600,
+      }}
+    >
+      {armed ? 'Confirm stop' : '■ Stop'}
+    </button>
   )
 }
 
@@ -493,7 +514,31 @@ export function MobileApp() {
   const [tab, setTab] = useState<Tab>('tasks')
   const [detail, setDetail] = useState<Detail>(null)
   const wide = useWide()
-  const pickTab = (t: Tab) => { setTab(t); setDetail(null) }
+
+  // native back button: tab + detail live in history state, so the browser's
+  // back gesture closes a detail (or steps back a tab switch) instead of
+  // leaving the app
+  useEffect(() => {
+    history.replaceState({ tab: 'tasks', d: null }, '')
+    const onPop = (e: PopStateEvent) => {
+      const st = e.state as { tab?: Tab; d?: Detail } | null
+      if (!st) return
+      if (st.tab) setTab(st.tab)
+      setDetail(st.d ?? null)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  const pickTab = (t: Tab) => {
+    history.replaceState({ tab: t, d: null }, '')
+    setTab(t)
+    setDetail(null)
+  }
+  const openDetail = (d: Detail) => {
+    if (d) history.pushState({ tab, d }, '')
+    setDetail(d)
+  }
+  const closeDetail = () => history.back()
 
   useEffect(() => {
     void (async () => {
@@ -606,7 +651,7 @@ export function MobileApp() {
         <div className="cols">
           <nav className="rail">{navButtons}</nav>
           <div className="listcol">
-            {snap ? <Lists tab={tab} snap={snap} open={setDetail} selected={detail?.id} /> : <div className="pairwrap"><div className="spinner" /></div>}
+            {snap ? <Lists tab={tab} snap={snap} open={openDetail} selected={detail?.id} /> : <div className="pairwrap"><div className="spinner" /></div>}
           </div>
           <div className="detailcol">
             {detailView ?? <div className="placeholder">{snap ? (tab === 'approvals' ? 'Decisions are answered directly in the list' : `Select a ${tab.slice(0, -1)} on the left`) : ''}</div>}
@@ -620,13 +665,15 @@ export function MobileApp() {
     <div className="shell">
       {detail ? (
         <div className="detailhead">
-          <button className="back" onClick={() => setDetail(null)}>‹</button>
+          <button className="back" onClick={closeDetail}>‹</button>
           {detail.kind !== 'task' && <Avatar name={detailTitle} size={34} />}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="htitle">{detailTitle}</div>
             {detailSub && <div className="hsub">{detailSub}</div>}
           </div>
-          {detailStatus && <StatusPill status={detailStatus} />}
+          {detail.kind === 'session' && (detailStatus === 'running' || detailStatus === 'needs')
+            ? <StopButton onStop={() => void sendCommand({ kind: 'session_stop', id: detail.id })} />
+            : detailStatus ? <StatusPill status={detailStatus} /> : null}
         </div>
       ) : (
         <div className="pagehead">
@@ -640,7 +687,7 @@ export function MobileApp() {
       {!snap ? (
         <div className="pairwrap"><div className="spinner" /></div>
       ) : (
-        detailView ?? <Lists tab={tab} snap={snap} open={setDetail} />
+        detailView ?? <Lists tab={tab} snap={snap} open={openDetail} />
       )}
       {!detail && <div className="tabs">{navButtons}</div>}
     </div>

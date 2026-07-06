@@ -1,11 +1,11 @@
 // Real terminal rendering for the companion: the SAME xterm.js the desktop
 // uses. Preferred source is the LIVE raw-byte SSE stream served straight from
-// the Rust PTY reader (multi-device sync independent of the desktop webview);
-// when the stream is unavailable it falls back to replaying the serialized
-// buffer from the snapshot. Fixed source column count — the host scrolls
-// horizontally instead of rewrapping TUI layouts.
+// the Rust PTY reader; fallback is replaying the serialized snapshot buffer.
+// The terminal FITS its container (FitAddon + ResizeObserver) so lines wrap to
+// the phone's width and the PTY-side layout reflows readably.
 import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { apiUrl, deviceToken } from './api'
 
@@ -27,11 +27,10 @@ function b64Bytes(data: string): Uint8Array {
   return bytes
 }
 
-export function TerminalView({ sessionId, data, cols }: { sessionId: string; data: string; cols: number }) {
+export function TerminalView({ sessionId, data }: { sessionId: string; data: string }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const lastRef = useRef<string>('')
-  const colsRef = useRef<number>(0)
   const [live, setLive] = useState(true)
 
   useEffect(() => {
@@ -39,18 +38,25 @@ export function TerminalView({ sessionId, data, cols }: { sessionId: string; dat
       disableStdin: true,
       cursorBlink: false,
       fontSize: 11,
-      lineHeight: 1.2,
-      fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
-      scrollback: 400,
+      lineHeight: 1.25,
+      fontFamily: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace",
+      scrollback: 600,
       theme: THEME,
     })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
     term.open(hostRef.current!)
+    try { fit.fit() } catch { /* not laid out yet */ }
     termRef.current = term
+    const ro = new ResizeObserver(() => {
+      try { fit.fit(); term.scrollToBottom() } catch { /* mid-unmount */ }
+    })
+    ro.observe(hostRef.current!)
     return () => {
+      ro.disconnect()
       term.dispose()
       termRef.current = null
       lastRef.current = ''
-      colsRef.current = 0
     }
   }, [])
 
@@ -75,21 +81,11 @@ export function TerminalView({ sessionId, data, cols }: { sessionId: string; dat
   // snapshot fallback: replay the serialized buffer whenever it changes
   useEffect(() => {
     const term = termRef.current
-    if (!term) return
-    const wantCols = Math.max(20, cols || 80)
-    if (colsRef.current !== wantCols) {
-      colsRef.current = wantCols
-      term.resize(wantCols, 36)
-    }
-    if (live || data === lastRef.current) return
+    if (!term || live || data === lastRef.current) return
     lastRef.current = data
     term.reset()
     term.write(data, () => term.scrollToBottom())
-  }, [data, cols, live])
+  }, [data, live])
 
-  return (
-    <div className="termscroll">
-      <div ref={hostRef} className="termhost" />
-    </div>
-  )
+  return <div ref={hostRef} className="termfill" />
 }
