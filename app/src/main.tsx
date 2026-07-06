@@ -9,6 +9,7 @@ import '@fontsource/ibm-plex-sans/600.css'
 import '@fontsource/jetbrains-mono/400.css'
 import '@fontsource/jetbrains-mono/500.css'
 import '@fontsource/jetbrains-mono/600.css'
+import '@fontsource-variable/noto-emoji/wght.css'
 import './index.css'
 import App from './App.tsx'
 

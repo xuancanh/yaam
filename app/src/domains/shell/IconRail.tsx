@@ -58,7 +58,18 @@ export function IconRail() {
               color: active ? 'var(--accent)' : 'var(--mut)',
             }}
           >
-            <span style={{ fontSize: 17, lineHeight: 1 }}>{a.icon}</span>
+            <span
+              aria-hidden="true"
+              style={{
+                fontSize: 17,
+                lineHeight: 1,
+                fontFamily: "'Noto Emoji Variable'",
+                fontWeight: 500,
+                fontVariantEmoji: 'text',
+              }}
+            >
+              {a.icon}
+            </span>
             <span style={{ fontSize: 9, fontWeight: 500, letterSpacing: 0.2, maxWidth: 46, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
           </button>
         )
