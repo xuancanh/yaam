@@ -57,6 +57,9 @@ export interface SessionRuntimeState {
   status: AgentStatus
   /** transient escalation reason shown while a session waits on the user */
   escReason?: string
+  /** transient: the PTY is actively streaming output right now (drives the tab's
+   *  blinking "responding" indicator). Cleared once output goes quiet. */
+  responding?: boolean
 }
 
 /** The durable configuration + history of a session: everything that is
@@ -140,7 +143,7 @@ export type Agent = SessionRecord & SessionRuntimeState
 /** The runtime-only keys, as a value — the single source of truth persistence
  *  uses to strip transient fields. Typed as keyof SessionRuntimeState so it stays
  *  in sync if the runtime shape changes. */
-export const SESSION_RUNTIME_KEYS: ReadonlyArray<keyof SessionRuntimeState> = ['status', 'escReason']
+export const SESSION_RUNTIME_KEYS: ReadonlyArray<keyof SessionRuntimeState> = ['status', 'escReason', 'responding']
 
 /** one message in a chat-mode session */
 export interface ChatMsg {

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { ACCENT, hexToRgba, indicatorColor } from '../../core/data'
+import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR } from '../../core/data'
 import type { Agent, TabGroup } from '../../core/types'
-import { IC, Icon, StatusPill } from '../../components/ui'
+import { IC, Icon } from '../../components/ui'
 import { NewSessionDialog } from './NewSessionDialog'
 import { Divider } from './Divider'
 import { Pane } from './Pane'
@@ -220,14 +220,20 @@ export function Workspace() {
     ...(truncateRepo ? { maxWidth: 52, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const, display: 'inline-block' as const } : {}),
   }
 
+  // The dot IS the status now (no text label): its color encodes the lifecycle
+  // state, and it blinks in two cases — amber/red pulse for needs-action, and a
+  // sky-blue pulse while the session is actively streaming a response.
   const tabDot = (a: Agent) => {
     const flash = a.status === 'needs' || a.attention
+    const responding = !flash && a.status === 'running' && !!a.responding
+    const active = flash || responding
+    const color = responding ? RESPONDING_COLOR : indicatorColor(a)
     return (
       <span style={{
-        width: flash ? 9 : 8, height: flash ? 9 : 8, borderRadius: '50%',
-        background: indicatorColor(a), flexShrink: 0,
-        animation: flash ? 'cpulse 1.1s ease-in-out infinite' : 'none',
-        boxShadow: flash ? `0 0 7px ${indicatorColor(a)}` : 'none',
+        width: active ? 9 : 8, height: active ? 9 : 8, borderRadius: '50%',
+        background: color, flexShrink: 0,
+        animation: active ? 'cpulse 1.1s ease-in-out infinite' : 'none',
+        boxShadow: active ? `0 0 7px ${color}` : 'none',
       }} />
     )
   }
@@ -264,7 +270,6 @@ export function Workspace() {
                     {a?.name ?? `empty · ${g.slots.length} pane${g.slots.length > 1 ? 's' : ''}`}
                   </span>
                   {a && <span className="mono" style={repoStyle}>{a.repo}</span>}
-                  {a && <StatusPill agent={a} small />}
                 </button>
               )
             }
@@ -296,7 +301,6 @@ export function Workspace() {
                     >
                       {tabDot(a)}
                       <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--text)' : 'var(--mut2)', whiteSpace: 'nowrap' }}>{a.name}</span>
-                      <StatusPill agent={a} small />
                     </button>
                   )
                 })}
@@ -322,7 +326,6 @@ export function Workspace() {
               {tabDot(a)}
               <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--mut2)', whiteSpace: 'nowrap' }}>{a.name}</span>
               <span className="mono" style={repoStyle}>{a.repo}</span>
-              <StatusPill agent={a} small />
             </button>
           ))}
         </div>

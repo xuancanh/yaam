@@ -34,6 +34,10 @@ export const STATUS_META: Record<string, { label: string; color: string }> = {
   error: { label: 'Error', color: '#FF5C5C' },
 }
 
+/** Tab indicator color while a session is actively streaming output ("responding").
+ *  Deliberately distinct from the lifecycle colors above (green/amber/red/grey). */
+export const RESPONDING_COLOR = '#7FD1FF'
+
 export const PERM_COLORS: Record<Perm, string> = {
   Off: '#6B7280',
   'Ask first': '#FFB020',

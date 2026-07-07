@@ -59,6 +59,21 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   const lastFlagged = new Map<string, string>()
   let scan: Disposable | undefined
 
+  // "responding" indicator: a session is streaming while raw output keeps
+  // arriving and stops once it goes quiet (settle fires). Tracked locally so the
+  // store is only touched on the false→true / true→false edges — bumpSettle runs
+  // at PTY speed, and dispatching per chunk would defeat the output batching.
+  const streaming = new Set<string>()
+  const setResponding = (id: string, on: boolean) => {
+    if (on === streaming.has(id)) return
+    if (on) streaming.add(id)
+    else streaming.delete(id)
+    state.update(s => ({
+      ...s,
+      agents: s.agents.map(a => (a.id === id ? { ...a, responding: on } : a)),
+    }))
+  }
+
   // Mark a session as awaiting fresh output so the next settle means completion.
   const armResponseWatch = (id: string) => {
     const alt = isAltScreen(id)
@@ -74,6 +89,8 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   // Inspect a stable rendered screen for prompts, completion, monitors, and watchers.
   const onSettle = (id: string, since: number) => {
     settle.delete(id)
+    // output went quiet — the session is no longer actively responding
+    setResponding(id, false)
     const agent = state.get().agents.find(a => a.id === id)
     if (!agent || (agent.status !== 'running' && agent.status !== 'needs')) return
     const st = state.get().settings
@@ -175,7 +192,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   const bumpSettle = (id: string) => {
     const prev = settle.get(id)
     if (prev) prev.timer.dispose()
-    const since = prev?.since ?? Math.max(0, (state.get().agents.find(a => a.id === id)?.log.length ?? 1) - 1)
+    const agent = state.get().agents.find(a => a.id === id)
+    if (agent?.status === 'running') setResponding(id, true)
+    const since = prev?.since ?? Math.max(0, (agent?.log.length ?? 1) - 1)
     const timer = clock.setTimeout(() => onSettle(id, since), 3000)
     settle.set(id, { since, timer })
   }
@@ -186,6 +205,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     settle.delete(id)
     armed.delete(id)
     lastFlagged.delete(id)
+    setResponding(id, false)
   }
 
   // Deterministic safety net for full-screen TUIs: scan the rendered screen of
@@ -229,7 +249,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     dispose() {
       scan?.dispose(); scan = undefined
       for (const { timer } of settle.values()) timer.dispose()
-      settle.clear(); armed.clear(); lastFlagged.clear()
+      settle.clear(); armed.clear(); lastFlagged.clear(); streaming.clear()
     },
   }
 }
