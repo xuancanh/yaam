@@ -9,6 +9,7 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 ## Highlights
 
 - **Real terminals, not fakes** — every session is an OS process in a PTY, rendered with xterm.js.
+- **Remote machines** — run any session on a saved SSH host inside tmux (survives disconnects; Files/Git browse the remote host too).
 - **Master orchestrator** — a Claude-with-tools that routes tasks, monitors sessions, and acts on your chat instructions.
 - **Chat agents** — in-app Claude-Desktop-style assistants that edit files, run commands, load skills, and call MCP servers.
 - **Worktree isolation + review queue** — sessions and tasks can run in mirrored git worktrees (multi-repo folders supported); review the diff, stage, commit, and merge back from a Fork-style git workbench.
@@ -27,6 +28,8 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 - **Persistent split-pane layouts** — a Chrome-style menu arranges 1–4 panes (single, split, three-up, or 2×2); the layout and orientation are saved and restored on restart.
 - Per-pane stop/resume/exit-code status, maximize/restore, and rename.
 - **Detachable sessions** — start a session in detached mode and its PTY lives in a separate host process with its own lifecycle: it keeps running when YAAM quits, and the app reattaches later (▶) with the recent output replayed. Stop ends it for real; everything else (monitors, remote companion, resize) works as usual.
+- **Remote machines** — save SSH hosts in **Settings → Machines** and run any session on one: the agent runs on the remote host inside **tmux**, so it survives disconnects and app restarts (Resume reattaches, Stop ends the remote tmux session for real). The **Files and Git** panels operate over SSH on that host, multi-repo folders included. Auth is keys/ssh-agent only (no passwords; a **Test connection** check probes tmux, `base64`, git, and the working dir). A machine can be chosen in the New Session dialog and on templates, board tasks, and schedules.
+- **Compact session tabs** — a single color-coded dot carries each session's status (no text label), blinking sky-blue while the agent is streaming a response; focusing a tab clears its notifications.
 
 ## Master — orchestration with monitors
 
@@ -35,19 +38,19 @@ Master is a Claude model with tools (enable in Settings → Master Brain; model 
 - **Per-session monitors** — every session gets its own lightweight monitor LLM that watches settled output, keeps the status card current, flags when input is needed, and escalates short digests to Master only when noteworthy.
 - **Acts on your behalf** — tools to launch, message, and stop sessions; create/toggle/delete schedules; add board tasks; and change app settings and tool permissions straight from chat.
 - **Proactive** — session exits and failures trigger Master turns (follow mode).
-- Without an API key, Master falls back to a heuristic router.
+- **Works without a brain** — with the Master Brain off, deterministic heuristics take over: sessions still flag when they need input, task cards still reach a final state (review/failed) on exit, and session cards get a best-effort status digest that flags error-looking output — so the board and fleet never go stale.
 
 ### Agents overview
 
 ![Agents overview — monitor-maintained status cards](docs/agents.png)
 
-Each session's card is kept current by its monitor — the current **task**, a timestamped **summary**, an **action** strip when something needs you, plus per-session spend, a live `git diff` review, and archive/restore. The **Overview** rail is a fleet ops console: stat tiles (running / needs you / watched tasks / chats / spend), a Master routing rail showing which sessions Master is steering, watched-task cards, and live chat cards.
+Each session's card is kept current by its monitor — the current **task**, a timestamped **summary**, an **action** strip when something needs you, plus per-session spend, a live `git diff` review, and archive/restore. The **Overview** rail is a fleet ops console: stat tiles (running / needs you / watched tasks / chats / spend), watched-task cards, and live chat cards.
 
 ### Mobile companion
 
-Flip **Settings → Remote Control** and YAAM serves a full mobile web app (embedded in the binary — no hosting) from an axum server on your network, styled after the desktop's design language. On the phone you get **Tasks** (the whole board, task details with criteria, the watcher chat, start/retry), **Chat** (searchable conversations, streaming replies, inline Allow/Deny for ask-mode tool calls, and file attachments from the working folder), **Agents** (filterable session cards; the detail view pins TERMINAL / FILES / CHANGES tabs under the top bar with a two-tap Stop control), and an **Inbox** of approvals. Navigation is history-backed, so the native back gesture works like an app.
+Flip **Settings → Remote Control** and YAAM serves a full mobile web app (embedded in the binary — no hosting) from an axum server on your network, styled after the desktop's design language. The phone opens on **Master** (the default tab) — the orchestrator conversation, in step with the desktop sidebar in both directions — plus **Tasks** (the whole board, task details with criteria, the watcher chat, start/retry), **Chat** (searchable conversations, streaming replies, inline Allow/Deny for ask-mode tool calls, and file attachments from the working folder), **Agents** (filterable session cards; the detail view pins TERMINAL / FILES / CHANGES tabs under the top bar with a two-tap Stop control), and an **Inbox** of approvals. The header and bottom tab bar stay put while content scrolls, and navigation is history-backed, so the native back gesture works like an app.
 
-The terminal is the real thing: raw PTY bytes stream from Rust over SSE into the phone's own xterm.js, with touch scrolling and bottom-stick auto-follow. **Terminal focus is exclusive** — the device viewing a terminal resizes the actual PTY to its screen, so TUIs reflow natively for the phone; the desktop (or another device) steals focus back by interacting. Files and git diffs browse over an rpc bridge answered by the desktop with its normal adapters, path-scoped to session working folders.
+The terminal is the real thing: raw PTY bytes stream from Rust over SSE into the phone's own xterm.js, with touch scrolling and bottom-stick auto-follow. A **⌨ keys popover** at the left of the composer sends Esc, Tab, Shift+Tab, arrows, and Enter straight to the PTY. **Terminal focus is exclusive** — the device viewing a terminal resizes the actual PTY to its screen, so TUIs reflow natively for the phone; the desktop (or another device) steals focus back by interacting. Files and git diffs browse over an rpc bridge answered by the desktop with its normal adapters, path-scoped to session working folders.
 
 Connecting requires two secrets: the URL token in the connect link (persisted across restarts, editable, regenerable, optionally auto-rotated every N hours) **and** a per-device token minted only when you explicitly approve that device's pairing request — suggested names come from the device's real user agent ("Pixel 8 · Chrome"). Paired devices are stored on both ends (revocable chips in Settings) and survive restarts and token rotations. Every action a phone takes is queued as a command that the desktop applies through the same conductor actions as its own buttons — execution, credentials, and file access never leave the machine.
 
@@ -108,7 +111,7 @@ Work is organized into **workspaces** (switcher in the title bar): each has its 
 ## More
 
 - **Schedules** — a 5-field cron scheduler plus one-time runs; can launch sessions or seed board tasks, from the UI or Master.
-- **Templates** — preconfigured launches, one-shot (run a task and exit) or interactive, that feed quick launches, schedules, and tasks.
+- **Templates** — preconfigured launches, one-shot (run a task and exit) or interactive, that feed quick launches, schedules, and tasks; any of them can target a saved remote machine.
 - **MCP everywhere** — streamable-HTTP *and* local stdio servers, a curated one-click marketplace, import from Claude Desktop / Claude Code / Cursor / Codex / Windsurf configs, and `.mcpb`/`.dxt` Claude Desktop extension bundles.
 - **Claude plugin marketplaces** — browse repos like `anthropics/claude-plugins-official` and install plugins for chat: skills and commands become slash-invocable skill registries, agents become personas, `.mcp.json` servers register directly, and plugin `hooks/` configs are translated into addon hooks (Stop/SessionEnd → session-exit, Notification → needs-input; runs gated behind the never-auto-granted `exec` permission).
 - **Skills** — local instruction packs plus GitHub/local registries (a keychain-backed GitHub token lifts API rate limits).

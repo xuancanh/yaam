@@ -265,6 +265,17 @@ host cleans up socket/spec and the attach client's EOF fires the normal
 session-exit flow. `detached_list` probes sockets for liveness and prunes
 stale leftovers.
 
+## Remote machines
+
+The same "lifecycle one process further out" idea, but on another host. A
+session bound to a saved machine (`settings.machines`, keys/ssh-agent auth) runs
+its command mode as an `ssh -tt … tmux new-session -A -s <id> …` client: the PTY
+is local, the agent runs on the host inside tmux, so a disconnect or app restart
+just re-runs the wrap to reattach, and stop kills the remote tmux session over
+SSH. No backend changes — the connection is snapshotted onto the session so a
+later machine edit/removal can't strand it, and remote Files/Git run `ls`/`cat`/
+`git` through `exec_command` over the shared SSH `ControlMaster` connection.
+
 ## Settle, prompt, monitor, and watcher flow
 
 Raw PTY activity resets a three-second quiet timer. On settle, YAAM examines the

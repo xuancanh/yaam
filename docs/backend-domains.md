@@ -90,6 +90,11 @@ Both set `TERM=xterm-256color`; an optional working directory is tilde-expanded
 and must exist. Reusing an id shuts down the previous child before inserting the
 replacement handle.
 
+Remote-machine sessions need no backend change: the command the frontend hands
+command mode is simply an `ssh … tmux new-session -A …` client, so the PTY is
+local while the agent runs on the host inside tmux. Their remote Files/Git reuse
+`exec_command` (below) to run `ls`/`cat`/`git` over the same SSH connection.
+
 On Unix, stop and id replacement send SIGTERM to the child and its process
 group, then send SIGKILL after a two-second grace period on a background thread.
 The grace period lets agent CLIs flush resume/session files. Non-Unix platforms

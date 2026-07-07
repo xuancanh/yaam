@@ -145,8 +145,10 @@ workspace file viewer.
 | `launch.ts` | Pure launch-plan construction, Claude session-id injection, initial Agent record |
 | `launch-runtime.ts` | PTY spawn, CLI id probing, template launch, canonical task launch |
 | `command.ts` | Agent type matching, env prefix, key mapping, delayed Enter send |
+| `remote-machine.ts` | Pure SSH/tmux command builders (wrap launch, kill, ssh options, connection test) for machine sessions |
+| `remote-native.ts` | `SessionFs` adapter: local native fs/git, or the same operations over SSH for a machine session |
 | `attention.ts` | Screen tails, needs-input escalation, monitor status, bounded output/usage |
-| `prompt-detection.ts` | Pure prompt/menu heuristics and numbered option extraction |
+| `prompt-detection.ts` | Pure prompt/menu heuristics, numbered option extraction, and the no-brain status digest |
 | `use-settle.ts` | Plain settle runtime plus legacy React adapter |
 | `exit.ts` | Pure stopped/failed/completed/exited classification |
 | `exit-handler.ts` | Effectful process-exit coordinator and native subscription |
@@ -241,11 +243,37 @@ at the pane header's Clear-terminal button — the explicit user-initiated full
 reset. History is never cleared automatically. Closing a pane stops the
 process and archives the session behind a confirmation.
 
+### Remote machines
+
+A session can run on a saved remote machine (`settings.machines`, keys/ssh-agent
+auth only) over SSH inside tmux — the remote analogue of detached sessions, with
+no new Rust: the local PTY simply runs an `ssh` client. `remote-machine.ts` is
+pure — `wrapLaunch` builds `ssh -tt … tmux new-session -A -s <id> …` (the inner
+command base64-encoded to survive two shells; `new-session -A` attaches-or-
+creates, so resume just re-runs it), `killRemote` ends the remote tmux session on
+stop, `sshPrefix` shares one `ControlMaster` connection across the terminal and
+fs/git calls, and `testCommand` probes tmux/`base64`/git/dir. `buildLaunch`
+snapshots the resolved connection onto `agent.machine`, so editing or removing the
+saved machine never strands a live session; launch/resume/stop and Files/Git read
+that snapshot. Machine sessions skip the local-only paths (CLI-id
+injection/probing, worktree isolation, detached hosting) and use `agent.cwd` as
+the remote working dir.
+
+`remote-native.ts` gives Files/Git a per-session `SessionFs`: the native adapter
+for local sessions, or ssh-backed `listDir`/`read`/`git status|diff|stage|commit`
+(run through `execCommand`, parsed to match `git.rs`, with a size cap on binary
+reads) for a machine session. `detectRepos` (cwd itself, else its immediate repo
+subfolders) runs over whichever adapter, so remote multi-repo folders are scanned
+on the host. `FilesPane`/`GitWorkbench` take the adapter and fall back to a poll
+instead of the local fs watch. Templates, board tasks, and schedules all carry a
+`machineId` so remote agents can run from those surfaces too.
+
 ### Tests
 
 Tests cover launch plans/runtime, controller effects through fake ports, action
 cleanup, prompt actions/detection, settle timing, exit classification/fan-out,
-and layout behavior indirectly through state helpers.
+layout behavior indirectly through state helpers, and the pure remote-machine
+builders + remote-native parsers/adapters.
 
 ## Board domain
 
@@ -452,7 +480,9 @@ marketplaces.
 - `plugin-market.ts` parses GitHub plugin marketplaces and resolves plugin
   sources.
 - `SettingsView.tsx` composes settings tabs; `ToolsView.tsx` renders Master tool
-  policy.
+  policy; `MachinesSection.tsx` manages the saved remote machines
+  (`settings.machines`: label, user/host/port, identity-file path, default dir,
+  extra ssh options) with a per-machine SSH **Test connection** action.
 
 ### MCP behavior
 
@@ -518,15 +548,20 @@ approval — without granting the remote any capability the desktop UI lacks.
   (thinking excluded), and approvals from both pending Master tool approvals
   and ask-mode chat approvals. Message counts, screen lines, and text lengths
   are capped so snapshots stay small.
+- `snapshot.ts` also publishes the active-workspace **Master conversation**
+  (`s.messages`, structured route/escalation/build payloads flattened to text)
+  plus its busy/brain state, so the phone's Master tab stays in step with the
+  desktop sidebar both ways.
 - `RemoteCompanion.tsx` is a headless component mounted in the shell. While
   `settings.remoteEnabled` is on it starts the server (storing
   `{ url, token, urls }` in transient `remoteInfo`), re-hydrates the paired
   device set from `settings.remoteDevices` (so Settings revokes propagate),
   publishes a debounced snapshot on every store change, drains the command
-  queue (chat send, task chat/start, session input/stop/resume, approvals)
-  through the normal conductor actions, and turns pairing requests into
-  `confirmAction` dialogs — approval mints the device token and persists it
-  in settings.
+  queue (master/chat send, task chat/start, session input/stop/resume, a
+  `session_key` that writes a mapped byte sequence straight to the PTY, prompt
+  answer/approve/deny, and approvals) through the normal conductor actions, and
+  turns pairing requests into `confirmAction` dialogs — approval mints the device
+  token and persists it in settings.
 - `src/mobile/` is the phone app itself: a second Vite build target
   (`vite.mobile.config.ts` + vite-plugin-singlefile, `npm run build:mobile`)
   that emits one self-contained HTML file embedded by the Rust server, styled
@@ -534,12 +569,16 @@ approval — without granting the remote any capability the desktop UI lacks.
   avatar cards with pulsing status pills, inbox-style approvals, assistant
   chat, pill composer). `api.ts` keeps all fetches relative
   (Cloudflare-Tunnel/proxy friendly), persists the device id/token in
-  localStorage, and exposes the rpc round trip; `MobileApp.tsx` owns
+  localStorage, and exposes the rpc round trip; `MobileApp.tsx` owns the
+  **Master** default tab (orchestrator chat) alongside Tasks/Chat/Agents/Inbox,
   history-backed navigation (native back closes details), Agents filter
   chips, chat search, and file attachments (a slide-in files sheet whose
-  preview offers "Add to chat"); `TerminalView.tsx` renders live SSE bytes in
-  its own xterm with manual touch scrolling and bottom-stick auto-follow;
-  `FilesGit.tsx` browses files and reviews git diffs over the rpc bridge.
+  preview offers "Add to chat"); a document-locked shell keeps the header and
+  bottom tab bar fixed while only the body scrolls; `TerminalView.tsx` renders
+  live SSE bytes in its own xterm with manual touch scrolling and bottom-stick
+  auto-follow, and a ⌨ keys popover (Esc/Tab/Shift+Tab/arrows/Enter) at the
+  left of the composer; `FilesGit.tsx` browses files and reviews git diffs over
+  the rpc bridge.
 - Terminal focus is exclusive: the device viewing a terminal claims it
   (`session_focus` with its fitted rows/cols → `remoteResize` sizes the real
   PTY and the desktop xterm alike), and leaving — or any desktop pane
