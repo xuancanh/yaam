@@ -36,6 +36,8 @@ export function createSessionLayoutActions(): SessionLayoutActions {
       return {
         ...withActiveGroup(s, g => ({ ...g, activePane: i })),
         agents: id ? s.agents.map(a => (a.id === id ? { ...a, attention: false } : a)) : s.agents,
+        // focusing a pane also clears that session's unread notifications
+        notifications: id ? s.notifications.map(n => (n.agentId === id && !n.read ? { ...n, read: true } : n)) : s.notifications,
       }
     }),
 

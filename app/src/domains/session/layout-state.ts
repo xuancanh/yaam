@@ -59,7 +59,12 @@ export function removeFromGroups(s: AppState, id: string): Pick<AppState, 'group
 // slot of the active group, else open a new single-pane group. A session never
 // appears in two groups (panes would fight over its terminal).
 export function focusSessionIn(s: AppState, id: string): AppState {
-  s = { ...s, agents: s.agents.map(a => (a.id === id ? { ...a, archived: false, attention: false } : a)) }
+  s = {
+    ...s,
+    agents: s.agents.map(a => (a.id === id ? { ...a, archived: false, attention: false } : a)),
+    // viewing a session clears its unread notifications
+    notifications: s.notifications.map(n => (n.agentId === id && !n.read ? { ...n, read: true } : n)),
+  }
   // chat sessions live in the Chat view, not in workspace tab groups
   if (s.agents.find(a => a.id === id)?.kind === 'chat') {
     return { ...s, activeChatId: id, view: 'chat' }
