@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useActions, useConductorSelector } from '../../store'
-import {
-  gitCommit, gitFileDiffSide, gitStage, gitStatus, gitUnstage, readTextFile, worktreeDiff,
-} from '../../core/native'
+import { worktreeDiff } from '../../core/native'
 import { detectRepoDirs } from '../../shared/git-repos'
 import type { GitStatusResult } from '../../core/native'
 import { buildCfg, callApi, hasCreds } from '../../llm/client'
 import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { FolderExplorer } from './FilesPane'
+import { findMachine } from './remote-machine'
+import { sessionFs } from './remote-native'
+import type { SessionFs } from './remote-native'
 
 // Fork/GitKraken-style git workbench for one session: a tree of changed files
 // on the left split into STAGED and CHANGES (stage/unstage per file or per
@@ -186,11 +187,13 @@ interface DiffSection {
 /** The shared git body: toolbar (repo picker, view toggle, refresh), the
  *  staged/unstaged tree + commit box on the left, diffs on the right, and an
  *  optional host-supplied footer (the review drawer's merge/approve row). */
-export function GitWorkbench({ cwd, worktree, footer }: {
+export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, '') }: {
   cwd?: string
   /** worktree info when the work happens in an isolated mirror */
   worktree?: { root: string; base: string; workdir: string }
   footer?: ReactNode
+  /** local or remote (ssh) git adapter for the reviewed session */
+  fs?: SessionFs
 }) {
   const settings = useConductorSelector(x => x.settings)
   const [repos, setRepos] = useState<string[]>([])
@@ -210,18 +213,29 @@ export function GitWorkbench({ cwd, worktree, footer }: {
 
   const refresh = useCallback(async (dir = repo) => {
     try {
-      const st = await gitStatus(dir)
+      const st = await fs.gitStatus(dir)
       setStatus(st)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setStatus(null)
     }
-  }, [repo])
+  }, [repo, fs])
 
-  // resolve the repo (or, for a multi-repo worktree/folder cwd, the repo list)
+  // resolve the repo (or, for a multi-repo worktree/folder cwd, the repo list).
+  // Remote (ssh) sessions can't be scanned locally, so the cwd IS the repo —
+  // gitStatus resolves the real toplevel, or errors into the no-repo fallback.
   useEffect(() => {
     let live = true
+    if (fs.remote) {
+      const dir = cwd ?? ''
+      setRepos([dir])
+      setRepo(dir)
+      void fs.gitStatus(dir)
+        .then(st => { if (live) { setStatus(st); setError(null) } })
+        .catch(() => { if (live) setNoRepo(true) })
+      return () => { live = false }
+    }
     void detectRepoDirs(cwd ?? "").then(candidates => {
       if (!live) return
       setRepos(candidates)
@@ -230,17 +244,17 @@ export function GitWorkbench({ cwd, worktree, footer }: {
     })
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd])
+  }, [cwd, fs])
 
   // one file's diff for its side; untracked files show their contents
   const loadFileDiff = useCallback(async (st: GitStatusResult, path: string, staged: boolean): Promise<string> => {
     const f = st.files.find(x => x.path === path)
     if (!staged && f?.status === '??') {
-      const text = await readTextFile(`${st.root}/${path}`).catch(() => '(binary or unreadable file)')
+      const text = await fs.readTextFile(`${st.root}/${path}`).catch(() => '(binary or unreadable file)')
       return `+++ ${path} (untracked)\n${text.split('\n').slice(0, 800).map(l => `+${l}`).join('\n')}`
     }
-    return await gitFileDiffSide(st.root, path, staged)
-  }, [])
+    return await fs.gitFileDiffSide(st.root, path, staged)
+  }, [fs])
 
   // single-file view: load the selected file's diff
   useEffect(() => {
@@ -314,10 +328,10 @@ export function GitWorkbench({ cwd, worktree, footer }: {
     }
   }
 
-  const toggle = (f: FileRow) => act(() => f.staged ? gitUnstage(status!.root, [f.path]) : gitStage(status!.root, [f.path]))
+  const toggle = (f: FileRow) => act(() => f.staged ? fs.gitUnstage(status!.root, [f.path]) : fs.gitStage(status!.root, [f.path]))
 
   const commit = () => act(async () => {
-    const summary = await gitCommit(status!.root, message.trim())
+    const summary = await fs.gitCommit(status!.root, message.trim())
     setMessage('')
     setNote(summary.split('\n')[0] ?? 'committed')
   })
@@ -329,7 +343,7 @@ export function GitWorkbench({ cwd, worktree, footer }: {
     try {
       const staged = stagedFiles.length > 0
       const parts = await Promise.all(
-        (staged ? stagedFiles : unstagedFiles).slice(0, 25).map(f => gitFileDiffSide(status.root, f.path, staged).catch(() => '')),
+        (staged ? stagedFiles : unstagedFiles).slice(0, 25).map(f => fs.gitFileDiffSide(status.root, f.path, staged).catch(() => '')),
       )
       const diffText = parts.join('\n').slice(0, 24_000)
       if (!diffText.trim()) throw new Error('nothing to describe — stage some changes first')
@@ -360,7 +374,7 @@ export function GitWorkbench({ cwd, worktree, footer }: {
           <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cwd}</span>
           <span style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--amber)' }}>not a git repository — browsing files</span>
         </div>
-        <FolderExplorer root={cwd ?? '~'} />
+        <FolderExplorer root={cwd ?? "~"} fs={fs} />
         {footer}
       </div>
     )
@@ -410,7 +424,7 @@ export function GitWorkbench({ cwd, worktree, footer }: {
                     title="STAGED"
                     files={stagedFiles}
                     bulkLabel="unstage all"
-                    onBulk={() => { void act(() => gitUnstage(status!.root, stagedFiles.map(f => f.path))) }}
+                    onBulk={() => { void act(() => fs.gitUnstage(status!.root, stagedFiles.map(f => f.path))) }}
                     selectedPath={selected?.path ?? null}
                     selectedStaged={selected?.staged ?? false}
                     onSelect={selectFile}
@@ -421,7 +435,7 @@ export function GitWorkbench({ cwd, worktree, footer }: {
                     title="CHANGES"
                     files={unstagedFiles}
                     bulkLabel="stage all"
-                    onBulk={() => { void act(() => gitStage(status!.root, unstagedFiles.map(f => f.path))) }}
+                    onBulk={() => { void act(() => fs.gitStage(status!.root, unstagedFiles.map(f => f.path))) }}
                     selectedPath={selected?.path ?? null}
                     selectedStaged={selected?.staged ?? true}
                     onSelect={selectFile}
@@ -514,6 +528,8 @@ export function GitWorkbench({ cwd, worktree, footer }: {
 /** The pane-header popup: a modal shell around the shared workbench. */
 export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const { openDiff } = useActions()
+  const machines = useConductorSelector(x => x.settings.machines)
+  const fs = useMemo(() => sessionFs(findMachine(machines, agent.machineId), agent.id), [machines, agent.machineId, agent.id])
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.6)', zIndex: 48, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '4vh 3vw' }}>
       <div onClick={e => e.stopPropagation()} style={{
@@ -539,7 +555,7 @@ export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void
             <Icon paths={IC.close} size={12} stroke={2} />
           </button>
         </div>
-        <GitWorkbench cwd={agent.cwd} worktree={agent.worktree} />
+        <GitWorkbench cwd={agent.cwd} worktree={agent.worktree} fs={fs} />
       </div>
     </div>
   )

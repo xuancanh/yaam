@@ -3,10 +3,14 @@
 // splits with the terminal or replaces it (toggleable). Git-aware: changed
 // files are tinted in the tree and the viewer's gutter can switch from line
 // numbers to change markers (green = new, amber = modified, red = deletion).
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { highlight, langForFile } from '../../core/highlight'
-import { gitFileDiff, gitStatus, isTauri, listDir, onFsChange, readFileB64, readTextFile, unwatchDir, watchDir } from '../../core/native'
+import { isTauri, onFsChange, unwatchDir, watchDir } from '../../core/native'
 import type { DirEntryInfo } from '../../core/native'
+import { useConductorSelector } from '../../store'
+import { findMachine } from './remote-machine'
+import { sessionFs } from './remote-native'
+import type { SessionFs } from './remote-native'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import { IMG_MIME, viewKind } from '../../shared/file-preview'
 import { parseDiffLines } from './diff-marks'
@@ -69,7 +73,7 @@ const OVERSCAN = 24
 // ---------------------------------------------------------------- tree
 
 /** Recursively render one directory level and lazily loaded descendants. */
-function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, onAttachFile }: {
+function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, onAttachFile, fs }: {
   dir: string
   depth: number
   expanded: Set<string>
@@ -79,17 +83,19 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
   git: GitInfo | null
   /** chat hosts: attach this file to the conversation (design's ＋ chip) */
   onAttachFile?: (path: string) => void
+  /** local or remote (ssh) fs adapter for the owning session */
+  fs: SessionFs
 }) {
   const [entries, setEntries] = useState<DirEntryInfo[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
-    listDir(dir)
+    fs.listDir(dir)
       .then(es => { if (live) setEntries(es.filter(e => e.name !== '.git')) })
       .catch(e => { if (live) setErr(e instanceof Error ? e.message : String(e)) })
     return () => { live = false }
-  }, [dir])
+  }, [dir, fs])
 
   if (err) return <div style={{ padding: `3px 8px 3px ${14 + depth * 13}px`, fontSize: 11, color: 'var(--red-soft)' }}>{err}</div>
   if (!entries) return <div style={{ padding: `3px 8px 3px ${14 + depth * 13}px`, fontSize: 11, color: 'var(--faint)' }}>…</div>
@@ -138,7 +144,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
               )}
             </button>
             {e.isDir && isOpen && (
-              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} onAttachFile={onAttachFile} />
+              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} onAttachFile={onAttachFile} fs={fs} />
             )}
           </div>
         )
@@ -153,7 +159,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
 // ---------------------------------------------------------------- viewer
 
 /** Load and display one file with syntax highlighting and optional diff gutter. */
-function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose, git, onAttachFile }: {
+function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose, git, onAttachFile, fs }: {
   path: string
   gutter: 'numbers' | 'git'
   onToggleGutter: () => void
@@ -163,6 +169,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   onClose: () => void
   git: GitInfo | null
   onAttachFile?: (path: string) => void
+  fs: SessionFs
 }) {
   const [content, setContent] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -189,13 +196,13 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         // rendered natively from a data URL; no diff/polling semantics
         const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
         const mime = kind === 'pdf' ? 'application/pdf' : IMG_MIME[ext]
-        setDataUrl(`data:${mime};base64,${await readFileB64(path)}`)
+        setDataUrl(`data:${mime};base64,${await fs.readFileB64(path)}`)
         setErr(null)
         return
       }
       if (kind === 'office') {
         // office docs preview as extracted text (viewer stays read-only)
-        const extracted = await extractFileText(name, b64ToBytes(await readFileB64(path)))
+        const extracted = await extractFileText(name, b64ToBytes(await fs.readFileB64(path)))
         const text = extracted.text ?? '(no text extracted)'
         if (text !== contentRef.current) {
           contentRef.current = text
@@ -204,7 +211,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         setErr(null)
         return
       }
-      const text = await readTextFile(path)
+      const text = await fs.readTextFile(path)
       if (text !== contentRef.current) {
         contentRef.current = text
         setContent(text)
@@ -220,7 +227,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         setMarks({ added: new Set([-1]), modified: new Set(), deletedAfter: new Set() })
       } else {
         try {
-          setMarks(parseDiffLines(await gitFileDiff(git.root, rel)))
+          setMarks(parseDiffLines(await fs.gitFileDiff(git.root, rel)))
         } catch {
           setMarks(null)
         }
@@ -228,7 +235,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
     } else {
       setMarks(null)
     }
-  }, [path, git, rel, kind, name])
+  }, [path, git, rel, kind, name, fs])
 
   // load on open, then keep it fresh — the agent edits files while you watch.
   // Desktop app: a native fs watch drives reloads (event-driven, no timer). We
@@ -455,6 +462,9 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
   const [git, setGit] = useState<GitInfo | null>(null)
   const [treeKey, setTreeKey] = useState(0)
   const root = agent.cwd || '~'
+  // machine sessions browse the remote host over ssh; local sessions use native fs
+  const machines = useConductorSelector(x => x.settings.machines)
+  const fs = useMemo(() => sessionFs(findMachine(machines, agent.machineId), agent.id), [machines, agent.machineId, agent.id])
   // chat hosts: files can be attached to the conversation with one click —
   // the ChatPane below subscribes on the attach bus and chips the file
   const attachToChat = agent.kind === 'chat' ? (path: string) => { requestAttach(agent.id, path) } : undefined
@@ -466,7 +476,7 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
 
   // Refresh repository status and rebuild the path-to-status lookup.
   const refreshGit = useCallback(() => {
-    gitStatus(root)
+    fs.gitStatus(root)
       .then(res => {
         const byPath = new Map<string, string>()
         const dirs = new Set<string>()
@@ -482,21 +492,23 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
         setGit({ root: res.root, byPath, dirs })
       })
       .catch(() => setGit(null))
-  }, [root])
+  }, [root, fs])
 
   // Desktop app: a native recursive watch on the workspace root drives tree +
   // git refresh (Rust coalesces bursts), so no fixed-interval polling. Browser
   // build: fall back to a periodic refresh since watch events never fire there.
   useEffect(() => {
     refreshGit()
-    if (isTauri) {
+    // native fs watch is local-only; a remote (ssh) session can't receive
+    // change events, so it falls back to the periodic refresh below
+    if (isTauri && !fs.remote) {
       void watchDir(root)
       const off = onFsChange(() => { setTreeKey(k => k + 1); refreshGit() })
       return () => { off(); void unwatchDir(root) }
     }
-    const iv = window.setInterval(refreshGit, 6000)
+    const iv = window.setInterval(() => { setTreeKey(k => k + 1); refreshGit() }, 6000)
     return () => window.clearInterval(iv)
-  }, [refreshGit, root])
+  }, [refreshGit, root, fs])
 
   // Expand a cached directory or lazily request its children before expanding.
   const toggleDir = (path: string) => {
@@ -542,6 +554,7 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
             selected={file}
             git={git}
             onAttachFile={attachToChat}
+            fs={fs}
           />
         </div>
       </div>
@@ -557,6 +570,7 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
             onClose={() => setFile(null)}
             git={git}
             onAttachFile={attachToChat}
+            fs={fs}
           />
         )}
         {(!file || mode === 'split') && (
@@ -580,7 +594,7 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
  *  open its files (code, markdown, images, PDF, office). Used by the review
  *  workbench when the reviewed folder has no git repository — there is no diff
  *  to show, but the work itself is still reviewable. */
-export function FolderExplorer({ root }: { root: string }) {
+export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: string; fs?: SessionFs }) {
   const init = cached(`folder:${root}`)
   const [file, setFile] = useState<string | null>(init.file)
   const [gutter, setGutter] = useState<'numbers' | 'git'>('numbers')
@@ -633,6 +647,7 @@ export function FolderExplorer({ root }: { root: string }) {
             openFile={setFile}
             selected={file}
             git={null}
+            fs={fs}
           />
         </div>
       </div>
@@ -645,6 +660,7 @@ export function FolderExplorer({ root }: { root: string }) {
             onToggleGutter={() => setGutter(g => (g === 'numbers' ? 'git' : 'numbers'))}
             onClose={() => setFile(null)}
             git={null}
+            fs={fs}
           />
         ) : (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--dim)' }}>
