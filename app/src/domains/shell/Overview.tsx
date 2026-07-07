@@ -34,7 +34,7 @@ function FleetStat({ label, value, tone }: { label: string; value: string | numb
 /** The fleet as an ops console: aggregate stats, Master's routing, live
  *  session/chat/watcher cards, and the archived shelf. */
 export function Overview() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, tasks: x.tasks, masterBusy: x.masterBusy }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, tasks: x.tasks }), shallowEqual)
   const { focusTab, resume, openPanel, openAgent, openDiff, renameSession, archiveSession, unarchiveSession, deleteSession, openChat, setView } = useActions()
   // Keep legacy sessions without workspaceId in the active workspace.
   const inWs = (a: typeof s.agents[number]) => (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace
@@ -44,7 +44,6 @@ export function Overview() {
   const watched = s.tasks.filter(t => !t.archived && (t.col === 'progress' || t.col === 'review'))
   const running = active.filter(a => a.status === 'running')
   const needs = active.filter(a => a.status === 'needs' || a.attention || a.actionNeeded)
-  const routed = active.filter(a => a.task) // Master-assigned work
   const spend = [...active, ...chats, ...archived].reduce((n, a) => n + a.cost, 0)
 
   return (
@@ -63,40 +62,6 @@ export function Overview() {
           <FleetStat label="CHATS" value={chats.length} />
           <FleetStat label="TOTAL SPEND" value={`$${spend.toFixed(2)}`} />
         </div>
-
-        {/* ── Master routing: which sessions carry Master-assigned work ── */}
-        {routed.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 16, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '10px 14px', overflowX: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              <span style={{
-                width: 26, height: 26, borderRadius: 8, background: 'var(--accent)', color: 'var(--panel)',
-                display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12,
-                animation: s.masterBusy ? 'cpulse 0.9s ease-in-out infinite' : 'none',
-              }}>M</span>
-              <span className="mono" style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color: 'var(--dim)' }}>ROUTING</span>
-            </div>
-            {routed.map(a => (
-              <div key={a.id} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                {/* the connection */}
-                <span style={{ width: 26, height: 1.5, background: a.status === 'running' ? 'var(--accent)' : 'var(--line2)', margin: '0 2px', flexShrink: 0 }} />
-                <button
-                  onClick={() => openAgent(a.id)}
-                  title={a.task}
-                  className="mono"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', maxWidth: 220,
-                    background: 'var(--bg)', border: `1px solid ${a.status === 'running' ? 'rgba(245,196,81,.4)' : 'var(--line2)'}`,
-                    borderRadius: 8, padding: '4px 9px', fontSize: 10.5, color: 'var(--text)',
-                  }}
-                >
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: a.color, flexShrink: 0 }} />
-                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</span>
-                  <span style={{ color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>{a.task}</span>
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
 
         <UsageSummary />
         <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))' }}>
