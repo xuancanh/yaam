@@ -37,6 +37,10 @@
 }
 * { box-sizing: border-box; margin: 0; }
 html, body, #root { height: 100%; }
+/* Only the in-shell .body scrolls. Without locking the document, a tall list
+   lets the whole page rubber-band on mobile and the fixed header + bottom tab
+   bar scroll away with it. */
+html, body { overflow: hidden; }
 body {
   background: var(--bg); color: var(--text);
   font: 14px/1.5 var(--font-sans);
@@ -262,6 +266,32 @@ button.card.sel { border-color: var(--accent-border); background: var(--panel2);
 .composer .sendbtn:active { filter: brightness(1.08); }
 .attbar { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 9px; }
 .attbar::-webkit-scrollbar { height: 0; }
+/* terminal keys: a ⌨ toggle at the left of the composer, opening a horizontal
+   popover of keys just above it */
+.keywrap { position: relative; flex: 0 0 auto; align-self: flex-end; }
+.keytoggle {
+  width: 36px; height: 36px; border-radius: 12px;
+  border: none; background: transparent; color: var(--mut);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 18px; line-height: 1;
+}
+.keytoggle.on { color: var(--accent); background: var(--accent-soft); }
+.keytoggle:active { background: var(--hover); color: var(--accent); }
+.keypop-veil { position: fixed; inset: 0; z-index: 15; }
+.keypop {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 16;
+  display: flex; gap: 7px; padding: 8px; max-width: 80vw; overflow-x: auto;
+  background: var(--panel2); border: 1px solid var(--line2); border-radius: 13px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .5); animation: cfade .14s ease;
+}
+.keypop::-webkit-scrollbar { height: 0; }
+.keypop button {
+  flex: 0 0 auto; min-width: 44px; height: 36px; border-radius: 10px; padding: 0 10px;
+  border: 1px solid var(--line2); background: var(--panel3); color: var(--text2);
+  font-family: var(--font-mono); font-size: 12.5px; font-weight: 700; white-space: nowrap;
+}
+.keypop button.wide { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
+.keypop button:active { background: var(--hover); color: var(--accent); }
 
 /* ── bottom tab bar ── */
 .tabs {

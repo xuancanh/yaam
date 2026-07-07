@@ -9,7 +9,7 @@ import { useActions, useConductorSelector } from '../../store'
 import {
   gitFileDiffSide, gitStatus, listDir, readFileB64, readTextFile,
   remoteActive, remoteApprovePair, remoteDenyPair, remotePendingPairs, remotePublish,
-  remoteRespond, remoteSetDevices, remoteStart, remoteStop, remoteTakeCommands,
+  remoteRespond, remoteSetDevices, remoteStart, remoteStop, remoteTakeCommands, writeSession,
 } from '../../core/native'
 import type { RemoteCommand } from '../../core/native'
 import { fitTerminal, remoteResize, serializeScreen, terminalSize } from '../../core/terminals'
@@ -21,6 +21,17 @@ import { buildRemoteSnapshot } from './snapshot'
 // SSE stream pushes every publish — this is the streaming granularity remotes see
 const PUBLISH_DEBOUNCE_MS = 300
 const POLL_MS = 800 // command/pairing drain — rpc browsing rides this loop
+
+const REMOTE_KEY_BYTES: Record<string, string> = {
+  enter: '\r',
+  esc: '\x1b',
+  tab: '\t',
+  'shift+tab': '\x1b[Z', // CSI Z — back-tab / reverse-tab
+  up: '\x1b[A',
+  down: '\x1b[B',
+  right: '\x1b[C',
+  left: '\x1b[D',
+}
 
 /** Client-side token mint (same alphabet the server uses). */
 function mintToken(): string {
@@ -192,6 +203,11 @@ export function RemoteCompanion() {
         case 'task_chat': return a.sendTaskChat(c.id, c.text)
         case 'task_start': return a.startTask(c.id)
         case 'session_input': return a.sendInput(c.id, c.text)
+        case 'session_key': {
+          const seq = REMOTE_KEY_BYTES[c.text]
+          if (seq) void writeSession(c.id, seq).catch(() => {})
+          return
+        }
         case 'prompt_answer': return a.answerPrompt(c.id, Number(c.text))
         case 'prompt_approve': return a.approve(c.id)
         case 'prompt_deny': return a.deny(c.id)

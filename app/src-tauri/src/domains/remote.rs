@@ -25,7 +25,7 @@ use tokio_stream::StreamExt;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RemoteCommand {
     /// master_send · chat_send · task_chat · task_move · task_start ·
-    /// session_input · prompt_answer · prompt_approve · prompt_deny ·
+    /// session_input · session_key · prompt_answer · prompt_approve · prompt_deny ·
     /// session_stop · session_resume · approve_master · approve_chat
     pub kind: String,
     pub id: String,

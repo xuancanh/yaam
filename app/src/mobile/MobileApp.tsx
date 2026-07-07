@@ -154,11 +154,13 @@ function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) 
 
 // ---------------------------------------------------------------- shared
 
-function Composer({ placeholder, onSend, onAttach, children }: {
+function Composer({ placeholder, onSend, onAttach, children, lead }: {
   placeholder: string
   onSend: (text: string) => void
   onAttach?: () => void
   children?: React.ReactNode
+  /** accessory rendered at the left of the input row (e.g. the terminal keys) */
+  lead?: React.ReactNode
 }) {
   const [draft, setDraft] = useState('')
   const send = () => {
@@ -171,6 +173,7 @@ function Composer({ placeholder, onSend, onAttach, children }: {
     <div className="composerwrap">
       {children && <div className="attbar">{children}</div>}
       <div className="composer">
+        {lead}
         {onAttach && <button className="attachbtn" title="Attach a file from the working folder" onClick={onAttach}>＋</button>}
         <textarea
           rows={1}
@@ -339,6 +342,40 @@ function ChatDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   )
 }
 
+/** ⌨ toggle at the left of the composer; opens a horizontal popover of terminal
+ *  keys (Esc, Tab, Shift+Tab, arrows, Enter) sent straight to the PTY. */
+function SessionKeyStrip({ sessionId }: { sessionId: string }) {
+  const [open, setOpen] = useState(false)
+  const key = (name: string) => { void sendCommand({ kind: 'session_key', id: sessionId, text: name }) }
+  return (
+    <div className="keywrap">
+      <button
+        className={`keytoggle${open ? ' on' : ''}`}
+        title="Terminal keys"
+        aria-label="Terminal keys"
+        onClick={() => setOpen(v => !v)}
+      >
+        ⌨
+      </button>
+      {open && (
+        <>
+          <div className="keypop-veil" onClick={() => setOpen(false)} />
+          <div className="keypop">
+            <button onClick={() => key('esc')}>Esc</button>
+            <button onClick={() => key('tab')}>Tab</button>
+            <button className="wide" onClick={() => key('shift+tab')}>⇧Tab</button>
+            <button onClick={() => key('left')}>←</button>
+            <button onClick={() => key('up')}>↑</button>
+            <button onClick={() => key('down')}>↓</button>
+            <button onClick={() => key('right')}>→</button>
+            <button className="wide" onClick={() => key('enter')}>Enter</button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   const [view, setView] = useState<'term' | 'files' | 'git'>('term')
   const s = snap.sessions.find(x => x.id === id)
@@ -360,7 +397,9 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
             <TerminalView sessionId={s.id} data={s.term} />
           </div>
           {live
-            ? <Composer placeholder="Message this agent…" onSend={text => { if (text) void sendCommand({ kind: 'session_input', id: s.id, text }) }} />
+            ? (
+              <Composer placeholder="Message this agent…" onSend={text => { if (text) void sendCommand({ kind: 'session_input', id: s.id, text }) }} lead={<SessionKeyStrip sessionId={s.id} />} />
+              )
             : (
               <div className="composerwrap">
                 <button className="btn primary" style={{ width: '100%' }} onClick={() => void sendCommand({ kind: 'session_resume', id: s.id })}>Resume session</button>
