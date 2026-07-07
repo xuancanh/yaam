@@ -60,6 +60,9 @@ export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeW
     typeId: typeId ?? typeForCommand(trimmed, agentTypes)?.id,
     workspaceId: workspaceId ?? activeWorkspace,
     machineId: machine?.id,
+    // snapshot the connection so later edits/removal of the saved machine can't
+    // strand this session (resume/stop/Files/Git read agent.machine, not settings)
+    machine: machine ? { ...machine } : undefined,
     ephemeral: machine ? false : opts?.ephemeral, autoArchive: machine ? false : opts?.autoArchive, templateId: opts?.templateId,
     terminalShell: opts?.terminalShell,
     memory: mkMemory(), tools: mkTools(),

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { useActions, useConductorSelector } from '../../store'
+import { useActions } from '../../store'
 import { ACCENT, memTokens } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
@@ -15,7 +15,7 @@ const filesOpenCache = new Map<string, boolean>()
 /** Render one terminal pane with session controls and optional file explorer. */
 export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
   const { setActivePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession, refreshTerminal, archiveSession } = useActions()
-  const machineLabel = useConductorSelector(x => (agent.machineId ? x.settings.machines?.find(m => m.id === agent.machineId)?.label ?? 'remote' : ''))
+  const machineLabel = agent.machine ? (agent.machine.label || 'remote') : ''
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
   const [gitOpen, setGitOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)

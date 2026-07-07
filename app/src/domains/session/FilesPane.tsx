@@ -7,8 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { highlight, langForFile } from '../../core/highlight'
 import { isTauri, onFsChange, unwatchDir, watchDir } from '../../core/native'
 import type { DirEntryInfo } from '../../core/native'
-import { useConductorSelector } from '../../store'
-import { findMachine } from './remote-machine'
 import { sessionFs } from './remote-native'
 import type { SessionFs } from './remote-native'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
@@ -462,9 +460,9 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
   const [git, setGit] = useState<GitInfo | null>(null)
   const [treeKey, setTreeKey] = useState(0)
   const root = agent.cwd || '~'
-  // machine sessions browse the remote host over ssh; local sessions use native fs
-  const machines = useConductorSelector(x => x.settings.machines)
-  const fs = useMemo(() => sessionFs(findMachine(machines, agent.machineId), agent.id), [machines, agent.machineId, agent.id])
+  // machine sessions browse the remote host over ssh (using the session's own
+  // connection snapshot); local sessions use native fs
+  const fs = useMemo(() => sessionFs(agent.machine, agent.id), [agent.machine, agent.id])
   // chat hosts: files can be attached to the conversation with one click —
   // the ChatPane below subscribes on the attach bus and chips the file
   const attachToChat = agent.kind === 'chat' ? (path: string) => { requestAttach(agent.id, path) } : undefined

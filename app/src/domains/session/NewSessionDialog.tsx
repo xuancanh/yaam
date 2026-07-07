@@ -66,7 +66,8 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
     if (dir) setCwd(dir)
   }
 
-  const canLaunch = Boolean(tpl || effectiveCommand.trim())
+  const machineIncomplete = Boolean(machine && (!machine.host?.trim() || !machine.user?.trim()))
+  const canLaunch = Boolean(tpl || effectiveCommand.trim()) && !machineIncomplete
 
   // Dispatch a template run or a real PTY session.
   const launch = () => {
@@ -156,7 +157,10 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               <FieldLabel>Run on</FieldLabel>
               <select value={machineId} onChange={e => selectMachine(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
                 <option value="">This machine (local)</option>
-                {machines.map(m => <option key={m.id} value={m.id}>{m.label} · {m.user}@{m.host}</option>)}
+                {machines.map(m => {
+                  const incomplete = !m.host?.trim() || !m.user?.trim()
+                  return <option key={m.id} value={m.id} disabled={incomplete}>{m.label || 'Unnamed'}{incomplete ? ' · incomplete — set user@host in Settings' : ` · ${m.user}@${m.host}`}</option>
+                })}
               </select>
               {machine && (
                 <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 5, lineHeight: 1.5 }}>

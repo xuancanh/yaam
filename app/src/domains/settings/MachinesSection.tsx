@@ -3,14 +3,38 @@ import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import type { Machine } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { mkId } from '../../shared/id'
+import { execCommand } from '../../core/native'
+import { testCommand } from '../session/remote-machine'
 import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
 import { confirmAction } from '../../components/Confirm'
+
+/** Summarize the marker output of `testCommand` into a short human status. */
+function summarizeTest(output: string): { ok: boolean; text: string } {
+  const has = (m: string) => output.includes(m)
+  if (!has('SSH_OK')) return { ok: false, text: output.trim().split('\n').pop()?.slice(0, 140) || 'could not connect' }
+  const miss: string[] = []
+  if (!has('TMUX_OK')) miss.push('no tmux')
+  if (!has('B64_OK')) miss.push('no base64 -d')
+  if (!has('GIT_OK')) miss.push('no git')
+  if (has('NO_DIR')) miss.push('working dir not found')
+  return miss.length ? { ok: false, text: `Connected, but: ${miss.join(', ')}` } : { ok: true, text: 'Connected · tmux, base64, git all present' }
+}
 
 /** One saved machine: summary row + expandable editor. Edits persist through the
  *  normal `updateSettings({ machines })` path, like the MCP/registry lists. */
 function MachineRow({ m, onChange, onRemove }: { m: Machine; onChange: (patch: Partial<Machine>) => void; onRemove: () => void }) {
   const [open, setOpen] = useState(!m.host)
+  const [test, setTest] = useState<{ ok: boolean; text: string } | 'running' | null>(null)
+  const runTest = async () => {
+    setTest('running')
+    try {
+      const { output } = await execCommand(testCommand(m), undefined, 15_000)
+      setTest(summarizeTest(output))
+    } catch (e) {
+      setTest({ ok: false, text: e instanceof Error ? e.message : String(e) })
+    }
+  }
   const field = (label: string, key: keyof Machine, placeholder: string, opts: { type?: string; width?: number } = {}) => (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: opts.width ? `0 0 ${opts.width}px` : 1, minWidth: 0 }}>
       <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--mut)' }}>{label}</span>
@@ -59,6 +83,16 @@ function MachineRow({ m, onChange, onRemove }: { m: Machine; onChange: (patch: P
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             {field('Extra ssh options', 'options', 'advanced, e.g. -o ProxyJump=bastion')}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
+            <button className="open-btn" style={{ flex: 'none', padding: '5px 12px', fontSize: 11.5 }} disabled={!m.host?.trim() || !m.user?.trim() || test === 'running'} onClick={() => { void runTest() }}>
+              {test === 'running' ? 'Testing…' : 'Test connection'}
+            </button>
+            {test && test !== 'running' && (
+              <span style={{ fontSize: 11.5, color: test.ok ? 'var(--green)' : 'var(--red-soft)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={test.text}>
+                {test.ok ? '✓ ' : '✕ '}{test.text}
+              </span>
+            )}
           </div>
         </div>
       )}

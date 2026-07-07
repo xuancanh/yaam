@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shq, tmuxName, sshPrefix, wrapLaunch, killRemote, findMachine } from './remote-machine'
+import { shq, tmuxName, sshPrefix, wrapLaunch, killRemote, findMachine, testCommand } from './remote-machine'
 import type { Machine } from '../../core/types'
 
 const m = (over: Partial<Machine> = {}): Machine =>
@@ -63,6 +63,17 @@ describe('wrapLaunch / killRemote', () => {
     const k = killRemote(m(), 'a1')
     expect(k).toContain('BatchMode=yes')
     expect(k).toContain(`tmux kill-session -t yaam-a1`)
+  })
+})
+
+describe('testCommand', () => {
+  it('probes reachability, tmux, base64 -d, git, and the working dir over batch ssh', () => {
+    const t = testCommand(m({ remoteDir: '/srv' }))
+    expect(t).toContain('BatchMode=yes')
+    expect(t).toContain('tmux -V')
+    expect(t).toContain('base64 -d')
+    expect(t).toContain('command -v git')
+    expect(t).toContain(`'/srv'`)
   })
 })
 

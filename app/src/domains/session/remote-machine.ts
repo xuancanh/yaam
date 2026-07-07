@@ -77,3 +77,18 @@ export function killRemote(m: Machine, id: string): string {
 export function findMachine(machines: Machine[] | undefined, id: string | undefined): Machine | undefined {
   return id ? machines?.find(m => m.id === id) : undefined
 }
+
+/** Local command that probes a machine's requirements over batch SSH: reachable,
+ *  tmux present, a working `base64 -d` (macOS/BSD differ), git, and the default
+ *  dir. Prints one `NAME_OK` / `NO_NAME` marker per check for the caller to read. */
+export function testCommand(m: Machine): string {
+  const dir = m.remoteDir?.trim()
+  const checks = [
+    'echo SSH_OK',
+    'tmux -V >/dev/null 2>&1 && echo TMUX_OK || echo NO_TMUX',
+    'printf x | base64 | base64 -d >/dev/null 2>&1 && echo B64_OK || echo NO_B64',
+    'command -v git >/dev/null 2>&1 && echo GIT_OK || echo NO_GIT',
+    dir ? `[ -d ${shq(dir)} ] && echo DIR_OK || echo NO_DIR` : 'echo DIR_SKIP',
+  ].join('; ')
+  return `${sshPrefix(m, {})} ${shq(checks)}`
+}

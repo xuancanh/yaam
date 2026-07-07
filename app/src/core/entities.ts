@@ -137,6 +137,9 @@ export interface SessionRecord {
    *  command (the ssh/tmux wrap is rebuilt on launch/resume), `cwd` is the remote
    *  working dir. Persistence is the remote tmux session, not a CLI resume id. */
   machineId?: string
+  /** connection snapshot taken at launch, so the session keeps resuming/stopping
+   *  and browsing Files/Git even if the saved machine is later edited or removed */
+  machine?: Machine
 }
 
 /** A session as the app works with it: durable record plus live runtime state.

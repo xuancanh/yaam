@@ -12,6 +12,9 @@ import {
 import type { DirEntryInfo, GitStatusResult } from '../../core/native'
 import { shq, sshPrefix } from './remote-machine'
 
+// execCommand caps output at ~40 KB; keep binary reads under that (base64 ~4/3)
+const REMOTE_B64_CAP = 24_000
+
 export interface SessionFs {
   listDir(path: string): Promise<DirEntryInfo[]>
   readTextFile(path: string): Promise<string>
@@ -83,6 +86,11 @@ export function remoteFs(machine: Machine, id: string): SessionFs {
       return ok(await run(`cat -- ${shq(path)}`))
     },
     async readFileB64(path) {
+      // execCommand caps its output (~40 KB) and base64 inflates ~4/3, so a big
+      // file would come back truncated — i.e. a corrupt preview. Refuse it up
+      // front with the real size instead (local reads have a size limit too).
+      const size = Number(ok(await run(`wc -c < ${shq(path)}`)).trim()) || 0
+      if (size > REMOTE_B64_CAP) throw new Error(`file too large to preview over SSH (${size} bytes; limit ${REMOTE_B64_CAP})`)
       // redirection avoids base64's differing file-arg flags across platforms
       return ok(await run(`base64 < ${shq(path)}`)).replace(/\s+/g, '')
     },

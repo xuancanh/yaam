@@ -9,7 +9,7 @@ import type { AppState, EventType } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { focusSessionIn, removeFromGroups } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
-import { findMachine, killRemote, tmuxName, wrapLaunch } from './remote-machine'
+import { killRemote, tmuxName, wrapLaunch } from './remote-machine'
 import { execCommand, worktreeMerge, worktreeRemove } from '../../core/native'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
@@ -147,7 +147,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         let cmd = agent.cmd
         const type = stateRef.current.agentTypes.find(t => t.id === agent.typeId)
           ?? typeForCommand(agent.cmd, stateRef.current.agentTypes)
-        const machine = findMachine(stateRef.current.settings?.machines, agent.machineId)
+        const machine = agent.machine
         if (machine) {
           resumeNote = `reattaching to ${machine.label} · tmux ${tmuxName(id)}`
         } else if (agent.detached) {
@@ -262,9 +262,18 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       // ending it for real, not just dropping the attach client
       if (agent?.detached) void port.detachedKill(id)
       // a machine session's agent lives in a remote tmux session — killing the
-      // local ssh PTY alone would just detach it; end it for real over ssh
-      const machine = findMachine(stateRef.current.settings?.machines, agent?.machineId)
-      if (machine) void execCommand(killRemote(machine, id)).catch(() => {})
+      // local ssh PTY alone would just detach it; end it for real over ssh. If we
+      // can't reach the host, say so instead of silently claiming it stopped.
+      const machine = agent?.machine
+      if (machine) {
+        const warn = (msg: string) => dispatch(s => ({
+          ...s,
+          agents: s.agents.map(a => a.id === id ? { ...a, log: a.log.concat([{ t: 'warn' as const, x: msg }]) } : a),
+        }))
+        void execCommand(killRemote(machine, id))
+          .then(r => { if (r.code !== 0) warn(`⚠ couldn't stop the remote tmux session on ${machine.host} (${r.output.trim().slice(0, 120) || `exit ${r.code}`}) — it may still be running; check with: tmux kill-session -t ${tmuxName(id)}`) })
+          .catch(e => warn(`⚠ couldn't reach ${machine.host} to stop the remote tmux session (${e instanceof Error ? e.message : String(e)}) — it may still be running`))
+      }
       // stop-flag + kill go through the shared command (user actor); the UI
       // status/log/toast stay here. Fall back to the port when unwired.
       if (ctx.execCommand) void ctx.execCommand('stop_session', { sessionId: id }, { actor: { kind: 'user' } })

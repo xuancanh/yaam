@@ -8,7 +8,6 @@ import { buildCfg, callApi, hasCreds } from '../../llm/client'
 import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { FolderExplorer } from './FilesPane'
-import { findMachine } from './remote-machine'
 import { sessionFs } from './remote-native'
 import type { SessionFs } from './remote-native'
 
@@ -528,8 +527,7 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
 /** The pane-header popup: a modal shell around the shared workbench. */
 export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const { openDiff } = useActions()
-  const machines = useConductorSelector(x => x.settings.machines)
-  const fs = useMemo(() => sessionFs(findMachine(machines, agent.machineId), agent.id), [machines, agent.machineId, agent.id])
+  const fs = useMemo(() => sessionFs(agent.machine, agent.id), [agent.machine, agent.id])
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.6)', zIndex: 48, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '4vh 3vw' }}>
       <div onClick={e => e.stopPropagation()} style={{

@@ -61,6 +61,18 @@ describe('parsePorcelain', () => {
   })
 })
 
+describe('remoteFs.readFileB64', () => {
+  it('reads a small binary, having checked the size first', async () => {
+    okOut('12\n')          // wc -c
+    okOut('aGVsbG8=\n')    // base64
+    expect(await remoteFs(m, 'a1').readFileB64('/small')).toBe('aGVsbG8=')
+  })
+  it('refuses an oversized file instead of returning a truncated (corrupt) preview', async () => {
+    okOut('9999999\n')     // wc -c — well over the cap
+    await expect(remoteFs(m, 'a1').readFileB64('/big.png')).rejects.toThrow(/too large/)
+  })
+})
+
 describe('remoteFs error propagation', () => {
   it('surfaces a non-zero remote command as an error', async () => {
     exec.mockResolvedValueOnce({ code: 1, output: 'cat: nope: No such file' })
