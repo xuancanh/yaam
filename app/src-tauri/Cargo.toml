@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.3.0"
+version = "0.4.0"
 description = "YAAM — Yet Another Agent Manager: a desktop manager for live coding-agent sessions"
 authors = ["xuancanh"]
 license = "MIT"
