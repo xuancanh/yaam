@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectPrompt, extractOptions } from './prompt-detection'
+import { detectPrompt, deterministicStatus, extractOptions } from './prompt-detection'
 
 describe('detectPrompt', () => {
   it('flags a plain y/n prompt on the stream tail', () => {
@@ -38,5 +38,25 @@ describe('detectPrompt', () => {
     const { options, cursorNum } = extractOptions(screen)
     expect(options.map(o => o.label)).toEqual(['Approve', 'Deny'])
     expect(cursorNum).toBe(1)
+  })
+})
+
+describe('deterministicStatus', () => {
+  it('summarizes the last meaningful line, skipping decoration/noise', () => {
+    const r = deterministicStatus(['building...', 'Tests passed: 42', '────────────', '   '])
+    expect(r.summary).toBe('Tests passed: 42')
+    expect(r.actionNeeded).toBeUndefined()
+  })
+
+  it('flags recent error-looking output as action needed', () => {
+    const r = deterministicStatus(['running build', 'Error: cannot find module "x"'])
+    expect(r.actionNeeded).toMatch(/error/i)
+    expect(r.summary).toContain('cannot find module')
+  })
+
+  it('does not re-flag an error buried far above the recent tail', () => {
+    const old = ['error: transient blip']
+    const recent = Array.from({ length: 12 }, (_, i) => `ok line ${i}`)
+    expect(deterministicStatus([...old, ...recent]).actionNeeded).toBeUndefined()
   })
 })

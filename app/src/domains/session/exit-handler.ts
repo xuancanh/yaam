@@ -12,11 +12,13 @@ import { dispatch } from '../../core/store'
 import * as native from '../../core/native'
 import { classifyExit } from './exit'
 import type { SessionExit } from './exit'
+import { deterministicStatus } from './prompt-detection'
 import { realSessionProcessPort } from './ports'
 import { removeFromGroups } from './layout-state'
 import { typeForCommand } from './command'
 import { updateLocatedTask } from '../board/task-state'
 import type { LocatedTask } from '../board/task-state'
+import { hasCreds } from '../../llm/client'
 
 /** The native process-exit event we react to. */
 export interface SessionExitEvent {
@@ -63,11 +65,23 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
   const agent = stateRef.current.agents.find(a => a.id === e.id)
   const userStopped = takeUserStopped(e.id)
   const taskFor = taskForSession(e.id)
+  // With no Master Brain there is no watcher to assess the outcome — the board
+  // must reach a final, honest state deterministically instead of parking the
+  // card on "assessing result" forever.
+  const settings = stateRef.current.settings
+  const brainOff = !(settings?.masterEnabled && hasCreds(settings))
   const cls = classifyExit({
     code: e.code, userStopped, ephemeral: !!agent?.ephemeral,
     autoArchive: !!agent?.autoArchive, hasTask: !!taskFor,
   })
   const { failed } = cls
+  // No LLM monitor to digest the exit — for a plain (non-task) session, derive a
+  // deterministic status so its card still reflects the outcome. Task sessions
+  // use the board column/note above instead.
+  const brainDigest = brainOff && !userStopped && !taskFor && agent
+    ? deterministicStatus((agent.log ?? []).slice(-14).map(l => l.x))
+    : null
+  const digestAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   dispatchFn(s => {
     const withAgent = {
       ...s,
@@ -77,6 +91,13 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
           status: failed ? 'error' as const : 'idle' as const,
           attention: !userStopped,
           log: a.log.concat([{ t: 'sys' as const, x: userStopped ? 'stopped by you' : `process exited${e.code !== null ? ` · code ${e.code}` : ''}` }]),
+          ...(brainDigest
+            ? {
+                summary: (failed ? `Exited with code ${e.code}` : brainDigest.summary) || a.summary,
+                summaryAt: digestAt,
+                actionNeeded: failed ? `Exited with code ${e.code} — check the terminal output` : brainDigest.actionNeeded ?? a.actionNeeded,
+              }
+            : {}),
         }
       : a),
     }
@@ -89,7 +110,9 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
         ? 'session stopped by the user'
         : failed
           ? `one-shot exited with code ${e.code}`
-          : 'one-shot finished · assessing result',
+          : brainOff
+            ? 'finished · review the changes'
+            : 'one-shot finished · assessing result',
     }), taskFor.workspaceId)
   })
   if (agent && !agent.cliSessionId && agent.cmd && agent.launchedAt) {
@@ -114,13 +137,23 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
         : failed
           ? `One-shot session exited with code ${e.code}`
           : 'One-shot session exited cleanly')
-      runWatcher(taskFor.task.id, userStopped
-        ? `The user manually STOPPED the task's session "${agent.name}". This is a pause, not a failure — do not move the task to failed or claim completion. Update your note and wait for instructions.`
-        : `The task's session "${agent.name}" exited ${failed ? `with code ${e.code} (failure)` : 'cleanly'}. Final output:\n${tail}\n\n` +
-          'Assess the result against the acceptance criteria and move the task (review when it looks complete, failed if the attempt is dead), then update your note. ' +
-          'Post ONE message to the user in the task chat that (1) summarizes concretely what was accomplished — files changed, checks run, criteria met or missed — and ' +
-          '(2) when the task moved to review, explicitly asks them to review and approve the changes (the Review button on the card shows the diff). ' +
-          'Ask a question only if the outcome is genuinely ambiguous.')
+      if (brainOff) {
+        // no watcher will assess this — point the user at the deterministic
+        // outcome and how to get automatic assessment
+        if (!userStopped) {
+          pushTaskChat(taskFor.task.id, 'system', failed
+            ? `Moved to Failed (exit ${e.code}). Reopen the card to retry, or inspect the session's final output above. Enable the Master Brain in Settings for automatic assessment and retries.`
+            : 'Moved to Review. No Master Brain is configured to assess the result — open Review on the card to check the changes and approve. Enable the Master Brain in Settings for automatic assessment.')
+        }
+      } else {
+        runWatcher(taskFor.task.id, userStopped
+          ? `The user manually STOPPED the task's session "${agent.name}". This is a pause, not a failure — do not move the task to failed or claim completion. Update your note and wait for instructions.`
+          : `The task's session "${agent.name}" exited ${failed ? `with code ${e.code} (failure)` : 'cleanly'}. Final output:\n${tail}\n\n` +
+            'Assess the result against the acceptance criteria and move the task (review when it looks complete, failed if the attempt is dead), then update your note. ' +
+            'Post ONE message to the user in the task chat that (1) summarizes concretely what was accomplished — files changed, checks run, criteria met or missed — and ' +
+            '(2) when the task moved to review, explicitly asks them to review and approve the changes (the Review button on the card shows the diff). ' +
+            'Ask a question only if the outcome is genuinely ambiguous.')
+      }
     }
     if (userStopped) {
       // a user stop is neither completion nor failure — the session stays

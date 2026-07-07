@@ -14,7 +14,7 @@ import { dispatch } from '../../core/store'
 import { browserClock, type ClockPort, type Disposable, type StatePort } from '../../core/ports'
 import { activeGroupOf } from './layout-state'
 import {
-  detectPrompt, extractOptions, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
+  detectPrompt, deterministicStatus, extractOptions, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
 } from './prompt-detection'
 
 export interface SettleDeps {
@@ -159,12 +159,28 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
         const watching = (g2 ? g2.slots[g2.activePane] : null) === id
           && (agent.workspaceId ?? st2.activeWorkspace) === st2.activeWorkspace
           && focused()
-        if (!watching) {
+        // No LLM monitor to write a status card — derive one deterministically
+        // from the settled output so the session still reports what it last did
+        // and flags output that looks like an error. (When the brain is on, the
+        // monitor below authors a richer status instead.)
+        const digest = !llm && !taskForSession(id) ? deterministicStatus(content) : null
+        if (!watching || digest) {
+          const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           state.update(s2 => ({
             ...s2,
-            agents: s2.agents.map(a => (a.id === id ? { ...a, attention: true } : a)),
+            agents: s2.agents.map(a => (a.id === id
+              ? {
+                  ...a,
+                  attention: a.attention || !watching,
+                  ...(digest ? { summary: digest.summary || a.summary, summaryAt: at, actionNeeded: digest.actionNeeded ?? a.actionNeeded } : {}),
+                }
+              : a)),
           }))
-          notify('done', `${agent.name} finished responding`, lastLine.slice(0, 90), id)
+          if (!watching) {
+            notify(digest?.actionNeeded ? 'escalate' : 'done',
+              `${agent.name} ${digest?.actionNeeded ? 'may need attention' : 'finished responding'}`,
+              (digest?.actionNeeded ?? lastLine).slice(0, 90), id)
+          }
         }
         // task sessions are watched by their task's watcher (the mini master
         // assigns itself as monitor) — the generic session monitor skips them

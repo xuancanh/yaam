@@ -107,12 +107,26 @@ describe('coordinateSessionExit', () => {
 
   it('a task session routes through the watcher, moves the task to review, and skips the monitor', () => {
     const located: LocatedTask = { task: task('t1'), workspaceId: 'ws' }
-    const h = harness({ agents: [agent({ ephemeral: true })], tasks: [task('t1')] }, { locatedTask: located })
+    const h = harness({
+      agents: [agent({ ephemeral: true })], tasks: [task('t1')],
+      settings: { masterEnabled: true, apiKey: 'k', provider: 'anthropic', credCmd: '' },
+    } as Partial<AppState>, { locatedTask: located })
     h.run(0)
     expect(h.ports.monitorEvent).not.toHaveBeenCalled() // task work reports via its watcher
     expect(h.ports.runWatcher).toHaveBeenCalledWith('t1', expect.any(String))
     expect(h.ports.pushTaskChat).toHaveBeenCalledWith('t1', 'system', expect.stringContaining('cleanly'))
     expect(h.state().tasks.find(t => t.id === 't1')?.col).toBe('review')
+  })
+
+  it('with the brain off, a task session reaches a final state deterministically and guides the user', () => {
+    const located: LocatedTask = { task: task('t1'), workspaceId: 'ws' }
+    // no settings → no Master Brain
+    const h = harness({ agents: [agent({ ephemeral: true })], tasks: [task('t1')] }, { locatedTask: located })
+    h.run(0)
+    expect(h.ports.runWatcher).not.toHaveBeenCalled() // no brain: no watcher to assess
+    expect(h.state().tasks.find(t => t.id === 't1')?.col).toBe('review')
+    expect(h.state().tasks.find(t => t.id === 't1')?.watcherNote).toContain('review')
+    expect(h.ports.pushTaskChat).toHaveBeenCalledWith('t1', 'system', expect.stringContaining('Review'))
   })
 
   it('a failed task session moves the task to failed', () => {
