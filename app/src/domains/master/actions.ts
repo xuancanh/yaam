@@ -36,14 +36,16 @@ export function createMasterActions(ctx: MasterActionsCtx): MasterActions {
 
   // side effects must stay OUT of the dispatch updater — React double-invokes
   // reducers in dev, which used to schedule two Master turns (the second
-  // re-answered with nothing new = double replies)
-  const sendMessage = (raw: string) => {
+  // re-answered with nothing new = double replies).
+  // `clearComposer` is only for the desktop send() — a phone-originated message
+  // must not wipe an unsent draft sitting in the desktop composer.
+  const post = (raw: string, clearComposer: boolean) => {
     const text = raw.trim()
     if (!text) return
     dispatch(s => ({
       ...s,
       messages: s.messages.concat([{ id: mkId('u'), role: 'you', kind: 'text', text }]),
-      composer: '',
+      ...(clearComposer ? { composer: '' } : {}),
     }))
     const st = stateRef.current.settings
     if (hasCreds(st) && st.masterEnabled) {
@@ -64,8 +66,8 @@ export function createMasterActions(ctx: MasterActionsCtx): MasterActions {
   return {
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
-    send: () => sendMessage(stateRef.current.composer),
-    sendMessage,
+    send: () => post(stateRef.current.composer, true),
+    sendMessage: text => post(text, false),
 
     focusComposer: () => {
       const el = document.querySelector<HTMLTextAreaElement>('[data-composer]')
