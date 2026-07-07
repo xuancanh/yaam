@@ -9,7 +9,7 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 ## Highlights
 
 - **Real terminals, not fakes** — every session is an OS process in a PTY, rendered with xterm.js.
-- **Remote machines** — run any session on a saved SSH host inside tmux (survives disconnects; Files/Git browse the remote host too).
+- **Remote machines** — run any session on a saved SSH host (optionally detached in tmux; Files/Git browse the remote host too).
 - **Master orchestrator** — a Claude-with-tools that routes tasks, monitors sessions, and acts on your chat instructions.
 - **Chat agents** — in-app Claude-Desktop-style assistants that edit files, run commands, load skills, and call MCP servers.
 - **Worktree isolation + review queue** — sessions and tasks can run in mirrored git worktrees (multi-repo folders supported); review the diff, stage, commit, and merge back from a Fork-style git workbench.
@@ -28,7 +28,7 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 - **Persistent split-pane layouts** — a Chrome-style menu arranges 1–4 panes (single, split, three-up, or 2×2); the layout and orientation are saved and restored on restart.
 - Per-pane stop/resume/exit-code status, maximize/restore, and rename.
 - **Detachable sessions** — start a session in detached mode and its PTY lives in a separate host process with its own lifecycle: it keeps running when YAAM quits, and the app reattaches later (▶) with the recent output replayed. Stop ends it for real; everything else (monitors, remote companion, resize) works as usual.
-- **Remote machines** — save SSH hosts in **Settings → Machines** and run any session on one: the agent runs on the remote host inside **tmux**, so it survives disconnects and app restarts (Resume reattaches, Stop ends the remote tmux session for real). The **Files and Git** panels operate over SSH on that host, multi-repo folders included. Auth is keys/ssh-agent only (no passwords; a **Test connection** check probes tmux, `base64`, git, and the working dir). A machine can be chosen in the New Session dialog and on templates, board tasks, and schedules.
+- **Remote machines** — save SSH hosts in **Settings → Machines** and run any session on one: by default the agent runs on the host over SSH just like a local session (it ends when you disconnect), and checking **Detached** keeps it alive in a **tmux** session across disconnects and app restarts (Resume reattaches, Stop ends it). The **Files and Git** panels operate over SSH on that host, multi-repo folders included. Auth is keys/ssh-agent only (no passwords; a **Test connection** check probes tmux, `base64`, git, and the working dir). A machine can be chosen in the New Session dialog and on templates, board tasks, and schedules.
 - **Compact session tabs** — a single color-coded dot carries each session's status (no text label), blinking sky-blue while the agent is streaming a response; focusing a tab clears its notifications.
 
 ## Master — orchestration with monitors

@@ -149,7 +149,9 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           ?? typeForCommand(agent.cmd, stateRef.current.agentTypes)
         const machine = agent.machine
         if (machine) {
-          resumeNote = `reattaching to ${machine.label} · tmux ${tmuxName(id)}`
+          resumeNote = agent.detached
+            ? `reattaching to ${machine.label} · tmux ${tmuxName(id)}`
+            : `restarting on ${machine.label}`
         } else if (agent.detached) {
           resumeNote = 'reattaching detached session — relaunches it if it had ended'
         } else if (type?.resumeCmd) {
@@ -179,11 +181,11 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         // and the CLI would keep rendering for the wrong terminal
         const size = port.terminalSize(id)
         if (machine) {
-          // reattach to the remote tmux session (new-session -A), rebuilding the
-          // same ssh wrap; tmux is the durability layer, not a CLI resume id
+          // rebuild the same ssh wrap: detached reattaches its tmux session,
+          // plain restarts the agent fresh (like a local resume)
           const inner = `${envPrefix(type?.env)}${agent.cmd}`.trim()
           const commandShell = stateRef.current.settings?.shell || 'zsh'
-          port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd), undefined, size?.rows, size?.cols, undefined, commandShell)
+          port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd, agent.detached), undefined, size?.rows, size?.cols, undefined, commandShell)
             .then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
             .catch(() => {})
         } else if (agent.detached) {
@@ -258,13 +260,14 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
 
     stopSession: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
-      // a detached session's PTY lives in the host process — stopping means
-      // ending it for real, not just dropping the attach client
-      if (agent?.detached) void port.detachedKill(id)
-      // a machine session's agent lives in a remote tmux session — killing the
-      // local ssh PTY alone would just detach it; end it for real over ssh. If we
-      // can't reach the host, say so instead of silently claiming it stopped.
-      const machine = agent?.machine
+      // a LOCAL detached session's PTY lives in a host process — end it for real,
+      // not just drop the attach client
+      if (agent?.detached && !agent.machine) void port.detachedKill(id)
+      // a DETACHED machine session's agent lives in a remote tmux session —
+      // killing the local ssh PTY alone would just detach it, so end it over ssh
+      // (a plain machine session dies with the ssh PTY via SIGHUP). If we can't
+      // reach the host, say so instead of silently claiming it stopped.
+      const machine = agent?.detached ? agent.machine : undefined
       if (machine) {
         const warn = (msg: string) => dispatch(s => ({
           ...s,

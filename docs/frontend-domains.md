@@ -246,18 +246,20 @@ process and archives the session behind a confirmation.
 ### Remote machines
 
 A session can run on a saved remote machine (`settings.machines`, keys/ssh-agent
-auth only) over SSH inside tmux — the remote analogue of detached sessions, with
-no new Rust: the local PTY simply runs an `ssh` client. `remote-machine.ts` is
-pure — `wrapLaunch` builds `ssh -tt … tmux new-session -A -s <id> …` (the inner
-command base64-encoded to survive two shells; `new-session -A` attaches-or-
-creates, so resume just re-runs it), `killRemote` ends the remote tmux session on
-stop, `sshPrefix` shares one `ControlMaster` connection across the terminal and
-fs/git calls, and `testCommand` probes tmux/`base64`/git/dir. `buildLaunch`
-snapshots the resolved connection onto `agent.machine`, so editing or removing the
-saved machine never strands a live session; launch/resume/stop and Files/Git read
-that snapshot. Machine sessions skip the local-only paths (CLI-id
-injection/probing, worktree isolation, detached hosting) and use `agent.cwd` as
-the remote working dir.
+auth only) over SSH, with no new Rust: the local PTY simply runs an `ssh` client.
+By default it behaves like a local session — `wrapLaunch` builds
+`ssh -tt … sh -c <cmd>`, so the agent dies when the connection drops and resume
+restarts it fresh. Checking **Detached** opts into durability: `wrapLaunch` then
+wraps it in `ssh -tt … tmux new-session -A -s <id> …` (attach-or-create, so
+resume reattaches and `killRemote` ends the tmux session on stop). The inner
+command is base64-encoded to survive both shells; `sshPrefix` shares one
+`ControlMaster` connection across the terminal and fs/git calls; `testCommand`
+probes tmux/`base64`/git/dir. `buildLaunch` snapshots the resolved connection onto
+`agent.machine` (so editing or removing the saved machine never strands a live
+session) and records `agent.detached` for the tmux mode; launch/resume/stop and
+Files/Git read that snapshot. Machine sessions skip the local-only paths (CLI-id
+injection/probing, worktree isolation, the setsid detached host) and use
+`agent.cwd` as the remote working dir.
 
 `remote-native.ts` gives Files/Git a per-session `SessionFs`: the native adapter
 for local sessions, or ssh-backed `listDir`/`read`/`git status|diff|stage|commit`

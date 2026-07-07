@@ -42,14 +42,19 @@ describe('sshPrefix', () => {
 })
 
 describe('wrapLaunch / killRemote', () => {
-  it('runs the agent inside an attach-or-create tmux session; inner command is recoverable', () => {
-    const cmd = wrapLaunch(m({ remoteDir: '/srv/app' }), `claude --model x`, 'a1')
+  it('a plain machine session runs the agent directly over ssh — no tmux', () => {
+    const cmd = wrapLaunch(m({ remoteDir: '/srv/app' }), 'claude --model x', 'a1')
     expect(cmd).toContain('ssh -tt')
-    expect(cmd).toContain(`tmux new-session -A -s yaam-a1`)
+    expect(cmd).toContain('sh -c')
+    expect(cmd).not.toContain('tmux')
     // the inner command is base64-encoded between the two shells; decode it back
     const b64 = cmd.match(/printf %s ([A-Za-z0-9+/=]+) /)?.[1]
-    expect(b64).toBeTruthy()
     expect(atob(b64!)).toBe(`cd '/srv/app' && claude --model x`)
+  })
+  it('a detached machine session runs inside an attach-or-create tmux session', () => {
+    const cmd = wrapLaunch(m({ remoteDir: '/srv' }), 'claude', 'a1', undefined, true)
+    expect(cmd).toContain('ssh -tt')
+    expect(cmd).toContain('tmux new-session -A -s yaam-a1')
   })
   it('omits the cd when no remote dir is set', () => {
     const b64 = wrapLaunch(m(), 'htop', 'a1').match(/printf %s ([A-Za-z0-9+/=]+) /)?.[1]

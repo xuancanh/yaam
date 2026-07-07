@@ -12,7 +12,7 @@ export interface LaunchInput {
   nameHint?: string
   typeId?: string
   workspaceId?: string
-  opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }
+  opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string }
 }
 
 export interface LaunchPlan {
@@ -63,7 +63,10 @@ export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeW
     // snapshot the connection so later edits/removal of the saved machine can't
     // strand this session (resume/stop/Files/Git read agent.machine, not settings)
     machine: machine ? { ...machine } : undefined,
-    ephemeral: machine ? false : opts?.ephemeral, autoArchive: machine ? false : opts?.autoArchive, templateId: opts?.templateId,
+    // a machine session behaves like a local one unless detached is requested,
+    // in which case it runs in tmux on the host (durable across disconnects)
+    detached: machine ? (opts?.detached || undefined) : undefined,
+    ephemeral: opts?.ephemeral, autoArchive: opts?.autoArchive, templateId: opts?.templateId,
     terminalShell: opts?.terminalShell,
     memory: mkMemory(), tools: mkTools(),
     log: [

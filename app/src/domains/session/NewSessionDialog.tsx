@@ -77,7 +77,8 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
       return
     }
     if (!effectiveCommand.trim()) return
-    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined, machine ? false : (isolate || undefined), machine ? false : (detached || undefined), machineId || undefined)
+    // worktree isolation is local-only; detached = tmux on a machine, setsid host locally
+    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined, machine ? false : (isolate || undefined), detached || undefined, machineId || undefined)
     onClose()
   }
 
@@ -190,30 +191,31 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           )}
-          {/* worktree isolation + detached hosting are local-only; a machine
-              session is already durable via remote tmux */}
+          {/* worktree isolation is local-only */}
           {!machine && (
-            <>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none' }} title="The working folder (a git repo, or a folder whose subfolders are repos) is mirrored into git worktrees on branch yaam/<session>; the session works there and your checkout stays untouched until you merge.">
-                <input type="checkbox" checked={isolate} onChange={e => setIsolate(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
-                <span>
-                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Isolate in a git worktree</span>
-                  <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
-                    Runs on a branch in a mirrored copy — supports multi-repo folders; review &amp; merge when done.
-                  </span>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none' }} title="The working folder (a git repo, or a folder whose subfolders are repos) is mirrored into git worktrees on branch yaam/<session>; the session works there and your checkout stays untouched until you merge.">
+              <input type="checkbox" checked={isolate} onChange={e => setIsolate(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
+              <span>
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>Isolate in a git worktree</span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                  Runs on a branch in a mirrored copy — supports multi-repo folders; review &amp; merge when done.
                 </span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none', marginTop: 10 }} title="The session's process runs in a detached host with its own lifecycle — it keeps working after you quit YAAM. Reopen the app and press ▶ to reattach; Stop ends it for real.">
-                <input type="checkbox" checked={detached} onChange={e => setDetached(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
-                <span>
-                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Detached (survives closing the app)</span>
-                  <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
-                    Runs in its own host process; the app attaches to it and can reattach, monitor, and stop it later.
-                  </span>
-                </span>
-              </label>
-            </>
+              </span>
+            </label>
           )}
+          {/* detached = durable lifecycle: a tmux session on a machine, a setsid
+              host process locally. Off = the session ends when you disconnect. */}
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none', marginTop: 10 }} title={machine ? 'Runs the agent in a tmux session on the host — it keeps working after you disconnect or quit YAAM. Reopen and press ▶ to reattach; Stop ends the tmux session.' : "The session's process runs in a detached host with its own lifecycle — it keeps working after you quit YAAM. Reopen the app and press ▶ to reattach; Stop ends it for real."}>
+            <input type="checkbox" checked={detached} onChange={e => setDetached(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
+            <span>
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>{machine ? 'Detachable (run in tmux, survive disconnects)' : 'Detached (survives closing the app)'}</span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                {machine
+                  ? 'Runs the agent in a tmux session on the host; reattach with ▶, Stop ends it. Off = runs like a local session and ends when you disconnect.'
+                  : 'Runs in its own host process; the app attaches to it and can reattach, monitor, and stop it later.'}
+              </span>
+            </span>
+          </label>
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button

@@ -53,18 +53,25 @@ function toB64(s: string): string {
   return btoa(bin)
 }
 
-/** Local PTY command that runs `innerCommand` on the machine inside a tmux
- *  session. `new-session -A` attaches if the session already exists (durability),
- *  so resume just re-runs this. `innerCommand` is the fully-built agent command
- *  (env prefix already applied). `cwd` is the session's working dir (from the
- *  launch dialog / persisted `agent.cwd`), falling back to the machine default —
- *  it MUST match the dir Files/Git browse, or the terminal and panels diverge. */
-export function wrapLaunch(m: Machine, innerCommand: string, id: string, cwd?: string): string {
+/** Local PTY command that runs `innerCommand` on the machine over SSH.
+ *
+ *  By default the agent runs directly (like a local session): it dies when the
+ *  SSH connection drops (app quit, network), and resume re-runs it fresh.
+ *  `detached` opts into durability by running it inside tmux (`new-session -A`
+ *  attaches-or-creates, so resume reattaches and stop kills the tmux session).
+ *
+ *  `innerCommand` is the fully-built agent command (env prefix already applied).
+ *  `cwd` is the session's working dir (launch dialog / persisted `agent.cwd`),
+ *  falling back to the machine default — it MUST match the dir Files/Git browse,
+ *  or the terminal and panels diverge. The inner command is base64-encoded so it
+ *  survives both shells without a nested-quoting minefield. */
+export function wrapLaunch(m: Machine, innerCommand: string, id: string, cwd?: string, detached?: boolean): string {
   const dir = (cwd || m.remoteDir || '').trim()
   const inner = dir ? `cd ${shq(dir)} && ${innerCommand}` : innerCommand
-  const b64 = toB64(inner)
-  // the remote shell decodes the inner command and hands it to tmux as one arg
-  const remote = `tmux new-session -A -s ${tmuxName(id)} "$(printf %s ${b64} | base64 -d)"`
+  const decode = `"$(printf %s ${toB64(inner)} | base64 -d)"`
+  const remote = detached
+    ? `tmux new-session -A -s ${tmuxName(id)} ${decode}`
+    : `sh -c ${decode}`
   return `${sshPrefix(m, { interactive: true, controlId: id })} ${shq(remote)}`
 }
 

@@ -267,14 +267,16 @@ stale leftovers.
 
 ## Remote machines
 
-The same "lifecycle one process further out" idea, but on another host. A
-session bound to a saved machine (`settings.machines`, keys/ssh-agent auth) runs
-its command mode as an `ssh -tt … tmux new-session -A -s <id> …` client: the PTY
-is local, the agent runs on the host inside tmux, so a disconnect or app restart
-just re-runs the wrap to reattach, and stop kills the remote tmux session over
-SSH. No backend changes — the connection is snapshotted onto the session so a
-later machine edit/removal can't strand it, and remote Files/Git run `ls`/`cat`/
-`git` through `exec_command` over the shared SSH `ControlMaster` connection.
+A session bound to a saved machine (`settings.machines`, keys/ssh-agent auth)
+runs its command mode as an `ssh` client, so the PTY is local while the agent
+runs on the host. By default it behaves like a local session (`ssh -tt … sh -c
+<cmd>` — dies with the connection, resume restarts it). Checking **Detached**
+opts into the "lifecycle one process further out" model on the remote:
+`ssh -tt … tmux new-session -A -s <id> …`, so a disconnect or app restart just
+re-runs the wrap to reattach and stop kills the tmux session over SSH. No backend
+changes — the connection is snapshotted onto the session so a later machine
+edit/removal can't strand it, and remote Files/Git run `ls`/`cat`/`git` through
+`exec_command` over the shared SSH `ControlMaster` connection.
 
 ## Settle, prompt, monitor, and watcher flow
 

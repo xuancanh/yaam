@@ -121,7 +121,8 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         // local-only and skipped.
         if (machine) {
           const inner = `${envPrefix(launchType?.env)}${spawnCommand}`
-          port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd), undefined, undefined, undefined, undefined, commandShell).catch(fail)
+          // tmux only when detached is requested; otherwise a plain ssh run
+          port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd, opts?.detached), undefined, undefined, undefined, undefined, commandShell).catch(fail)
           return
         }
         // Claude's id is known up front; only codex/opencode need file detection.
