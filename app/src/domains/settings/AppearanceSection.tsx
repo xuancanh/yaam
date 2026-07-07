@@ -5,6 +5,35 @@ import type { AppearanceSettings } from '../../core/types'
 import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
 
+const SCALE_MIN = 80
+const SCALE_MAX = 140
+const SCALE_STEP = 5
+
+/** −/＋ stepper for the interface scale — more reliable than a drag slider for
+ *  landing on an exact 5% increment. */
+function ScaleStepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const clamp = (v: number) => Math.max(SCALE_MIN, Math.min(SCALE_MAX, v))
+  const step = (dir: -1 | 1) => onChange(clamp(Math.round(value / SCALE_STEP) * SCALE_STEP + dir * SCALE_STEP))
+  const btn = (label: string, dir: -1 | 1, disabled: boolean) => (
+    <button
+      className="icon-btn"
+      onClick={() => step(dir)}
+      disabled={disabled}
+      title={dir < 0 ? 'Smaller' : 'Larger'}
+      style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid var(--line2)', fontSize: 16, opacity: disabled ? 0.4 : 1 }}
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {btn('−', -1, value <= SCALE_MIN)}
+      <span className="mono" style={{ fontSize: 12.5, width: 44, textAlign: 'center', fontWeight: 600 }}>{value}%</span>
+      {btn('＋', 1, value >= SCALE_MAX)}
+    </div>
+  )
+}
+
 /** One labeled appearance row with the control on the right. */
 function AppearanceRow({ label, detail, children, last }: { label: string; detail: string; children: ReactNode; last?: boolean }) {
   return (
@@ -37,13 +66,7 @@ export function AppearanceSection() {
           </select>
         </AppearanceRow>
         <AppearanceRow label="Interface scale" detail="Scales all text and spacing together.">
-          <input
-            type="range" min={80} max={140} step={5}
-            value={a.uiScale}
-            onChange={e => patch({ uiScale: Number(e.target.value) })}
-            style={{ width: 150 }}
-          />
-          <span className="mono" style={{ fontSize: 12, width: 44, textAlign: 'right' }}>{a.uiScale}%</span>
+          <ScaleStepper value={a.uiScale} onChange={v => patch({ uiScale: v })} />
         </AppearanceRow>
         <AppearanceRow label="Density" detail="Row spacing and message padding in chats and lists.">
           <select value={a.density} onChange={e => patch({ density: e.target.value as AppearanceSettings['density'] })} style={{ ...FIELD_STYLE, width: 160 }}>
