@@ -73,6 +73,20 @@ describe('remoteFs.readFileB64', () => {
   })
 })
 
+describe('remoteFs.detectRepos', () => {
+  it('returns [cwd] when the folder itself is a repo', async () => {
+    okOut('/srv\nmain\n') // gitStatus(cwd) succeeds
+    expect(await remoteFs(m, 'a1').detectRepos('/srv')).toEqual(['/srv'])
+  })
+  it('finds repo subfolders when the folder is a multi-repo container', async () => {
+    okOut('\n\n')                          // gitStatus(/srv) → not a repo
+    okOut('repo-a/\nrepo-b/\nnotes.txt\n') // listDir(/srv)
+    okOut('/srv/repo-a\nmain\n')           // gitStatus(/srv/repo-a) → repo
+    okOut('\n\n')                          // gitStatus(/srv/repo-b) → not a repo
+    expect(await remoteFs(m, 'a1').detectRepos('/srv')).toEqual(['/srv/repo-a'])
+  })
+})
+
 describe('remoteFs error propagation', () => {
   it('surfaces a non-zero remote command as an error', async () => {
     exec.mockResolvedValueOnce({ code: 1, output: 'cat: nope: No such file' })

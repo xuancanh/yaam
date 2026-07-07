@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useActions, useConductorSelector } from '../../store'
 import { worktreeDiff } from '../../core/native'
-import { detectRepoDirs } from '../../shared/git-repos'
 import type { GitStatusResult } from '../../core/native'
 import { buildCfg, callApi, hasCreds } from '../../llm/client'
 import type { Agent } from '../../core/types'
@@ -221,21 +220,11 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
     }
   }, [repo, fs])
 
-  // resolve the repo (or, for a multi-repo worktree/folder cwd, the repo list).
-  // Remote (ssh) sessions can't be scanned locally, so the cwd IS the repo —
-  // gitStatus resolves the real toplevel, or errors into the no-repo fallback.
+  // resolve the repo (or, for a multi-repo folder cwd, the repo list) through the
+  // session's adapter, so a remote folder of repos is detected on the host too
   useEffect(() => {
     let live = true
-    if (fs.remote) {
-      const dir = cwd ?? ''
-      setRepos([dir])
-      setRepo(dir)
-      void fs.gitStatus(dir)
-        .then(st => { if (live) { setStatus(st); setError(null) } })
-        .catch(() => { if (live) setNoRepo(true) })
-      return () => { live = false }
-    }
-    void detectRepoDirs(cwd ?? "").then(candidates => {
+    void fs.detectRepos(cwd ?? "").then(candidates => {
       if (!live) return
       setRepos(candidates)
       if (candidates.length) { setRepo(candidates[0]); void refresh(candidates[0]) }
