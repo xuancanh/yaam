@@ -32,10 +32,18 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
       fitTerminal(agent.id)
       term.scrollToBottom()
     }, 150)
-    const ro = new ResizeObserver(() => fitTerminal(agent.id))
+    // Coalesce the burst of observer ticks a window/divider drag produces into
+    // one fit per frame — refitting on every intermediate size mid-drag left the
+    // PTY and renderer briefly disagreeing (offset input/selection).
+    let roRaf = 0
+    const ro = new ResizeObserver(() => {
+      if (roRaf) return
+      roRaf = requestAnimationFrame(() => { roRaf = 0; fitTerminal(agent.id) })
+    })
     ro.observe(el)
     return () => {
       cancelAnimationFrame(raf)
+      if (roRaf) cancelAnimationFrame(roRaf)
       window.clearTimeout(late)
       ro.disconnect()
       disableGpuRenderer(agent.id)

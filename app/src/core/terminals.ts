@@ -238,8 +238,19 @@ export function fitTerminal(id: string) {
   const host = entry.term.element.parentElement
   if (host && !host.clientHeight) return
   try {
+    const before = `${entry.term.rows}x${entry.term.cols}`
     entry.fit.fit()
+    const changed = `${entry.term.rows}x${entry.term.cols}` !== before
     resizeSession(id, entry.term.rows, entry.term.cols)
+    if (changed) {
+      // A reflow invalidates any active selection's cell coordinates and can
+      // leave the WebGL grid painted at the previous cell metrics — the symptom
+      // being clicks/selection landing on the wrong glyph and typed input
+      // appearing offset. Drop the stale selection and force a full repaint so
+      // the renderer re-measures against the new size.
+      entry.term.clearSelection()
+      entry.term.refresh(0, entry.term.rows - 1)
+    }
   } catch { /* pane not laid out yet */ }
 }
 

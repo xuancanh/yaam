@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useActions } from '../../store'
 import { ACCENT, memTokens } from '../../core/data'
 import type { Agent } from '../../core/types'
@@ -18,6 +18,19 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
   const [gitOpen, setGitOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // open the settings menu upward when a bottom-row pane lacks room below, so it
+  // never renders off the bottom edge of the window
+  const [settingsUp, setSettingsUp] = useState(false)
+  const settingsAnchor = useRef<HTMLDivElement>(null)
+  const toggleSettings = () => {
+    setSettingsOpen(v => {
+      if (!v) {
+        const rect = settingsAnchor.current?.getBoundingClientRect()
+        setSettingsUp(!!rect && window.innerHeight - rect.bottom < 150)
+      }
+      return !v
+    })
+  }
   // Toggle the pane-local file explorer and repaint the terminal after resizing.
   const toggleFiles = () => {
     setFilesOpen(v => {
@@ -71,12 +84,12 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={15} stroke={1.7} />
           </button>
         )}
-        <div style={{ position: 'relative' }}>
+        <div ref={settingsAnchor} style={{ position: 'relative' }}>
           <button
             className="icon-btn"
             title="Session settings — memory & context, tools & permissions"
             style={{ width: 27, height: 27, borderRadius: 7, color: settingsOpen ? 'var(--accent)' : undefined }}
-            onClick={e => { e.stopPropagation(); setSettingsOpen(v => !v) }}
+            onClick={e => { e.stopPropagation(); toggleSettings() }}
           >
             <Icon paths={[...IC.sliders, 'M6 9m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 15m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']} size={15} />
           </button>
@@ -84,7 +97,7 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={e => { e.stopPropagation(); setSettingsOpen(false) }} />
               <div style={{
-                position: 'absolute', top: 31, right: 0, zIndex: 41, minWidth: 190,
+                position: 'absolute', ...(settingsUp ? { bottom: 31 } : { top: 31 }), right: 0, zIndex: 41, minWidth: 190,
                 background: 'var(--panel)', border: '1px solid var(--line2)', borderRadius: 10,
                 padding: 4, boxShadow: '0 8px 28px rgba(0,0,0,.35)',
               }}>
