@@ -33,7 +33,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 /** Full-view editor for one template — opened by create / edit */
 /** Edit every persisted launch option for one agent template. */
 function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => void }) {
-  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes }), shallowEqual)
+  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes, machines: x.settings.machines ?? [] }), shallowEqual)
   const { updateTemplate, runTemplate } = useActions()
   const type = s.agentTypes.find(t => t.id === tpl.typeId)
   const preview = buildTemplateCommand(tpl, type, tpl.prompt.includes('{task}') ? '<task>' : undefined)
@@ -116,8 +116,20 @@ function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => v
             />
           </Field>
 
+          {s.machines.length > 0 && (
+            <Field label="RUN ON" hint={tpl.machineId ? 'over SSH + tmux; the working directory is on the remote host' : 'this machine'}>
+              <select value={tpl.machineId ?? ''} onChange={e => upd({ machineId: e.target.value || undefined })} className="select-field" style={FIELD_STYLE}>
+                <option value="">This machine (local)</option>
+                {s.machines.map(m => {
+                  const incomplete = !m.host?.trim() || !m.user?.trim()
+                  return <option key={m.id} value={m.id} disabled={incomplete}>{m.label || 'Unnamed'}{incomplete ? ' · incomplete' : ` · ${m.user}@${m.host}`}</option>
+                })}
+              </select>
+            </Field>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="WORKING DIRECTORY">
+            <Field label={tpl.machineId ? 'WORKING DIRECTORY (remote host)' : 'WORKING DIRECTORY'}>
               <input value={tpl.cwd} onChange={e => upd({ cwd: e.target.value })} placeholder="session default" style={FIELD_STYLE} />
             </Field>
             <Field label="EXTRA CLI FLAGS" hint="verbatim">

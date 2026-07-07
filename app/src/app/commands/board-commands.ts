@@ -20,6 +20,7 @@ export interface AddTaskInput {
   cwd?: string
   typeId?: string
   templateId?: string
+  machineId?: string
 }
 
 export interface RemoveTaskInput { id: string }
@@ -51,6 +52,7 @@ export function registerBoardCommands(
           cwd: i.cwd?.trim() || undefined,
           typeId: i.typeId || undefined,
           templateId: i.templateId || undefined,
+          machineId: i.machineId || undefined,
           chat: [{ id: mkId('tc'), role: 'system', text: i.note || 'Task created', at: Date.now() }],
         }]),
       }))

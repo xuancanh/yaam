@@ -181,6 +181,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       const command = buildTemplateCommand(tpl, type, task, contract)
       const id = launchSession(command, cwdOverride || tpl.cwd || st.settings.defaultCwd || '', tpl.name, type?.id, workspaceId, {
         ephemeral: tpl.mode === 'ephemeral', autoArchive: tpl.autoArchive, templateId: tpl.id, isolate,
+        machineId: tpl.machineId,
       })
       if (id) logEvent('route', id, `Launched template “${tpl.name}”${task ? ` · ${task.slice(0, 48)}` : ''}`)
       return id
@@ -222,7 +223,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
           id: '', name: task.title.slice(0, 18), typeId: type.id, mode: 'ephemeral',
           prompt: '{task}', systemPrompt: '', model: '', approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
         }
-        id = launchSession(buildTemplateCommand(oneShot, type, work, contract), runCwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, workspaceId, { ephemeral: true, isolate })
+        id = launchSession(buildTemplateCommand(oneShot, type, work, contract), runCwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, workspaceId, { ephemeral: true, isolate, machineId: task.machineId })
       }
       if (!id) return null
       if (prior) {

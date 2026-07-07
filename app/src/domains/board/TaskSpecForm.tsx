@@ -15,6 +15,8 @@ export interface TaskSpecValue {
   /** '' = default type · type id · 'tpl:<id>' = template */
   runWith: string
   cwd: string
+  /** '' = local · saved machine id (SSH + tmux) */
+  machineId: string
   /** run the task's sessions in an isolated git worktree */
   isolate: boolean
 }
@@ -27,11 +29,12 @@ export interface TaskSpecPatch {
   templateId?: string
   typeId?: string
   cwd?: string
+  machineId?: string
   isolate?: boolean
 }
 
 export function emptyTaskSpec(defaultCwd: string): TaskSpecValue {
-  return { title: '', description: '', criteria: '', runWith: '', cwd: defaultCwd, isolate: false }
+  return { title: '', description: '', criteria: '', runWith: '', cwd: defaultCwd, machineId: '', isolate: false }
 }
 
 const FIELD = {
@@ -59,6 +62,7 @@ function toPatch(v: TaskSpecValue, description: string, criteria: string[]): Tas
     description,
     criteria,
     cwd: v.cwd.trim() || undefined,
+    machineId: v.machineId || undefined,
     isolate: v.isolate || undefined,
     ...(v.runWith.startsWith('tpl:') ? { templateId: v.runWith.slice(4) } : { typeId: v.runWith || undefined }),
   }
@@ -133,7 +137,7 @@ export function TaskSpecFields({ v, set, questions, error, autoFocus }: {
   error: string
   autoFocus?: boolean
 }) {
-  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes, templates: x.templates }), shallowEqual)
+  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes, templates: x.templates, machines: x.settings.machines ?? [] }), shallowEqual)
   const enabledTypes = s.agentTypes.filter(t => t.enabled)
   const templates = s.templates ?? []
 
@@ -172,20 +176,35 @@ export function TaskSpecFields({ v, set, questions, error, autoFocus }: {
         <div>
           <FieldLabel>Working folder</FieldLabel>
           <div style={{ display: 'flex', gap: 6 }}>
-            <input value={v.cwd} onChange={e => set({ ...v, cwd: e.target.value })} placeholder="default" style={{ ...FIELD, fontFamily: 'var(--font-mono)', fontSize: 11.5 }} />
-            <button className="open-btn" style={{ flex: 'none', padding: '0 11px', fontSize: 11.5 }} onClick={browse} disabled={!isTauri}>…</button>
+            <input value={v.cwd} onChange={e => set({ ...v, cwd: e.target.value })} placeholder={v.machineId ? 'remote folder' : 'default'} style={{ ...FIELD, fontFamily: 'var(--font-mono)', fontSize: 11.5 }} />
+            {!v.machineId && <button className="open-btn" style={{ flex: 'none', padding: '0 11px', fontSize: 11.5 }} onClick={browse} disabled={!isTauri}>…</button>}
           </div>
         </div>
       </div>
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none' }} title="The working folder (a git repo, or a folder whose subfolders are repos) is mirrored into git worktrees; the task's sessions work there and changes land via the review queue.">
-        <input type="checkbox" checked={v.isolate} onChange={e => set({ ...v, isolate: e.target.checked })} style={{ marginTop: 2 }} />
-        <span>
-          <span style={{ fontSize: 12, fontWeight: 600 }}>Isolate in a git worktree</span>
-          <span style={{ display: 'block', fontSize: 10.5, color: 'var(--dim)', marginTop: 2 }}>
-            Sessions work on a branch in a mirrored copy (multi-repo folders supported); approve &amp; merge from the Review column.
+      {s.machines.length > 0 && (
+        <div>
+          <FieldLabel hint={v.machineId ? 'over SSH + tmux — the folder above is on the remote host' : 'this machine'}>Run on</FieldLabel>
+          <select value={v.machineId} onChange={e => set({ ...v, machineId: e.target.value })} className="select-field" style={FIELD}>
+            <option value="">This machine (local)</option>
+            {s.machines.map(m => {
+              const incomplete = !m.host?.trim() || !m.user?.trim()
+              return <option key={m.id} value={m.id} disabled={incomplete}>{m.label || 'Unnamed'}{incomplete ? ' · incomplete' : ` · ${m.user}@${m.host}`}</option>
+            })}
+          </select>
+        </div>
+      )}
+      {/* worktree isolation is local-only */}
+      {!v.machineId && (
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none' }} title="The working folder (a git repo, or a folder whose subfolders are repos) is mirrored into git worktrees; the task's sessions work there and changes land via the review queue.">
+          <input type="checkbox" checked={v.isolate} onChange={e => set({ ...v, isolate: e.target.checked })} style={{ marginTop: 2 }} />
+          <span>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>Isolate in a git worktree</span>
+            <span style={{ display: 'block', fontSize: 10.5, color: 'var(--dim)', marginTop: 2 }}>
+              Sessions work on a branch in a mirrored copy (multi-repo folders supported); approve &amp; merge from the Review column.
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      )}
       {questions.length > 0 && (
         <div style={{ border: '1px solid rgba(255,176,32,.4)', background: 'rgba(255,176,32,.07)', borderRadius: 10, padding: '10px 13px' }}>
           <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--amber)', marginBottom: 6 }}>Needs more info before it can be created</div>

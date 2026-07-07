@@ -508,6 +508,8 @@ export interface AgentTemplate {
   extraArgs: string
   /** archive the session automatically after a successful ephemeral run */
   autoArchive: boolean
+  /** run on a saved remote machine (SSH + tmux) instead of locally; empty = local */
+  machineId?: string
 }
 
 /** one message in a task's watcher chat */
@@ -544,6 +546,9 @@ export interface BoardTask {
   typeId?: string
   /** working directory for the spawned session (overrides template/default) */
   cwd?: string
+  /** run the task's sessions on a saved remote machine (SSH + tmux); empty =
+   *  local. Ignored when the task uses a template that already sets a machine. */
+  machineId?: string
   /** run the task's sessions in an isolated git worktree (reviewed via the queue) */
   isolate?: boolean
   /** archived tasks leave the board but stay recoverable; deletion only

@@ -40,8 +40,8 @@ export interface BoardActions {
   dropTo: (col: BoardCol) => void
   startTask: (taskId: string) => void
   restartTask: (taskId: string) => void
-  createTask: (input: { title: string; description: string; criteria: string[]; templateId?: string; typeId?: string; cwd?: string }) => void
-  updateTask: (id: string, patch: Partial<Pick<BoardTask, 'title' | 'description' | 'criteria' | 'templateId' | 'typeId' | 'cwd'>>) => void
+  createTask: (input: { title: string; description: string; criteria: string[]; templateId?: string; typeId?: string; cwd?: string; machineId?: string }) => void
+  updateTask: (id: string, patch: Partial<Pick<BoardTask, 'title' | 'description' | 'criteria' | 'templateId' | 'typeId' | 'cwd' | 'machineId'>>) => void
   sendTaskChat: (taskId: string, text: string) => void
   draftTask: (input: { title: string; description: string; criteria: string[] }) => Promise<TaskSpecDraft | null>
   renameTask: (id: string, title: string) => void
@@ -114,7 +114,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
       if (ctx.execCommand) {
         void ctx.execCommand('add_task', {
           title: input.title, description: input.description, criteria: input.criteria,
-          templateId: input.templateId, typeId: input.typeId, cwd: input.cwd,
+          templateId: input.templateId, typeId: input.typeId, cwd: input.cwd, machineId: input.machineId,
         }, { actor: { kind: 'user' } })
       } else {
         dispatch(s => ({
@@ -129,6 +129,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
             templateId: input.templateId || undefined,
             typeId: input.typeId || undefined,
             cwd: input.cwd?.trim() || undefined,
+            machineId: input.machineId || undefined,
             chat: [{ id: mkId('tc'), role: 'system', text: 'Task created', at: Date.now() }],
           }]),
         }))
