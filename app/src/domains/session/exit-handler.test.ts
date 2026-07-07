@@ -129,6 +129,16 @@ describe('coordinateSessionExit', () => {
     expect(h.ports.pushTaskChat).toHaveBeenCalledWith('t1', 'system', expect.stringContaining('Review'))
   })
 
+  it('with the brain off, a clean exit clears a stale deterministic error flag', () => {
+    // a plain (non-task) session that earlier flagged a possible error, now
+    // exiting cleanly with error-free output — the flag must not linger
+    const h = harness({
+      agents: [agent({ ephemeral: false, actionNeeded: 'Possible error — boom', log: [{ t: 'out', x: 'All tests passed' }] })],
+    })
+    h.run(0)
+    expect(h.state().agents[0].actionNeeded).toBeUndefined()
+  })
+
   it('a failed task session moves the task to failed', () => {
     const located: LocatedTask = { task: task('t1'), workspaceId: 'ws' }
     const h = harness({ agents: [agent({ ephemeral: true })], tasks: [task('t1')] }, { locatedTask: located })

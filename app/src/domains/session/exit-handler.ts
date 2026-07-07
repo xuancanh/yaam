@@ -95,7 +95,8 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
             ? {
                 summary: (failed ? `Exited with code ${e.code}` : brainDigest.summary) || a.summary,
                 summaryAt: digestAt,
-                actionNeeded: failed ? `Exited with code ${e.code} — check the terminal output` : brainDigest.actionNeeded ?? a.actionNeeded,
+                // authoritative: a clean exit clears any stale error flag
+                actionNeeded: failed ? `Exited with code ${e.code} — check the terminal output` : brainDigest.actionNeeded,
               }
             : {}),
         }

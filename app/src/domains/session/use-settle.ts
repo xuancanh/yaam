@@ -172,7 +172,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
               ? {
                   ...a,
                   attention: a.attention || !watching,
-                  ...(digest ? { summary: digest.summary || a.summary, summaryAt: at, actionNeeded: digest.actionNeeded ?? a.actionNeeded } : {}),
+                  // the digest is authoritative for this deterministic path:
+                  // a clean settle must CLEAR a stale "possible error" flag
+                  ...(digest ? { summary: digest.summary || a.summary, summaryAt: at, actionNeeded: digest.actionNeeded } : {}),
                 }
               : a)),
           }))
