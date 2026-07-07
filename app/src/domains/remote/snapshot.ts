@@ -3,7 +3,7 @@
 // task board (with watcher chats), chat conversations, and every approval
 // answerable from the desktop. Sizes are capped so the LAN payload stays
 // small even for long-running fleets.
-import type { AppState, Message } from '../../core/types'
+import type { AppState, BuildResult, BuildUI, Escalation, Message, RouteEntry } from '../../core/types'
 import { hasCreds } from '../../llm/client'
 
 export interface RemoteApproval {
@@ -21,6 +21,14 @@ export interface RemoteMsg {
   text: string
   at: number
   approval?: string
+  /** Master message shape, when this is from the orchestrator conversation. */
+  kind?: Message['kind']
+  thinking?: string
+  routes?: RouteEntry[]
+  esc?: Escalation
+  escFor?: string
+  build?: BuildResult
+  buildUI?: BuildUI
 }
 
 export interface RemoteSnapshot {
@@ -166,8 +174,20 @@ export function buildRemoteSnapshot(
       busy: Boolean(s.masterBusy),
       brain: Boolean(s.settings.masterEnabled && hasCreds(s.settings)),
       msgs: s.messages
-        .map(m => ({ id: m.id, role: m.role === 'you' ? 'user' : 'assistant', text: clip(masterMsgText(m)), at: 0 }))
-        .filter(m => m.text)
+        .map(m => ({
+          id: m.id,
+          role: m.role === 'you' ? 'user' : 'assistant',
+          text: clip(m.text ?? ''),
+          at: 0,
+          kind: m.kind,
+          thinking: m.thinking ? clip(m.thinking) : undefined,
+          routes: m.routes,
+          esc: m.esc,
+          escFor: m.escFor,
+          build: m.build,
+          buildUI: m.buildUI,
+        }))
+        .filter(m => m.text || m.kind !== 'text')
         .slice(-MSG_CAP),
     },
     approvals,

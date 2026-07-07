@@ -89,7 +89,9 @@ describe('buildRemoteSnapshot', () => {
     expect(snap.master.brain).toBe(true)
     expect(snap.master.msgs.map(m => m.role)).toEqual(['assistant', 'user', 'assistant', 'assistant'])
     expect(snap.master.msgs[0].text).toBe('Hi, I am Master.')
-    expect(snap.master.msgs[2].text).toContain('worker') // routed line derived from structured payload
+    expect(snap.master.msgs[2].kind).toBe('route')
+    expect(snap.master.msgs[2].routes?.[0]?.name).toBe('worker')
+    expect(snap.master.msgs[2].text).toBe('') // mobile renders the structured route card, not a synthetic line
   })
 
   it('masterMsgText flattens structured payloads to a readable line', () => {

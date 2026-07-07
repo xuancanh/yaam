@@ -192,6 +192,9 @@ export function RemoteCompanion() {
         case 'task_chat': return a.sendTaskChat(c.id, c.text)
         case 'task_start': return a.startTask(c.id)
         case 'session_input': return a.sendInput(c.id, c.text)
+        case 'prompt_answer': return a.answerPrompt(c.id, Number(c.text))
+        case 'prompt_approve': return a.approve(c.id)
+        case 'prompt_deny': return a.deny(c.id)
         // exclusive terminal focus: the focused device owns the PTY size
         case 'session_focus': {
           try {

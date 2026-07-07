@@ -93,6 +93,22 @@ function StatusPill({ status }: { status: string }) {
   )
 }
 
+function MobileMasterMark({ size = 28 }: { size?: number }) {
+  const bar = (h: number) => (
+    <span style={{ width: Math.max(3, Math.round(size * 0.11)), height: h, borderRadius: 999, background: '#1A1400', display: 'block' }} />
+  )
+  return (
+    <span
+      className="mastermark"
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.3), gap: Math.max(2, Math.round(size * 0.08)) }}
+    >
+      {bar(Math.round(size * 0.22))}
+      {bar(Math.round(size * 0.38))}
+      {bar(Math.round(size * 0.55))}
+    </span>
+  )
+}
+
 // ---------------------------------------------------------------- pairing
 
 function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) => void }) {
@@ -177,10 +193,11 @@ function Composer({ placeholder, onSend, onAttach, children }: {
 
 /** Chat transcript in the assistant design: user bubbles right, bot content
  *  free-flowing beside a small avatar, system lines centered mono. */
-function Messages({ msgs, echoes, botWho }: {
+function Messages({ msgs, echoes, botWho, botAvatar }: {
   msgs: { id: string; role: string; text: string }[]
   echoes: string[]
   botWho?: string
+  botAvatar?: React.ReactNode
 }) {
   const endRef = useRef<HTMLDivElement>(null)
   const count = msgs.length + echoes.length
@@ -193,7 +210,7 @@ function Messages({ msgs, echoes, botWho }: {
         if (m.role === 'system' || m.role === 'tool') return <div key={m.id} className="sysline">· {m.text.slice(0, 200)} ·</div>
         return (
           <div key={m.id} className="botrow">
-            <div className="botavatar" title={botWho}>⚡</div>
+            <div className="botavatar" title={botWho}>{botAvatar ?? '⚡'}</div>
             <div className="botbody"><Markdown text={m.text} /></div>
           </div>
         )
@@ -361,6 +378,185 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   )
 }
 
+type MasterMsg = RemoteSnapshot['master']['msgs'][number]
+
+function MasterThinking({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const steps = text.split('\n').filter(Boolean).length
+  return (
+    <div className="mthink">
+      <button onClick={() => setOpen(v => !v)}>
+        <span style={{ transform: open ? 'rotate(90deg)' : undefined }}>▸</span>
+        thinking · {steps} step{steps === 1 ? '' : 's'}
+      </button>
+      {open && <pre>{text}</pre>}
+    </div>
+  )
+}
+
+function MasterRouteCard({ msg }: { msg: MasterMsg }) {
+  return (
+    <div className="mcard">
+      <div className="mcardlabel">AUTO-ROUTED</div>
+      {msg.text && <div className="mcardtext"><Markdown text={msg.text} /></div>}
+      {(msg.routes ?? []).map((r, i) => (
+        <div className="mroute" key={`${r.name}-${i}`}>
+          <span className="rdot" style={{ background: r.color }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="rname">{r.name}</div>
+            <div className="rrepo">{r.repo}</div>
+          </div>
+          <span className="raction" style={{ color: r.color }}>{r.action}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MasterEscalationCard({ msg }: { msg: MasterMsg }) {
+  const esc = msg.esc
+  if (!esc) return <div className="mcard"><Markdown text={msg.text} /></div>
+  const sid = msg.escFor ?? ''
+  const choose = (num: number) => sid && sendCommand({ kind: 'prompt_answer', id: sid, text: String(num) })
+  const approve = () => sid && sendCommand({ kind: 'prompt_approve', id: sid })
+  const deny = () => sid && sendCommand({ kind: 'prompt_deny', id: sid })
+  return (
+    <div className={`mcard warncard${esc.resolved ? '' : ' live'}`}>
+      <div className="mcardlabel amber">NEEDS YOUR DECISION</div>
+      <div className="magent">
+        <span className="rdot" style={{ background: esc.color }} />
+        <strong>{esc.name}</strong>
+        <span>{esc.repo}</span>
+      </div>
+      <div className="mcardtext">{esc.reason}</div>
+      {!esc.resolved ? (
+        esc.options?.length ? (
+          <div className="moptions">
+            {esc.options.map(o => (
+              <button key={o.num} onClick={() => void choose(o.num)}>
+                <span>{o.num}.</span>
+                {o.label}
+              </button>
+            ))}
+            <button className="dangerline" onClick={() => void deny()}>Dismiss (Esc)</button>
+          </div>
+        ) : (
+          <div className="btnrow">
+            <button className="btn primary" onClick={() => void approve()} disabled={!sid}>Approve</button>
+            <button className="btn ghost" onClick={() => void deny()} disabled={!sid}>Deny</button>
+          </div>
+        )
+      ) : (
+        <div className={`mdecision ${esc.decision === 'denied' ? 'bad' : ''}`}>
+          {esc.decision === 'denied' ? 'Denied · dismissed'
+            : esc.decision === 'approved' ? (esc.choice ? `Chose ${esc.choice}` : 'Approved · agent resumed')
+            : esc.choice ?? 'resolved'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MasterBuildCard({ msg }: { msg: MasterMsg }) {
+  const b = msg.build
+  if (!b) return <div className="mcard"><Markdown text={msg.text} /></div>
+  return (
+    <div className="mcard">
+      <div className="mcardlabel">BUILT A {b.kind === 'tool' ? 'TOOL' : 'SCHEDULE'}</div>
+      <div className="mbuildtitle">{b.title}</div>
+      <div className="mcardtext">{b.detail}</div>
+    </div>
+  )
+}
+
+const BUILD_STEPS_MOBILE = ['Planning', 'Generating', 'Wiring data', 'Mounting']
+
+function MasterBuildUICard({ msg }: { msg: MasterMsg }) {
+  const b = msg.buildUI
+  if (!b) return <div className="mcard"><Markdown text={msg.text || 'Built a view'} /></div>
+  return (
+    <div className="mcard">
+      <div className="mcardlabel">SELF-BUILDING · {b.title}</div>
+      <div className="msteps">
+        {BUILD_STEPS_MOBILE.map((label, i) => {
+          const done = b.stage > i + 1 || b.done
+          const active = b.stage === i + 1 && !b.done
+          return (
+            <span key={label} className={done ? 'done' : active ? 'active' : ''}>
+              <i />{label}
+            </span>
+          )
+        })}
+      </div>
+      {b.done && (
+        <div className="mbars">
+          {b.bars.map((v, i) => <span key={i} style={{ height: `${Math.round(16 + v * 42)}px` }} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MasterPayload({ msg }: { msg: MasterMsg }) {
+  if (msg.kind === 'route') return <MasterRouteCard msg={msg} />
+  if (msg.kind === 'escalate') return <MasterEscalationCard msg={msg} />
+  if (msg.kind === 'build') return <MasterBuildCard msg={msg} />
+  if (msg.kind === 'buildui') return <MasterBuildUICard msg={msg} />
+  return (
+    <div className="botbody">
+      {msg.thinking && <MasterThinking text={msg.thinking} />}
+      <Markdown text={msg.text} />
+    </div>
+  )
+}
+
+function MasterMessages({ msgs, echoes }: { msgs: MasterMsg[]; echoes: string[] }) {
+  const endRef = useRef<HTMLDivElement>(null)
+  const count = msgs.length + echoes.length
+  const lastLen = msgs.length ? msgs[msgs.length - 1].text.length : 0
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [count, lastLen])
+  return (
+    <div className="msgs">
+      {msgs.map(m => (
+        m.role === 'user'
+          ? <div key={m.id} className="bubble-user">{m.text}</div>
+          : (
+            <div key={m.id} className="botrow masterrow">
+              <div className="botavatar masteravatar" title="Master"><MobileMasterMark size={24} /></div>
+              <div className="masterbody"><MasterPayload msg={m} /></div>
+            </div>
+            )
+      ))}
+      {echoes.map((text, i) => (
+        <div key={`echo-${i}`} className="bubble-user" style={{ opacity: 0.55 }}>{text}</div>
+      ))}
+      <div ref={endRef} />
+    </div>
+  )
+}
+
+function MasterApprovals({ snap }: { snap: RemoteSnapshot }) {
+  const approvals = snap.approvals.filter(a => a.kind === 'master')
+  if (!approvals.length) return null
+  return (
+    <div className="mdecisionbox">
+      <div className="mcardlabel amber">MASTER TOOL APPROVALS</div>
+      {approvals.map(a => (
+        <div key={a.id} className="mtoolapproval">
+          <div>
+            <strong>{a.label}</strong>
+            <span>{a.detail}</span>
+          </div>
+          <div className="btnrow">
+            <button className="btn primary" onClick={() => void sendCommand({ kind: 'approve_master', id: a.id, ok: true })}>Approve</button>
+            <button className="btn ghost" onClick={() => void sendCommand({ kind: 'approve_master', id: a.id, ok: false })}>Deny</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** Master orchestrator conversation — the mobile default view. Shares the same
  *  `s.messages` the desktop sidebar reads, so both stay in step. */
 function MasterView({ snap }: { snap: RemoteSnapshot }) {
@@ -376,7 +572,7 @@ function MasterView({ snap }: { snap: RemoteSnapshot }) {
       <div className="body">
         {m.msgs.length === 0 && echoes.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '56px 20px 24px' }}>
-            <div className="botavatar" style={{ width: 50, height: 50, borderRadius: 15, margin: '0 auto 16px', fontSize: 24 }}>✦</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}><MobileMasterMark size={50} /></div>
             <div style={{ fontFamily: 'var(--font-title)', fontSize: 20, fontWeight: 600 }}>Master</div>
             <div style={{ fontSize: 13, color: 'var(--mut)', marginTop: 6, lineHeight: 1.5 }}>
               {m.brain ? 'Route work, launch sessions, and ask about your fleet.' : 'No Master Brain configured — enable it in desktop Settings → Master Brain.'}
@@ -385,7 +581,8 @@ function MasterView({ snap }: { snap: RemoteSnapshot }) {
         ) : (
           !m.brain && <div className="warn" style={{ margin: '0 0 12px' }}>⚠ Master Brain is off — enable it in desktop Settings → Master Brain to get replies.</div>
         )}
-        <Messages msgs={m.msgs} echoes={echoes} botWho="Master" />
+        <MasterApprovals snap={snap} />
+        <MasterMessages msgs={m.msgs} echoes={echoes} />
       </div>
       <Composer placeholder={m.brain ? 'Message Master…' : 'Message Master (brain off)'} onSend={send} />
     </>
