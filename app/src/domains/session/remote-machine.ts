@@ -56,9 +56,11 @@ function toB64(s: string): string {
 /** Local PTY command that runs `innerCommand` on the machine inside a tmux
  *  session. `new-session -A` attaches if the session already exists (durability),
  *  so resume just re-runs this. `innerCommand` is the fully-built agent command
- *  (env prefix already applied). */
-export function wrapLaunch(m: Machine, innerCommand: string, id: string): string {
-  const dir = m.remoteDir?.trim()
+ *  (env prefix already applied). `cwd` is the session's working dir (from the
+ *  launch dialog / persisted `agent.cwd`), falling back to the machine default —
+ *  it MUST match the dir Files/Git browse, or the terminal and panels diverge. */
+export function wrapLaunch(m: Machine, innerCommand: string, id: string, cwd?: string): string {
+  const dir = (cwd || m.remoteDir || '').trim()
   const inner = dir ? `cd ${shq(dir)} && ${innerCommand}` : innerCommand
   const b64 = toB64(inner)
   // the remote shell decodes the inner command and hands it to tmux as one arg

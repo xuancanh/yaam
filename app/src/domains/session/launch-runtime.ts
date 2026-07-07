@@ -121,7 +121,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         // local-only and skipped.
         if (machine) {
           const inner = `${envPrefix(launchType?.env)}${spawnCommand}`
-          port.spawnSession(id, wrapLaunch(machine, inner, id), undefined, undefined, undefined, undefined, commandShell).catch(fail)
+          port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd), undefined, undefined, undefined, undefined, commandShell).catch(fail)
           return
         }
         // Claude's id is known up front; only codex/opencode need file detection.

@@ -183,7 +183,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           // same ssh wrap; tmux is the durability layer, not a CLI resume id
           const inner = `${envPrefix(type?.env)}${agent.cmd}`.trim()
           const commandShell = stateRef.current.settings?.shell || 'zsh'
-          port.spawnSession(id, wrapLaunch(machine, inner, id), undefined, size?.rows, size?.cols, undefined, commandShell)
+          port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd), undefined, size?.rows, size?.cols, undefined, commandShell)
             .then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
             .catch(() => {})
         } else if (agent.detached) {

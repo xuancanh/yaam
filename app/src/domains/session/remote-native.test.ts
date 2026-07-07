@@ -10,7 +10,7 @@ vi.mock('../../core/native', () => ({
   gitStage: vi.fn(), gitUnstage: vi.fn(), gitCommit: vi.fn(),
 }))
 
-import { remoteFs, sessionFs } from './remote-native'
+import { parsePorcelain, remoteFs, sessionFs } from './remote-native'
 import type { Machine } from '../../core/types'
 
 const m: Machine = { id: 'mc1', label: 'box', host: 'h', user: 'u' }
@@ -44,6 +44,20 @@ describe('remoteFs.gitStatus', () => {
   it('rejects a non-repo directory (empty toplevel)', async () => {
     okOut('\n\n')
     await expect(remoteFs(m, 'a1').gitStatus('/tmp')).rejects.toThrow(/not a git repository/)
+  })
+})
+
+describe('parsePorcelain', () => {
+  it('matches git.rs: rename → destination, strips quotes, needs a space at col 2', () => {
+    const st = parsePorcelain('/r', 'main', [
+      'R  old.ts -> new.ts',
+      ' M "file with spaces.txt"',
+      'A  keep.ts',
+      'bad',            // no space at column 2 → skipped
+    ])
+    expect(st.files.map(f => f.path)).toEqual(['new.ts', 'file with spaces.txt', 'keep.ts'])
+    expect(st.files[0]).toMatchObject({ status: 'R', index: 'R', work: ' ' })
+    expect(st.files[1]).toMatchObject({ status: 'M', index: ' ', work: 'M' })
   })
 })
 

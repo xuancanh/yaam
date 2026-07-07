@@ -33,11 +33,19 @@ const localFs: SessionFs = {
 }
 
 /** Parse `git status --porcelain` exactly like the Rust parser (git.rs):
- *  status = trimmed XY, index = X column, work = Y column, path = the rest. */
-function parsePorcelain(root: string, branch: string, lines: string[]): GitStatusResult {
-  const files = lines
-    .filter(l => l.length >= 3)
-    .map(l => ({ path: l.slice(3), status: l.slice(0, 2).trim(), index: l.slice(0, 1), work: l.slice(1, 2) }))
+ *  require a space at column 2; status = trimmed XY, index = X, work = Y; take a
+ *  rename's destination (after " -> "); strip surrounding quotes git adds to
+ *  paths with special characters — so paths match what stage/diff expect. */
+export function parsePorcelain(root: string, branch: string, lines: string[]): GitStatusResult {
+  const files: GitStatusResult['files'] = []
+  for (const line of lines) {
+    if (line.length < 4 || line[2] !== ' ') continue
+    let path = line.slice(3)
+    const arrow = path.indexOf(' -> ')
+    if (arrow !== -1) path = path.slice(arrow + 4)
+    path = path.replace(/^"+/, '').replace(/"+$/, '')
+    files.push({ path, status: line.slice(0, 2).trim(), index: line.slice(0, 1), work: line.slice(1, 2) })
+  }
   return { root, branch, files }
 }
 
