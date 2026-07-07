@@ -187,6 +187,7 @@ export function RemoteCompanion() {
       if (c.kind.startsWith('rpc_')) { void answerRpc(c.kind, c.id, c.text); return }
       const a = actionsRef.current
       switch (c.kind) {
+        case 'master_send': return a.sendMessage(c.text)
         case 'chat_send': return a.sendChatMessage(c.id, c.text)
         case 'task_chat': return a.sendTaskChat(c.id, c.text)
         case 'task_start': return a.startTask(c.id)

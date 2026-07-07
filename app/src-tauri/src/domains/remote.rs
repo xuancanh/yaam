@@ -24,8 +24,8 @@ use tokio_stream::StreamExt;
 /// routes it through the same conductor actions its own UI uses.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RemoteCommand {
-    /// chat_send · task_chat · task_move · task_start · session_input ·
-    /// session_stop · session_resume · approve_master · approve_chat
+    /// master_send · chat_send · task_chat · task_move · task_start ·
+    /// session_input · session_stop · session_resume · approve_master · approve_chat
     pub kind: String,
     pub id: String,
     #[serde(default)]

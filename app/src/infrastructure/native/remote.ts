@@ -14,8 +14,8 @@ export interface RemoteInfo {
 
 /** One action a paired phone asked the desktop to perform. */
 export interface RemoteCommand {
-  /** chat_send · task_chat · task_move · task_start · session_input ·
-   *  session_stop · session_resume · approve_master · approve_chat */
+  /** master_send · chat_send · task_chat · task_move · task_start ·
+   *  session_input · session_stop · session_resume · approve_master · approve_chat */
   kind: string
   id: string
   agent_id: string

@@ -18,6 +18,9 @@ export interface MasterActionsCtx {
 export interface MasterActions {
   setComposer: (v: string) => void
   send: () => void
+  /** send an explicit message to Master (used by the phone remote, which has no
+   *  desktop composer) — same behavior as send() otherwise */
+  sendMessage: (text: string) => void
   focusComposer: () => void
   resolveToolApproval: (id: string, approve: boolean) => void
 }
@@ -30,35 +33,39 @@ export function useMasterActions(ctx: MasterActionsCtx): MasterActions {
 /** Plain (non-React) factory for the Master chat actions. */
 export function createMasterActions(ctx: MasterActionsCtx): MasterActions {
   const { stateRef, later, runMaster, toolApprovals } = ctx
+
+  // side effects must stay OUT of the dispatch updater — React double-invokes
+  // reducers in dev, which used to schedule two Master turns (the second
+  // re-answered with nothing new = double replies)
+  const sendMessage = (raw: string) => {
+    const text = raw.trim()
+    if (!text) return
+    dispatch(s => ({
+      ...s,
+      messages: s.messages.concat([{ id: mkId('u'), role: 'you', kind: 'text', text }]),
+      composer: '',
+    }))
+    const st = stateRef.current.settings
+    if (hasCreds(st) && st.masterEnabled) {
+      later(50, () => { void runMaster() })
+    } else {
+      later(300, () => dispatch(s2 => ({
+        ...s2,
+        messages: s2.messages.concat([{
+          id: mkId('m'), role: 'master', kind: 'text',
+          text: hasCreds(s2.settings)
+            ? 'My brain is switched off — enable “LLM Master” in Settings → Master Brain and I’ll take it from there.'
+            : 'I need a brain first: pick a provider in Settings → Master Brain (API key, or AWS Bedrock with your credential chain) and flip the LLM Master toggle, then ask me again.',
+        }]),
+      })))
+    }
+  }
+
   return {
     setComposer: v => dispatch(s => ({ ...s, composer: v })),
 
-    send: () => {
-      // side effects must stay OUT of the dispatch updater — React double-
-      // invokes reducers in dev, which used to schedule two Master turns
-      // (the second re-answered with nothing new = double replies)
-      const text = stateRef.current.composer.trim()
-      if (!text) return
-      dispatch(s => ({
-        ...s,
-        messages: s.messages.concat([{ id: mkId('u'), role: 'you', kind: 'text', text }]),
-        composer: '',
-      }))
-      const st = stateRef.current.settings
-      if (hasCreds(st) && st.masterEnabled) {
-        later(50, () => { void runMaster() })
-      } else {
-        later(300, () => dispatch(s2 => ({
-          ...s2,
-          messages: s2.messages.concat([{
-            id: mkId('m'), role: 'master', kind: 'text',
-            text: hasCreds(s2.settings)
-              ? 'My brain is switched off — enable “LLM Master” in Settings → Master Brain and I’ll take it from there.'
-              : 'I need a brain first: pick a provider in Settings → Master Brain (API key, or AWS Bedrock with your credential chain) and flip the LLM Master toggle, then ask me again.',
-          }]),
-        })))
-      }
-    },
+    send: () => sendMessage(stateRef.current.composer),
+    sendMessage,
 
     focusComposer: () => {
       const el = document.querySelector<HTMLTextAreaElement>('[data-composer]')

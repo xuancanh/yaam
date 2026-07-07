@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildRemoteSnapshot } from './snapshot'
-import type { AppState, Agent, BoardTask, ChatMsg, TaskChatMsg } from '../../core/types'
+import { buildRemoteSnapshot, masterMsgText } from './snapshot'
+import type { AppState, Agent, BoardTask, ChatMsg, Message, TaskChatMsg } from '../../core/types'
 
 const agent = (over: Partial<Agent>): Agent =>
   ({
@@ -16,7 +16,8 @@ const task = (over: Partial<BoardTask>): BoardTask =>
 const state = (over: Partial<AppState>): AppState =>
   ({
     agents: [], tasks: [], pendingToolApprovals: [], workspaces: [{ id: 'w1', name: 'acme' }],
-    activeWorkspace: 'w1',
+    activeWorkspace: 'w1', messages: [], masterBusy: false,
+    settings: { masterEnabled: false, apiKey: '', credCmd: '', provider: 'anthropic' },
     ...over,
   }) as unknown as AppState
 
@@ -72,7 +73,29 @@ describe('buildRemoteSnapshot', () => {
     expect(snap.tasks).toEqual([])
     expect(snap.chats).toEqual([])
     expect(snap.approvals).toEqual([])
+    expect(snap.master).toEqual({ busy: false, brain: false, msgs: [] })
     expect(typeof snap.ts).toBe('number')
+  })
+
+  it('carries the Master conversation, mapping roles and skipping empty structured messages', () => {
+    const messages: Message[] = [
+      { id: 'm1', role: 'master', kind: 'text', text: 'Hi, I am Master.' },
+      { id: 'm2', role: 'you', kind: 'text', text: 'launch a session' },
+      { id: 'm3', role: 'master', kind: 'route', text: '', routes: [{ name: 'worker', color: '#fff', repo: 'yaam', task: 'x', action: 'launch' }] },
+      { id: 'm4', role: 'master', kind: 'buildui', text: '' },
+    ]
+    const snap = buildRemoteSnapshot(state({ masterBusy: true, messages, settings: { masterEnabled: true, apiKey: 'k', credCmd: '', provider: 'anthropic' } as AppState['settings'] }))
+    expect(snap.master.busy).toBe(true)
+    expect(snap.master.brain).toBe(true)
+    expect(snap.master.msgs.map(m => m.role)).toEqual(['assistant', 'user', 'assistant', 'assistant'])
+    expect(snap.master.msgs[0].text).toBe('Hi, I am Master.')
+    expect(snap.master.msgs[2].text).toContain('worker') // routed line derived from structured payload
+  })
+
+  it('masterMsgText flattens structured payloads to a readable line', () => {
+    expect(masterMsgText({ id: 'x', role: 'master', kind: 'text', text: 'plain' })).toBe('plain')
+    expect(masterMsgText({ id: 'x', role: 'master', kind: 'escalate', esc: { name: 'w', color: '#fff', repo: 'r', reason: 'need input', resolved: false, decision: null } })).toContain('need input')
+    expect(masterMsgText({ id: 'x', role: 'master', kind: 'buildui' })).toBe('Built a view')
   })
 
   it('caps message and screen payloads so snapshots stay small', () => {

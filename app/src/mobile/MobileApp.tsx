@@ -15,7 +15,7 @@ const POLL_MS = 2000
 const ATT_CONTENT_CAP = 6000
 
 type Pairing = 'checking' | 'bad-token' | 'unpaired' | 'waiting' | 'paired'
-type Tab = 'tasks' | 'chats' | 'sessions' | 'approvals'
+type Tab = 'master' | 'tasks' | 'chats' | 'sessions' | 'approvals'
 type Detail = { kind: 'task' | 'chat' | 'session'; id: string } | null
 interface Attachment { name: string; path: string; text: string }
 
@@ -361,6 +361,37 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   )
 }
 
+/** Master orchestrator conversation — the mobile default view. Shares the same
+ *  `s.messages` the desktop sidebar reads, so both stay in step. */
+function MasterView({ snap }: { snap: RemoteSnapshot }) {
+  const m = snap.master ?? { busy: false, brain: false, msgs: [] }
+  const { echoes, addEcho } = useEchoes(m.msgs)
+  const send = (text: string) => {
+    if (!text) return
+    addEcho(text)
+    void sendCommand({ kind: 'master_send', id: 'master', text })
+  }
+  return (
+    <>
+      <div className="body">
+        {m.msgs.length === 0 && echoes.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '56px 20px 24px' }}>
+            <div className="botavatar" style={{ width: 50, height: 50, borderRadius: 15, margin: '0 auto 16px', fontSize: 24 }}>✦</div>
+            <div style={{ fontFamily: 'var(--font-title)', fontSize: 20, fontWeight: 600 }}>Master</div>
+            <div style={{ fontSize: 13, color: 'var(--mut)', marginTop: 6, lineHeight: 1.5 }}>
+              {m.brain ? 'Route work, launch sessions, and ask about your fleet.' : 'No Master Brain configured — enable it in desktop Settings → Master Brain.'}
+            </div>
+          </div>
+        ) : (
+          !m.brain && <div className="warn" style={{ margin: '0 0 12px' }}>⚠ Master Brain is off — enable it in desktop Settings → Master Brain to get replies.</div>
+        )}
+        <Messages msgs={m.msgs} echoes={echoes} botWho="Master" />
+      </div>
+      <Composer placeholder={m.brain ? 'Message Master…' : 'Message Master (brain off)'} onSend={send} />
+    </>
+  )
+}
+
 /** Top-bar stop control: first tap arms it, second tap within 3s confirms. */
 function StopButton({ onStop }: { onStop: () => void }) {
   const [armed, setArmed] = useState(false)
@@ -500,6 +531,7 @@ function Lists({ tab, snap, open, selected }: { tab: Tab; snap: RemoteSnapshot; 
 // ---------------------------------------------------------------- app
 
 const TABS: { id: Tab; label: string; glyph: string }[] = [
+  { id: 'master', label: 'Master', glyph: '✦' },
   { id: 'tasks', label: 'Tasks', glyph: '▦' },
   { id: 'chats', label: 'Chat', glyph: '◍' },
   { id: 'sessions', label: 'Agents', glyph: '⌘' },
@@ -507,6 +539,7 @@ const TABS: { id: Tab; label: string; glyph: string }[] = [
 ]
 
 const HEAD_SUB: Record<Tab, (s: RemoteSnapshot) => string> = {
+  master: s => (s.master?.brain ? (s.master.busy ? 'thinking…' : 'orchestrator') : 'brain off'),
   tasks: s => `${s.tasks.length} on the board`,
   chats: s => `${s.chats.length} conversations`,
   sessions: s => `${s.sessions.length} sessions`,
@@ -517,7 +550,7 @@ export function MobileApp() {
   const [pairing, setPairing] = useState<Pairing>('checking')
   const [snap, setSnap] = useState<RemoteSnapshot | null>(null)
   const [online, setOnline] = useState(true)
-  const [tab, setTab] = useState<Tab>('tasks')
+  const [tab, setTab] = useState<Tab>('master')
   const [detail, setDetail] = useState<Detail>(null)
   const wide = useWide()
 
@@ -525,7 +558,7 @@ export function MobileApp() {
   // back gesture closes a detail (or steps back a tab switch) instead of
   // leaving the app
   useEffect(() => {
-    history.replaceState({ tab: 'tasks', d: null }, '')
+    history.replaceState({ tab: 'master', d: null }, '')
     const onPop = (e: PopStateEvent) => {
       const st = e.state as { tab?: Tab; d?: Detail } | null
       if (!st) return
@@ -657,10 +690,13 @@ export function MobileApp() {
         <div className="cols">
           <nav className="rail">{navButtons}</nav>
           <div className="listcol">
-            {snap ? <Lists tab={tab} snap={snap} open={openDetail} selected={detail?.id} /> : <div className="pairwrap"><div className="spinner" /></div>}
+            {!snap ? <div className="pairwrap"><div className="spinner" /></div>
+              : tab === 'master' ? <div className="placeholder">Master orchestrates the whole fleet</div>
+              : <Lists tab={tab} snap={snap} open={openDetail} selected={detail?.id} />}
           </div>
           <div className="detailcol">
-            {detailView ?? <div className="placeholder">{snap ? (tab === 'approvals' ? 'Decisions are answered directly in the list' : `Select a ${tab.slice(0, -1)} on the left`) : ''}</div>}
+            {snap && tab === 'master' ? <MasterView snap={snap} />
+              : detailView ?? <div className="placeholder">{snap ? (tab === 'approvals' ? 'Decisions are answered directly in the list' : `Select a ${tab.slice(0, -1)} on the left`) : ''}</div>}
           </div>
         </div>
       </div>
@@ -692,6 +728,8 @@ export function MobileApp() {
       )}
       {!snap ? (
         <div className="pairwrap"><div className="spinner" /></div>
+      ) : tab === 'master' && !detail ? (
+        <MasterView snap={snap} />
       ) : (
         detailView ?? <Lists tab={tab} snap={snap} open={openDetail} />
       )}

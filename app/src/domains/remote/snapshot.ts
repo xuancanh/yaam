@@ -3,7 +3,8 @@
 // task board (with watcher chats), chat conversations, and every approval
 // answerable from the desktop. Sizes are capped so the LAN payload stays
 // small even for long-running fleets.
-import type { AppState } from '../../core/types'
+import type { AppState, Message } from '../../core/types'
+import { hasCreds } from '../../llm/client'
 
 export interface RemoteApproval {
   /** routes the command back: 'master' → resolveToolApproval, 'chat' → approveChatTool */
@@ -59,6 +60,14 @@ export interface RemoteSnapshot {
     model: string
     msgs: RemoteMsg[]
   }[]
+  /** the Master orchestrator conversation for the active workspace — the mobile
+   *  app's default view, kept in step with the desktop sidebar */
+  master: {
+    busy: boolean
+    /** an LLM brain is configured (masterEnabled + credentials) */
+    brain: boolean
+    msgs: RemoteMsg[]
+  }
   approvals: RemoteApproval[]
 }
 
@@ -67,6 +76,22 @@ const TASK_CAP = 60
 const TEXT_CAP = 4000
 
 const clip = (s: string) => (s.length > TEXT_CAP ? `${s.slice(0, TEXT_CAP)}…` : s)
+
+/** Flatten one Master message to plain text the mobile chat can render. Master
+ *  messages carry structured route/escalation/build payloads; distill each to a
+ *  readable line, falling back to the message's own text. */
+export function masterMsgText(m: Message): string {
+  if (m.text?.trim()) return m.text
+  if (m.kind === 'escalate' && m.esc) {
+    return `⚠ ${m.esc.name} needs input: ${m.esc.reason}` + (m.esc.resolved ? ` — ${m.esc.decision ?? 'resolved'}` : '')
+  }
+  if (m.kind === 'route' && m.routes?.length) {
+    return `Routed: ${m.routes.map(r => `${r.name} · ${r.action}`).join(', ')}`
+  }
+  if (m.kind === 'build' && m.build) return `${m.build.title} — ${m.build.detail}`
+  if (m.kind === 'buildui') return 'Built a view'
+  return ''
+}
 
 export function buildRemoteSnapshot(
   s: AppState,
@@ -137,6 +162,14 @@ export function buildRemoteSnapshot(
           .slice(-MSG_CAP)
           .map(m => ({ id: m.id, role: m.role, text: clip(m.text), at: m.at, approval: m.approval })),
       })),
+    master: {
+      busy: Boolean(s.masterBusy),
+      brain: Boolean(s.settings.masterEnabled && hasCreds(s.settings)),
+      msgs: s.messages
+        .map(m => ({ id: m.id, role: m.role === 'you' ? 'user' : 'assistant', text: clip(masterMsgText(m)), at: 0 }))
+        .filter(m => m.text)
+        .slice(-MSG_CAP),
+    },
     approvals,
   }
 }
