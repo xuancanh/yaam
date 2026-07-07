@@ -133,6 +133,10 @@ export interface SessionRecord {
   /** the PTY lives in a detached host process that outlives the app; the
    *  session command is an attach client (resume = reconnect) */
   detached?: boolean
+  /** runs on a saved remote machine over SSH + tmux; `cmd` is the original agent
+   *  command (the ssh/tmux wrap is rebuilt on launch/resume), `cwd` is the remote
+   *  working dir. Persistence is the remote tmux session, not a CLI resume id. */
+  machineId?: string
 }
 
 /** A session as the app works with it: durable record plus live runtime state.
@@ -388,6 +392,25 @@ export interface AppearanceSettings {
   tableFont?: 'sans' | 'mono'
 }
 
+/** A saved remote machine agents can run on over SSH (inside tmux for
+ *  durability). Auth is keys/ssh-agent only — `identityFile` is a path, never
+ *  key contents, and there is deliberately no password field. */
+export interface Machine {
+  id: string
+  /** display name in the machine picker */
+  label: string
+  host: string
+  user: string
+  /** ssh port; defaults to 22 */
+  port?: number
+  /** path to a private key passed as `ssh -i`; empty = ssh-agent/default keys */
+  identityFile?: string
+  /** default working directory on the host (prefilled cwd / fs+git root) */
+  remoteDir?: string
+  /** extra raw `ssh -o` options for advanced setups (space-separated) */
+  options?: string
+}
+
 export interface OrchestrationSettings {
   autoRoute: boolean
   approveDestructive: boolean
@@ -452,6 +475,8 @@ export interface OrchestrationSettings {
   remoteTokenRotate?: boolean
   /** rotation period in hours (default 24) */
   remoteTokenRotateHours?: number
+  /** saved remote machines agents can run on over SSH + tmux */
+  machines?: Machine[]
 }
 
 export type BoardCol = 'backlog' | 'progress' | 'review' | 'done' | 'failed'

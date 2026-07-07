@@ -9,7 +9,8 @@ import type { AppState, EventType } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { focusSessionIn, removeFromGroups } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
-import { worktreeMerge, worktreeRemove } from '../../core/native'
+import { findMachine, killRemote, tmuxName, wrapLaunch } from './remote-machine'
+import { execCommand, worktreeMerge, worktreeRemove } from '../../core/native'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
 import { inferLegacyTerminalShell } from '../../store/state-helpers'
@@ -20,7 +21,7 @@ export interface SessionActionsCtx {
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   markUserStopped: (id: string) => void
   disposeSessionRuntime: (id: string) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean }) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string }) => string | null
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
   armResponseWatch: (id: string) => void
   appendTail: (id: string, line: string) => void
@@ -43,7 +44,7 @@ export interface SessionActions {
   /** user-initiated full terminal reset (modes + scrollback) — the manual fix
    *  for a corrupted pane; never triggered automatically */
   refreshTerminal: (id: string) => void
-  newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean, detached?: boolean) => void
+  newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean, detached?: boolean, machineId?: string) => void
   sendInput: (id: string, text: string) => void
   stopSession: (id: string) => void
 }
@@ -146,7 +147,10 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         let cmd = agent.cmd
         const type = stateRef.current.agentTypes.find(t => t.id === agent.typeId)
           ?? typeForCommand(agent.cmd, stateRef.current.agentTypes)
-        if (agent.detached) {
+        const machine = findMachine(stateRef.current.settings?.machines, agent.machineId)
+        if (machine) {
+          resumeNote = `reattaching to ${machine.label} · tmux ${tmuxName(id)}`
+        } else if (agent.detached) {
           resumeNote = 'reattaching detached session — relaunches it if it had ended'
         } else if (type?.resumeCmd) {
           if (type.resumeCmd.includes('{id}')) {
@@ -174,7 +178,15 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         // resume, so nothing would ever correct the backend's 24×80 default
         // and the CLI would keep rendering for the wrong terminal
         const size = port.terminalSize(id)
-        if (agent.detached) {
+        if (machine) {
+          // reattach to the remote tmux session (new-session -A), rebuilding the
+          // same ssh wrap; tmux is the durability layer, not a CLI resume id
+          const inner = `${envPrefix(type?.env)}${agent.cmd}`.trim()
+          const commandShell = stateRef.current.settings?.shell || 'zsh'
+          port.spawnSession(id, wrapLaunch(machine, inner, id), undefined, size?.rows, size?.cols, undefined, commandShell)
+            .then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
+            .catch(() => {})
+        } else if (agent.detached) {
           // Ensure the host first: a live one is simply reattached; a dead one
           // is relaunched from the stored command. Legacy agents persisted the
           // attach wrapper as their cmd — pass '' so the host's on-disk spec
@@ -221,8 +233,8 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       flash('Terminal cleared')
     },
 
-    newRealSession: (command, cwd, terminalShell, isolate, detached) => {
-      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell, isolate, detached })
+    newRealSession: (command, cwd, terminalShell, isolate, detached, machineId) => {
+      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell, isolate, detached, machineId })
       if (id) {
         logEvent('route', id, `Launched session · ${command.trim()}`)
         flash('Session launched')
@@ -245,9 +257,14 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
     },
 
     stopSession: id => {
+      const agent = stateRef.current.agents.find(a => a.id === id)
       // a detached session's PTY lives in the host process — stopping means
       // ending it for real, not just dropping the attach client
-      if (stateRef.current.agents.find(a => a.id === id)?.detached) void port.detachedKill(id)
+      if (agent?.detached) void port.detachedKill(id)
+      // a machine session's agent lives in a remote tmux session — killing the
+      // local ssh PTY alone would just detach it; end it for real over ssh
+      const machine = findMachine(stateRef.current.settings?.machines, agent?.machineId)
+      if (machine) void execCommand(killRemote(machine, id)).catch(() => {})
       // stop-flag + kill go through the shared command (user actor); the UI
       // status/log/toast stay here. Fall back to the port when unwired.
       if (ctx.execCommand) void ctx.execCommand('stop_session', { sessionId: id }, { actor: { kind: 'user' } })

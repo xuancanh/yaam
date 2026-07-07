@@ -31,6 +31,18 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const [isolate, setIsolate] = useState(false)
   const [detached, setDetached] = useState(false)
 
+  // remote machine (ssh + tmux); '' = run locally
+  const machines = s.settings.machines ?? []
+  const [machineId, setMachineId] = useState('')
+  const machine = machines.find(m => m.id === machineId)
+  // switching machine prefills the working dir from its default (local ↔ remote
+  // paths differ, so replace rather than keep)
+  const selectMachine = (id: string) => {
+    setMachineId(id)
+    const m = machines.find(x => x.id === id)
+    setCwd(m ? (m.remoteDir ?? '') : (s.settings.defaultCwd || ''))
+  }
+
   const isShell = typeId === 'shell'
   const isCustom = typeId === 'custom'
   const shell = shellOverride || s.settings.shell || 'zsh'
@@ -64,7 +76,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
       return
     }
     if (!effectiveCommand.trim()) return
-    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined, isolate || undefined, detached || undefined)
+    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined, machine ? false : (isolate || undefined), machine ? false : (detached || undefined), machineId || undefined)
     onClose()
   }
 
@@ -139,42 +151,65 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
+          {!tpl && machines.length > 0 && (
+            <div>
+              <FieldLabel>Run on</FieldLabel>
+              <select value={machineId} onChange={e => selectMachine(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
+                <option value="">This machine (local)</option>
+                {machines.map(m => <option key={m.id} value={m.id}>{m.label} · {m.user}@{m.host}</option>)}
+              </select>
+              {machine && (
+                <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 5, lineHeight: 1.5 }}>
+                  Runs over SSH inside tmux on {machine.host} — survives disconnects; Resume reattaches. The agent CLI &amp; tmux must be installed there.
+                </div>
+              )}
+            </div>
+          )}
+
           {!tpl && (
             <div>
-              <FieldLabel>Working directory</FieldLabel>
+              <FieldLabel>{machine ? 'Working directory (on the remote host)' : 'Working directory'}</FieldLabel>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input
                   value={cwd}
                   onChange={e => setCwd(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') launch() }}
-                  placeholder="folder (optional)"
+                  placeholder={machine ? 'remote folder (optional)' : 'folder (optional)'}
                   disabled={!isTauri}
                   style={FIELD_STYLE}
                 />
-                <button className="open-btn" style={{ flex: 'none', padding: '0 14px' }} onClick={browse} disabled={!isTauri}>
-                  Browse…
-                </button>
+                {!machine && (
+                  <button className="open-btn" style={{ flex: 'none', padding: '0 14px' }} onClick={browse} disabled={!isTauri}>
+                    Browse…
+                  </button>
+                )}
               </div>
             </div>
           )}
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none' }} title="The working folder (a git repo, or a folder whose subfolders are repos) is mirrored into git worktrees on branch yaam/<session>; the session works there and your checkout stays untouched until you merge.">
-            <input type="checkbox" checked={isolate} onChange={e => setIsolate(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
-            <span>
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>Isolate in a git worktree</span>
-              <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
-                Runs on a branch in a mirrored copy — supports multi-repo folders; review &amp; merge when done.
-              </span>
-            </span>
-          </label>
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none', marginTop: 10 }} title="The session's process runs in a detached host with its own lifecycle — it keeps working after you quit YAAM. Reopen the app and press ▶ to reattach; Stop ends it for real.">
-            <input type="checkbox" checked={detached} onChange={e => setDetached(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
-            <span>
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>Detached (survives closing the app)</span>
-              <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
-                Runs in its own host process; the app attaches to it and can reattach, monitor, and stop it later.
-              </span>
-            </span>
-          </label>
+          {/* worktree isolation + detached hosting are local-only; a machine
+              session is already durable via remote tmux */}
+          {!machine && (
+            <>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none' }} title="The working folder (a git repo, or a folder whose subfolders are repos) is mirrored into git worktrees on branch yaam/<session>; the session works there and your checkout stays untouched until you merge.">
+                <input type="checkbox" checked={isolate} onChange={e => setIsolate(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
+                <span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Isolate in a git worktree</span>
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                    Runs on a branch in a mirrored copy — supports multi-repo folders; review &amp; merge when done.
+                  </span>
+                </span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none', marginTop: 10 }} title="The session's process runs in a detached host with its own lifecycle — it keeps working after you quit YAAM. Reopen the app and press ▶ to reattach; Stop ends it for real.">
+                <input type="checkbox" checked={detached} onChange={e => setDetached(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
+                <span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Detached (survives closing the app)</span>
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                    Runs in its own host process; the app attaches to it and can reattach, monitor, and stop it later.
+                  </span>
+                </span>
+              </label>
+            </>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button

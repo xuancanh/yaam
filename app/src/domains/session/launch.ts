@@ -1,7 +1,7 @@
 // Pure launch planning: turn a launch request into the concrete Agent record
 // and the exact command to spawn, without touching state, terminals, or the
 // backend. The provider applies the plan (dispatch + terminal + native spawn).
-import type { Agent, AgentType } from '../../core/types'
+import type { Agent, AgentType, Machine } from '../../core/types'
 import { defaultDetail, mkMemory, mkTools } from '../../core/data'
 import { mkId } from '../../shared/id'
 import { typeForCommand } from './command'
@@ -28,7 +28,7 @@ export interface LaunchPlan {
 
 const REAL_COLORS = ['#7FD1FF', '#F5C451', '#3DDC97', '#FF9B9B', '#C77DFF', '#E8A87C']
 
-export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeWorkspace: string): LaunchPlan | null {
+export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeWorkspace: string, machine?: Machine): LaunchPlan | null {
   const { command, cwd, nameHint, typeId, workspaceId, opts } = input
   const trimmed = command.trim()
   if (!trimmed) return null
@@ -42,9 +42,13 @@ export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeW
   // detection. The flag goes only into the SPAWNED command (reusing an id
   // errors "already in use"), while cmd stays clean for relaunch/resume.
   // codex/opencode have no launch-time id flag, so they keep file detection.
+  // Remote (machine) sessions can't use local CLI id injection/detection — the
+  // CLI stores live on the host — and are never one-shot; tmux is the durability
+  // layer. The ssh+tmux wrap itself is applied later (launch-runtime), after the
+  // env prefix, so `spawnCommand` stays the clean agent command here.
   let knownSessionId: string | undefined
   let spawnCommand = trimmed
-  if (launchType?.probe === 'claude' && !/(^|\s)(--session-id|--resume|-r|--continue|-c)(\s|=|$)/.test(trimmed)) {
+  if (!machine && launchType?.probe === 'claude' && !/(^|\s)(--session-id|--resume|-r|--continue|-c)(\s|=|$)/.test(trimmed)) {
     knownSessionId = crypto.randomUUID()
     spawnCommand = trimmed.replace(/^(\s*\S+)/, `$1 --session-id ${knownSessionId}`)
   }
@@ -55,7 +59,8 @@ export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeW
     cliSessionId: knownSessionId,
     typeId: typeId ?? typeForCommand(trimmed, agentTypes)?.id,
     workspaceId: workspaceId ?? activeWorkspace,
-    ephemeral: opts?.ephemeral, autoArchive: opts?.autoArchive, templateId: opts?.templateId,
+    machineId: machine?.id,
+    ephemeral: machine ? false : opts?.ephemeral, autoArchive: machine ? false : opts?.autoArchive, templateId: opts?.templateId,
     terminalShell: opts?.terminalShell,
     memory: mkMemory(), tools: mkTools(),
     log: [

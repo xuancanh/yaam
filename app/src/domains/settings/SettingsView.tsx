@@ -36,6 +36,7 @@ function ConnectLink({ label, url }: { label: string; url: string }) {
 }
 import { ToolsSection } from './ToolsView'
 import { McpSection } from './McpSection'
+import { MachinesSection } from './MachinesSection'
 import { PluginsSection } from './PluginsSection'
 import { AppearanceSection } from './AppearanceSection'
 import { SkillsSection, PersonasSection, SkillRegistriesSection, ChatTypesSection, AddChatTypeButton } from './ChatAgentSections'
@@ -55,6 +56,7 @@ const SETTINGS_TABS = [
   ['types', 'Terminal Agents'],
   ['chatagents', 'Chat Agents'],
   ['mcp', 'MCP Servers'],
+  ['machines', 'Machines'],
   ['remote', 'Remote Control'],
   ['tools', 'Tools & Permissions'],
 ] as const
@@ -437,6 +439,7 @@ export function SettingsView() {
           </>}
 
           {tab === 'mcp' && <McpSection />}
+          {tab === 'machines' && <MachinesSection />}
 
           {tab === 'remote' && <>
           <SectionLabel>REMOTE CONTROL</SectionLabel>

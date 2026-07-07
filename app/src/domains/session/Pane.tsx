@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { useActions } from '../../store'
+import { useActions, useConductorSelector } from '../../store'
 import { ACCENT, memTokens } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
@@ -15,6 +15,7 @@ const filesOpenCache = new Map<string, boolean>()
 /** Render one terminal pane with session controls and optional file explorer. */
 export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
   const { setActivePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession, refreshTerminal, archiveSession } = useActions()
+  const machineLabel = useConductorSelector(x => (agent.machineId ? x.settings.machines?.find(m => m.id === agent.machineId)?.label ?? 'remote' : ''))
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
   const [gitOpen, setGitOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -59,7 +60,7 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         <div style={{ minWidth: 0, overflow: 'hidden' }}>
           <EditableName name={agent.name} onRename={name => renameSession(agent.id, name)} fontSize={12.5} />
           <div className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {agent.repo} · {agent.branch}{agent.worktree ? <span style={{ color: 'var(--amber)' }}> · isolated</span> : null}{agent.detached ? <span style={{ color: 'var(--green)' }}> · detached</span> : null}
+            {agent.repo} · {agent.branch}{machineLabel ? <span style={{ color: 'var(--accent)' }}> · {machineLabel}</span> : null}{agent.worktree ? <span style={{ color: 'var(--amber)' }}> · isolated</span> : null}{agent.detached ? <span style={{ color: 'var(--green)' }}> · detached</span> : null}
           </div>
         </div>
         <div style={{ marginLeft: 6 }}>

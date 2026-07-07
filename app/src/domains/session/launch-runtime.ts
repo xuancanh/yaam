@@ -11,6 +11,7 @@ import { hasCreds } from '../../master'
 import { buildLaunch } from './launch'
 import { focusSessionIn } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
+import { findMachine, wrapLaunch } from './remote-machine'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
 import { buildTemplateCommand } from '../schedules/template-command'
@@ -35,7 +36,7 @@ export interface LaunchRuntimeCtx {
 
 export interface LaunchRuntime {
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean }) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string }) => string | null
   launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string) => string | null
   spawnTaskSession: (taskId: string, opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string }) => string | null
   spawnSessionForTask: (taskId: string, workspaceId?: string) => void
@@ -87,8 +88,9 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
     }
 
     // Create optimistic session state, spawn its PTY, and attach lifecycle tracking.
-    const launchSession = (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean }): string | null => {
-      const plan = buildLaunch({ command, cwd, nameHint, typeId, workspaceId, opts }, stateRef.current.agentTypes, stateRef.current.activeWorkspace)
+    const launchSession = (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string }): string | null => {
+      const machine = findMachine(stateRef.current.settings?.machines, opts?.machineId)
+      const plan = buildLaunch({ command, cwd, nameHint, typeId, workspaceId, opts }, stateRef.current.agentTypes, stateRef.current.activeWorkspace, machine)
       if (!plan) return null
       const { agent, spawnCommand, knownSessionId, launchType } = plan
       const id = agent.id
@@ -113,6 +115,15 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         // terminal. Plain terminal sessions already carry terminalShell and
         // launch that shell directly instead.
         const commandShell = opts?.terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
+        // Machine session: the local PTY runs an ssh client into a remote tmux
+        // session (the durability layer). The remote cwd is handled inside the
+        // wrap, so the local spawn cwd is irrelevant; CLI id probing/detach are
+        // local-only and skipped.
+        if (machine) {
+          const inner = `${envPrefix(launchType?.env)}${spawnCommand}`
+          port.spawnSession(id, wrapLaunch(machine, inner, id), undefined, undefined, undefined, undefined, commandShell).catch(fail)
+          return
+        }
         // Claude's id is known up front; only codex/opencode need file detection.
         if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', spawnCwd ?? '', false)
         if (opts?.detached) {
@@ -135,7 +146,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         }
         port.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd || undefined, undefined, undefined, opts?.terminalShell, commandShell).catch(fail)
       }
-      if (opts?.isolate && agent.cwd) {
+      if (opts?.isolate && agent.cwd && !machine) {
         // isolation: mirror the working folder (a repo, or a folder of repos)
         // into git worktrees first, then run the session inside the mirror
         port.createWorktree(agent.cwd, id).then(wt => {
