@@ -85,6 +85,26 @@ export function findMachine(machines: Machine[] | undefined, id: string | undefi
   return id ? machines?.find(m => m.id === id) : undefined
 }
 
+/** One-shot command that lists the codex rollout files on the host written since
+ *  `sinceSec` (epoch seconds), newest first — the SSH analogue of the local
+ *  session-file probe (session.rs). codex has no launch-time id flag, so a remote
+ *  codex session's id can only be recovered by finding the rollout it just wrote.
+ *  `-newermt @<sec>` (works on GNU + BSD find) bounds it to this run so we don't
+ *  grab a stale session; `-exec ls -t {} +` sorts newest-first portably. */
+export function remoteSessionProbe(m: Machine, id: string, sinceSec: number): string {
+  const find = `find "$HOME/.codex/sessions" -type f -name 'rollout-*.jsonl' -newermt @${Math.floor(sinceSec)} -exec ls -t {} + 2>/dev/null | head -20`
+  return `${sshPrefix(m, { controlId: id })} ${shq(find)}`
+}
+
+/** Derive codex's resume id from a rollout path `…/rollout-<ts>-<uuid>.jsonl`:
+ *  the trailing 36-char UUID of the file stem (mirrors derive_session_id in
+ *  session.rs). Returns undefined for anything too short to carry a UUID. */
+export function codexIdFromRolloutPath(path: string): string | undefined {
+  const file = path.split('/').pop() || ''
+  const stem = file.replace(/\.jsonl$/, '')
+  return stem.length >= 36 ? stem.slice(-36) : undefined
+}
+
 /** Local command that probes a machine's requirements over batch SSH: reachable,
  *  tmux present, a working `base64 -d` (macOS/BSD differ), git, and the default
  *  dir. Prints one `NAME_OK` / `NO_NAME` marker per check for the caller to read. */

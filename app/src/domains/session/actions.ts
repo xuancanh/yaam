@@ -10,6 +10,7 @@ import { dispatch } from '../../core/store'
 import { focusSessionIn, removeFromGroups } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
 import { killRemote, tmuxName, wrapLaunch } from './remote-machine'
+import { probeRemoteCliSession } from './remote-probe'
 import { execCommand, worktreeMerge, worktreeRemove } from '../../core/native'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
@@ -149,9 +150,27 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           ?? typeForCommand(agent.cmd, stateRef.current.agentTypes)
         const machine = agent.machine
         if (machine) {
-          resumeNote = agent.detached
-            ? `reattaching to ${machine.label} · tmux ${tmuxName(id)}`
-            : `restarting on ${machine.label}`
+          // Remote resume rebuilds the ssh wrap. We minted the CLI session id at
+          // launch (claude --session-id), so restart with the resume command
+          // (claude --resume <id>) — the conversation carries over on the host
+          // instead of starting fresh. Detached also reattaches its tmux session
+          // (new-session -A ignores the command while it's alive, and resumes the
+          // id if it had ended); plain just re-runs the resume command over ssh.
+          if (type?.resumeCmd?.includes('{id}') && agent.cliSessionId) {
+            cmd = type.resumeCmd.replace('{id}', agent.cliSessionId)
+            resumeNote = agent.detached
+              ? `reattaching to ${machine.label} · tmux ${tmuxName(id)}`
+              : `resuming ${type.name} session ${agent.cliSessionId} on ${machine.label}`
+          } else if (type?.resumeCmd && !type.resumeCmd.includes('{id}')) {
+            cmd = type.resumeCmd
+            resumeNote = agent.detached
+              ? `reattaching to ${machine.label} · tmux ${tmuxName(id)}`
+              : `restarting on ${machine.label} · ${cmd}`
+          } else {
+            resumeNote = agent.detached
+              ? `reattaching to ${machine.label} · tmux ${tmuxName(id)}`
+              : `restarting on ${machine.label}`
+          }
         } else if (agent.detached) {
           resumeNote = 'reattaching detached session — relaunches it if it had ended'
         } else if (type?.resumeCmd) {
@@ -181,13 +200,18 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         // and the CLI would keep rendering for the wrong terminal
         const size = port.terminalSize(id)
         if (machine) {
-          // rebuild the same ssh wrap: detached reattaches its tmux session,
-          // plain restarts the agent fresh (like a local resume)
-          const inner = `${envPrefix(type?.env)}${agent.cmd}`.trim()
+          // rebuild the same ssh wrap around the resume command resolved above
+          // (resume-by-id for claude, else the plain command)
+          const inner = `${envPrefix(type?.env)}${cmd}`.trim()
           const commandShell = stateRef.current.settings?.shell || 'zsh'
           port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd, agent.detached), undefined, size?.rows, size?.cols, undefined, commandShell)
             .then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
             .catch(() => {})
+          // best-effort: (re)capture codex's session id from the host so a future
+          // resume can `codex resume <id>`. Recovers the id if it wasn't caught at
+          // launch (e.g. app closed early) or after a clean restart; no-op for
+          // claude (id already known) and harmless when the id is unchanged.
+          probeRemoteCliSession(id, machine, type?.probe, true)
         } else if (agent.detached) {
           // Ensure the host first: a live one is simply reattached; a dead one
           // is relaunched from the stored command. Legacy agents persisted the

@@ -41,14 +41,16 @@ export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeW
   // we mint the id ourselves and know it immediately — no fragile file
   // detection. The flag goes only into the SPAWNED command (reusing an id
   // errors "already in use"), while cmd stays clean for relaunch/resume.
-  // codex/opencode have no launch-time id flag, so they keep file detection.
-  // Remote (machine) sessions can't use local CLI id injection/detection — the
-  // CLI stores live on the host — and are never one-shot; tmux is the durability
-  // layer. The ssh+tmux wrap itself is applied later (launch-runtime), after the
-  // env prefix, so `spawnCommand` stays the clean agent command here.
+  // codex/opencode have no launch-time id flag, so they keep file DETECTION,
+  // which reads LOCAL stores — so remote (machine) sessions can't resume those by
+  // id and restart fresh. Claude honors `--session-id <uuid>` wherever it runs, so
+  // we mint the id up front even for machine sessions and resume by it on the host
+  // (see actions.resume) — injection works remotely, only detection doesn't. The
+  // ssh wrap is applied later (launch-runtime), after the env prefix, so
+  // `spawnCommand` stays the clean agent command here.
   let knownSessionId: string | undefined
   let spawnCommand = trimmed
-  if (!machine && launchType?.probe === 'claude' && !/(^|\s)(--session-id|--resume|-r|--continue|-c)(\s|=|$)/.test(trimmed)) {
+  if (launchType?.probe === 'claude' && !/(^|\s)(--session-id|--resume|-r|--continue|-c)(\s|=|$)/.test(trimmed)) {
     knownSessionId = crypto.randomUUID()
     spawnCommand = trimmed.replace(/^(\s*\S+)/, `$1 --session-id ${knownSessionId}`)
   }

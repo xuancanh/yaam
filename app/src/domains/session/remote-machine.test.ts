@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shq, tmuxName, sshPrefix, wrapLaunch, killRemote, findMachine, testCommand } from './remote-machine'
+import { shq, tmuxName, sshPrefix, wrapLaunch, killRemote, findMachine, testCommand, remoteSessionProbe, codexIdFromRolloutPath } from './remote-machine'
 import type { Machine } from '../../core/types'
 
 const m = (over: Partial<Machine> = {}): Machine =>
@@ -88,5 +88,30 @@ describe('findMachine', () => {
     expect(findMachine(list, 'y')?.id).toBe('y')
     expect(findMachine(list, undefined)).toBeUndefined()
     expect(findMachine(undefined, 'x')).toBeUndefined()
+  })
+})
+
+describe('remoteSessionProbe', () => {
+  it('finds codex rollout files newer than the launch, newest first, over the shared connection', () => {
+    const cmd = remoteSessionProbe(m({ id: 'a1' }), 'a1', 1_700_000_000.9)
+    expect(cmd).toContain('$HOME/.codex/sessions')
+    expect(cmd).toContain('rollout-*.jsonl')
+    // epoch is floored, `-newermt @<sec>` works on GNU + BSD find
+    expect(cmd).toContain('-newermt @1700000000')
+    expect(cmd).toContain('-exec ls -t {} +')
+    // reuses the terminal session's ControlMaster (batch, not interactive)
+    expect(cmd).toContain('ControlMaster=auto')
+    expect(cmd).not.toContain('-tt')
+  })
+})
+
+describe('codexIdFromRolloutPath', () => {
+  it('extracts the trailing 36-char UUID from a rollout filename', () => {
+    const uuid = '22222222-2222-2222-2222-222222222222'
+    expect(codexIdFromRolloutPath(`/home/u/.codex/sessions/2026/07/07/rollout-2026-07-07T10-05-00-${uuid}.jsonl`)).toBe(uuid)
+  })
+  it('ignores anything too short to carry a UUID', () => {
+    expect(codexIdFromRolloutPath('rollout.jsonl')).toBeUndefined()
+    expect(codexIdFromRolloutPath('')).toBeUndefined()
   })
 })

@@ -12,6 +12,7 @@ import { buildLaunch } from './launch'
 import { focusSessionIn } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
 import { findMachine, wrapLaunch } from './remote-machine'
+import { probeRemoteCliSession } from './remote-probe'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
 import { buildTemplateCommand } from '../schedules/template-command'
@@ -123,6 +124,10 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
           const inner = `${envPrefix(launchType?.env)}${spawnCommand}`
           // tmux only when detached is requested; otherwise a plain ssh run
           port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd, opts?.detached), undefined, undefined, undefined, undefined, commandShell).catch(fail)
+          // claude's id was minted at launch; codex has no such flag, so recover
+          // its id from the rollout it writes on the host (best-effort) — lets a
+          // later Resume `codex resume <id>` instead of starting fresh
+          if (!knownSessionId) probeRemoteCliSession(id, machine, launchType?.probe)
           return
         }
         // Claude's id is known up front; only codex/opencode need file detection.
