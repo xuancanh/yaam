@@ -403,8 +403,16 @@ button {
   padding: 5px 10px;
   border: none;
   height: 100%;
-  flex-shrink: 0;
+  /* Equal-width tabs: every tab shares the same basis, so they line up. With a
+     few tabs they cap at an optimal readable width (max-width); as more open
+     they shrink evenly toward a floor (min-width), after which the bar scrolls.
+     overflow:hidden lets the name label ellipsis instead of pushing the width. */
+  flex: 1 1 176px;
+  min-width: 96px;
+  max-width: 176px;
+  overflow: hidden;
 }
+.tab-btn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tab-btn:hover {
   background: var(--panel2);
 }
