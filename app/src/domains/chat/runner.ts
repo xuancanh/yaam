@@ -2,7 +2,7 @@
 // MCP tools) with streamed answer + reasoning bubbles and one-shot auto-titling.
 // Extracted from the provider; operates on the stable refs/callbacks in `ctx`.
 import type { MutableRefObject } from 'react'
-import type { AppState, ChatMsg } from '../../core/types'
+import type { AppState, ChatAttachmentRecord, ChatMsg, ChatToolEvent, ChatTurn } from '../../core/types'
 import type { ApiMessage } from '../../master'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
@@ -13,6 +13,7 @@ import type { ChatAppPort } from './agent'
 import { mkId } from '../../shared/id'
 import type { AbortRegistry } from '../../core/abort-registry'
 import { isAbortError } from '../../core/abort-registry'
+import { readFileB64 } from '../../core/native'
 
 export interface ChatCtx {
   stateRef: MutableRefObject<AppState>
@@ -34,7 +35,7 @@ export interface ChatCtx {
 /** One file attached to an outgoing chat message. Text-ish files (and
  *  extracted PDF/office text) inline into the prompt; images become vision
  *  blocks. `path` lets the agent reach the original file with its tools. */
-export interface ChatAttachment {
+export interface ChatAttachment extends ChatAttachmentRecord {
   name: string
   kind: 'text' | 'image'
   text?: string
@@ -43,12 +44,16 @@ export interface ChatAttachment {
   path?: string
 }
 
+function attachmentRecord(a: ChatAttachment): ChatAttachmentRecord {
+  return { name: a.name, kind: a.kind, text: a.text, mediaType: a.mediaType, path: a.path }
+}
+
 /** App-level tools (board/schedules/skills) backed by the store — the chat
  *  agent's bridge into YAAM's own orchestration surfaces. */
-function makeAppPort(ctx: ChatCtx, agentId: string): ChatAppPort {
+function makeAppPort(ctx: ChatCtx, agentId: string, turnId: string): ChatAppPort {
   return {
     requestApproval: (tool, preview) => {
-      const msgId = ctx.pushChatLog(agentId, { role: 'tool', text: `${tool} → ${preview}`, approval: 'pending' })
+      const msgId = ctx.pushChatLog(agentId, { role: 'tool', text: `${tool} → ${preview}`, approval: 'pending', turnId })
       return new Promise<boolean>(resolve => {
         ctx.pendingApprovals.set(msgId, { agentId, resolve })
         // an aborted/stopped turn must not leave the promise hanging
@@ -140,10 +145,39 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     return
   }
   ctx.busy.add(agentId)
+  const turnId = mkId('turn')
+  const startedAt = Date.now()
+  const slashName = text.match(/^\/([\w][\w.-]*)/)?.[1]
+  const turn: ChatTurn = {
+    id: turnId,
+    at: startedAt,
+    startedAt,
+    status: 'running',
+    model: agent.chatModel || chatType.model,
+    input: { text, attachments: (atts ?? []).map(attachmentRecord), ...(slashName ? { skill: slashName } : {}) },
+    tools: [],
+  }
+  const updateTurn = (patch: Partial<ChatTurn>) => ctx.dispatch(s => ({
+    ...s,
+    agents: s.agents.map(a => a.id === agentId
+      ? { ...a, chatTurns: (a.chatTurns ?? []).map(t => t.id === turnId ? { ...t, ...patch } : t) }
+      : a),
+  }))
+  const addToolEvent = (event: ChatToolEvent) => ctx.dispatch(s => ({
+    ...s,
+    agents: s.agents.map(a => a.id === agentId
+      ? { ...a, chatTurns: (a.chatTurns ?? []).map(t => t.id === turnId ? { ...t, tools: [...t.tools, event] } : t) }
+      : a),
+  }))
   // the visible bubble carries attachment markers; payloads go only to the API
   const visible = atts?.length ? `${text}\n\n${atts.map(a => `📎 ${a.name}`).join(' · ')}` : text
-  ctx.pushChatLog(agentId, { role: 'user', text: visible })
-  ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'running' as const } : a)) }))
+  ctx.pushChatLog(agentId, { role: 'user', text: visible, turnId })
+  ctx.dispatch(s => ({
+    ...s,
+    agents: s.agents.map(a => a.id === agentId
+      ? { ...a, status: 'running' as const, chatTurns: [...(a.chatTurns ?? []), turn].slice(-200) }
+      : a),
+  }))
   try {
     let history = ctx.histories.get(agentId)
     if (!history) {
@@ -177,17 +211,25 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     if (slash) {
       const skill = skills.find(k => k.name.toLowerCase() === slash[1].toLowerCase())
       if (!skill) {
-        ctx.pushChatLog(agentId, { role: 'assistant', text: `No skill named “${slash[1]}”. Available: ${skills.map(k => `\`${k.name}\``).join(', ') || '(none)'}` })
+        const reply = `No skill named “${slash[1]}”. Available: ${skills.map(k => `\`${k.name}\``).join(', ') || '(none)'}`
+        ctx.pushChatLog(agentId, { role: 'assistant', text: reply, turnId })
+        updateTurn({ status: 'complete', completedAt: Date.now(), assistantText: reply })
         return
       }
       const rest = slash[2].trim()
       apiText = `The user invoked the skill "${skill.name}" with a slash command — follow it now.\n\n<skill name="${skill.name}">\n${skill.body}\n</skill>${rest ? `\n\nUser input: ${rest}` : ''}`
     }
+    // Replayed image attachments retain a path but intentionally do not persist
+    // their base64 payload. Reload it only when the turn is actually replayed.
+    const resolvedAtts = await Promise.all((atts ?? []).map(async a => {
+      if (a.kind !== 'image' || a.dataB64 || !a.path) return a
+      try { return { ...a, dataB64: await readFileB64(a.path) } } catch { return a }
+    }))
     // attachments: text extracts inline into the prompt; images become vision blocks
     let apiContent: string | ApiContentBlock[] = apiText
-    if (atts?.length) {
-      const textAtts = atts.filter(a => a.kind === 'text')
-      const imgAtts = atts.filter(a => a.kind === 'image' && a.dataB64)
+    if (resolvedAtts.length) {
+      const textAtts = resolvedAtts.filter(a => a.kind === 'text')
+      const imgAtts = resolvedAtts.filter(a => a.kind === 'image' && a.dataB64)
       const inlined = textAtts.map(a =>
         `\n\n<attachment name="${a.name}"${a.path ? ` path="${a.path}"` : ''}>\n${(a.text ?? '').slice(0, 60_000)}\n</attachment>`).join('')
       const full = apiText + inlined
@@ -228,7 +270,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       ctx.dispatch(s2 => ({
         ...s2,
         agents: s2.agents.map(a => a.id === agentId
-          ? { ...a, chatLog: [...(a.chatLog ?? []), { id, role, text: bubbleText, at: Date.now() }].slice(-200) }
+          ? { ...a, chatLog: [...(a.chatLog ?? []), { id, role, text: bubbleText, at: Date.now(), turnId }].slice(-200) }
           : a),
       }))
     }
@@ -239,8 +281,9 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
         streamId = null
         acc = ''
       } else if (finalText !== undefined) {
-        ctx.pushChatLog(agentId, { role: 'assistant', text: finalText })
+        ctx.pushChatLog(agentId, { role: 'assistant', text: finalText, turnId })
       }
+      if (finalText !== undefined) updateTurn({ assistantText: finalText })
     }
     await runChatTurn(
       buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
@@ -276,15 +319,17 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
           thinkAcc = ''
         } else {
           flushNow() // commit buffered deltas before inserting the tool trace
-          ctx.pushChatLog(agentId, { role: 'tool', text: e.text })
+          ctx.pushChatLog(agentId, { role: 'tool', text: e.text, turnId })
+          if (e.tool) addToolEvent(e.tool)
         }
       },
       persona || undefined,
       ctx.aborts.signal(agentId),
-      makeAppPort(ctx, agentId),
+      makeAppPort(ctx, agentId, turnId),
       ctx.stateRef.current.chatMemory?.[agent.workspaceId ?? ctx.stateRef.current.activeWorkspace],
     )
     seal()
+    updateTurn({ status: 'complete', completedAt: Date.now() })
     // auto-title: after a successful turn, chats still carrying the default
     // type name get a short LLM-derived title (a manual rename always wins)
     if (ctx.stateRef.current.agents.find(a => a.id === agentId)?.nameIsDefault) {
@@ -314,9 +359,14 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     // the chat was deleted mid-reply — stop quietly, don't push an error bubble.
     // (any buffered delta frame still pending is a harmless no-op if the chat is
     // gone; the final seal on the success path already flushed it.)
-    if (isAbortError(e) || ctx.aborts.signal(agentId).aborted) return
+    if (isAbortError(e) || ctx.aborts.signal(agentId).aborted) {
+      updateTurn({ status: 'stopped', completedAt: Date.now() })
+      return
+    }
     console.error('[yaam] chat turn failed:', e) // reaches the dev/webview log for debugging
-    ctx.pushChatLog(agentId, { role: 'assistant', text: `Error: ${e instanceof Error ? e.message : String(e)}` })
+    const error = e instanceof Error ? e.message : String(e)
+    updateTurn({ status: 'failed', completedAt: Date.now(), error })
+    ctx.pushChatLog(agentId, { role: 'assistant', text: `Error: ${error}`, turnId })
   } finally {
     ctx.busy.delete(agentId)
     ctx.aborts.clear(agentId)

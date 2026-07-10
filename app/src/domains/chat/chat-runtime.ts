@@ -10,6 +10,7 @@ import type { CatalogSkill } from '../../core/skills'
 import { AbortRegistry } from '../../core/abort-registry'
 import { runChatMessageTurn } from './runner'
 import type { ChatAttachment } from './runner'
+import { lastReplayableTurn, removeStructuredTurn } from './turns'
 
 export interface ChatPorts {
   stateRef: MutableRefObject<AppState>
@@ -58,7 +59,25 @@ export function createChatRuntime(ports: ChatPorts): ChatRuntime {
     },
     retry: (agentId) => {
       if (busy.has(agentId)) return
-      const log = ports.stateRef.current.agents.find(a => a.id === agentId)?.chatLog ?? []
+      const agent = ports.stateRef.current.agents.find(a => a.id === agentId)
+      const log = agent?.chatLog ?? []
+      const turn = lastReplayableTurn(agent)
+      if (turn) {
+        ports.dispatch(s => ({
+          ...s,
+          agents: s.agents.map(a => a.id === agentId ? removeStructuredTurn(a, turn.id) : a),
+        }))
+        const h = histories.get(agentId)
+        if (h) {
+          while (h.length) {
+            const e = h.pop()
+            const blocks = Array.isArray(e?.content) ? e.content as Array<{ type?: string }> : []
+            if (e?.role === 'user' && !blocks.some(b => b.type === 'tool_result')) break
+          }
+        }
+        run(agentId, turn.input.text, turn.input.attachments)
+        return
+      }
       let idx = -1
       for (let i = log.length - 1; i >= 0; i--) if (log[i].role === 'user') { idx = i; break }
       if (idx < 0) return

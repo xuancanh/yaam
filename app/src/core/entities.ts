@@ -48,6 +48,40 @@ export interface Snapshot {
   time: string
 }
 
+export interface ChatAttachmentRecord {
+  name: string
+  kind: 'text' | 'image'
+  text?: string
+  mediaType?: string
+  path?: string
+}
+
+export interface ChatToolEvent {
+  id: string
+  at: number
+  name: string
+  input: string
+  result: string
+  status: 'completed' | 'failed' | 'denied' | 'truncated'
+}
+
+export interface ChatTurn {
+  id: string
+  at: number
+  startedAt: number
+  completedAt?: number
+  status: 'running' | 'complete' | 'stopped' | 'failed'
+  model: string
+  input: {
+    text: string
+    attachments: ChatAttachmentRecord[]
+    skill?: string
+  }
+  assistantText?: string
+  error?: string
+  tools: ChatToolEvent[]
+}
+
 /** Transient per-session runtime state — NOT persisted. Hydration re-derives it
  *  (restored sessions always start idle). Split out from the durable SessionRecord
  *  so the persistence boundary is explicit and type-enforced rather than an ad-hoc
@@ -115,6 +149,8 @@ export interface SessionRecord {
   templateId?: string
   /** chat-mode conversation (kind === 'chat') */
   chatLog?: ChatMsg[]
+  /** durable structured work records; legacy chats populate this on their next turn */
+  chatTurns?: ChatTurn[]
   /** name was never chosen by the user — safe to auto-title from the conversation */
   nameIsDefault?: boolean
   /** which ChatAgentType powers this chat session */
@@ -160,6 +196,8 @@ export interface ChatMsg {
   at: number
   /** set on tool-approval prompts (ask mode): awaiting → user decided */
   approval?: 'pending' | 'approved' | 'denied'
+  /** structured turn that produced this visible transcript entry */
+  turnId?: string
 }
 
 export interface RouteEntry {

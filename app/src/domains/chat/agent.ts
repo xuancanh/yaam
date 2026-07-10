@@ -7,7 +7,7 @@ import * as native from '../../core/native'
 import { mcpCallTool } from '../../core/mcp'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
-import type { Agent } from '../../core/types'
+import type { Agent, ChatToolEvent } from '../../core/types'
 import { callApiStream } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
 
@@ -17,6 +17,7 @@ export interface ChatTurnEvent {
    *  text = final reply · tool = tool trace */
   kind: 'tool' | 'text' | 'delta' | 'thinking' | 'round'
   text: string
+  tool?: ChatToolEvent
 }
 
 const MCP_PREFIX = 'mcp__'
@@ -549,7 +550,11 @@ export async function runChatTurn(
         // with {} — that silently wrote to an empty path / ran a bare shell
         if (b.incompleteArgs) {
           content = `error: the arguments for "${name}" were cut off before they finished (likely the response hit the token limit). Retry with a smaller payload — for large files, write in sections with write_file then append via edit_file.`
-          onEvent({ kind: 'tool', text: `${name} — arguments truncated, not executed` })
+          onEvent({
+            kind: 'tool',
+            text: `${name} — arguments truncated, not executed`,
+            tool: { id: b.id ?? `tool-${i}`, at: Date.now(), name, input: JSON.stringify(input).slice(0, 2_000), result: content, status: 'truncated' },
+          })
           return { type: 'tool_result', tool_use_id: b.id, content }
         }
         // ask mode (the default): shell, AppleScript, and deletions pause for
@@ -577,7 +582,18 @@ export async function runChatTurn(
           content = `error: ${e instanceof Error ? e.message : String(e)}`
         }
         const argPreview = JSON.stringify(input).slice(0, 120)
-        onEvent({ kind: 'tool', text: `${name} ${argPreview} → ${content.split('\n')[0]?.slice(0, 120) ?? ''}` })
+        onEvent({
+          kind: 'tool',
+          text: `${name} ${argPreview} → ${content.split('\n')[0]?.slice(0, 120) ?? ''}`,
+          tool: {
+            id: b.id ?? `tool-${i}`,
+            at: Date.now(),
+            name,
+            input: JSON.stringify(input).slice(0, 2_000),
+            result: content.slice(0, 4_000),
+            status: content.startsWith('error:') ? 'failed' : content.startsWith('The user declined') ? 'denied' : 'completed',
+          },
+        })
         return { type: 'tool_result', tool_use_id: b.id, content: content.slice(0, 50_000) }
       }))
     // thinking blocks never go back over the wire — providers reject or
