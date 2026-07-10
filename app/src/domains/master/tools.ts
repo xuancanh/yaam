@@ -19,6 +19,10 @@ export interface MasterExec {
   createSchedule: (name: string, cron: string, command?: string, cwd?: string, templateName?: string, prompt?: string) => string
   runTemplate: (templateName: string, task?: string) => string
   addTask: (title: string) => string
+  /** search the shared multi-file assistant memory */
+  memoryLookup: (query: string) => string
+  /** append one distilled fact to a named memory file */
+  memorySave: (file: string, entry: string) => string
 }
 
 export const TOOLS = [
@@ -224,6 +228,27 @@ Style to match the app: dark background #0A0B0F, text #E7E9F0, muted #8B93A1, ac
       required: ['title'],
     },
   },
+  {
+    name: 'memory_lookup',
+    description: 'Search the assistants\' shared memory files (approvals, preferences, patterns, corrections, notes) for how the user handled similar situations before. Use it before deciding how to route, escalate, or answer on the user\'s behalf.',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string' } },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'memory_save',
+    description: 'Save one distilled, durable fact to a shared memory file so every assistant (monitors, watchers, chat) benefits. file: approvals | preferences | patterns | corrections | notes. Save decisions the user made, corrections they gave you, and stable preferences — never transient state.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', enum: ['approvals', 'preferences', 'patterns', 'corrections', 'notes'] },
+        entry: { type: 'string', description: 'one concise sentence' },
+      },
+      required: ['file', 'entry'],
+    },
+  },
 ]
 
 /** Validate and dispatch one Master tool call onto the store-owned execution surface. */
@@ -253,6 +278,8 @@ export async function runTool(name: string, input: Record<string, unknown>, exec
     case 'create_schedule': return exec.createSchedule(str('name'), str('cron'), str('command') || undefined, str('cwd') || undefined, str('template') || undefined, str('prompt') || undefined)
     case 'run_template': return exec.runTemplate(str('template'), str('task') || undefined)
     case 'add_task': return exec.addTask(str('title'))
+    case 'memory_lookup': return exec.memoryLookup(str('query'))
+    case 'memory_save': return exec.memorySave(str('file'), str('entry'))
     default: return `unknown tool ${name}`
   }
 }

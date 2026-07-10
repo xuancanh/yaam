@@ -7,6 +7,7 @@ import { confirmAction } from '../../components/Confirm'
 import { ChatPane } from '../chat/ChatPane'
 import { FilesPane } from './FilesPane'
 import { GitPopup, GitSidePanel } from './GitPanel'
+import { SuggestionChips } from './SuggestionChips'
 import { TerminalPane } from './TerminalPane'
 
 // explorer/changes visibility survives tab switches (panes remount freely)
@@ -178,6 +179,8 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
           <Icon paths={IC.close} size={14} stroke={1.8} />
         </button>
       </div>
+
+      <SuggestionChips agent={agent} />
 
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: gitDock === 'bottom' ? 'column' : 'row' }}>
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

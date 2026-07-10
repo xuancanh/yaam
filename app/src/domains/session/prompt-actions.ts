@@ -5,6 +5,9 @@ import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AppState, EventType } from '../../core/types'
 import { dispatch } from '../../core/store'
+import { withMemoryAppend } from '../master/assistant-memory'
+import { resolveDecision } from '../master/harness-stats'
+import { sendLineToSession } from './command'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
 
@@ -22,6 +25,11 @@ export interface SessionPromptActions {
   answerPrompt: (aid: string, num: number) => void
   approve: (aid: string) => void
   deny: (aid: string) => void
+  /** run one of the monitor's suggested actions: send it to the session,
+   *  record the acceptance, and learn the pattern */
+  runSuggestion: (aid: string, suggestionId: string) => void
+  /** clear a session's suggestions and record the dismissal */
+  dismissSuggestions: (aid: string) => void
 }
 
 export function useSessionPromptActions(ctx: PromptActionsCtx): SessionPromptActions {
@@ -47,7 +55,7 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       if (moves) port.writeSession(aid, moves).catch(() => {})
       window.setTimeout(() => { port.writeSession(aid, '\r').catch(() => {}) }, 200)
       clearFlagged(aid)
-      dispatch(s => ({
+      dispatch(s => withMemoryAppend({
         ...s,
         agents: s.agents.map(a => a.id === aid
           ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'you' as const, x: `chose ${num}. ${target.label}` }]) }
@@ -55,7 +63,8 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
         messages: s.messages.map(m => m === msg && m.esc
           ? { ...m, esc: { ...m.esc, resolved: true, decision: 'approved' as const, choice: `${num}. ${target.label}` } }
           : m),
-      }))
+        harnessLog: resolveDecision(s.harnessLog, { kind: 'needs_input', agentId: aid }, 'accepted', `${num}. ${target.label}`),
+      }, 'approvals', `prompt "${(esc.reason ?? '').slice(0, 90)}" in ${agent.name} → chose "${target.label}"`))
       flash(`Chose “${target.label}”`)
       logEvent('done', aid, `Answered prompt · ${num}. ${target.label}`)
       armResponseWatch(aid)
@@ -65,13 +74,15 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       const agent = stateRef.current.agents.find(a => a.id === aid)
       // answer the prompt: Enter accepts the default / highlighted option
       if (agent?.kind === 'real') port.writeSession(aid, '\r').catch(() => {})
-      dispatch(s => ({
+      const reason = (agent?.escReason ?? '').slice(0, 90)
+      dispatch(s => withMemoryAppend({
         ...s,
         agents: s.agents.map(a => a.id === aid
           ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'approved by you' }]) }
           : a),
         messages: s.messages.map(m => (m.escFor === aid && m.esc ? { ...m, esc: { ...m.esc, resolved: true, decision: 'approved' as const } } : m)),
-      }))
+        harnessLog: resolveDecision(s.harnessLog, { kind: 'needs_input', agentId: aid }, 'accepted', 'approved'),
+      }, 'approvals', reason ? `prompt "${reason}" in ${agent?.name ?? aid} → approved` : ''))
       flash(`Approved — ${agent?.name || 'agent'} resumed`)
       logEvent('done', aid, 'Approved · prompt accepted')
     },
@@ -80,15 +91,43 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       const agent = stateRef.current.agents.find(a => a.id === aid)
       // Escape cancels the prompt
       if (agent?.kind === 'real') port.writeSession(aid, '\x1b').catch(() => {})
-      dispatch(s => ({
+      const reason = (agent?.escReason ?? '').slice(0, 90)
+      dispatch(s => withMemoryAppend({
         ...s,
         agents: s.agents.map(a => a.id === aid
           ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'denied · prompt cancelled' }]) }
           : a),
         messages: s.messages.map(m => (m.escFor === aid && m.esc ? { ...m, esc: { ...m.esc, resolved: true, decision: 'denied' as const } } : m)),
-      }))
+        // the flag itself was right (the user engaged) — the answer was "no"
+        harnessLog: resolveDecision(s.harnessLog, { kind: 'needs_input', agentId: aid }, 'accepted', 'denied'),
+      }, 'approvals', reason ? `prompt "${reason}" in ${agent?.name ?? aid} → denied` : ''))
       flash(`Denied — prompt cancelled`)
       logEvent('escalate', aid, 'Denied · prompt cancelled')
+    },
+
+    runSuggestion: (aid, suggestionId) => {
+      const agent = stateRef.current.agents.find(a => a.id === aid)
+      const sug = agent?.suggestions?.find(x => x.id === suggestionId)
+      if (!agent || !sug) return
+      sendLineToSession(aid, sug.send)
+      armResponseWatch(aid)
+      dispatch(s => withMemoryAppend({
+        ...s,
+        agents: s.agents.map(a => a.id === aid
+          ? { ...a, suggestions: undefined, log: a.log.concat([{ t: 'you' as const, x: `ran suggestion · ${sug.label}` }]) }
+          : a),
+        harnessLog: resolveDecision(s.harnessLog, { kind: 'suggestion', agentId: aid }, 'accepted', sug.label),
+      }, 'patterns', `when "${(agent.summary || agent.task || agent.name).slice(0, 90)}" → user ran "${sug.label}" (${sug.send.slice(0, 80)})`))
+      flash(`Sent “${sug.label}”`)
+      logEvent('route', aid, `Ran suggestion · ${sug.label}`)
+    },
+
+    dismissSuggestions: aid => {
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => (a.id === aid ? { ...a, suggestions: undefined } : a)),
+        harnessLog: resolveDecision(s.harnessLog, { kind: 'suggestion', agentId: aid }, 'dismissed'),
+      }))
     },
   }
 }

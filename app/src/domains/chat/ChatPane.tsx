@@ -123,7 +123,7 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
   )
 }
 
-function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void }) {
+function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork, onQuickReply }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void; onQuickReply?: (msgId: string, reply: string) => void }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
   if (m.role === 'thinking') return <ThinkingBubble m={m} live={!!live} />
@@ -183,6 +183,21 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
         <Markdown text={m.text} />
         {live && <span className="stream-caret" />}
       </div>
+      {!live && !busy && !!m.suggestions?.length && onQuickReply && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+          {m.suggestions.map(reply => (
+            <button
+              key={reply}
+              className="open-btn"
+              title="Send this as your reply"
+              onClick={() => onQuickReply(m.id, reply)}
+              style={{ padding: '5px 13px', fontSize: 12 }}
+            >
+              {reply}
+            </button>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, minHeight: 22 }}>
         {artifact && onArtifact && (
           <button
@@ -354,7 +369,7 @@ function SlashMenu({ items, sel, onPick }: {
 }
 
 export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
-  const { sendChatMessage, stopChat, retryChat, editAndResendChat, forkChatTurn, promoteChatTurn, clearChat, chatSkills, approveChatTool, setChatComposer } = useActions()
+  const { sendChatMessage, sendQuickReply, stopChat, retryChat, editAndResendChat, forkChatTurn, promoteChatTurn, clearChat, chatSkills, approveChatTool, setChatComposer } = useActions()
   const composer = agent.chatComposer ?? { draft: '', attachments: [], queue: [] }
   const draft = composer.draft
   const atts = composer.attachments
@@ -589,6 +604,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                   collapseTool={!!turn && turn.status !== 'running'}
                   onEdit={m.role === 'user' && turn && !busy ? () => reviseTurn(turn, 'replace') : undefined}
                   onFork={m.role === 'user' && turn && !busy ? () => reviseTurn(turn, 'fork') : undefined}
+                  onQuickReply={(msgId, reply) => sendQuickReply(agent.id, msgId, reply)}
                 />
                 {lastInTurn && <TurnActivity turn={turn} onPromote={() => promoteChatTurn(agent.id, turn.id)} />}
               </Fragment>

@@ -23,6 +23,8 @@ export interface MasterActions {
   sendMessage: (text: string) => void
   focusComposer: () => void
   resolveToolApproval: (id: string, approve: boolean) => void
+  /** replace one shared-memory file's content (Settings → Assistants editor) */
+  setAssistantMemoryFile: (name: string, content: string) => void
 }
 
 export function useMasterActions(ctx: MasterActionsCtx): MasterActions {
@@ -72,6 +74,18 @@ export function createMasterActions(ctx: MasterActionsCtx): MasterActions {
     focusComposer: () => {
       const el = document.querySelector<HTMLTextAreaElement>('[data-composer]')
       el?.focus()
+    },
+
+    setAssistantMemoryFile: (name, content) => {
+      dispatch(s => {
+        const wid = s.activeWorkspace
+        const files = (s.assistantMemory ?? {})[wid] ?? []
+        const existing = files.find(f => f.name === name)
+        const next = existing
+          ? files.map(f => (f.name === name ? { ...f, content, updatedAt: Date.now() } : f))
+          : [...files, { id: mkId('mem'), name, content, updatedAt: Date.now() }]
+        return { ...s, assistantMemory: { ...(s.assistantMemory ?? {}), [wid]: next } }
+      })
     },
 
     resolveToolApproval: (id, approve) => {

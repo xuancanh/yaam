@@ -8,6 +8,9 @@ import type { ApiMessage } from '../../master'
 import { buildCfg, hasCreds } from '../../master'
 import { runMonitorTurn } from '../../monitor'
 import type { MonitorExec } from '../../monitor'
+import { mkId } from '../../shared/id'
+import { formatHits, memoryDigest, searchMemory, wsMemory } from './assistant-memory'
+import { calibrationNote, recordDecision } from './harness-stats'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { extractOptions } from '../session/prompt-detection'
 import type { AbortRegistry } from '../../core/abort-registry'
@@ -58,8 +61,26 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
           const screen = isAltScreen(id) ? readScreen(id) : (ctx.stateRef.current.agents.find(a => a.id === id)?.log ?? []).slice(-14).map(l => l.x)
           const { options, cursorNum } = extractOptions(screen)
           ctx.setNeedsInput(id, question || 'waiting for input', options, cursorNum)
+          // implicit-feedback eval: approve/deny/answer resolves this decision
+          ctx.dispatch(s2 => ({
+            ...s2,
+            harnessLog: recordDecision(s2.harnessLog, { role: 'monitor', kind: 'needs_input', agentId: id, text: (question || 'waiting for input').slice(0, 140) }),
+          }))
           return 'flagged as needing input'
         },
+        suggestActions: list => {
+          const suggestions = list.map(x => ({ id: mkId('sg'), label: x.label, send: x.send }))
+          ctx.dispatch(s2 => ({
+            ...s2,
+            agents: s2.agents.map(a => (a.id === id ? { ...a, suggestions } : a)),
+            harnessLog: recordDecision(s2.harnessLog, {
+              role: 'monitor', kind: 'suggestion', agentId: id,
+              text: suggestions.map(x => x.label).join(' · ').slice(0, 160),
+            }),
+          }))
+          return `${suggestions.length} suggestion(s) shown to the user`
+        },
+        memoryLookup: query => formatHits(searchMemory(wsMemory(ctx.stateRef.current), query)),
         reportToMaster: (digest, importance) => {
           const a = ctx.stateRef.current.agents.find(x => x.id === id)
           ctx.dispatch(s2 => ({
@@ -77,7 +98,12 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
         },
       }
       try {
-        await runMonitorTurn(buildCfg(st, st.monitorModel || undefined), agent, current, history, exec, ctx.aborts.signal(id))
+        const cur = ctx.stateRef.current
+        await runMonitorTurn(buildCfg(st, st.monitorModel || undefined), agent, current, history, exec, ctx.aborts.signal(id), {
+          memoryDigest: memoryDigest(wsMemory(cur), ['approvals', 'preferences', 'patterns']),
+          calibration: calibrationNote(cur.harnessLog, 'monitor'),
+          custom: cur.settings.assistantPrompts?.monitor,
+        })
       } catch (e) {
         // the session was disposed mid-turn — stop quietly, don't report an error
         if (isAbortError(e) || ctx.aborts.signal(id).aborted) { pending = undefined; break }

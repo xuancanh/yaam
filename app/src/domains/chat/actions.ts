@@ -10,6 +10,7 @@ import type { ChatAttachment } from './runner'
 import { mkId } from '../../shared/id'
 import { defaultDetail, mkMemory, mkTools } from '../../core/data'
 import { buildContextSummary } from './turns'
+import { resolveDecision } from '../master/harness-stats'
 
 export interface ChatActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -28,6 +29,9 @@ export interface ChatActions {
   newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string, personaId?: string, skillSourceIds?: string[]) => string
   openChat: (id: string | null) => void
   sendChatMessage: (agentId: string, text: string, atts?: ChatAttachment[]) => void
+  /** click one of the assistant's quick replies: clears the chips, records the
+   *  acceptance, and sends the reply as the user's message */
+  sendQuickReply: (agentId: string, msgId: string, reply: string) => void
   stopChat: (agentId: string) => void
   retryChat: (agentId: string) => void
   editAndResendChat: (agentId: string, turnId: string, text: string, atts?: ChatAttachment[]) => void
@@ -122,6 +126,17 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
     sendChatMessage: (agentId, text, atts) => {
       const msg = text.trim()
       if (msg || atts?.length) void ctx.runChatMessage(agentId, msg || '(see attachments)', atts)
+    },
+
+    sendQuickReply: (agentId, msgId, reply) => {
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === agentId
+          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, suggestions: undefined } : m)) }
+          : a),
+        harnessLog: resolveDecision(s.harnessLog, { role: 'chat', kind: 'reply', agentId }, 'accepted', reply.slice(0, 60)),
+      }))
+      void ctx.runChatMessage(agentId, reply)
     },
 
     stopChat: agentId => ctx.stopChatMessage(agentId),

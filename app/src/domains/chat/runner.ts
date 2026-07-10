@@ -16,6 +16,11 @@ import { isAbortError } from '../../core/abort-registry'
 import { readFileB64 } from '../../core/native'
 import { ESTIMATED_OUTPUT_COST_PER_KTOK } from '../../core/usage'
 import { buildContextSummary, chatBudgetState } from './turns'
+import { formatHits, memoryDigest, searchMemory, withMemoryAppend, wsMemory } from '../master/assistant-memory'
+import { recordDecision } from '../master/harness-stats'
+
+/** quick replies proposed mid-turn, attached to the final bubble at seal time */
+const pendingReplies = new Map<string, string[]>()
 
 export interface ChatCtx {
   stateRef: MutableRefObject<AppState>
@@ -107,14 +112,27 @@ function makeAppPort(ctx: ChatCtx, agentId: string, turnId: string): ChatAppPort
       return `created schedule ${id} (“${name.trim()}”) — it will add the board task when it fires`
     },
     remember: fact => {
+      // facts land in the shared multi-file store (notes) so monitors, watchers
+      // and Master benefit too; the legacy chatMemory string stays readable
       const st = ctx.stateRef.current
       const wid = st.agents.find(a => a.id === agentId)?.workspaceId ?? st.activeWorkspace
-      const cur = st.chatMemory?.[wid] ?? ''
-      if (cur.length > 8000) return 'memory is full (8k chars) — ask the user to prune it via the Memory editor in the chat header'
-      const line = `- ${fact.replace(/\s+/g, ' ').trim()}`
-      if (cur.includes(line)) return 'already remembered'
-      ctx.dispatch(s => ({ ...s, chatMemory: { ...s.chatMemory, [wid]: cur ? `${cur}\n${line}` : line } }))
+      ctx.dispatch(s => withMemoryAppend(s, 'notes', fact, wid))
       return `remembered: ${fact.trim()}`
+    },
+    memoryLookup: query => {
+      const st = ctx.stateRef.current
+      const wid = st.agents.find(a => a.id === agentId)?.workspaceId ?? st.activeWorkspace
+      return formatHits(searchMemory(wsMemory(st, wid), query))
+    },
+    suggestReplies: replies => {
+      // stash for this turn: the chips attach to the final assistant bubble
+      // when the turn seals; recording now lets click/ignore resolve it
+      pendingReplies.set(agentId, replies)
+      ctx.dispatch(s => ({
+        ...s,
+        harnessLog: recordDecision(s.harnessLog, { role: 'chat', kind: 'reply', agentId, text: replies.join(' · ').slice(0, 160) }),
+      }))
+      return `${replies.length} quick replies will be offered under your answer`
     },
     saveSkill: (name, description, body) => {
       const slug = name.trim()
@@ -296,6 +314,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       }
       if (finalText !== undefined) updateTurn({ assistantText: finalText })
     }
+    pendingReplies.delete(agentId) // an aborted turn must not leak stale chips
     const usage = await runChatTurn(
       buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
       () => ctx.stateRef.current.agents.find(a => a.id === agentId),
@@ -339,10 +358,35 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       persona || undefined,
       ctx.aborts.signal(agentId),
       makeAppPort(ctx, agentId, turnId),
-      ctx.stateRef.current.chatMemory?.[agent.workspaceId ?? ctx.stateRef.current.activeWorkspace],
+      // legacy single-string memory + the freshest shared memory-file lines
+      [
+        ctx.stateRef.current.chatMemory?.[agent.workspaceId ?? ctx.stateRef.current.activeWorkspace],
+        memoryDigest(wsMemory(ctx.stateRef.current, agent.workspaceId), ['notes', 'preferences', 'corrections']),
+      ].filter(Boolean).join('\n') || undefined,
       agent.chatContextSummary,
+      ctx.stateRef.current.settings.assistantPrompts?.chat,
     )
     seal()
+    // attach quick replies (suggest_replies) to the final assistant bubble
+    {
+      const replies = pendingReplies.get(agentId)
+      pendingReplies.delete(agentId)
+      if (replies?.length) {
+        ctx.dispatch(s2 => ({
+          ...s2,
+          agents: s2.agents.map(a => {
+            if (a.id !== agentId) return a
+            const log = a.chatLog ?? []
+            let lastIx = -1
+            for (let i = log.length - 1; i >= 0; i--) {
+              if (log[i].role === 'assistant') { lastIx = i; break }
+            }
+            if (lastIx < 0) return a
+            return { ...a, chatLog: log.map((m, i) => (i === lastIx ? { ...m, suggestions: replies } : m)) }
+          }),
+        }))
+      }
+    }
     updateTurn({ status: 'complete', completedAt: Date.now(), ...(usage ? { usage } : {}) })
     if (usage) {
       ctx.dispatch(s2 => ({

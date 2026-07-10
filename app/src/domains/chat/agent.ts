@@ -40,11 +40,15 @@ export interface ChatAppPort {
   saveSkill: (name: string, description: string, body: string) => string
   /** append one distilled fact to the workspace's durable memory */
   remember: (fact: string) => string
+  /** search the assistants' shared multi-file memory */
+  memoryLookup: (query: string) => string
+  /** propose one-click quick replies shown under the final answer */
+  suggestReplies: (replies: string[]) => string
 }
 
 const READ_ONLY_TOOLS = new Set([
   'list_dir', 'read_file', 'glob_files', 'grep_files', 'web_search', 'fetch_url',
-  'list_board_tasks', 'list_schedules', 'load_skill',
+  'list_board_tasks', 'list_schedules', 'load_skill', 'memory_lookup', 'suggest_replies',
 ])
 
 export function toolNeedsApproval(name: string): boolean {
@@ -218,6 +222,20 @@ function builtinTools(skills: CatalogSkill[]) {
       name: 'remember',
       description: 'Save one durable fact to this workspace\'s memory (shown to every chat agent here, across restarts). Use for stable facts worth keeping: preferences, project conventions, decisions, key paths — not transient task state.',
       input_schema: { type: 'object', properties: { fact: { type: 'string', description: 'one concise sentence' } }, required: ['fact'] },
+    },
+    {
+      name: 'memory_lookup',
+      description: 'Search the assistants\' shared memory files (approvals, preferences, patterns, corrections, notes) for how the user handled similar things before. Query with a few keywords.',
+      input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    },
+    {
+      name: 'suggest_replies',
+      description: 'Offer up to 3 short one-click replies under your answer when the natural next step is a choice (e.g. "Yes, apply it", "Show the diff first", "Skip"). Each is sent verbatim as the user\'s next message when clicked. Skip it for open-ended answers.',
+      input_schema: {
+        type: 'object',
+        properties: { replies: { type: 'array', items: { type: 'string' } } },
+        required: ['replies'],
+      },
     },
     {
       name: 'save_skill',
@@ -416,6 +434,17 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
       if (!app) return 'memory is unavailable in this context'
       if (!str('fact').trim()) throw new ToolError('remember: "fact" is required')
       return app.remember(str('fact').trim())
+    case 'memory_lookup':
+      if (!app) return 'memory is unavailable in this context'
+      return app.memoryLookup(str('query'))
+    case 'suggest_replies': {
+      if (!app) return 'suggestions are unavailable in this context'
+      const replies = Array.isArray(input.replies)
+        ? (input.replies as unknown[]).filter((r): r is string => typeof r === 'string' && !!r.trim()).map(r => r.trim().slice(0, 80)).slice(0, 3)
+        : []
+      if (!replies.length) throw new ToolError('suggest_replies: "replies" must be a non-empty string array')
+      return app.suggestReplies(replies)
+    }
     case 'save_skill':
       if (!app) return 'skill tools are unavailable in this context'
       if (!str('name') || !str('body')) throw new ToolError('save_skill: "name" and "body" are required')
@@ -455,7 +484,7 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
   }
 }
 
-function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], persona?: string, memory?: string, contextSummary?: string): string {
+function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], persona?: string, memory?: string, contextSummary?: string, custom?: string): string {
   return `You are a chat agent inside YAAM (an agent-orchestration desktop app) — the user's hands-on assistant in this workspace, like a desktop Claude. You live in a pane named "${agent.name}".
 
 WORKING FOLDER: ${agent.cwd || '(none set — you cannot write files until the user sets one)'}
@@ -480,7 +509,8 @@ RULES
 - Prefer edit_file with exact context over rewriting whole files.
 - Destructive or hard-to-undo actions (deleting files, git push, package publish, rm -rf) need the user's explicit go-ahead first.
 - Some tool calls (shell commands, AppleScript, deletions) may pause for the user's inline approval. A denial is guidance, not an error — adjust course instead of retrying.
-- Keep replies concise markdown. Reference files as \`path:line\`. When a skill is relevant to the request, load it before answering.${persona?.trim() ? `\n\nPERSONA (set by the user for this agent type)\n${persona.trim()}` : ''}`
+- Keep replies concise markdown. Reference files as \`path:line\`. When a skill is relevant to the request, load it before answering.
+- When your answer ends on an enumerable choice, call suggest_replies so the user can answer with one click.${persona?.trim() ? `\n\nPERSONA (set by the user for this agent type)\n${persona.trim()}` : ''}${custom?.trim() ? `\n\nUSER'S CUSTOM INSTRUCTIONS FOR CHAT AGENTS (follow on top of the rules above)\n${custom.trim()}` : ''}`
 }
 
 /** Replace image blocks in the history with text placeholders (for models
@@ -524,6 +554,7 @@ export async function runChatTurn(
   app?: ChatAppPort,
   memory?: string,
   contextSummary?: string,
+  custom?: string,
 ): Promise<ApiUsage | undefined> {
   // a stopped/aborted turn can leave the history mid-tool-round (assistant
   // tool_use without its tool_result) — providers reject that; drop the debris.
@@ -540,7 +571,7 @@ export async function runChatTurn(
   for (let i = 0; i < 24; i++) {
     const agent = getAgent()
     if (!agent) return usage
-    const stream = () => callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory, contextSummary), history, tools,
+    const stream = () => callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory, contextSummary, custom), history, tools,
       (d, ch) => onEvent({ kind: ch === 'thinking' ? 'thinking' : 'delta', text: d }), signal)
     let res: Awaited<ReturnType<typeof callApiStream>>
     try {

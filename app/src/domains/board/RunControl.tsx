@@ -4,6 +4,7 @@ import { indicatorColor } from '../../core/data'
 import type { Agent, BoardTask } from '../../core/types'
 import { Icon } from '../../components/ui'
 import { TerminalPane } from '../session/TerminalPane'
+import { SuggestionChips } from '../session/SuggestionChips'
 import { GitPopup, GitWorkbench } from '../session/GitPanel'
 import { sessionFs } from '../session/remote-native'
 import { WorktreeMergeBar } from '../session/WorktreeMergeBar'
@@ -255,6 +256,7 @@ function RunDetail({ run }: { run: RunRef }) {
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
         {/* center column: terminal/spec, with changes below when bottom-docked */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {agent && <SuggestionChips agent={agent} />}
           {agent ? <TerminalPane agent={agent} active /> : task ? <SpecBlock task={task} /> : <div style={{ flex: 1 }} />}
           {showChanges && changesDock === 'bottom' && (
             <div style={{ height: 'clamp(220px, 44%, 480px)', flexShrink: 0, minHeight: 0, display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--line)', background: 'var(--panel)' }}>

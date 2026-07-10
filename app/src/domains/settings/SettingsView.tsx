@@ -39,6 +39,7 @@ import { McpSection } from './McpSection'
 import { MachinesSection } from './MachinesSection'
 import { PluginsSection } from './PluginsSection'
 import { AppearanceSection } from './AppearanceSection'
+import { AssistantsSection } from './AssistantsSection'
 import { SkillsSection, PersonasSection, SkillRegistriesSection, ChatTypesSection, AddChatTypeButton } from './ChatAgentSections'
 import { confirmAction } from '../../components/Confirm'
 
@@ -53,6 +54,7 @@ const SETTINGS_TABS = [
   ['general', 'General'],
   ['appearance', 'Appearance'],
   ['brain', 'Master Brain'],
+  ['assistants', 'Assistants'],
   ['types', 'Terminal Agents'],
   ['chatagents', 'Chat Agents'],
   ['mcp', 'MCP Servers'],
@@ -275,6 +277,8 @@ export function SettingsView() {
           </>}
 
           {tab === 'appearance' && <AppearanceSection />}
+
+          {tab === 'assistants' && <AssistantsSection />}
 
           {tab === 'general' && <>
           <SectionLabel>SESSION DEFAULTS</SectionLabel>

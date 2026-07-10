@@ -11,6 +11,30 @@ export interface MonitorExec {
   updateStatus: (task?: string, summary?: string, actionNeeded?: string) => string
   flagNeedsInput: (question: string) => string
   reportToMaster: (digest: string, importance: 'info' | 'action' | 'critical') => string
+  /** propose clickable next actions for the user (label + exact text to send) */
+  suggestActions: (suggestions: Array<{ label: string; send: string }>) => string
+  /** search the shared multi-file assistant memory */
+  memoryLookup: (query: string) => string
+}
+
+/** Prompt context the host injects: learned memory, self-calibration, and the
+ *  user's custom instructions for this role. */
+export interface PromptExtras {
+  memoryDigest?: string
+  calibration?: string
+  custom?: string
+}
+
+/** Render the shared extra prompt sections appended to a role's system prompt. */
+export function promptExtraSections(x: PromptExtras | undefined): string {
+  if (!x) return ''
+  const parts: string[] = []
+  if (x.memoryDigest?.trim()) {
+    parts.push(`LEARNED MEMORY (how this user actually responds — ground your judgment in it; use memory_lookup for anything older):\n${x.memoryDigest.trim()}`)
+  }
+  if (x.calibration?.trim()) parts.push(x.calibration.trim())
+  if (x.custom?.trim()) parts.push(`USER'S CUSTOM INSTRUCTIONS FOR YOU (follow on top of the rules above):\n${x.custom.trim()}`)
+  return parts.length ? `\n\n${parts.join('\n\n')}` : ''
 }
 
 const MONITOR_TOOLS = [
@@ -36,6 +60,33 @@ const MONITOR_TOOLS = [
     },
   },
   {
+    name: 'suggest_actions',
+    description: 'Propose 1-4 concrete next actions the user can trigger with one click — each is typed into the session verbatim when clicked. Use when the session is blocked, errored, or finished and there are obvious next moves (retry command, answer, follow-up instruction). label = short button text; send = the exact text to type. Ground suggestions in the actual output and in learned memory of how this user responds.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        suggestions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { label: { type: 'string' }, send: { type: 'string' } },
+            required: ['label', 'send'],
+          },
+        },
+      },
+      required: ['suggestions'],
+    },
+  },
+  {
+    name: 'memory_lookup',
+    description: 'Search the assistants\' shared memory files (approvals, preferences, patterns, corrections, notes) for how the user handled similar situations before. Query with a few keywords.',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string' } },
+      required: ['query'],
+    },
+  },
+  {
     name: 'report_to_master',
     description: 'Escalate a short digest to Master. ONLY for noteworthy events: the session finished its task, failed or got blocked, needs a user decision, or hit a major milestone. Routine progress must NOT be reported — just update_status.',
     input_schema: {
@@ -50,7 +101,7 @@ const MONITOR_TOOLS = [
 ]
 
 /** Describe one session and the monitor's strict escalation responsibilities. */
-function monitorSystem(agent: Agent): string {
+function monitorSystem(agent: Agent, extras?: PromptExtras): string {
   return `You are a session monitor inside YAAM (an agent manager). You watch exactly ONE terminal session:
 - name: ${agent.name}
 - command: ${agent.cmd || '-'}
@@ -60,9 +111,10 @@ function monitorSystem(agent: Agent): string {
 You receive the session's output whenever it settles. Your duties, in order:
 1. Keep the status card current with update_status (terse: task, 1-2 sentence summary, action_needed or empty string).
 2. If the session is waiting on the user (permission prompt, question, selection menu), call flag_needs_input.
-3. Call report_to_master ONLY when noteworthy: task completed, error/blocked, user decision required, or a major milestone. Routine progress = update_status only, no report. Master is busy — do not spam it.
+3. When the session is blocked, errored, or finished with obvious next moves, ALSO call suggest_actions with 1-4 one-click options (exact text to send) — the user prefers choosing over typing. Check learned memory / memory_lookup first so the suggestions match how this user actually responds; put the likeliest choice first.
+4. Call report_to_master ONLY when noteworthy: task completed, error/blocked, user decision required, or a major milestone. Routine progress = update_status only, no report. Master is busy — do not spam it.
 
-Ground every tool argument in the output you actually received — never invent progress, intentions, or results that the text does not show. If the output is ambiguous, say so in the summary rather than guessing. Never reply with prose; use tools, then stop. If nothing changed, do nothing.`
+Ground every tool argument in the output you actually received — never invent progress, intentions, or results that the text does not show. If the output is ambiguous, say so in the summary rather than guessing. Never reply with prose; use tools, then stop. If nothing changed, do nothing.${promptExtraSections(extras)}`
 }
 
 /** Dispatch a monitor tool call to the session-specific execution callbacks. */
@@ -78,6 +130,17 @@ function runMonitorTool(name: string, input: Record<string, unknown>, exec: Moni
       )
     case 'flag_needs_input':
       return exec.flagNeedsInput(str('question'))
+    case 'suggest_actions': {
+      const raw = Array.isArray(input.suggestions) ? input.suggestions : []
+      const list = raw
+        .map(x => (x && typeof x === 'object' ? x as Record<string, unknown> : {}))
+        .filter(x => typeof x.label === 'string' && typeof x.send === 'string' && (x.send as string).trim())
+        .map(x => ({ label: (x.label as string).trim().slice(0, 60), send: (x.send as string) }))
+        .slice(0, 4)
+      return list.length ? exec.suggestActions(list) : 'no valid suggestions given'
+    }
+    case 'memory_lookup':
+      return exec.memoryLookup(str('query'))
     case 'report_to_master': {
       const imp = str('importance')
       return exec.reportToMaster(str('digest'), imp === 'action' || imp === 'critical' ? imp : 'info')
@@ -98,10 +161,11 @@ export async function runMonitorTurn(
   history: ApiMessage[],
   exec: MonitorExec,
   signal?: AbortSignal,
+  extras?: PromptExtras,
 ): Promise<void> {
   history.push({ role: 'user', content: note })
   await runToolLoop({
-    cfg, system: monitorSystem(agent), history, tools: MONITOR_TOOLS, maxRounds: 3, signal,
+    cfg, system: monitorSystem(agent, extras), history, tools: MONITOR_TOOLS, maxRounds: 3, signal,
     terminalAssistant: 'text', sequential: true,
     execute: async (name, input) => runMonitorTool(name, input, exec),
   })

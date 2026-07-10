@@ -11,6 +11,10 @@ import { realSessionProcessPort } from '../session/ports'
 import type { SessionProcessPort } from '../session/ports'
 import { draftTaskSpec } from './watcher'
 import type { TaskSpecDraft } from './watcher'
+import { sendLineToSession } from '../session/command'
+import { withMemoryAppend } from '../master/assistant-memory'
+import { resolveDecision } from '../master/harness-stats'
+import { updateLocatedTask } from './task-state'
 
 export interface BoardActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -38,6 +42,10 @@ export interface BoardActions {
   /** open the New-task dialog from anywhere (jumps to the board) */
   openNewTask: () => void
   closeNewTask: () => void
+  /** run one of the watcher's one-click options: send it to the task's live
+   *  session, record the acceptance, and learn the pattern */
+  runTaskSuggestion: (taskId: string, msgId: string, suggestionId: string) => void
+  dismissTaskSuggestions: (taskId: string, msgId: string) => void
   startCardDrag: (id: string) => void
   enterCol: (col: BoardCol) => void
   dropTo: (col: BoardCol) => void
@@ -75,6 +83,45 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
   return {
     openNewTask: () => dispatch(s => ({ ...s, view: 'board', newTaskOpen: true })),
     closeNewTask: () => dispatch(s => (s.newTaskOpen ? { ...s, newTaskOpen: false } : s)),
+
+    runTaskSuggestion: (taskId, msgId, suggestionId) => {
+      const st = ctx.stateRef.current
+      const task = st.tasks.find(t => t.id === taskId)
+      const msg = (task?.chat ?? []).find(m => m.id === msgId)
+      const sug = msg?.suggestions?.find(x => x.id === suggestionId)
+      if (!task || !sug) return
+      // target the most recent live session attached to this task
+      const live = [...(task.agentIds ?? []), ...(task.agentId ? [task.agentId] : [])]
+        .map(id => st.agents.find(a => a.id === id))
+        .filter(a => a && (a.status === 'running' || a.status === 'needs'))
+      const target = live[live.length - 1]
+      if (!target) {
+        ctx.pushTaskChat(taskId, 'system', `Could not run “${sug.label}” — no live session is attached to this task.`)
+        return
+      }
+      sendLineToSession(target.id, sug.send)
+      dispatch(s => withMemoryAppend({
+        ...updateLocatedTask(s, taskId, t => ({
+          ...t,
+          awaitingUser: false,
+          chat: (t.chat ?? []).map(m => (m.id === msgId ? { ...m, suggestions: undefined } : m))
+            .concat([{ id: mkId('tc'), role: 'user' as const, text: `▶ ${sug.label}`, at: Date.now() }]),
+        })),
+        harnessLog: resolveDecision(s.harnessLog, { kind: 'suggestion', taskId }, 'accepted', sug.label),
+      }, 'patterns', `task "${task.title.slice(0, 70)}" → user picked "${sug.label}" (${sug.send.slice(0, 80)})`))
+      ctx.flash(`Sent “${sug.label}”`)
+      ctx.logEvent('route', target.id, `Task option · ${sug.label}`)
+    },
+
+    dismissTaskSuggestions: (taskId, msgId) => {
+      dispatch(s => ({
+        ...updateLocatedTask(s, taskId, t => ({
+          ...t,
+          chat: (t.chat ?? []).map(m => (m.id === msgId ? { ...m, suggestions: undefined } : m)),
+        })),
+        harnessLog: resolveDecision(s.harnessLog, { kind: 'suggestion', taskId }, 'dismissed'),
+      }))
+    },
     startCardDrag: id => { dragId.current = id },
     enterCol: col => dispatch(s => (s.dragOverCol === col ? s : { ...s, dragOverCol: col })),
     dropTo: col => {
@@ -249,11 +296,12 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
 
     rejectTaskReview: (taskId, comment) => {
       const note = comment.trim() || 'Changes requested (no comment given).'
+      const title = stateRef.current.tasks.find(t => t.id === taskId)?.title ?? ''
       ctx.pushTaskChat(taskId, 'user', `Review — changes requested: ${note}`)
-      dispatch(s => ({
+      dispatch(s => withMemoryAppend({
         ...s,
         tasks: s.tasks.map(t => (t.id === taskId ? { ...t, col: 'progress' as const, awaitingUser: false } : t)),
-      }))
+      }, 'corrections', comment.trim() ? `review of "${title.slice(0, 60)}" rejected: ${note.slice(0, 140)}` : ''))
       void ctx.runWatcher(taskId,
         `[review] The user reviewed this task's changes and requested changes: ${note}. ` +
         'Relaunch a session (or instruct the current one) to address the feedback, then move the task back to review when done.')

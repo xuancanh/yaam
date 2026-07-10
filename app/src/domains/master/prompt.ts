@@ -2,6 +2,9 @@
 import type { AppState } from '../../core/types'
 import type { ApiMessage } from '../../llm/client'
 import { addonPromptAppends } from '../../core/addons'
+import { memoryDigest, wsMemory } from './assistant-memory'
+import { calibrationNote } from './harness-stats'
+import { promptExtraSections } from './monitor'
 
 /** Serialize the bounded live app state that Master needs for one decision. */
 function describeState(s: AppState): string {
@@ -65,8 +68,14 @@ Speak ONLY about observed results. Never narrate intentions — phrases like "le
 
 Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on). You manage the app itself from chat: settings (configure_setting), your tool permissions (set_tool_permission), schedules (create/toggle/delete_schedule), and custom addon tabs (create_addon / remove_addon) — when the user asks for a new view, dashboard, or feature, build it as an addon. Whenever you review a session's output (events, read_session), also call update_agent_status so the Agents overview shows its current task, a short summary, and any action the user must take (clear action_needed with an empty string once handled).
 
+You share a multi-file memory with the session monitors, task watchers, and chat agents: memory_lookup searches it; memory_save adds distilled facts (user decisions, corrections, stable preferences). Consult it before guessing how the user wants something handled, and save anything durable you learn.
+
 CURRENT STATE
-${describeState(s)}${addonPromptAppends(s)}`
+${describeState(s)}${addonPromptAppends(s)}${promptExtraSections({
+    memoryDigest: memoryDigest(wsMemory(s), ['preferences', 'corrections']),
+    calibration: calibrationNote(s.harnessLog, 'master'),
+    custom: s.settings.assistantPrompts?.master,
+  })}`
 }
 
 /** Convert visible chat and an optional proactive event into bounded API history. */

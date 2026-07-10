@@ -16,6 +16,7 @@ import { createSessionSettle } from '../../domains/session/use-settle'
 import { subscribeSessionExits } from '../../domains/session/exit-handler'
 import { createLaunchRuntime } from '../../domains/session/launch-runtime'
 import { createMonitorRuntime } from '../../domains/master/monitor-runtime'
+import { resolveDecision } from '../../domains/master/harness-stats'
 import { createWatcherRuntime } from '../../domains/board/watcher-runtime'
 import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
@@ -97,11 +98,16 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
     dispatch(s => ({
       ...s,
       agents: s.agents.map(a => a.id === id
-        ? { ...a, attention: false, actionNeeded: undefined, ...(a.status === 'needs' ? { status: 'running' as const, escReason: undefined } : {}) }
+        ? { ...a, attention: false, actionNeeded: undefined, suggestions: undefined, ...(a.status === 'needs' ? { status: 'running' as const, escReason: undefined } : {}) }
         : a),
       messages: s.messages.map(m => (m.escFor === id && m.esc && !m.esc.resolved
         ? { ...m, esc: { ...m.esc, resolved: true, choice: 'handled in the terminal' } }
         : m)),
+      // implicit-feedback eval: the user acted in the terminal instead of the
+      // card/chips — the flag was right but the proposals went unused
+      harnessLog: resolveDecision(
+        resolveDecision(s.harnessLog, { kind: 'needs_input', agentId: id }, 'overridden', 'handled in terminal'),
+        { kind: 'suggestion', agentId: id }, 'overridden'),
     }))
   }
 

@@ -40,6 +40,8 @@ export function selectMainState(s: AppState): MainPartition {
     addons: s.addons,
     addonStorage: s.addonStorage,
     chatMemory: s.chatMemory,
+    assistantMemory: s.assistantMemory ?? {},
+    harnessLog: (s.harnessLog ?? []).slice(0, 200),
     messages: s.messages.slice(-60),
     events: s.events.slice(0, 60),
     notifications: s.notifications.slice(0, 30),

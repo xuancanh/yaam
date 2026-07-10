@@ -114,6 +114,19 @@ export interface SessionRuntimeState {
   /** transient: the PTY is actively streaming output right now (drives the tab's
    *  blinking "responding" indicator). Cleared once output goes quiet. */
   responding?: boolean
+  /** transient: the monitor's proposed next actions — chips the user can click
+   *  to send straight to the session. Cleared on click/dismiss/new turn. */
+  suggestions?: SuggestedAction[]
+}
+
+/** One concrete next action an assistant proposes for a session: clicking it
+ *  types `send` into the session's terminal. */
+export interface SuggestedAction {
+  id: string
+  /** short button label, e.g. "Retry with --force" */
+  label: string
+  /** the exact text sent to the session when clicked */
+  send: string
 }
 
 /** The durable configuration + history of a session: everything that is
@@ -216,7 +229,7 @@ export type Agent = SessionRecord & SessionRuntimeState
 /** The runtime-only keys, as a value — the single source of truth persistence
  *  uses to strip transient fields. Typed as keyof SessionRuntimeState so it stays
  *  in sync if the runtime shape changes. */
-export const SESSION_RUNTIME_KEYS: ReadonlyArray<keyof SessionRuntimeState> = ['status', 'escReason', 'responding']
+export const SESSION_RUNTIME_KEYS: ReadonlyArray<keyof SessionRuntimeState> = ['status', 'escReason', 'responding', 'suggestions']
 
 /** one message in a chat-mode session */
 export interface ChatMsg {
@@ -228,6 +241,8 @@ export interface ChatMsg {
   approval?: 'pending' | 'approved' | 'denied'
   /** structured turn that produced this visible transcript entry */
   turnId?: string
+  /** assistant-proposed quick replies — clicking one sends it as the user */
+  suggestions?: string[]
 }
 
 export interface RouteEntry {
@@ -550,6 +565,13 @@ export interface OrchestrationSettings {
   chatListWidth?: number
   /** Control Center view: the Runs triage cockpit or the Fleet overview */
   controlView?: 'runs' | 'fleet'
+  /** user instructions appended to each assistant role's default system prompt */
+  assistantPrompts?: {
+    monitor?: string
+    watcher?: string
+    master?: string
+    chat?: string
+  }
   /** phone remote companion: LAN server for fleet status + approvals */
   remoteEnabled?: boolean
   /** devices that completed the pairing handshake (token minted on explicit
@@ -606,6 +628,8 @@ export interface TaskChatMsg {
   role: 'user' | 'watcher' | 'system'
   text: string
   at: number
+  /** watcher-proposed next actions — chips that send text to the task's session */
+  suggestions?: SuggestedAction[]
 }
 
 export interface BoardTask {
@@ -728,6 +752,38 @@ export interface Drawer {
   agentId: string
 }
 
+/** One named file in the assistants' shared memory store (per workspace).
+ *  Monitors/watchers/Master/chat read these via memory tools and prompt
+ *  digests; user responses to their suggestions are distilled back in. */
+export interface MemoryFile {
+  id: string
+  /** short kebab name, e.g. approvals · preferences · patterns · corrections */
+  name: string
+  content: string
+  updatedAt: number
+}
+
+export type HarnessRole = 'monitor' | 'watcher' | 'master' | 'chat'
+
+/** One recorded assistant decision + the user's implicit feedback — the online
+ *  eval signal (acceptance/dismissal/override rates) behind the scorecard and
+ *  the calibration notes injected into each role's prompt. */
+export interface HarnessDecision {
+  id: string
+  at: number
+  role: HarnessRole
+  /** what was proposed: a needs-input flag, action suggestions, or a quick reply */
+  kind: 'needs_input' | 'suggestion' | 'reply'
+  agentId?: string
+  taskId?: string
+  /** what was shown (question text / suggestion labels) */
+  text: string
+  /** how the user responded; unset while pending */
+  outcome?: 'accepted' | 'dismissed' | 'overridden'
+  /** the option/suggestion the user actually picked */
+  choice?: string
+}
+
 export interface PersistedState {
   /** schema revision of this snapshot; absent in pre-versioning saves */
   schemaVersion?: number
@@ -747,6 +803,10 @@ export interface PersistedState {
   workspaceData?: Record<string, WorkspaceData>
   addonStorage?: Record<string, Record<string, unknown>>
   chatMemory?: Record<string, string>
+  /** multi-file assistant memory, keyed by workspace id */
+  assistantMemory?: Record<string, MemoryFile[]>
+  /** recent assistant decisions + user responses (implicit-feedback eval log) */
+  harnessLog?: HarnessDecision[]
   /** session definitions + output tails; restored as paused sessions */
   agents?: Agent[]
   groups?: TabGroup[]

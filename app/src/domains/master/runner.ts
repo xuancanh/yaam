@@ -15,6 +15,7 @@ import { KEYMAP, sendLineToSession, wait } from '../session/command'
 import { PERM_ORDER, SHELLS } from '../../core/data'
 import { isAbortError } from '../../core/abort-registry'
 import * as native from '../../core/native'
+import { MEMORY_FILE_NAMES, formatHits, searchMemory, withMemoryAppend, wsMemory } from './assistant-memory'
 
 export interface MasterCtx {
   stateRef: MutableRefObject<AppState>
@@ -320,6 +321,16 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
         tasks: s.tasks.concat([{ id: mkId('t'), title, col: 'backlog', agentId: null }]),
       }))
       return `added task "${title}"`
+    },
+    memoryLookup: query => formatHits(searchMemory(wsMemory(stateRef.current), query)),
+    memorySave: (file, entry) => {
+      if (!MEMORY_FILE_NAMES.includes(file as typeof MEMORY_FILE_NAMES[number])) {
+        return `unknown memory file "${file}" — use ${MEMORY_FILE_NAMES.join(' | ')}`
+      }
+      if (!entry.trim()) return 'entry must not be empty'
+      dispatch(s => withMemoryAppend(s, file, entry))
+      ctx.logEvent('edit', null, `Master remembered → ${file}: ${entry.slice(0, 60)}`)
+      return `saved to ${file}`
     },
   }
 

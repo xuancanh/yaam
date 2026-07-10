@@ -15,6 +15,9 @@ import { sendLineToSession } from '../session/command'
 import { findTaskInState, updateLocatedTask } from './task-state'
 import type { AbortRegistry } from '../../core/abort-registry'
 import { isAbortError } from '../../core/abort-registry'
+import { mkId } from '../../shared/id'
+import { formatHits, memoryDigest, searchMemory, wsMemory } from '../master/assistant-memory'
+import { calibrationNote, recordDecision } from '../master/harness-stats'
 
 export interface WatcherCtx {
   stateRef: MutableRefObject<AppState>
@@ -177,10 +180,35 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           const name = ctx.stateRef.current.agents.find(a => a.id === sid)?.name ?? sid
           return `spawned one-shot session "${name}" — its output digests will come to you; it exits by itself when done`
         },
+        suggestActions: list => {
+          const t = getTask()
+          if (!t) return 'task no longer exists'
+          const suggestions = list.map(x => ({ id: mkId('sg'), label: x.label, send: x.send }))
+          ctx.dispatch(s2 => {
+            const next = updateLocatedTask(s2, taskId, x => ({
+              ...x,
+              chat: [...(x.chat ?? []), { id: mkId('tc'), role: 'watcher' as const, text: 'One-click options:', at: Date.now(), suggestions }],
+            }))
+            return {
+              ...next,
+              harnessLog: recordDecision(next.harnessLog, {
+                role: 'watcher', kind: 'suggestion', taskId,
+                text: suggestions.map(x => x.label).join(' · ').slice(0, 160),
+              }),
+            }
+          })
+          return `${suggestions.length} one-click option(s) shown in the task chat`
+        },
+        memoryLookup: query => formatHits(searchMemory(wsMemory(ctx.stateRef.current), query)),
       }
       const stream = makeStreamingCall(ctx, taskId)
       try {
-        const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec, ctx.aborts.signal(taskId), stream.call)
+        const curState = ctx.stateRef.current
+        const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec, ctx.aborts.signal(taskId), stream.call, {
+          memoryDigest: memoryDigest(wsMemory(curState), ['preferences', 'patterns', 'corrections']),
+          calibration: calibrationNote(curState.harnessLog, 'watcher'),
+          custom: curState.settings.assistantPrompts?.watcher,
+        })
         stream.clear()
         if (reply) ctx.pushTaskChat(taskId, 'watcher', reply)
         else if (isUserMessage) {

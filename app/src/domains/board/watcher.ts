@@ -7,6 +7,8 @@ import type { Agent, BoardTask } from '../../core/types'
 import { callApi } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
 import { runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
+import { promptExtraSections } from '../master/monitor'
+import type { PromptExtras } from '../master/monitor'
 
 // ---------- task creation assist ----------
 
@@ -69,6 +71,10 @@ export interface WatcherExec {
   askUser: (question: string) => string
   checkSession: () => string
   spawnSession: (extraInstructions: string) => string
+  /** propose clickable next actions in the task chat (label + text to send) */
+  suggestActions: (suggestions: Array<{ label: string; send: string }>) => string
+  /** search the shared multi-file assistant memory */
+  memoryLookup: (query: string) => string
 }
 
 const WATCHER_TOOLS = [
@@ -109,11 +115,38 @@ const WATCHER_TOOLS = [
   },
   {
     name: 'ask_user',
-    description: 'Ask the user a question in the task chat and flag the task as waiting on them. Use when stuck, when the outcome is ambiguous, or when a decision is theirs to make. Do not also repeat the question in your reply.',
+    description: 'Ask the user a question in the task chat and flag the task as waiting on them. Use when stuck, when the outcome is ambiguous, or when a decision is theirs to make. Do not also repeat the question in your reply. Whenever the plausible answers are enumerable, ALSO call suggest_actions so the user can answer with one click.',
     input_schema: {
       type: 'object',
       properties: { question: { type: 'string' } },
       required: ['question'],
+    },
+  },
+  {
+    name: 'suggest_actions',
+    description: 'Offer the user 1-4 one-click choices in the task chat — each is typed into the task\'s live session verbatim when clicked (label = short button text; send = exact text to send). Use alongside ask_user, after failures (retry variants), or when the session waits on input. Ground the options in evidence and in learned memory; likeliest first.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        suggestions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { label: { type: 'string' }, send: { type: 'string' } },
+            required: ['label', 'send'],
+          },
+        },
+      },
+      required: ['suggestions'],
+    },
+  },
+  {
+    name: 'memory_lookup',
+    description: 'Search the assistants\' shared memory files (approvals, preferences, patterns, corrections, notes) for how the user handled similar situations before. Query with a few keywords.',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string' } },
+      required: ['query'],
     },
   },
   {
@@ -124,7 +157,7 @@ const WATCHER_TOOLS = [
 ]
 
 /** Describe a task, its workers, and evidence rules for its dedicated watcher. */
-function watcherSystem(task: BoardTask, agents: Agent[]): string {
+function watcherSystem(task: BoardTask, agents: Agent[], extras?: PromptExtras): string {
   const criteria = (task.criteria ?? []).map((c, i) => `${i + 1}. ${c}`).join('\n') || '(none set)'
   const workers = agents.length
     ? agents.map(a =>
@@ -155,7 +188,7 @@ YOUR DUTIES
 5. When a session stalls, errs, or asks something you can answer from the task spec, unblock it with send_to_session.
 6. When YOU are stuck, the outcome is ambiguous, or a decision belongs to the user — ask_user (sparingly; one focused question).
 
-You also chat with the user: your final plain-text reply (if any) is posted to the task's chat. Keep replies short and concrete. Use tools first, then reply only if there is something worth saying.`
+You also chat with the user: your final plain-text reply (if any) is posted to the task's chat. Keep replies short and concrete. Use tools first, then reply only if there is something worth saying.${promptExtraSections(extras)}`
 }
 
 /** Dispatch one watcher tool call onto the task-scoped execution surface. */
@@ -169,6 +202,16 @@ function runWatcherTool(name: string, input: Record<string, unknown>, exec: Watc
     case 'ask_user': return exec.askUser(str('question'))
     case 'check_session': return exec.checkSession()
     case 'spawn_session': return exec.spawnSession(str('extra_instructions'))
+    case 'suggest_actions': {
+      const raw = Array.isArray(input.suggestions) ? input.suggestions : []
+      const list = raw
+        .map(x => (x && typeof x === 'object' ? x as Record<string, unknown> : {}))
+        .filter(x => typeof x.label === 'string' && typeof x.send === 'string' && (x.send as string).trim())
+        .map(x => ({ label: (x.label as string).trim().slice(0, 60), send: (x.send as string) }))
+        .slice(0, 4)
+      return list.length ? exec.suggestActions(list) : 'no valid suggestions given'
+    }
+    case 'memory_lookup': return exec.memoryLookup(str('query'))
     default: return `unknown tool ${name}`
   }
 }
@@ -187,6 +230,7 @@ export async function runWatcherTurn(
   exec: WatcherExec,
   signal?: AbortSignal,
   callApi?: Parameters<typeof runToolLoop>[0]['callApi'],
+  extras?: PromptExtras,
 ): Promise<string> {
   // a previous failed/aborted turn can leave dangling tool rounds — providers
   // reject those, which would silence the watcher on every later turn
@@ -197,7 +241,7 @@ export async function runWatcherTurn(
     terminalAssistant: 'text', sequential: true,
     // re-read live task/agents each round; stop if the task was deleted mid-loop
     shouldContinue: () => !!getTask(),
-    system: () => { const t = getTask(); return t ? watcherSystem(t, getAgents()) : '' },
+    system: () => { const t = getTask(); return t ? watcherSystem(t, getAgents(), extras) : '' },
     execute: async (name, input) => runWatcherTool(name, input, exec),
   })
   // cap the private history so long tasks stay cheap — then re-establish the

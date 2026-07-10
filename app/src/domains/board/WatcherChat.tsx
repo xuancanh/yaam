@@ -11,8 +11,11 @@ import { Markdown } from '../../components/Markdown'
 // review footer (feedback → watcher, request changes, approve & merge) so both
 // surfaces close the loop through the same component.
 
-/** Render one user, watcher, or system message from a task conversation. */
-export function ChatBubble({ m }: { m: TaskChatMsg }) {
+/** Render one user, watcher, or system message from a task conversation.
+ *  Watcher messages can carry one-click options (suggestions) — clicking sends
+ *  the option's text to the task's live session. */
+export function ChatBubble({ m, taskId }: { m: TaskChatMsg; taskId?: string }) {
+  const { runTaskSuggestion, dismissTaskSuggestions } = useActions()
   if (m.role === 'system') {
     return (
       <div className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', textAlign: 'center', padding: '2px 0' }}>
@@ -31,6 +34,29 @@ export function ChatBubble({ m }: { m: TaskChatMsg }) {
       }}>
         {!user && <div className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--accent)', marginBottom: 3 }}>WATCHER</div>}
         <Markdown text={m.text} />
+        {!!m.suggestions?.length && taskId && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8 }}>
+            {m.suggestions.map(sug => (
+              <button
+                key={sug.id}
+                className="open-btn"
+                title={`Send to the task's session: ${sug.send}`}
+                onClick={() => runTaskSuggestion(taskId, m.id, sug.id)}
+                style={{ padding: '4px 11px', fontSize: 11.5 }}
+              >
+                ▶ {sug.label}
+              </button>
+            ))}
+            <button
+              className="mono"
+              title="Dismiss these options"
+              onClick={() => dismissTaskSuggestions(taskId, m.id)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--dim)', padding: '2px 4px' }}
+            >
+              dismiss
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -66,7 +92,7 @@ export function WatcherChat({ task }: { task: BoardTask }) {
             This task's watcher chats here once a session is started —<br />progress notes, questions, and your replies.
           </div>
         )}
-        {chat.map(m => <ChatBubble key={m.id} m={m} />)}
+        {chat.map(m => <ChatBubble key={m.id} m={m} taskId={task.id} />)}
         {stream && (
           <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
             <div style={{
