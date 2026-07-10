@@ -1,8 +1,14 @@
+import { useEffect, useRef } from 'react'
+
 /** Convert pointer drag distance into a clamped row or column split ratio. */
 export function Divider({ dir, onRatio }: { dir: 'col' | 'row'; onRatio: (r: number) => void }) {
+  const stopDragRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => stopDragRef.current?.(), [])
+
   // Capture the initial container geometry for a document-level drag.
   const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
+    stopDragRef.current?.()
     // walk past display:contents wrappers, which have no box
     let parent = e.currentTarget.parentElement
     while (parent) {
@@ -20,12 +26,16 @@ export function Divider({ dir, onRatio }: { dir: 'col' | 'row'; onRatio: (r: num
       onRatio(Math.min(0.85, Math.max(0.15, raw)))
     }
     // Stop tracking once the pointer is released anywhere in the document.
-    const up = () => {
+    const stop = () => {
       window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('blur', stop)
+      stopDragRef.current = null
     }
     window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('blur', stop)
+    stopDragRef.current = stop
   }
   return (
     <div
