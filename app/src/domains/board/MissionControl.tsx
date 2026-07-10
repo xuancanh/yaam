@@ -345,13 +345,15 @@ export function MissionControl() {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{ width: 264, flexShrink: 0, borderRight: '1px solid var(--line)', overflowY: 'auto', background: 'var(--panel)', padding: '6px 6px 12px' }}>
-        <div style={{ display: 'flex', gap: 2, padding: '4px 4px 6px' }}>
+        <div style={{ display: 'flex', gap: 2, margin: '4px 4px 8px', background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2 }}>
           {FILTERS.map(f => (
             <button
               key={f.id}
               onClick={() => setFilter(f.id)}
               style={{
-                flex: 1, border: 'none', borderRadius: 7, padding: '4px 0', fontSize: 10.5, fontWeight: 600, cursor: 'pointer',
+                flex: 1, minWidth: 0, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: 'none', borderRadius: 7, padding: 0, fontSize: 10.5, fontWeight: 600, cursor: 'pointer',
+                whiteSpace: 'nowrap', overflow: 'hidden',
                 background: filter === f.id ? 'var(--panel2)' : 'transparent',
                 color: filter === f.id ? 'var(--accent)' : 'var(--dim)',
               }}
