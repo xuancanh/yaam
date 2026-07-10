@@ -334,26 +334,25 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
     }
     case 'create_dir': {
       const target = writePath()
-      const res = await native.execCommand(`mkdir -p ${shellEsc(target)}`, undefined, 10_000)
-      return res.code === 0 ? `created ${target}` : `mkdir failed: ${res.output}`
+      await native.createDir(root, target)
+      return `created ${target}`
     }
     case 'move_path': {
       const from = writePath('from')
       const to = writePath('to')
-      const res = await native.execCommand(`mv ${shellEsc(from)} ${shellEsc(to)}`, undefined, 10_000)
-      return res.code === 0 ? `moved ${from} → ${to}` : `mv failed: ${res.output}`
+      await native.movePath(root, from, to)
+      return `moved ${from} → ${to}`
     }
     case 'copy_path': {
       const from = readPath('from') // sources may be read from anywhere readable
       const to = writePath('to')
-      const res = await native.execCommand(`cp -R ${shellEsc(from)} ${shellEsc(to)}`, undefined, 30_000)
-      return res.code === 0 ? `copied ${from} → ${to}` : `cp failed: ${res.output}`
+      await native.copyPath(root, from, to)
+      return `copied ${from} → ${to}`
     }
     case 'delete_path': {
       const target = writePath()
-      if (target === root) throw new ToolError('delete_path: refusing to delete the working folder itself')
-      const res = await native.execCommand(`rm -rf ${shellEsc(target)}`, undefined, 10_000)
-      return res.code === 0 ? `deleted ${target}` : `rm failed: ${res.output}`
+      await native.deletePath(root, target)
+      return `deleted ${target}`
     }
     case 'web_search': {
       const query = str('query')

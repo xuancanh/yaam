@@ -143,7 +143,11 @@ fn read_text_range_impl(
         .take(limit.max(1))
         .map(|s| s.to_string())
         .collect();
-    Ok(TextRange { lines, total, start })
+    Ok(TextRange {
+        lines,
+        total,
+        start,
+    })
 }
 
 /// Read one file as base64 — the viewer/import path for binary formats (PDF,
@@ -174,6 +178,65 @@ fn write_text_impl(root: Option<&str>, path: &str, contents: &str) -> Result<(),
         }
     }
     std::fs::write(&full, contents).map_err(|e| e.to_string())
+}
+
+fn create_dir_impl(root: &str, path: &str) -> Result<(), String> {
+    let full = resolve_in_root(root, path)?;
+    std::fs::create_dir_all(full).map_err(|e| e.to_string())
+}
+
+fn move_path_impl(root: &str, from: &str, to: &str) -> Result<(), String> {
+    let source = resolve_in_root(root, from)?;
+    let target = resolve_in_root(root, to)?;
+    if source == std::fs::canonicalize(expand_tilde(root)).map_err(|e| e.to_string())? {
+        return Err("refusing to move the workspace root".to_string());
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(source, target).map_err(|e| e.to_string())
+}
+
+fn copy_tree(source: &Path, target: &Path) -> Result<(), String> {
+    let meta = std::fs::symlink_metadata(source).map_err(|e| e.to_string())?;
+    if meta.file_type().is_symlink() {
+        return Err(format!("refusing to copy symlink {}", source.display()));
+    }
+    if meta.is_dir() {
+        std::fs::create_dir_all(target).map_err(|e| e.to_string())?;
+        for entry in std::fs::read_dir(source).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            copy_tree(&entry.path(), &target.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::copy(source, target)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+}
+
+fn copy_path_impl(root: &str, from: &str, to: &str) -> Result<(), String> {
+    let source = PathBuf::from(expand_tilde(from));
+    let target = resolve_in_root(root, to)?;
+    copy_tree(&source, &target)
+}
+
+fn delete_path_impl(root: &str, path: &str) -> Result<(), String> {
+    let full = resolve_in_root(root, path)?;
+    let canon_root = std::fs::canonicalize(expand_tilde(root)).map_err(|e| e.to_string())?;
+    if full == canon_root {
+        return Err("refusing to delete the workspace root".to_string());
+    }
+    let meta = std::fs::symlink_metadata(&full).map_err(|e| e.to_string())?;
+    if meta.is_dir() {
+        std::fs::remove_dir_all(full).map_err(|e| e.to_string())
+    } else {
+        std::fs::remove_file(full).map_err(|e| e.to_string())
+    }
 }
 
 /// Run a user-configured credential command through a login shell and return
@@ -325,16 +388,36 @@ pub fn read_file_b64(
     root: Option<String>,
     max_bytes: Option<u64>,
 ) -> Result<String, String> {
-    read_file_b64_impl(root.as_deref(), &path, max_bytes.unwrap_or(25 * 1024 * 1024))
+    read_file_b64_impl(
+        root.as_deref(),
+        &path,
+        max_bytes.unwrap_or(25 * 1024 * 1024),
+    )
 }
 
 #[tauri::command]
-pub fn write_text_file(
-    path: String,
-    contents: String,
-    root: Option<String>,
-) -> Result<(), String> {
+pub fn write_text_file(path: String, contents: String, root: Option<String>) -> Result<(), String> {
     write_text_impl(root.as_deref(), &path, &contents)
+}
+
+#[tauri::command]
+pub fn create_dir(root: String, path: String) -> Result<(), String> {
+    create_dir_impl(&root, &path)
+}
+
+#[tauri::command]
+pub fn move_path(root: String, from: String, to: String) -> Result<(), String> {
+    move_path_impl(&root, &from, &to)
+}
+
+#[tauri::command]
+pub fn copy_path(root: String, from: String, to: String) -> Result<(), String> {
+    copy_path_impl(&root, &from, &to)
+}
+
+#[tauri::command]
+pub fn delete_path(root: String, path: String) -> Result<(), String> {
+    delete_path_impl(&root, &path)
 }
 
 #[tauri::command]
@@ -354,7 +437,8 @@ pub async fn exec_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        exec_command_impl, list_dir_impl, read_text_impl, read_text_range_impl, resolve_in_root,
+        copy_path_impl, create_dir_impl, delete_path_impl, exec_command_impl, list_dir_impl,
+        move_path_impl, read_text_impl, read_text_range_impl, resolve_in_root,
         run_credential_command_impl, write_text_impl,
     };
     use std::path::{Path, PathBuf};
@@ -518,8 +602,11 @@ mod tests {
         std::fs::write(outside.path().join("secret.txt"), "top secret").unwrap();
         let root = TestDir::new("scope-symfile");
         // a symlink INSIDE the workspace that points at a file OUTSIDE it
-        std::os::unix::fs::symlink(outside.path().join("secret.txt"), root.path().join("link.txt"))
-            .unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.txt"),
+            root.path().join("link.txt"),
+        )
+        .unwrap();
 
         // lexically "link.txt" looks workspace-local, but it resolves outside
         let err = read_text_impl(Some(&root.path().to_string_lossy()), "link.txt").unwrap_err();
@@ -545,6 +632,57 @@ mod tests {
     fn scope_rejects_a_missing_root() {
         let err = resolve_in_root("/no/such/workspace/root/here", "file.txt").unwrap_err();
         assert!(err.contains("workspace root unavailable"));
+    }
+
+    #[test]
+    fn scoped_file_management_stays_inside_the_root() {
+        let root = TestDir::new("scoped-management");
+        let root_s = root.path().to_string_lossy();
+        create_dir_impl(&root_s, "incoming/nested").unwrap();
+        std::fs::write(root.path().join("incoming/nested/source.txt"), "hello").unwrap();
+
+        move_path_impl(&root_s, "incoming/nested/source.txt", "moved/source.txt").unwrap();
+        copy_path_impl(
+            &root_s,
+            &root.path().join("moved/source.txt").to_string_lossy(),
+            "copies/source.txt",
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("copies/source.txt")).unwrap(),
+            "hello"
+        );
+        delete_path_impl(&root_s, "moved").unwrap();
+        assert!(!root.path().join("moved").exists());
+    }
+
+    #[test]
+    fn scoped_file_management_refuses_the_root() {
+        let root = TestDir::new("scoped-root-refusal");
+        let root_s = root.path().to_string_lossy();
+        assert!(delete_path_impl(&root_s, &root_s)
+            .unwrap_err()
+            .contains("workspace root"));
+        assert!(move_path_impl(&root_s, &root_s, "elsewhere")
+            .unwrap_err()
+            .contains("workspace root"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_file_management_rejects_symlink_escapes() {
+        let outside = TestDir::new("management-outside");
+        let root = TestDir::new("management-symlink");
+        std::os::unix::fs::symlink(outside.path(), root.path().join("outside")).unwrap();
+        let root_s = root.path().to_string_lossy();
+
+        assert!(create_dir_impl(&root_s, "outside/new-dir")
+            .unwrap_err()
+            .contains("outside"));
+        assert!(delete_path_impl(&root_s, "outside")
+            .unwrap_err()
+            .contains("outside"));
+        assert!(!outside.path().join("new-dir").exists());
     }
 
     #[test]

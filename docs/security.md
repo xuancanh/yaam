@@ -162,16 +162,12 @@ Chat reads may use absolute paths by design. `exec_command` accepts arbitrary
 shell commands and cwd. It limits time and output but is not a filesystem or
 network sandbox.
 
-### Current file-tool limitation
+### File-management operations
 
-Chat `create_dir`, `move_path`, `copy_path`, and `delete_path` use shell commands
-after frontend lexical path checks. They do not use the Rust canonical-root
-function. A symlinked parent inside the workspace can therefore weaken the
-intended workspace boundary for these shell-backed operations. `delete_path`
-is approval-gated in Ask mode; the other file-management operations are not.
-
-Do not describe all chat file operations as symlink-safe until these operations
-have dedicated root-aware Rust commands or execute through a sandboxed process.
+Chat `create_dir`, `move_path`, `copy_path`, and `delete_path` use dedicated Rust
+commands that authorize destinations against the canonical workspace root.
+Moves authorize both paths, deletion refuses the root itself, and recursive
+copies reject symlinks. `delete_path` remains approval-gated in Ask mode.
 
 ## Process execution
 

@@ -85,6 +85,22 @@ export async function writeTextFile(path: string, contents: string, root?: strin
   await invoke('write_text_file', { path, contents, root })
 }
 
+export async function createDir(root: string, path: string): Promise<void> {
+  await invoke('create_dir', { root, path })
+}
+
+export async function movePath(root: string, from: string, to: string): Promise<void> {
+  await invoke('move_path', { root, from, to })
+}
+
+export async function copyPath(root: string, from: string, to: string): Promise<void> {
+  await invoke('copy_path', { root, from, to })
+}
+
+export async function deletePath(root: string, path: string): Promise<void> {
+  await invoke('delete_path', { root, path })
+}
+
 /** Run a configured credential-export command in the native login shell. */
 export async function runCredentialCommand(cmd: string): Promise<string> {
   if (!isTauri) throw new Error('credential commands require the desktop app')
