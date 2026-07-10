@@ -14,8 +14,14 @@ export function useGlobalEffects(): void {
   // appearance: stamp theme/density/typography onto <html> now and on every
   // settings change; re-resolve the 'system' theme when the OS scheme flips
   useEffect(() => {
-    applyAppearance(useAppStore.getState().settings.appearance)
-    const unsub = useAppStore.subscribe(s => applyAppearance(s.settings.appearance))
+    let current = useAppStore.getState().settings.appearance
+    applyAppearance(current)
+    const unsub = useAppStore.subscribe(s => {
+      const next = s.settings.appearance
+      if (next === current) return
+      current = next
+      applyAppearance(next)
+    })
     const mq = window.matchMedia?.('(prefers-color-scheme: light)')
     const onScheme = () => applyAppearance(useAppStore.getState().settings.appearance)
     mq?.addEventListener?.('change', onScheme)
