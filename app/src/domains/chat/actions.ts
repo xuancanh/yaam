@@ -250,6 +250,7 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
         chatLog: (source.chatLog ?? []).filter(m => !m.turnId || keptIds.has(m.turnId)),
         chatComposer: { draft: '', attachments: [], queue: [] },
         chatContextSummary: buildContextSummary(keptTurns),
+        chatCompactedAt: undefined,
       }
       dispatch(s => ({ ...s, agents: [...s.agents, fork], activeChatId: id, view: 'chat' }))
       ctx.logEvent('route', id, `Forked chat “${source.name}”`)
@@ -262,7 +263,7 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === agentId
-          ? { ...a, chatLog: [], chatTurns: [], chatComposer: { draft: '', attachments: [], queue: [] }, chatContextSummary: undefined, status: 'idle' as const }
+          ? { ...a, chatLog: [], chatTurns: [], chatComposer: { draft: '', attachments: [], queue: [] }, chatContextSummary: undefined, chatCompactedAt: undefined, status: 'idle' as const }
           : a),
       }))
     },

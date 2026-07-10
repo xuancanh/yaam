@@ -8,6 +8,7 @@ const turn = (id: string, status: ChatTurn['status']): ChatTurn => ({
 
 const agent = {
   id: 'chat', kind: 'chat', chatTurns: [turn('done', 'complete'), turn('live', 'running')],
+  chatCompactedAt: 123,
   chatLog: [
     { id: 'm1', role: 'user', text: 'one', at: 1, turnId: 'done' },
     { id: 'm2', role: 'assistant', text: 'two', at: 2, turnId: 'done' },
@@ -24,6 +25,7 @@ describe('structured chat turns', () => {
     const next = removeStructuredTurn(agent, 'done')
     expect(next.chatTurns?.map(t => t.id)).toEqual(['live'])
     expect(next.chatLog?.map(m => m.id)).toEqual(['m3'])
+    expect(next.chatCompactedAt).toBeUndefined()
   })
 
   it('rewinds the selected turn and every turn after it', () => {
@@ -40,6 +42,7 @@ describe('structured chat turns', () => {
     const next = rewindFromTurn(source, 'two')
     expect(next.chatTurns?.map(t => t.id)).toEqual(['one'])
     expect(next.chatLog?.map(m => m.id)).toEqual(['intro', 'one'])
+    expect(next.chatCompactedAt).toBeUndefined()
   })
 
   it('summarizes only turns older than the recent context window', () => {

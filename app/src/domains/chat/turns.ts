@@ -30,7 +30,7 @@ export function removeStructuredTurn(agent: Agent, turnId: string): Agent {
     chatLog: (agent.chatLog ?? []).filter(m => m.turnId !== turnId),
     chatTurns: (agent.chatTurns ?? []).filter(t => t.id !== turnId),
   }
-  return { ...next, chatContextSummary: buildContextSummary(next.chatTurns ?? []) }
+  return { ...next, chatContextSummary: buildContextSummary(next.chatTurns ?? []), chatCompactedAt: undefined }
 }
 
 export function rewindFromTurn(agent: Agent, turnId: string): Agent {
@@ -43,5 +43,5 @@ export function rewindFromTurn(agent: Agent, turnId: string): Agent {
     chatLog: (agent.chatLog ?? []).filter(m => !m.turnId || !removed.has(m.turnId)),
     chatTurns: turns.slice(0, index),
   }
-  return { ...next, chatContextSummary: buildContextSummary(next.chatTurns ?? []) }
+  return { ...next, chatContextSummary: buildContextSummary(next.chatTurns ?? []), chatCompactedAt: undefined }
 }

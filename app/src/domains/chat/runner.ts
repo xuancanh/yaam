@@ -2,7 +2,7 @@
 // MCP tools) with streamed answer + reasoning bubbles and one-shot auto-titling.
 // Extracted from the provider; operates on the stable refs/callbacks in `ctx`.
 import type { MutableRefObject } from 'react'
-import type { AppState, ChatAttachmentRecord, ChatMsg, ChatToolEvent, ChatTurn } from '../../core/types'
+import type { Agent, AppState, ChatAttachmentRecord, ChatMsg, ChatToolEvent, ChatTurn } from '../../core/types'
 import type { ApiMessage } from '../../master'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
@@ -22,6 +22,24 @@ import { LESSONS_FILE, JOURNAL_FILE, appendBrainFile, commitBrain, durablePrompt
 
 /** quick replies proposed mid-turn, attached to the final bubble at seal time */
 const pendingReplies = new Map<string, string[]>()
+
+const compactedSummaryMessage = (summary: string): ApiMessage => ({
+  role: 'user',
+  content: `[The conversation so far was compacted to save context. Structured summary — treat it as your memory of everything above:]\n\n${summary}\n\n[Continue seamlessly; the user still sees the full transcript.]`,
+})
+
+/** Rebuild private provider history after a restart. A compacted chat starts
+ *  from its durable summary plus only the visible turns created afterwards. */
+export function rebuildChatHistory(agent: Agent): ApiMessage[] {
+  const visible: ApiMessage[] = (agent.chatLog ?? [])
+    .filter(m => (m.role === 'user' || m.role === 'assistant') && (!agent.chatCompactedAt || m.at > agent.chatCompactedAt))
+    .map(m => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.text }))
+  const history = agent.chatContextSummary && agent.chatCompactedAt
+    ? [compactedSummaryMessage(agent.chatContextSummary), { role: 'assistant' as const, content: 'Understood — continuing from the compacted summary.' }, ...visible]
+    : visible
+  while (history.length && history[0].role !== 'user') history.shift()
+  return history
+}
 
 /** The durable agent a conversation belongs to, if any. */
 function durableAgentOf(ctx: ChatCtx, agentId: string) {
@@ -260,11 +278,8 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     let history = ctx.histories.get(agentId)
     if (!history) {
       // after a restart the private API history is gone — rebuild it from
-      // the persisted visible transcript (tool traces excluded)
-      history = (agent.chatLog ?? [])
-        .filter(m => m.role === 'user' || m.role === 'assistant')
-        .map(m => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.text }))
-      while (history.length && history[0].role !== 'user') history.shift()
+      // the persisted visible transcript or its durable compaction cutoff
+      history = rebuildChatHistory(agent)
       ctx.histories.set(agentId, history)
     }
     const mcp = ctx.stateRef.current.mcpServers
@@ -417,7 +432,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
         ctx.stateRef.current.chatMemory?.[agent.workspaceId ?? ctx.stateRef.current.activeWorkspace],
         memoryDigest(wsMemory(ctx.stateRef.current, agent.workspaceId), ['notes', 'preferences', 'corrections']),
       ].filter(Boolean).join('\n') || undefined,
-      agent.chatContextSummary,
+      agent.chatCompactedAt ? undefined : agent.chatContextSummary,
       ctx.stateRef.current.settings.assistantPrompts?.chat,
       durableSection,
     )
@@ -456,7 +471,9 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     const currentTurns = ctx.stateRef.current.agents.find(a => a.id === agentId)?.chatTurns ?? []
     ctx.dispatch(s2 => ({
       ...s2,
-      agents: s2.agents.map(a => a.id === agentId ? { ...a, chatContextSummary: buildContextSummary(currentTurns) } : a),
+      agents: s2.agents.map(a => a.id === agentId
+        ? { ...a, ...(!a.chatCompactedAt ? { chatContextSummary: buildContextSummary(currentTurns) } : {}) }
+        : a),
     }))
     // durable agents: distill enough-new conversation into journal + lessons
     // in the background (threshold lives inside; failures are silent)
@@ -554,7 +571,8 @@ export async function compactConversation(ctx: ChatCtx, agentId: string, force =
   const agent = st.agents.find(a => a.id === agentId)
   if (!agent || agent.kind !== 'chat') return 'not a chat session'
   if (ctx.busy.has(agentId)) return 'the agent is mid-turn — try again when it finishes'
-  const msgs = (agent.chatLog ?? []).filter(m => m.role === 'user' || m.role === 'assistant')
+  const msgs = (agent.chatLog ?? []).filter(m => (m.role === 'user' || m.role === 'assistant')
+    && (!agent.chatCompactedAt || m.at > agent.chatCompactedAt))
   if (msgs.length < (force ? 2 : 8)) return 'nothing to compact yet'
   const chatType = st.chatAgentTypes.find(t => t.id === agent.chatTypeId) ?? st.chatAgentTypes.find(t => t.enabled)
   if (!chatType || !chatTypeHasCreds(chatType, st.settings)) return 'no chat credentials available for compaction'
@@ -565,7 +583,12 @@ export async function compactConversation(ctx: ChatCtx, agentId: string, force =
     agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'running' as const, attention: false } : a)),
   }))
   try {
-    const transcript = msgs.map(m => `${m.role === 'user' ? 'USER' : 'AGENT'}: ${m.text.slice(0, 1500)}`).join('\n').slice(-28_000)
+    const previous = agent.chatContextSummary && agent.chatCompactedAt
+      ? `PREVIOUS COMPACTED SUMMARY:\n${agent.chatContextSummary}`
+      : ''
+    const freshLimit = Math.max(4_000, 28_000 - previous.length - 2)
+    const fresh = msgs.map(m => `${m.role === 'user' ? 'USER' : 'AGENT'}: ${m.text.slice(0, 1500)}`).join('\n').slice(-freshLimit)
+    const transcript = [previous, fresh].filter(Boolean).join('\n\n')
     const res = await callApi(
       buildChatCfg(chatType, st.settings),
       'You compact a long conversation so the agent can continue with a fraction of the context. Write a dense, structured summary the agent can rely on as its ONLY memory of the conversation: ' +
@@ -581,14 +604,15 @@ export async function compactConversation(ctx: ChatCtx, agentId: string, force =
     const history = ctx.histories.get(agentId) ?? []
     const dropped = history.length
     history.length = 0
-    history.push({ role: 'user', content: `[The conversation so far was compacted to save context. Structured summary — treat it as your memory of everything above:]\n\n${summary}\n\n[Continue seamlessly; the user still sees the full transcript.]` })
+    history.push(compactedSummaryMessage(summary))
     history.push({ role: 'assistant', content: 'Understood — continuing from the compacted summary.' })
     ctx.histories.set(agentId, history)
 
     // persist: a restart rebuilds context from chatContextSummary
+    const compactedAt = Date.now()
     ctx.dispatch(s => ({
       ...s,
-      agents: s.agents.map(a => (a.id === agentId ? { ...a, chatContextSummary: summary.slice(0, 6000) } : a)),
+      agents: s.agents.map(a => (a.id === agentId ? { ...a, chatContextSummary: summary.slice(0, 6000), chatCompactedAt: compactedAt } : a)),
     }))
     ctx.pushChatLog(agentId, { role: 'tool', text: `context compacted — ${dropped || msgs.length} entries distilled into a ${summary.length}-char summary` })
     return `compacted · ${dropped || msgs.length} context entries → ${summary.length}-char summary`

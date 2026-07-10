@@ -188,6 +188,8 @@ export interface SessionRecord {
   chatComposer?: ChatComposerState
   /** bounded extractive context for turns older than the provider history window */
   chatContextSummary?: string
+  /** visible messages at or before this epoch are represented by the compacted summary */
+  chatCompactedAt?: number
   /** name was never chosen by the user — safe to auto-title from the conversation */
   nameIsDefault?: boolean
   /** which ChatAgentType powers this chat session */

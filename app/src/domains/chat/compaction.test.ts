@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { seedState } from '../../core/data'
 import type { Agent } from '../../core/types'
 import type { ApiMessage } from '../../llm/client'
-import { compactConversation } from './runner'
+import { compactConversation, rebuildChatHistory } from './runner'
 import type { ChatCtx } from './runner'
 
 const mocks = vi.hoisted(() => ({ callApi: vi.fn() }))
@@ -50,7 +50,45 @@ describe('compactConversation', () => {
     await expect(pending).resolves.toMatch(/compacted/)
     expect(ctx.busy.has('chat')).toBe(false)
     expect(stateRef.current.agents[0]).toMatchObject({ status: 'idle', chatContextSummary: 'Dense summary' })
+    expect(stateRef.current.agents[0].chatCompactedAt).toEqual(expect.any(Number))
     expect(histories.get('chat')).toHaveLength(2)
     expect(histories.get('chat')?.[0].content).toContain('Dense summary')
+  })
+
+  it('restarts from the compacted summary plus only newer visible messages', () => {
+    const agent = {
+      chatContextSummary: 'Earlier decisions', chatCompactedAt: 20,
+      chatLog: [
+        { role: 'user', text: 'old question', at: 10 },
+        { role: 'assistant', text: 'old answer', at: 20 },
+        { role: 'tool', text: 'context compacted', at: 21 },
+        { role: 'user', text: 'new question', at: 30 },
+        { role: 'assistant', text: 'new answer', at: 40 },
+      ],
+    } as Agent
+
+    const history = rebuildChatHistory(agent)
+
+    expect(history).toHaveLength(4)
+    expect(history[0].content).toContain('Earlier decisions')
+    expect(history.map(m => m.content)).toContain('new question')
+    expect(history.map(m => m.content)).not.toContain('old question')
+  })
+
+  it('folds the previous summary together with only fresh messages', async () => {
+    mocks.callApi.mockResolvedValue({ content: [{ type: 'text', text: 'Updated summary' }] })
+    const { ctx, stateRef } = context()
+    stateRef.current.agents[0] = {
+      ...stateRef.current.agents[0],
+      chatContextSummary: 'Durable earlier decision',
+      chatCompactedAt: 4,
+    }
+
+    await compactConversation(ctx, 'chat', true)
+
+    const request = JSON.stringify(mocks.callApi.mock.calls[0][2])
+    expect(request).toContain('Durable earlier decision')
+    expect(request).toContain('message 7')
+    expect(request).not.toContain('message 0')
   })
 })
