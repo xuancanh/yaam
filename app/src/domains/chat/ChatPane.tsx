@@ -7,7 +7,7 @@ import { isTauri, pickFiles, pickSavePath, readFileB64, writeTextFile } from '..
 import { listMentionFiles, matchFiles } from './mentions'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import type { CatalogSkill } from '../../core/skills'
-import type { Agent, ChatMsg } from '../../core/types'
+import type { Agent, ChatAttachmentRecord, ChatMsg } from '../../core/types'
 import type { ChatAttachment } from './runner'
 import { onAttachRequest } from './attach-bus'
 import { IC, Icon } from '../../components/ui'
@@ -299,10 +299,23 @@ function SlashMenu({ items, sel, onPick }: {
 }
 
 export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
-  const { sendChatMessage, stopChat, retryChat, clearChat, chatSkills, approveChatTool } = useActions()
-  const [draft, setDraft] = useState('')
-  const [queue, setQueue] = useState<{ text: string; atts?: ChatAttachment[] }[]>([])
-  const [atts, setAtts] = useState<ChatAttachment[]>([])
+  const { sendChatMessage, stopChat, retryChat, clearChat, chatSkills, approveChatTool, setChatComposer } = useActions()
+  const composer = agent.chatComposer ?? { draft: '', attachments: [], queue: [] }
+  const draft = composer.draft
+  const atts = composer.attachments
+  const queue = composer.queue
+  const setDraft = (value: string | ((current: string) => string)) => {
+    const next = typeof value === 'function' ? value(draft) : value
+    setChatComposer(agent.id, { draft: next })
+  }
+  const setAtts = (value: ChatAttachmentRecord[] | ((current: ChatAttachmentRecord[]) => ChatAttachmentRecord[])) => {
+    const next = typeof value === 'function' ? value(atts) : value
+    setChatComposer(agent.id, { attachments: next })
+  }
+  const setQueue = (value: typeof queue | ((current: typeof queue) => typeof queue)) => {
+    const next = typeof value === 'function' ? value(queue) : value
+    setChatComposer(agent.id, { queue: next })
+  }
   const [loadingAtts, setLoadingAtts] = useState(0)
   const [dragOver, setDragOver] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -371,9 +384,9 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
     if (!queue.length || dequeuedRef.current) return
     dequeuedRef.current = true
     const [next, ...rest] = queue
-    setQueue(rest)
-    sendChatMessage(agent.id, next.text, next.atts)
-  }, [busy, queue, agent.id, sendChatMessage])
+    setChatComposer(agent.id, { queue: rest })
+    sendChatMessage(agent.id, next.text, next.attachments)
+  }, [busy, queue, agent.id, sendChatMessage, setChatComposer])
 
   const flashNote = (t: string) => {
     setNote(t)
@@ -384,15 +397,21 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
     const take = paths.slice(0, Math.max(0, 10 - atts.length))
     if (!take.length) return
     setLoadingAtts(n => n + take.length)
+    const loaded: ChatAttachmentRecord[] = []
     for (const p of take) {
       try {
         const att = await loadAttachment(p)
-        setAtts(cur => (cur.some(a => a.path === att.path) ? cur : [...cur, att]))
+        loaded.push({ name: att.name, kind: att.kind, text: att.text, mediaType: att.mediaType, path: att.path })
       } catch (e) {
         flashNote(`couldn't attach ${p.slice(p.lastIndexOf('/') + 1)}: ${e instanceof Error ? e.message : e}`)
       } finally {
         setLoadingAtts(n => n - 1)
       }
+    }
+    if (loaded.length) {
+      const next = [...atts]
+      for (const att of loaded) if (!next.some(a => a.path === att.path)) next.push(att)
+      setAtts(next)
     }
   }
 
@@ -433,7 +452,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
     if (msg === '/clear') { clearChat(agent.id); setQueue([]); setAtts([]); return }
     if (msg === '/export') { void exportChat().catch(e => flashNote(`export failed: ${e instanceof Error ? e.message : e}`)); return }
     if (busy) {
-      setQueue(q => [...q, { text: msg, atts: attachments }])
+      setQueue(q => [...q, { id: `queued-${Date.now()}-${q.length}`, at: Date.now(), text: msg, attachments: attachments ?? [] }])
       return
     }
     sendChatMessage(agent.id, msg, attachments)
@@ -513,7 +532,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                 background: 'var(--panel2)', border: '1px dashed var(--line2)', borderRadius: 7, padding: '3px 8px', maxWidth: 320,
               }}>
                 <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  queued: {q.text}{q.atts?.length ? ` (+${q.atts.length} file${q.atts.length > 1 ? 's' : ''})` : ''}
+                  queued: {q.text}{q.attachments.length ? ` (+${q.attachments.length} file${q.attachments.length > 1 ? 's' : ''})` : ''}
                 </span>
                 <button
                   className="icon-btn"

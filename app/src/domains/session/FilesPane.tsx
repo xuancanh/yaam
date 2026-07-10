@@ -547,7 +547,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
 // ---------------------------------------------------------------- pane
 
 /** Manage a session-scoped filesystem tree, selected file, and git metadata. */
-export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) {
+export function FilesPane({ agent, active, showSession = true }: { agent: Agent; active: boolean; showSession?: boolean }) {
   const init = cached(agent.id)
   const [file, setFile] = useState<string | null>(init.file)
   const [mode, setMode] = useState<FilesMode>(init.mode)
@@ -659,15 +659,20 @@ export function FilesPane({ agent, active }: { agent: Agent; active: boolean }) 
             path={file}
             gutter={gutter}
             onToggleGutter={() => setGutter(g => (g === 'numbers' ? 'git' : 'numbers'))}
-            mode={mode}
-            onToggleMode={() => setMode(m => (m === 'split' ? 'replace' : 'split'))}
+            mode={showSession ? mode : undefined}
+            onToggleMode={showSession ? () => setMode(m => (m === 'split' ? 'replace' : 'split')) : undefined}
             onClose={() => setFile(null)}
             git={git}
             onAttachFile={attachToChat}
             fs={fs}
           />
         )}
-        {(!file || mode === 'split') && (
+        {!file && !showSession && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--dim)' }}>
+            Pick a file to preview
+          </div>
+        )}
+        {showSession && (!file || mode === 'split') && (
           <div style={{
             flex: file ? '0 0 40%' : 1, minHeight: 0, display: 'flex', flexDirection: 'column',
             borderTop: file ? '1px solid var(--line)' : 'none',

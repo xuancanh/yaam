@@ -45,6 +45,7 @@ function NewChatRow({ onCreated }: { onCreated: (id: string) => void }) {
   const [model, setModel] = useState('')
   const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
   const [personaId, setPersonaId] = useState('')
+  const [advanced, setAdvanced] = useState(false)
   const [sources, setSources] = useState<string[]>(() => ['local', ...s.skillRegistries.filter(r => r.enabled).map(r => r.id)])
   const type = s.chatAgentTypes.find(t => t.id === typeId) ?? types[0]
   const toggleSource = (id: string) =>
@@ -67,50 +68,43 @@ function NewChatRow({ onCreated }: { onCreated: (id: string) => void }) {
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderBottom: '1px solid var(--line)' }}>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <select value={type?.id ?? ''} onChange={e => { setTypeId(e.target.value); setModel('') }} className="select-field" style={{ ...FIELD, flex: 1, minWidth: 0 }}>
-          {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+      {advanced && <>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <select value={type?.id ?? ''} onChange={e => { setTypeId(e.target.value); setModel('') }} className="select-field" style={{ ...FIELD, flex: 1, minWidth: 0 }}>
+            {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <select value={effModel} onChange={e => setModel(e.target.value)} disabled={list.length <= 1} className="select-field" style={{ ...FIELD, flex: 1, minWidth: 0 }}>
+            {list.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <select value={personaId} onChange={e => setPersonaId(e.target.value)} className="select-field" style={FIELD} title="Persona — appended to the agent's instructions">
+          <option value="">no persona</option>
+          {s.personas.map(pe => <option key={pe.id} value={pe.id}>{pe.name}{pe.description ? ` — ${pe.description.slice(0, 40)}` : ''}</option>)}
         </select>
-        <select value={effModel} onChange={e => setModel(e.target.value)} disabled={list.length <= 1} className="select-field" style={{ ...FIELD, flex: 1, minWidth: 0 }}>
-          {list.map(m => <option key={m} value={m}>{m}</option>)}
-        </select>
-      </div>
-      <select value={personaId} onChange={e => setPersonaId(e.target.value)} className="select-field" style={FIELD} title="Persona — appended to the agent's instructions">
-        <option value="">no persona</option>
-        {s.personas.map(pe => <option key={pe.id} value={pe.id}>{pe.name}{pe.description ? ` — ${pe.description.slice(0, 40)}` : ''}</option>)}
-      </select>
-      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }} title="Skill sources for this chat — the agent sees and loads skills from the checked sources">
-        <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)' }}>SKILLS</span>
-        {[{ id: 'local', name: 'local', count: s.skills.length }, ...s.skillRegistries.map(r => ({ id: r.id, name: r.name, count: r.skillCount }))].map(src => {
-          const on = sources.includes(src.id)
-          return (
-            <button
-              key={src.id}
-              className="mono"
-              onClick={() => toggleSource(src.id)}
-              style={{
-                fontSize: 10, fontWeight: 600, padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
-                border: `1px solid ${on ? 'rgba(61,220,151,.35)' : 'var(--line2)'}`,
-                background: on ? 'rgba(61,220,151,.1)' : 'transparent',
-                color: on ? 'var(--green)' : 'var(--dim)',
-              }}
-            >
-              {src.name}{src.count !== undefined ? ` · ${src.count}` : ''}
-            </button>
-          )
-        })}
-      </div>
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }} title="Skill sources for this chat — the agent sees and loads skills from the checked sources">
+          <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)' }}>SKILLS</span>
+          {[{ id: 'local', name: 'local', count: s.skills.length }, ...s.skillRegistries.map(r => ({ id: r.id, name: r.name, count: r.skillCount }))].map(src => {
+            const on = sources.includes(src.id)
+            return <button key={src.id} className="mono" onClick={() => toggleSource(src.id)} style={{
+              fontSize: 10, fontWeight: 600, padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
+              border: `1px solid ${on ? 'rgba(61,220,151,.35)' : 'var(--line2)'}`,
+              background: on ? 'rgba(61,220,151,.1)' : 'transparent', color: on ? 'var(--green)' : 'var(--dim)',
+            }}>{src.name}{src.count !== undefined ? ` · ${src.count}` : ''}</button>
+          })}
+        </div>
+      </>}
       <div style={{ display: 'flex', gap: 6 }}>
         <input value={cwd} onChange={e => setCwd(e.target.value)} placeholder="working folder (optional)" className="mono" style={{ ...FIELD, flex: 1, fontSize: 11 }} />
         <button className="open-btn" style={{ flex: 'none', padding: '0 10px', fontSize: 11.5 }} onClick={browse} disabled={!isTauri}>…</button>
       </div>
-      <button
-        className="approve-btn"
-        style={{ padding: 7, fontSize: 12 }}
-        onClick={() => { if (type) onCreated(newChatSession(undefined, cwd, type.id, effModel || undefined, personaId || undefined, sources)) }}
-      >
-        Start chat{type ? ` · ${type.name}` : ''}
-      </button>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button className="icon-btn" title={advanced ? 'Hide chat configuration' : 'Configure model, persona, and skills'} onClick={() => setAdvanced(v => !v)} style={{ width: 30, height: 30, borderRadius: 7 }}>
+          <Icon paths={['M4 7h10', 'M18 7h2', 'M4 17h2', 'M10 17h10', 'M14 4v6', 'M6 14v6']} size={14} stroke={1.7} />
+        </button>
+        <button className="approve-btn" style={{ padding: 7, fontSize: 12, flex: 1 }} onClick={() => { if (type) onCreated(newChatSession(undefined, cwd, type.id, effModel || undefined, personaId || undefined, sources)) }}>
+          Start chat{advanced && type ? ` · ${type.name}` : ''}
+        </button>
+      </div>
     </div>
   )
 }
@@ -347,9 +341,14 @@ export function ChatView() {
                 <Icon paths={['M3 7a2 2 0 012-2h4l2 2h9a1 1 0 011 1v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z']} size={14} stroke={1.7} />
               </button>
             </div>
-            {filesOpen[selected.id]
-              ? <FilesPane agent={selected} active />
-              : <ChatPane agent={selected} active />}
+            <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+              <ChatPane agent={selected} active />
+              {filesOpen[selected.id] && (
+                <div style={{ width: '48%', minWidth: 360, maxWidth: 760, flexShrink: 0, display: 'flex', borderLeft: '1px solid var(--line)' }}>
+                  <FilesPane agent={selected} active showSession={false} />
+                </div>
+              )}
+            </div>
           </>
         ) : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>

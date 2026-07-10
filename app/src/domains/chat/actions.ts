@@ -4,7 +4,7 @@
 // menu). Composed into the provider's action surface.
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
-import type { Agent, AppState, EventType } from '../../core/types'
+import type { Agent, AppState, ChatComposerState, EventType } from '../../core/types'
 import type { CatalogSkill } from '../../core/skills'
 import type { ChatAttachment } from './runner'
 import { mkId } from '../../shared/id'
@@ -29,6 +29,7 @@ export interface ChatActions {
   stopChat: (agentId: string) => void
   retryChat: (agentId: string) => void
   clearChat: (agentId: string) => void
+  setChatComposer: (agentId: string, patch: Partial<ChatComposerState>) => void
   /** answer a pending ask-mode tool approval */
   approveChatTool: (agentId: string, msgId: string, ok: boolean) => void
   /** flip a chat between ask (approve risky tools) and auto */
@@ -67,8 +68,9 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
         memory: mkMemory(), tools: mkTools(), log: [],
         chatLog: [{
           id: mkId('cm'), role: 'assistant', at: Date.now(),
-          text: `Hi — I'm a chat agent${dir ? ` working in \`${dir}\`` : ''}. I can browse and edit files, run commands and scripts, load skills, and call your MCP servers. What are we doing?`,
+          text: `Hi${dir ? ` — I'm working in \`${dir}\`` : ''}. What would you like to work on? You can describe an outcome or attach files.`,
         }],
+        chatComposer: { draft: '', attachments: [], queue: [] },
         ...defaultDetail(), usageVersion: 1,
       }
       dispatch(s => ({ ...s, agents: s.agents.concat([agent]), activeChatId: id, view: 'chat' }))
@@ -91,9 +93,20 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
       ctx.resetChatRuntime(agentId)
       dispatch(s => ({
         ...s,
-        agents: s.agents.map(a => a.id === agentId ? { ...a, chatLog: [], status: 'idle' as const } : a),
+        agents: s.agents.map(a => a.id === agentId
+          ? { ...a, chatLog: [], chatTurns: [], chatComposer: { draft: '', attachments: [], queue: [] }, status: 'idle' as const }
+          : a),
       }))
     },
+
+    setChatComposer: (agentId, patch) => dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => {
+        if (a.id !== agentId) return a
+        const current = a.chatComposer ?? { draft: '', attachments: [], queue: [] }
+        return { ...a, chatComposer: { ...current, ...patch } }
+      }),
+    })),
 
     approveChatTool: (agentId, msgId, ok) => ctx.resolveChatApproval(agentId, msgId, ok),
 

@@ -82,6 +82,19 @@ export interface ChatTurn {
   tools: ChatToolEvent[]
 }
 
+export interface ChatQueuedMessage {
+  id: string
+  at: number
+  text: string
+  attachments: ChatAttachmentRecord[]
+}
+
+export interface ChatComposerState {
+  draft: string
+  attachments: ChatAttachmentRecord[]
+  queue: ChatQueuedMessage[]
+}
+
 /** Transient per-session runtime state — NOT persisted. Hydration re-derives it
  *  (restored sessions always start idle). Split out from the durable SessionRecord
  *  so the persistence boundary is explicit and type-enforced rather than an ad-hoc
@@ -151,6 +164,8 @@ export interface SessionRecord {
   chatLog?: ChatMsg[]
   /** durable structured work records; legacy chats populate this on their next turn */
   chatTurns?: ChatTurn[]
+  /** durable unsent work so navigation and restarts do not discard it */
+  chatComposer?: ChatComposerState
   /** name was never chosen by the user — safe to auto-title from the conversation */
   nameIsDefault?: boolean
   /** which ChatAgentType powers this chat session */
