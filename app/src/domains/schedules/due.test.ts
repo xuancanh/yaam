@@ -41,4 +41,12 @@ describe('collectDueTasks', () => {
   it('skips a scheduled task that already has a session', () => {
     expect(collectDueTasks([task({ id: 'a', scheduleAt: now.getTime() - 1, agentId: 'sess-1' })], now)).toEqual([])
   })
+  it('skips archived and terminal-state tasks', () => {
+    const at = now.getTime() - 1
+    expect(collectDueTasks([
+      task({ id: 'archived', scheduleAt: at, archived: true }),
+      task({ id: 'done', scheduleAt: at, col: 'done' }),
+      task({ id: 'failed', scheduleAt: at, col: 'failed' }),
+    ], now)).toEqual([])
+  })
 })

@@ -19,5 +19,10 @@ export function collectDueSchedules(crons: Cron[], now: Date): Cron[] {
  *  been assigned a session. */
 export function collectDueTasks(tasks: BoardTask[], now: Date): BoardTask[] {
   const nowMs = now.getTime()
-  return tasks.filter(t => !!t.scheduleAt && t.scheduleAt <= nowMs && !t.agentId)
+  return tasks.filter(t => !t.archived
+    && t.col !== 'done'
+    && t.col !== 'failed'
+    && !!t.scheduleAt
+    && t.scheduleAt <= nowMs
+    && !t.agentId)
 }
