@@ -15,6 +15,7 @@ export const JOURNAL_FILE = 'JOURNAL.md'
 const LESSONS_PROMPT_CHARS = 2400
 const JOURNAL_PROMPT_CHARS = 1600
 const FILE_CAP_CHARS = 60_000
+const appendQueues = new Map<string, Promise<void>>()
 
 export interface AgentBrain {
   lessons: string
@@ -36,19 +37,31 @@ export async function loadBrain(agent: DurableAgent): Promise<AgentBrain> {
 export async function appendBrainFile(agent: DurableAgent, file: string, entry: string): Promise<void> {
   if (!agent.homeDir?.trim() || !entry.trim()) return
   const path = brainPath(agent, file)
-  const cur = await readTextFile(path).catch(() => '')
-  const header = cur ? '' : file === LESSONS_FILE
-    ? `# Lessons — ${agent.name}\nCorrections and learnings this agent maintains about how to do its job.\n\n`
-    : `# Journal — ${agent.name}\nEpisodic log of past work, distilled after conversations.\n\n`
-  let next = `${cur || header}${cur && !cur.endsWith('\n') ? '\n' : ''}${entry.trim()}\n`
-  while (next.length > FILE_CAP_CHARS) {
-    // drop the oldest section (or line) after the header
-    const start = next.indexOf('\n\n') + 2
-    const cut = next.indexOf('\n', start + 1)
-    if (cut < 0) break
-    next = next.slice(0, start) + next.slice(cut + 1)
+  const previous = appendQueues.get(path) ?? Promise.resolve()
+  const pending = previous.catch(() => {}).then(async () => {
+    const cur = await readTextFile(path).catch(() => '')
+    const header = cur ? '' : file === LESSONS_FILE
+      ? `# Lessons — ${agent.name}\nCorrections and learnings this agent maintains about how to do its job.\n\n`
+      : `# Journal — ${agent.name}\nEpisodic log of past work, distilled after conversations.\n\n`
+    let next = `${cur || header}${cur && !cur.endsWith('\n') ? '\n' : ''}${entry.trim()}\n`
+    if (next.length > FILE_CAP_CHARS) {
+      const headerEnd = next.indexOf('\n\n')
+      const prefix = headerEnd >= 0 && headerEnd < 4_000 ? next.slice(0, headerEnd + 2) : ''
+      const body = next.slice(prefix.length)
+      let tail = body.slice(-(FILE_CAP_CHARS - prefix.length))
+      // When several entries remain, do not preserve a partial oldest line.
+      const firstBreak = tail.indexOf('\n')
+      if (body.length > tail.length && firstBreak >= 0 && firstBreak < tail.length - 1) tail = tail.slice(firstBreak + 1)
+      next = `${prefix}${tail}`
+    }
+    await writeTextFile(path, next)
+  })
+  appendQueues.set(path, pending)
+  try {
+    await pending
+  } finally {
+    if (appendQueues.get(path) === pending) appendQueues.delete(path)
   }
-  await writeTextFile(path, next)
 }
 
 /** The identity block injected at the TOP of a durable agent's system prompt:

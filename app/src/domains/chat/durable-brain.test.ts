@@ -1,7 +1,44 @@
-import { describe, expect, it } from 'vitest'
-import { journalEntry, knowledgeSearchCommand, rankKnowledgeHits } from './durable-brain'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { appendBrainFile, journalEntry, knowledgeSearchCommand, LESSONS_FILE, rankKnowledgeHits } from './durable-brain'
 import { exportRecord, parseAgentExport } from './agent-templates'
 import type { DurableAgent } from '../../core/types'
+
+const native = vi.hoisted(() => ({ readTextFile: vi.fn(), writeTextFile: vi.fn() }))
+
+vi.mock('../../core/native', async importOriginal => ({
+  ...await importOriginal<typeof import('../../core/native')>(),
+  readTextFile: native.readTextFile,
+  writeTextFile: native.writeTextFile,
+}))
+
+describe('appendBrainFile', () => {
+  const agent = { id: 'a', name: 'Chef', charter: 'cook', homeDir: '/agents/chef', createdAt: 1 } as DurableAgent
+  let stored = ''
+
+  beforeEach(() => {
+    stored = ''
+    native.readTextFile.mockReset().mockImplementation(async () => stored)
+    native.writeTextFile.mockReset().mockImplementation(async (_path, text) => { stored = text })
+  })
+
+  it('serializes concurrent learning so neither entry is overwritten', async () => {
+    await Promise.all([
+      appendBrainFile(agent, LESSONS_FILE, '- use less salt'),
+      appendBrainFile(agent, LESSONS_FILE, '- ask about allergies'),
+    ])
+
+    expect(stored).toContain('- use less salt')
+    expect(stored).toContain('- ask about allergies')
+  })
+
+  it('bounds even a single oversized entry while retaining its newest tail', async () => {
+    await appendBrainFile(agent, LESSONS_FILE, `- ${'x'.repeat(70_000)}END`)
+
+    expect(stored.length).toBeLessThanOrEqual(60_000)
+    expect(stored).toContain('# Lessons')
+    expect(stored).toContain('END')
+  })
+})
 
 describe('knowledgeSearchCommand', () => {
   it('builds a case-insensitive alternation over tokens, .git excluded, bounded', () => {
