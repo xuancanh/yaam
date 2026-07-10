@@ -12,6 +12,7 @@ const MAIN_SLICES: readonly (keyof AppState)[] = [
   'tasks', 'crons', 'settings', 'toolsCatalog', 'agentTypes', 'templates',
   'mcpServers', 'skills', 'personas', 'skillRegistries', 'chatAgentTypes',
   'groups', 'activeGroup', 'minimizedIds', 'addons', 'addonStorage',
+  'chatMemory', 'assistantMemory', 'harnessLog',
   'messages', 'events', 'notifications', 'workspaces', 'activeWorkspace', 'workspaceData',
 ]
 
