@@ -33,7 +33,8 @@ export function artifactSrcDoc(a: ChatArtifact): string {
   }
   // full documents pass through with the CSP injected; fragments get a shell
   if (/<html[\s>]/i.test(a.source)) {
-    return a.source.replace(/<head([^>]*)>/i, `<head$1>${csp}`) || a.source
+    if (/<head[\s>]/i.test(a.source)) return a.source.replace(/<head([^>]*)>/i, `<head$1>${csp}`)
+    return a.source.replace(/<html([^>]*)>/i, `<html$1><head>${csp}</head>`)
   }
   return `<!doctype html><html><head>${csp}<style>body{font-family:system-ui,sans-serif;margin:16px}</style></head><body>${a.source}</body></html>`
 }

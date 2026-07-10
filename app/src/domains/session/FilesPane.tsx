@@ -20,6 +20,7 @@ import { IC, Icon } from '../../components/ui'
 import { FileIcon } from '../../components/FileIcon'
 import { Markdown } from '../../components/Markdown'
 import { ChatPane } from '../chat/ChatPane'
+import { artifactSrcDoc } from '../chat/artifacts'
 import { requestAttach } from '../chat/attach-bus'
 import { TerminalPane } from './TerminalPane'
 
@@ -425,7 +426,10 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
           <iframe
             title={name}
             sandbox=""
-            srcDoc={`<!doctype html><meta charset="utf-8"><style>body{font-family:system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 20px;line-height:1.6;color:#1c1f26;background:#fff}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px}img{max-width:100%}</style>${office.html ?? ''}`}
+            srcDoc={artifactSrcDoc({
+              kind: 'html',
+              source: `<meta charset="utf-8"><style>body{font-family:system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 20px;line-height:1.6;color:#1c1f26;background:#fff}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px}img{max-width:100%}</style>${office.html ?? ''}`,
+            })}
             style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }}
           />
         ) : (
@@ -459,7 +463,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         content !== null ? (
           // same trust model as chat artifacts: opaque origin, scripts allowed,
           // no reach back into the app
-          <iframe title={name} sandbox="allow-scripts" srcDoc={content} style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }} />
+          <iframe title={name} sandbox="allow-scripts" srcDoc={artifactSrcDoc({ kind: 'html', source: content })} style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }} />
         ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
       ) : kind === 'image' ? (
         dataUrl ? (

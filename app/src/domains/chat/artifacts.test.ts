@@ -39,6 +39,14 @@ describe('artifactSrcDoc', () => {
     expect(doc.match(/<html/gi)).toHaveLength(1)
   })
 
+  it('adds a protected head when a full document omitted one', () => {
+    const full = `<html><body>${bigHtml}</body></html>`
+    const doc = artifactSrcDoc({ kind: 'html', source: full })
+    expect(doc).toContain(`<html><head><meta http-equiv="Content-Security-Policy"`)
+    expect(doc).toContain("default-src 'none'")
+    expect(doc.match(/<html/gi)).toHaveLength(1)
+  })
+
   it('centers svg artifacts in a minimal shell', () => {
     const doc = artifactSrcDoc({ kind: 'svg', source: bigSvg })
     expect(doc).toContain(bigSvg)
