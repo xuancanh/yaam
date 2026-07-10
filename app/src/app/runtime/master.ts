@@ -10,6 +10,7 @@ import * as native from '../../core/native'
 import { createMasterRuntime } from '../../domains/master/master-runtime'
 import type { MasterRuntime } from '../../domains/master/master-runtime'
 import { createSchedulerRuntime } from '../../domains/schedules/runtime'
+import { buildChatSession } from '../../domains/chat/actions'
 import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
 import type { SessionRuntime } from './session'
@@ -30,14 +31,32 @@ export type MasterSendLine = (sid: string, text: string) => void
 /** Flags + kills a session as the master actor (routes through stop_session). */
 export type MasterStopLine = (sid: string) => void
 
-export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem, sendLine?: MasterSendLine, stopLine?: MasterStopLine): MasterSubsystem {
+export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem, runChatMessage?: (agentId: string, text: string) => void, sendLine?: MasterSendLine, stopLine?: MasterStopLine): MasterSubsystem {
   const { stateRef, widOf, logEvent, notify, flash } = k
   const { masterEventRef, toolApprovalsRef, userStoppedRef, fireAddonHookRef } = refs
   const state: StatePort = { get: () => stateRef.current, update: dispatch, subscribe: () => () => {} }
 
+  // a durable agent's scheduled loop: deliver the prompt into its dedicated
+  // "scheduled" conversation (created lazily), running in the background
+  const sendAgentChat = (durableAgentId: string, prompt: string, scheduleName: string): string | null => {
+    if (!runChatMessage) return null
+    const s = stateRef.current
+    const durable = (s.durableAgents ?? []).find(d => d.id === durableAgentId && !d.archived)
+    if (!durable) return null
+    let conv = s.agents.find(a => a.kind === 'chat' && !a.archived && a.durableAgentId === durableAgentId && (a.chatTags ?? []).includes('scheduled'))
+    if (!conv) {
+      conv = buildChatSession(s, { durableAgentId, name: `${durable.name} · scheduled`, tags: ['scheduled'] })
+      const created = conv
+      dispatch(s2 => ({ ...s2, agents: s2.agents.concat([created]) }))
+    }
+    runChatMessage(conv.id, `[schedule "${scheduleName}" fired] ${prompt}`)
+    return conv.id
+  }
+
   const scheduler = createSchedulerRuntime({
     state, clock: browserClock, logEvent, notify,
     launchSession: session.launchSession, spawnTaskSession: session.spawnTaskSession,
+    sendAgentChat,
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
     canLaunch: native.isTauri,
   })

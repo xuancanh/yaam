@@ -4,7 +4,7 @@
 // menu). Composed into the provider's action surface.
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
-import type { Agent, AppState, ChatComposerState, EventType } from '../../core/types'
+import type { Agent, AppState, ChatComposerState, DurableAgent, EventType } from '../../core/types'
 import type { CatalogSkill } from '../../core/skills'
 import type { ChatAttachment } from './runner'
 import { mkId } from '../../shared/id'
@@ -23,10 +23,17 @@ export interface ChatActionsCtx {
   resetChatRuntime: (agentId: string) => void
   resolveChatApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
   skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
+  /** distill one conversation into its durable agent's journal/lessons */
+  reflectConversation: (conversationId: string) => Promise<string>
 }
 
 export interface ChatActions {
-  newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string, personaId?: string, skillSourceIds?: string[]) => string
+  newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string, personaId?: string, skillSourceIds?: string[], durableAgentId?: string) => string
+  /** durable agents: create/update/archive, and manually reflect the latest conversation */
+  addDurableAgent: (patch: Partial<DurableAgent> & { name: string }) => string
+  updateDurableAgent: (id: string, patch: Partial<DurableAgent>) => void
+  archiveDurableAgent: (id: string) => void
+  reflectDurableAgent: (id: string) => Promise<string>
   openChat: (id: string | null) => void
   sendChatMessage: (agentId: string, text: string, atts?: ChatAttachment[]) => void
   /** click one of the assistant's quick replies: clears the chips, records the
@@ -59,38 +66,58 @@ export function useChatActions(ctx: ChatActionsCtx): ChatActions {
   return useMemo(() => createChatActions(ctx), [ctx.dispatch, ctx.stateRef, ctx.logEvent, ctx.runChatMessage, ctx.stopChatMessage, ctx.retryChatMessage, ctx.replayChatMessage, ctx.resetChatRuntime, ctx.skillCatalogs])
 }
 
+/** Build a fresh chat-session record. A durable agent's conversations inherit
+ *  its home dir, color, and defaults; explicit opts win. Pure — the caller
+ *  dispatches it (used by newChatSession and by scheduled agent prompts). */
+export function buildChatSession(st: AppState, opts: {
+  name?: string
+  cwd?: string
+  chatTypeId?: string
+  model?: string
+  personaId?: string
+  skillSourceIds?: string[]
+  durableAgentId?: string
+  tags?: string[]
+}): Agent {
+  const id = mkId('a')
+  const durable = opts.durableAgentId ? (st.durableAgents ?? []).find(d => d.id === opts.durableAgentId) : undefined
+  const dir = (opts.cwd ?? durable?.homeDir ?? st.settings.defaultCwd ?? '').trim()
+  const chatType = st.chatAgentTypes.find(t => t.id === (opts.chatTypeId ?? durable?.chatTypeId))
+    ?? st.chatAgentTypes.find(t => t.enabled)
+    ?? st.chatAgentTypes[0]
+  const effModel = opts.model || durable?.model
+  return {
+    id, name: opts.name?.trim() || durable?.name || chatType?.name || 'chat', short: (opts.name?.trim() || durable?.name || chatType?.name || 'CH').slice(0, 2).toUpperCase(),
+    color: durable?.color ?? '#7FD1FF', repo: dir ? dir.split('/').pop() || dir : '~', branch: 'chat',
+    status: 'idle', model: chatType ? `${chatType.name} · ${effModel || chatType.model}` : 'chat agent', kind: 'chat', cwd: dir,
+    chatTypeId: chatType?.id,
+    chatModel: effModel || chatType?.model,
+    nameIsDefault: !opts.name?.trim(),
+    personaId: opts.personaId ?? durable?.personaId,
+    skillSourceIds: opts.skillSourceIds ?? durable?.skillSourceIds,
+    durableAgentId: durable?.id,
+    chatTags: opts.tags,
+    workspaceId: st.activeWorkspace,
+    memory: mkMemory(), tools: mkTools(), log: [],
+    chatLog: [{
+      id: mkId('cm'), role: 'assistant', at: Date.now(),
+      text: `Hi${dir ? ` — I'm working in \`${dir}\`` : ''}. What would you like to work on? You can describe an outcome or attach files.`,
+    }],
+    chatComposer: { draft: '', attachments: [], queue: [] },
+    chatTokenBudget: 200_000,
+    ...defaultDetail(), usageVersion: 1,
+  }
+}
+
 /** Plain (non-React) factory for the chat actions. */
 export function createChatActions(ctx: ChatActionsCtx): ChatActions {
   const { dispatch, stateRef } = ctx
   return {
-    newChatSession: (name, cwd, chatTypeId, model, personaId, skillSourceIds) => {
-      const id = mkId('a')
-      const dir = (cwd ?? stateRef.current.settings.defaultCwd ?? '').trim()
-      const chatType = stateRef.current.chatAgentTypes.find(t => t.id === chatTypeId)
-        ?? stateRef.current.chatAgentTypes.find(t => t.enabled)
-        ?? stateRef.current.chatAgentTypes[0]
-      const agent: Agent = {
-        id, name: name?.trim() || chatType?.name || 'chat', short: (name?.trim() || chatType?.name || 'CH').slice(0, 2).toUpperCase(),
-        color: '#7FD1FF', repo: dir ? dir.split('/').pop() || dir : '~', branch: 'chat',
-        status: 'idle', model: chatType ? `${chatType.name} · ${model || chatType.model}` : 'chat agent', kind: 'chat', cwd: dir,
-        chatTypeId: chatType?.id,
-        chatModel: model || chatType?.model,
-        nameIsDefault: !name?.trim(),
-        personaId,
-        skillSourceIds,
-        workspaceId: stateRef.current.activeWorkspace,
-        memory: mkMemory(), tools: mkTools(), log: [],
-        chatLog: [{
-          id: mkId('cm'), role: 'assistant', at: Date.now(),
-          text: `Hi${dir ? ` — I'm working in \`${dir}\`` : ''}. What would you like to work on? You can describe an outcome or attach files.`,
-        }],
-        chatComposer: { draft: '', attachments: [], queue: [] },
-        chatTokenBudget: 200_000,
-        ...defaultDetail(), usageVersion: 1,
-      }
-      dispatch(s => ({ ...s, agents: s.agents.concat([agent]), activeChatId: id, view: 'chat' }))
-      ctx.logEvent('route', id, `Started chat agent “${agent.name}”`)
-      return id
+    newChatSession: (name, cwd, chatTypeId, model, personaId, skillSourceIds, durableAgentId) => {
+      const agent = buildChatSession(stateRef.current, { name, cwd, chatTypeId, model, personaId, skillSourceIds, durableAgentId })
+      dispatch(s => ({ ...s, agents: s.agents.concat([agent]), activeChatId: agent.id, view: 'chat' }))
+      ctx.logEvent('route', agent.id, `Started chat agent “${agent.name}”`)
+      return agent.id
     },
 
     promoteChatTurn: (agentId, turnId) => {
@@ -122,6 +149,46 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
     },
 
     openChat: id => dispatch(s => ({ ...s, activeChatId: id, ...(id ? { view: 'chat' as const } : {}) })),
+
+    addDurableAgent: patch => {
+      const id = mkId('da')
+      dispatch(s => ({
+        ...s,
+        durableAgents: [...(s.durableAgents ?? []), {
+          id, color: '#B78AF7', charter: '', createdAt: Date.now(),
+          ...patch, name: patch.name.trim() || 'Agent',
+        }],
+      }))
+      ctx.logEvent('build', null, `Created durable agent “${patch.name}”`)
+      return id
+    },
+
+    updateDurableAgent: (id, patch) => {
+      dispatch(s => ({
+        ...s,
+        durableAgents: (s.durableAgents ?? []).map(d => (d.id === id ? { ...d, ...patch, id: d.id, builtin: d.builtin } : d)),
+      }))
+    },
+
+    archiveDurableAgent: id => {
+      const d = (stateRef.current.durableAgents ?? []).find(x => x.id === id)
+      if (!d || d.builtin) return
+      dispatch(s => ({
+        ...s,
+        durableAgents: (s.durableAgents ?? []).map(x => (x.id === id ? { ...x, archived: true } : x)),
+      }))
+      ctx.logEvent('edit', null, `Archived durable agent “${d.name}”`)
+    },
+
+    reflectDurableAgent: async id => {
+      // reflect the agent's most recent conversation with new content
+      const conv = [...stateRef.current.agents]
+        .filter(a => a.kind === 'chat' && a.durableAgentId === id && !a.archived)
+        .sort((a, b) => ((a.chatLog ?? []).at(-1)?.at ?? 0) - ((b.chatLog ?? []).at(-1)?.at ?? 0))
+        .pop()
+      if (!conv) return 'this agent has no conversations yet'
+      return await ctx.reflectConversation(conv.id)
+    },
 
     sendChatMessage: (agentId, text, atts) => {
       const msg = text.trim()

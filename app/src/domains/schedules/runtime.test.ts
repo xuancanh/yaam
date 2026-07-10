@@ -16,7 +16,7 @@ function harness(state: AppState, over: Partial<SchedulerDeps> = {}) {
   const deps: SchedulerDeps = {
     state: port, clock,
     logEvent: vi.fn(), notify: vi.fn(),
-    launchSession: vi.fn(() => 'sid'), spawnTaskSession: vi.fn(() => 'sid'),
+    launchSession: vi.fn(() => 'sid'), spawnTaskSession: vi.fn(() => 'sid'), sendAgentChat: vi.fn(() => null),
     fireAddonHook: vi.fn(), canLaunch: true,
     ...over,
   }
@@ -54,7 +54,7 @@ describe('createSchedulerRuntime', () => {
     const port = createFakeStatePort(baseState({ crons: [atCron] }))
     const deps: SchedulerDeps = {
       state: port, clock: at, logEvent: vi.fn(), notify: vi.fn(),
-      launchSession: vi.fn(() => 'sid'), spawnTaskSession: vi.fn(() => null), fireAddonHook: vi.fn(), canLaunch: true,
+      launchSession: vi.fn(() => 'sid'), spawnTaskSession: vi.fn(() => null), sendAgentChat: vi.fn(() => null), fireAddonHook: vi.fn(), canLaunch: true,
     }
     createSchedulerRuntime(deps).start()
     at.advance(15000)

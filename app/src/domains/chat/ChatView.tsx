@@ -7,6 +7,7 @@ import { ACCENT, hexToRgba } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { EditableName, IC, Icon } from '../../components/ui'
 import { ChatPane } from './ChatPane'
+import { DurableAgentDialog } from './DurableAgentDialog'
 import { FilesPane } from '../session/FilesPane'
 import { confirmAction } from '../../components/Confirm'
 
@@ -187,8 +188,8 @@ function compactTokens(tokens: number): string {
 }
 
 export function ChatView() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId, activeWorkspace: x.activeWorkspace, settings: x.settings }), shallowEqual)
-  const { openChat, deleteSession, renameSession, setChatPermMode, setChatPinned, archiveChat, restoreChat, updateSettings } = useActions()
+  const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId, activeWorkspace: x.activeWorkspace, settings: x.settings, durableAgents: x.durableAgents }), shallowEqual)
+  const { openChat, deleteSession, renameSession, setChatPermMode, setChatPinned, archiveChat, restoreChat, updateSettings, newChatSession, addDurableAgent } = useActions()
   // drag-resizable conversation list (persisted like the Master sidebar)
   const listWidth = Math.max(220, Math.min(520, s.settings.chatListWidth ?? 300))
   const startListResize = (e: ReactPointerEvent) => {
@@ -236,6 +237,13 @@ export function ChatView() {
     .map(a => ({ agent: a, last: lastSnippet(a) }))
     .sort((x, y) => Number(!!y.agent.chatPinned) - Number(!!x.agent.chatPinned) || y.last.at - x.last.at)
 
+  // conversations hang off durable agents; anything unclaimed (legacy chats,
+  // archived agents' conversations) shows under the built-in generic agent
+  const durables = (s.durableAgents ?? []).filter(d => !d.archived)
+  const [agentDialogId, setAgentDialogId] = useState<string | null>(null)
+  const groupOf = (a: Agent) => (durables.some(d => d.id === a.durableAgentId) ? a.durableAgentId! : durables.find(d => d.builtin)?.id ?? 'agent-default')
+  const grouped = durables.map(d => ({ d, items: chats.filter(c => groupOf(c.agent) === d.id) }))
+
   const selected = s.agents.find(a => a.id === s.activeChatId && inWorkspace(a))
 
   // full-text search through the embedded engine (debounced)
@@ -275,6 +283,14 @@ export function ChatView() {
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px 8px' }}>
           <span className="grotesk" style={{ fontSize: 14.5, fontWeight: 600, flex: 1 }}>Chats</span>
+          <button
+            className="icon-btn"
+            title="New durable agent — a persistent identity with its own charter, brain files, and loops"
+            onClick={() => setAgentDialogId(addDurableAgent({ name: 'New agent' }))}
+            style={{ width: 28, height: 28, borderRadius: 7 }}
+          >
+            <Icon paths={['M12 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7z', 'M5 20a7 7 0 0110-6.3', 'M17 14v6', 'M14 17h6']} size={15} stroke={1.7} />
+          </button>
           <button className="icon-btn" title={showArchived ? 'Show active chats' : 'Show archived chats'} onClick={() => { setShowArchived(v => !v); openChat(null) }} style={{ width: 28, height: 28, borderRadius: 7, color: showArchived ? 'var(--accent)' : undefined }}>
             <Icon paths={['M4 7h16v13H4z', 'M3 4h18v3H3z', 'M9 11h6']} size={14} stroke={1.7} />
           </button>
@@ -317,47 +333,79 @@ export function ChatView() {
                 ))}
               </button>
             )) : <div style={{ fontSize: 11.5, color: 'var(--dim)', padding: '6px 10px' }}>no matches</div>
-          ) : chats.length ? chats.map(({ agent: a, last }) => (
-            <div
-              key={a.id}
-              className="palette-item"
-              onClick={() => openChat(a.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 9, padding: 'var(--row-pad)', borderRadius: 9, cursor: 'pointer',
-                background: s.activeChatId === a.id ? 'rgba(245,196,81,.08)' : 'transparent',
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  {a.chatPinned && <span title="Pinned" style={{ color: 'var(--accent)', fontSize: 10 }}>◆</span>}
-                  <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
-                    {a.name}
-                  </span>
-                  <span className="mono" style={{ fontSize: 9.5, color: 'var(--faint)', flexShrink: 0 }}>{timeLabel(last.at)}</span>
+          ) : (() => {
+            const row = ({ agent: a, last }: { agent: Agent; last: { text: string; at: number } }) => (
+              <div
+                key={a.id}
+                className="palette-item"
+                onClick={() => openChat(a.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 9, padding: 'var(--row-pad)', borderRadius: 9, cursor: 'pointer',
+                  background: s.activeChatId === a.id ? 'rgba(245,196,81,.08)' : 'transparent',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    {a.chatPinned && <span title="Pinned" style={{ color: 'var(--accent)', fontSize: 10 }}>◆</span>}
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
+                      {a.name}
+                    </span>
+                    <span className="mono" style={{ fontSize: 9.5, color: 'var(--faint)', flexShrink: 0 }}>{timeLabel(last.at)}</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: a.status === 'running' ? 'var(--accent)' : 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
+                    {a.status === 'running' ? 'thinking…' : last.text || 'empty chat'}
+                  </div>
+                  {!!a.chatTags?.length && <div className="mono" style={{ marginTop: 3, fontSize: 9.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.chatTags.map(tag => `#${tag}`).join(' ')}</div>}
                 </div>
-                <div style={{ fontSize: 10.5, color: a.status === 'running' ? 'var(--accent)' : 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
-                  {a.status === 'running' ? 'thinking…' : last.text || 'empty chat'}
-                </div>
-                {!!a.chatTags?.length && <div className="mono" style={{ marginTop: 3, fontSize: 9.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.chatTags.map(tag => `#${tag}`).join(' ')}</div>}
+                {showArchived ? <>
+                  <button className="icon-btn" title="Restore chat" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} onClick={e => { e.stopPropagation(); restoreChat(a.id) }}>
+                    <Icon paths={['M4 12a8 8 0 101.8-5', 'M4 4v5h5']} size={11} stroke={1.8} />
+                  </button>
+                  <button className="icon-btn danger" title="Delete permanently" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} onClick={e => { e.stopPropagation(); void confirmAction({ title: `Permanently delete “${a.name.slice(0, 40)}”?`, detail: 'Removes the conversation and transcript. This cannot be undone.' }).then(ok => { if (ok) deleteSession(a.id) }) }}>
+                    <Icon paths={IC.close} size={10} stroke={2} />
+                  </button>
+                </> : (
+                  <button className="icon-btn" title="Archive chat" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} onClick={e => { e.stopPropagation(); archiveChat(a.id) }}>
+                    <Icon paths={['M4 7h16v13H4z', 'M3 4h18v3H3z']} size={11} stroke={1.8} />
+                  </button>
+                )}
               </div>
-              {showArchived ? <>
-                <button className="icon-btn" title="Restore chat" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} onClick={e => { e.stopPropagation(); restoreChat(a.id) }}>
-                  <Icon paths={['M4 12a8 8 0 101.8-5', 'M4 4v5h5']} size={11} stroke={1.8} />
-                </button>
-                <button className="icon-btn danger" title="Delete permanently" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} onClick={e => { e.stopPropagation(); void confirmAction({ title: `Permanently delete “${a.name.slice(0, 40)}”?`, detail: 'Removes the conversation and transcript. This cannot be undone.' }).then(ok => { if (ok) deleteSession(a.id) }) }}>
-                  <Icon paths={IC.close} size={10} stroke={2} />
-                </button>
-              </> : (
-                <button className="icon-btn" title="Archive chat" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} onClick={e => { e.stopPropagation(); archiveChat(a.id) }}>
-                  <Icon paths={['M4 7h16v13H4z', 'M3 4h18v3H3z']} size={11} stroke={1.8} />
-                </button>
-              )}
-            </div>
-          )) : (
-            <div style={{ fontSize: 11.5, color: 'var(--dim)', padding: '8px 10px', lineHeight: 1.6 }}>
-              {showArchived ? 'No archived chats.' : 'No chats yet — hit + to start one.'}
-            </div>
-          )}
+            )
+            if (showArchived) {
+              return chats.length ? chats.map(row) : (
+                <div style={{ fontSize: 11.5, color: 'var(--dim)', padding: '8px 10px', lineHeight: 1.6 }}>No archived chats.</div>
+              )
+            }
+            // active view: conversations grouped under their durable agents
+            return grouped.map(({ d, items }) => (
+              <div key={d.id} style={{ marginBottom: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 6px 3px' }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 3, background: d.color, flexShrink: 0 }} />
+                  <button
+                    className="mono"
+                    title={`${d.role ? `${d.role} · ` : ''}open agent profile (charter, brain, loops)`}
+                    onClick={() => setAgentDialogId(d.id)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--mut)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    {d.name.toUpperCase()}
+                  </button>
+                  {d.role && <span style={{ fontSize: 9.5, color: 'var(--faint)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.role}</span>}
+                  <div style={{ flex: 1 }} />
+                  <button
+                    className="icon-btn"
+                    title={`New conversation with ${d.name}`}
+                    onClick={() => openChat(newChatSession(undefined, undefined, undefined, undefined, undefined, undefined, d.id))}
+                    style={{ width: 20, height: 20, borderRadius: 5, flexShrink: 0 }}
+                  >
+                    <Icon paths={IC.plus} size={11} stroke={2} />
+                  </button>
+                </div>
+                {items.length
+                  ? items.map(row)
+                  : <div style={{ fontSize: 10.5, color: 'var(--faint)', padding: '2px 22px 4px' }}>no conversations yet</div>}
+              </div>
+            ))
+          })()}
         </div>
       </div>
 
@@ -450,6 +498,7 @@ export function ChatView() {
       {memoryOpen && <MemoryEditor workspaceId={s.activeWorkspace} onClose={() => setMemoryOpen(false)} />}
       {tagsOpen && selected && <TagsEditor agent={selected} onClose={() => setTagsOpen(false)} />}
       {budgetOpen && selected && <BudgetEditor agent={selected} onClose={() => setBudgetOpen(false)} />}
+      {agentDialogId && <DurableAgentDialog agentId={agentDialogId} onClose={() => setAgentDialogId(null)} />}
     </div>
   )
 }

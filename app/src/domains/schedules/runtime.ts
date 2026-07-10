@@ -20,6 +20,9 @@ export interface SchedulerDeps {
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
   launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }) => string | null
   spawnTaskSession: (taskId: string, opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string }) => string | null
+  /** deliver a scheduled prompt to a durable agent's conversation (its loop);
+   *  returns the conversation id, or null when the agent/brain is unavailable */
+  sendAgentChat: (durableAgentId: string, prompt: string, scheduleName: string) => string | null
   fireAddonHook: (hook: 'onCronFired', event: Record<string, unknown>) => void
   /** whether raw-command / one-shot launches are possible (false in a browser build) */
   canLaunch: boolean
@@ -75,8 +78,21 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
       for (const c of due) {
         fireAddonHook('onCronFired', {
           name: c.name,
-          kind: c.boardTask || c.templateId ? 'task' : c.cmd ? 'command' : 'log',
+          kind: c.durableAgentId ? 'agent' : c.boardTask || c.templateId ? 'task' : c.cmd ? 'command' : 'log',
         })
+        if (c.durableAgentId && c.agentPrompt) {
+          // a durable agent's loop: deliver the prompt to its conversation
+          const convId = deps.sendAgentChat(c.durableAgentId, c.agentPrompt, c.name)
+          recordRun(c.id, {
+            at: now.getTime(),
+            note: convId ? `prompted agent: ${c.agentPrompt.slice(0, 60)}` : 'could not reach the agent (archived, or no chat credentials)',
+            ok: !!convId,
+            agentId: convId ?? undefined,
+          })
+          logEvent('cron', convId, `${c.name} fired · prompted durable agent`)
+          notify('cron', `${c.name} fired`, c.agentPrompt.slice(0, 60), convId)
+          continue
+        }
         if (c.boardTask) {
           // schedule adds a task to the kanban board instead of launching;
           // it carries the full task spec, and startNow spawns its watcher-
@@ -173,6 +189,7 @@ export interface SchedulerCtx {
   notify: SchedulerDeps['notify']
   launchSession: SchedulerDeps['launchSession']
   spawnTaskSession: SchedulerDeps['spawnTaskSession']
+  sendAgentChat: SchedulerDeps['sendAgentChat']
   fireAddonHook: SchedulerDeps['fireAddonHook']
 }
 
@@ -181,7 +198,7 @@ export function useSchedulerRuntime(ctx: SchedulerCtx): void {
     const state: StatePort = { get: () => ctx.stateRef.current, update: dispatch, subscribe: () => () => {} }
     const rt = createSchedulerRuntime({
       state, clock: browserClock, logEvent: ctx.logEvent, notify: ctx.notify,
-      launchSession: ctx.launchSession, spawnTaskSession: ctx.spawnTaskSession, fireAddonHook: ctx.fireAddonHook,
+      launchSession: ctx.launchSession, spawnTaskSession: ctx.spawnTaskSession, sendAgentChat: ctx.sendAgentChat, fireAddonHook: ctx.fireAddonHook,
       canLaunch: native.isTauri,
     })
     rt.start()

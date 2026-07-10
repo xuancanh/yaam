@@ -63,6 +63,7 @@ function assembleRuntimeDeps(
     retryChatMessage: chat.retryChatMessage, resetChatRuntime: chat.resetChatRuntime,
     replayChatMessage: chat.replayChatMessage,
     resolveChatApproval: chat.resolveChatApproval,
+    reflectConversation: chat.reflectConversation,
     installPackage: addon.installPackage, sendAddonChat: addon.sendAddonChat,
     makeAddonApi: addon.makeAddonApi, disposeAddon: addon.disposeAddon,
     runMaster: master.runMaster, disposeSessionRuntime: chat.disposeSessionRuntime, abortMaster: master.abortMaster,
@@ -140,7 +141,7 @@ export function createAppRuntime(): AppRuntime {
   const session = createSessionRuntime(kernel, refs)
   const addon = createAddonSubsystem(kernel, refs, session, addonExec)
   const chat = createChatBoot(kernel, refs, session)
-  const master = createMasterSubsystem(kernel, refs, session, addon, masterSendLine, masterStopLine)
+  const master = createMasterSubsystem(kernel, refs, session, addon, chat.runChatMessage, masterSendLine, masterStopLine)
 
   const actions = createConductorActions({
     ...kernel,

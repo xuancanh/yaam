@@ -44,11 +44,15 @@ export interface ChatAppPort {
   memoryLookup: (query: string) => string
   /** propose one-click quick replies shown under the final answer */
   suggestReplies: (replies: string[]) => string
+  /** durable agents: record one lesson in the agent's LESSONS.md (or the
+   *  shared memory when the agent has no home folder) */
+  learnLesson: (lesson: string) => Promise<string>
 }
 
 const READ_ONLY_TOOLS = new Set([
   'list_dir', 'read_file', 'glob_files', 'grep_files', 'web_search', 'fetch_url',
   'list_board_tasks', 'list_schedules', 'load_skill', 'memory_lookup', 'suggest_replies',
+  'learn_lesson',
 ])
 
 export function toolNeedsApproval(name: string): boolean {
@@ -227,6 +231,11 @@ function builtinTools(skills: CatalogSkill[]) {
       name: 'memory_lookup',
       description: 'Search the assistants\' shared memory files (approvals, preferences, patterns, corrections, notes) for how the user handled similar things before. Query with a few keywords.',
       input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    },
+    {
+      name: 'learn_lesson',
+      description: 'Record one durable lesson about how to do YOUR job better — a user correction, a stated preference, an approach that failed or worked. It lands in your LESSONS.md and rides along in every future conversation. Use it the moment you are corrected; never for transient task state.',
+      input_schema: { type: 'object', properties: { lesson: { type: 'string', description: 'one concise sentence' } }, required: ['lesson'] },
     },
     {
       name: 'suggest_replies',
@@ -437,6 +446,10 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
     case 'memory_lookup':
       if (!app) return 'memory is unavailable in this context'
       return app.memoryLookup(str('query'))
+    case 'learn_lesson':
+      if (!app) return 'lessons are unavailable in this context'
+      if (!str('lesson').trim()) throw new ToolError('learn_lesson: "lesson" is required')
+      return await app.learnLesson(str('lesson').trim())
     case 'suggest_replies': {
       if (!app) return 'suggestions are unavailable in this context'
       const replies = Array.isArray(input.replies)
@@ -484,8 +497,8 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
   }
 }
 
-function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], persona?: string, memory?: string, contextSummary?: string, custom?: string): string {
-  return `You are a chat agent inside YAAM (an agent-orchestration desktop app) — the user's hands-on assistant in this workspace, like a desktop Claude. You live in a pane named "${agent.name}".
+function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], persona?: string, memory?: string, contextSummary?: string, custom?: string, durable?: string): string {
+  return `${durable?.trim() ? `${durable.trim()}\n\n` : ''}You are a chat agent inside YAAM (an agent-orchestration desktop app) — the user's hands-on assistant in this workspace, like a desktop Claude. You live in a pane named "${agent.name}".
 
 WORKING FOLDER: ${agent.cwd || '(none set — you cannot write files until the user sets one)'}
 - Writes (write_file / edit_file) are sandboxed to the working folder: pass paths relative to it (e.g. "report.docx", "src/main.py"). Absolute paths or ".."/"~" that escape the folder are refused. Reads may use absolute paths.
@@ -555,6 +568,7 @@ export async function runChatTurn(
   memory?: string,
   contextSummary?: string,
   custom?: string,
+  durable?: string,
 ): Promise<ApiUsage | undefined> {
   // a stopped/aborted turn can leave the history mid-tool-round (assistant
   // tool_use without its tool_result) — providers reject that; drop the debris.
@@ -571,7 +585,7 @@ export async function runChatTurn(
   for (let i = 0; i < 24; i++) {
     const agent = getAgent()
     if (!agent) return usage
-    const stream = () => callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory, contextSummary, custom), history, tools,
+    const stream = () => callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory, contextSummary, custom, durable), history, tools,
       (d, ch) => onEvent({ kind: ch === 'thinking' ? 'thinking' : 'delta', text: d }), signal)
     let res: Awaited<ReturnType<typeof callApiStream>>
     try {

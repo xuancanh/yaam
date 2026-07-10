@@ -192,6 +192,10 @@ export interface SessionRecord {
   nameIsDefault?: boolean
   /** which ChatAgentType powers this chat session */
   chatTypeId?: string
+  /** the durable agent this conversation belongs to (chat sessions) */
+  durableAgentId?: string
+  /** epoch ms of the last reflection distilled from this conversation */
+  reflectedAt?: number
   /** model chosen for this session (from the type's models list) */
   chatModel?: string
   /** persona adopted by this chat session */
@@ -348,6 +352,10 @@ export interface Cron {
   lastFiredMinute?: string
   /** newest-first log of the last firings and what each produced */
   runs?: CronRun[]
+  /** when set, firing sends `agentPrompt` to this durable agent's scheduled
+   *  conversation (its recurring loop) instead of launching anything */
+  durableAgentId?: string
+  agentPrompt?: string
   /** agent template launched on fire (overrides cmd) */
   templateId?: string
   /** task text passed to the template */
@@ -450,6 +458,33 @@ export interface ChatAgentType {
   /** extra persona appended to the chat agent's system prompt */
   systemPrompt?: string
   enabled: boolean
+}
+
+/** A durable agent: a persistent chat identity that outlives conversations.
+ *  Its brain lives as files in `homeDir` (LESSONS.md, JOURNAL.md, knowledge/)
+ *  which it maintains with its own file tools; the charter is the stable,
+ *  user-written job description. Conversations are chat sessions carrying
+ *  `durableAgentId`; the built-in generic agent handles everything else. */
+export interface DurableAgent {
+  id: string
+  name: string
+  color: string
+  /** one-line role, shown under the name */
+  role?: string
+  /** the job description: scope, standards, and rules — stable, user-owned */
+  charter: string
+  /** the agent's home folder: working dir + brain files; empty = defaultCwd
+   *  (no persistent file brain — the built-in assistant works this way) */
+  homeDir?: string
+  /** defaults for new conversations */
+  chatTypeId?: string
+  model?: string
+  personaId?: string
+  skillSourceIds?: string[]
+  /** the seeded generic assistant — not deletable, homeDir optional */
+  builtin?: boolean
+  archived?: boolean
+  createdAt: number
 }
 
 /** a named persona chat agents can adopt (picked per chat) */
@@ -826,6 +861,8 @@ export interface PersistedState {
   workspaceData?: Record<string, WorkspaceData>
   addonStorage?: Record<string, Record<string, unknown>>
   chatMemory?: Record<string, string>
+  /** persistent chat identities that outlive conversations */
+  durableAgents?: DurableAgent[]
   /** multi-file assistant memory, keyed by workspace id */
   assistantMemory?: Record<string, MemoryFile[]>
   /** recent assistant decisions + user responses (implicit-feedback eval log) */

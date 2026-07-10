@@ -8,6 +8,7 @@ import { mkMemory, mkTools } from '../../core/data'
 import { estimateLogUsage } from '../../core/usage'
 import { mkId } from '../../shared/id'
 import { groupsFromLegacy } from '../../domains/session/layout-state'
+import { builtinAssistant } from '../../domains/chat/slice'
 import { inferLegacyTerminalShell } from '../../store/state-helpers'
 
 export interface HydrationOutcome {
@@ -115,6 +116,10 @@ export function buildHydration(p: Partial<PersistedState>, seed: AppState): Hydr
     workspaceData,
     addonStorage: p.addonStorage ?? {},
     chatMemory: p.chatMemory ?? {},
+    // the built-in assistant survives even snapshots from before durable agents
+    durableAgents: (p.durableAgents ?? []).some(a => a.builtin)
+      ? p.durableAgents!
+      : [builtinAssistant(), ...(p.durableAgents ?? [])],
     assistantMemory: p.assistantMemory ?? {},
     harnessLog: p.harnessLog ?? [],
     addons: (p.addons ?? seed.addons).map(a => {

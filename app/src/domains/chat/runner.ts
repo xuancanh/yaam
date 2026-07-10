@@ -18,9 +18,17 @@ import { ESTIMATED_OUTPUT_COST_PER_KTOK } from '../../core/usage'
 import { buildContextSummary, chatBudgetState } from './turns'
 import { formatHits, memoryDigest, searchMemory, withMemoryAppend, wsMemory } from '../master/assistant-memory'
 import { recordDecision } from '../master/harness-stats'
+import { LESSONS_FILE, JOURNAL_FILE, appendBrainFile, durablePromptSection, journalEntry, loadBrain, reflectTranscript } from './durable-brain'
 
 /** quick replies proposed mid-turn, attached to the final bubble at seal time */
 const pendingReplies = new Map<string, string[]>()
+
+/** The durable agent a conversation belongs to, if any. */
+function durableAgentOf(ctx: ChatCtx, agentId: string) {
+  const st = ctx.stateRef.current
+  const session = st.agents.find(a => a.id === agentId)
+  return session?.durableAgentId ? (st.durableAgents ?? []).find(d => d.id === session.durableAgentId && !d.archived) : undefined
+}
 
 export interface ChatCtx {
   stateRef: MutableRefObject<AppState>
@@ -133,6 +141,18 @@ function makeAppPort(ctx: ChatCtx, agentId: string, turnId: string): ChatAppPort
         harnessLog: recordDecision(s.harnessLog, { role: 'chat', kind: 'reply', agentId, text: replies.join(' · ').slice(0, 160) }),
       }))
       return `${replies.length} quick replies will be offered under your answer`
+    },
+    learnLesson: async lesson => {
+      const durable = durableAgentOf(ctx, agentId)
+      if (durable?.homeDir?.trim()) {
+        await appendBrainFile(durable, LESSONS_FILE, `- ${lesson.replace(/\s+/g, ' ').trim()}`)
+        return `lesson recorded in ${LESSONS_FILE}`
+      }
+      // no home folder (built-in assistant): shared workspace memory instead
+      const st = ctx.stateRef.current
+      const wid = st.agents.find(a => a.id === agentId)?.workspaceId ?? st.activeWorkspace
+      ctx.dispatch(s => withMemoryAppend(s, 'notes', lesson, wid))
+      return 'lesson recorded in the shared workspace memory'
     },
     saveSkill: (name, description, body) => {
       const slug = name.trim()
@@ -315,6 +335,11 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       if (finalText !== undefined) updateTurn({ assistantText: finalText })
     }
     pendingReplies.delete(agentId) // an aborted turn must not leak stale chips
+    // durable agents carry their identity + file brain into every turn
+    const durableAgent = durableAgentOf(ctx, agentId)
+    const durableSection = durableAgent
+      ? durablePromptSection(durableAgent, await loadBrain(durableAgent).catch(() => ({ lessons: '', journal: '' })))
+      : undefined
     const usage = await runChatTurn(
       buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
       () => ctx.stateRef.current.agents.find(a => a.id === agentId),
@@ -365,6 +390,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       ].filter(Boolean).join('\n') || undefined,
       agent.chatContextSummary,
       ctx.stateRef.current.settings.assistantPrompts?.chat,
+      durableSection,
     )
     seal()
     // attach quick replies (suggest_replies) to the final assistant bubble
@@ -403,6 +429,9 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       ...s2,
       agents: s2.agents.map(a => a.id === agentId ? { ...a, chatContextSummary: buildContextSummary(currentTurns) } : a),
     }))
+    // durable agents: distill enough-new conversation into journal + lessons
+    // in the background (threshold lives inside; failures are silent)
+    void reflectDurableConversation(ctx, agentId).catch(() => {})
     // auto-title: after a successful turn, chats still carrying the default
     // type name get a short LLM-derived title (a manual rename always wins)
     if (ctx.stateRef.current.agents.find(a => a.id === agentId)?.nameIsDefault) {
@@ -445,4 +474,33 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     ctx.aborts.clear(agentId)
     ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
   }
+}
+
+/** Distill a durable-agent conversation's new messages into its journal and
+ *  lessons. Auto-triggered after turns once ≥8 fresh messages accumulated;
+ *  `force` (manual "Reflect now") skips the threshold. Returns a status line. */
+export async function reflectDurableConversation(ctx: ChatCtx, conversationId: string, force = false): Promise<string> {
+  const st = ctx.stateRef.current
+  const conv = st.agents.find(a => a.id === conversationId)
+  const durable = conv?.durableAgentId ? (st.durableAgents ?? []).find(d => d.id === conv.durableAgentId) : undefined
+  if (!conv || !durable) return 'not a durable-agent conversation'
+  const since = conv.reflectedAt ?? 0
+  const fresh = (conv.chatLog ?? []).filter(m => m.at > since && (m.role === 'user' || m.role === 'assistant'))
+  if (fresh.length < (force ? 2 : 8)) return 'not enough new conversation to reflect on'
+  const chatType = st.chatAgentTypes.find(t => t.id === conv.chatTypeId) ?? st.chatAgentTypes.find(t => t.enabled)
+  if (!chatType || !chatTypeHasCreds(chatType, st.settings)) return 'no chat credentials available for reflection'
+  const reflection = await reflectTranscript(buildChatCfg(chatType, st.settings), durable, conv, since)
+  if (!reflection) return 'nothing worth recording'
+  if (durable.homeDir?.trim()) {
+    await appendBrainFile(durable, JOURNAL_FILE, journalEntry(conv.name, reflection.journal))
+    for (const l of reflection.lessons) await appendBrainFile(durable, LESSONS_FILE, `- ${l}`)
+  } else if (reflection.lessons.length) {
+    // brainless (built-in) agents keep lessons in the shared workspace memory
+    ctx.dispatch(s => reflection.lessons.reduce((acc, l) => withMemoryAppend(acc, 'notes', l, conv.workspaceId), s))
+  }
+  ctx.dispatch(s => ({
+    ...s,
+    agents: s.agents.map(a => (a.id === conversationId ? { ...a, reflectedAt: Date.now() } : a)),
+  }))
+  return `reflected · journal updated${reflection.lessons.length ? ` · ${reflection.lessons.length} lesson(s) learned` : ''}`
 }
