@@ -47,6 +47,23 @@ describe('buildHydration', () => {
     expect(last.text).toMatch(/interrupted/)
   })
 
+  it('stops a structured turn interrupted after an assistant delta was persisted', () => {
+    const p = {
+      agents: [{
+        id: 'c1', kind: 'chat', chatLog: [{ id: 'm', role: 'assistant', text: 'partial reply', at: 2 }],
+        chatTurns: [{
+          id: 't1', at: 1, startedAt: 1, status: 'running', model: 'test',
+          input: { text: 'hi', attachments: [] }, tools: [], assistantText: 'partial reply',
+        }],
+      }],
+    } as unknown as Partial<PersistedState>
+    const chat = buildHydration(p, seed()).restoredAgents.find(a => a.id === 'c1')!
+
+    expect(chat.chatTurns?.[0].status).toBe('stopped')
+    expect(chat.chatTurns?.[0].completedAt).toEqual(expect.any(Number))
+    expect(chat.chatLog?.at(-1)?.text).toMatch(/interrupted/)
+  })
+
   it('drops tab-group slots referencing unknown session ids and empties dead groups', () => {
     const p = {
       agents: [{ id: 'a1', kind: 'real', cmd: 'claude', log: [] }],

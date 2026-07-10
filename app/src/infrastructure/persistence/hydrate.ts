@@ -32,17 +32,23 @@ export function buildHydration(p: Partial<PersistedState>, seed: AppState): Hydr
     .map(a => {
       const log = (a.log ?? []).slice(-200)
       const usage = a.usageVersion === 1 ? { used: a.used, cost: a.cost } : estimateLogUsage(log)
+      const interruptedAt = Date.now()
+      const hadRunningTurn = (a.chatTurns ?? []).some(t => t.status === 'running')
+      const chatTurns = a.chatTurns?.map(t => t.status === 'running'
+        ? { ...t, status: 'stopped' as const, completedAt: interruptedAt }
+        : t)
       // a chat persisted while running (or with an unanswered user
       // message) died mid-reply — say so instead of a silent gap
       const lastChat = (a.chatLog ?? [])[(a.chatLog ?? []).length - 1]
       const interrupted = a.kind === 'chat'
-        && (a.status === 'running' || lastChat?.role === 'user' || lastChat?.role === 'thinking')
+        && (a.status === 'running' || hadRunningTurn || lastChat?.role === 'user' || lastChat?.role === 'thinking')
       const chatLog = interrupted
-        ? [...(a.chatLog ?? []), { id: mkId('cm'), role: 'assistant' as const, text: '*(interrupted — the app closed mid-reply; send a message to continue)*', at: Date.now() }]
+        ? [...(a.chatLog ?? []), { id: mkId('cm'), role: 'assistant' as const, text: '*(interrupted — the app closed mid-reply; send a message to continue)*', at: interruptedAt }]
         : a.chatLog
       return {
         ...a,
         ...(chatLog ? { chatLog } : {}),
+        ...(chatTurns ? { chatTurns } : {}),
         ...usage,
         usageVersion: 1 as const,
         tools: a.tools ?? mkTools(),
