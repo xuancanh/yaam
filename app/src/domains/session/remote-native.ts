@@ -15,6 +15,7 @@ import { shq, sshPrefix } from './remote-machine'
 
 // execCommand caps output at ~40 KB; keep binary reads under that (base64 ~4/3)
 const REMOTE_B64_CAP = 24_000
+const REMOTE_TEXT_CAP = 30_000
 
 export interface SessionFs {
   listDir(path: string): Promise<DirEntryInfo[]>
@@ -106,14 +107,20 @@ export function remoteFs(machine: Machine, id: string): SessionFs {
         .sort((a, b) => (a.isDir === b.isDir ? a.name.toLowerCase().localeCompare(b.name.toLowerCase()) : a.isDir ? -1 : 1))
     },
     async readTextFile(path) {
-      return ok(await run(`cat -- ${shq(path)}`))
+      const target = shq(path)
+      return ok(await run(
+        `size=$(wc -c < ${target}) || exit $?; `
+        + `if [ "$size" -gt ${REMOTE_TEXT_CAP} ]; then echo "file too large to edit over SSH ($size bytes; limit ${REMOTE_TEXT_CAP})" >&2; exit 1; fi; `
+        + `cat -- ${target}`,
+      ))
     },
     async writeTextFile(path, contents) {
       // the content travels base64 inside the command line (like wrapLaunch's
       // inner command) — keep it well under ARG_MAX
-      if (contents.length > 200_000) throw new Error('file too large to save over SSH (200 KB limit)')
+      const bytes = new TextEncoder().encode(contents)
+      if (bytes.length > 200_000) throw new Error('file too large to save over SSH (200 KB limit)')
       let bin = ''
-      for (const b of new TextEncoder().encode(contents)) bin += String.fromCharCode(b)
+      for (const b of bytes) bin += String.fromCharCode(b)
       const target = shq(path)
       // Decode beside the destination, then rename. A failed transfer/decode
       // leaves the original intact; copying first preserves an existing mode.

@@ -87,6 +87,25 @@ describe('remoteFs.writeTextFile', () => {
     await expect(remoteFs(m, 'a1').writeTextFile('/srv/app/file.txt', 'x'.repeat(200_001))).rejects.toThrow(/too large/)
     expect(exec).not.toHaveBeenCalled()
   })
+  it('enforces the save limit in encoded bytes, not UTF-16 characters', async () => {
+    await expect(remoteFs(m, 'a1').writeTextFile('/srv/app/file.txt', 'é'.repeat(100_001))).rejects.toThrow(/too large/)
+    expect(exec).not.toHaveBeenCalled()
+  })
+})
+
+describe('remoteFs.readTextFile', () => {
+  it('checks the remote size before returning editable text', async () => {
+    okOut('hello')
+    expect(await remoteFs(m, 'a1').readTextFile('/srv/app/file.txt')).toBe('hello')
+    const command = exec.mock.calls[0][0]
+    expect(command).toContain('wc -c')
+    expect(command).toContain('file too large to edit over SSH')
+    expect(command.indexOf('wc -c')).toBeLessThan(command.indexOf('cat --'))
+  })
+  it('surfaces the remote size guard instead of exposing truncated content', async () => {
+    exec.mockResolvedValueOnce({ code: 1, output: 'file too large to edit over SSH (50000 bytes; limit 30000)' })
+    await expect(remoteFs(m, 'a1').readTextFile('/srv/app/large.txt')).rejects.toThrow(/too large to edit/)
+  })
 })
 
 describe('remoteFs.detectRepos', () => {
