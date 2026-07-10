@@ -28,11 +28,12 @@ export interface ChatSearchOps {
 }
 
 const SYNC_DEBOUNCE_MS = 1500
+const SYNC_RETRY_MS = 5000
 
 const defaultOps: ChatSearchOps = {
-  reindex: docs => native.chatSearchReindex(docs).catch(() => {}),
-  upsert: docs => native.chatSearchUpsert(docs).catch(() => {}),
-  remove: ids => native.chatSearchRemove(ids).catch(() => {}),
+  reindex: docs => native.chatSearchReindex(docs),
+  upsert: docs => native.chatSearchUpsert(docs),
+  remove: ids => native.chatSearchRemove(ids),
 }
 
 export function createChatSearchIndexer(
@@ -42,6 +43,9 @@ export function createChatSearchIndexer(
 ): ChatSearchIndexer {
   let timer: Disposable | undefined
   let unsub: (() => void) | undefined
+  let active = false
+  let syncing = false
+  let rerun = false
   // msgId → indexed text; undefined until the first (full) sync completes
   let indexed: Map<string, string> | undefined
 
@@ -54,29 +58,64 @@ export function createChatSearchIndexer(
         text: `${a.name}${a.chatTags?.length ? `\n${a.chatTags.join(' ')}` : ''}\n${m.text}`,
       })))
 
-  const sync = () => {
-    const docs = collect()
-    const next = new Map(docs.map(d => [d.msgId, d.text]))
-    if (!indexed) {
-      // first sync: full rebuild
-      void ops.reindex(docs)
-    } else {
-      const changed = docs.filter(d => indexed!.get(d.msgId) !== d.text)
-      const removed = [...indexed.keys()].filter(id => !next.has(id))
-      if (changed.length) void ops.upsert(changed)
-      if (removed.length) void ops.remove(removed)
-    }
-    indexed = next
+  const arm = (delay = SYNC_DEBOUNCE_MS) => {
+    if (!active) return
+    timer?.dispose()
+    timer = clock.setTimeout(() => {
+      timer = undefined
+      void sync()
+    }, delay)
   }
 
-  const arm = () => {
-    timer?.dispose()
-    timer = clock.setTimeout(sync, SYNC_DEBOUNCE_MS)
+  const sync = async () => {
+    if (syncing) {
+      rerun = true
+      return
+    }
+    syncing = true
+    const docs = collect()
+    const next = new Map(docs.map(d => [d.msgId, d.text]))
+    let failed = false
+    try {
+      if (!indexed) {
+        // first sync: full rebuild
+        await ops.reindex(docs)
+      } else {
+        const changed = docs.filter(d => indexed!.get(d.msgId) !== d.text)
+        const removed = [...indexed.keys()].filter(id => !next.has(id))
+        await Promise.all([
+          changed.length ? ops.upsert(changed) : Promise.resolve(),
+          removed.length ? ops.remove(removed) : Promise.resolve(),
+        ])
+      }
+      if (active) indexed = next
+    } catch {
+      failed = true
+    } finally {
+      syncing = false
+      if (active) {
+        if (rerun) {
+          rerun = false
+          arm(0)
+        } else if (failed && !timer) {
+          arm(SYNC_RETRY_MS)
+        }
+      }
+    }
   }
 
   return {
-    start() { unsub ??= state.subscribe((s, prev) => { if (chatTranscriptsChanged(s, prev)) arm() }) },
-    dispose() { timer?.dispose(); timer = undefined; unsub?.(); unsub = undefined; indexed = undefined },
+    start() {
+      active = true
+      unsub ??= state.subscribe((s, prev) => { if (chatTranscriptsChanged(s, prev)) arm() })
+    },
+    dispose() {
+      active = false
+      rerun = false
+      timer?.dispose(); timer = undefined
+      unsub?.(); unsub = undefined
+      indexed = undefined
+    },
   }
 }
 

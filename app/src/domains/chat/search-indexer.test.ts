@@ -17,6 +17,11 @@ function spyOps() {
   } satisfies ChatSearchOps
 }
 
+const flush = async () => {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 describe('createChatSearchIndexer', () => {
   it('does a full reindex on the first sync, user/assistant messages only', () => {
     const port = createFakeStatePort(state([chat('c1', [
@@ -39,7 +44,7 @@ describe('createChatSearchIndexer', () => {
     expect(ops.upsert).not.toHaveBeenCalled()
   })
 
-  it('upserts only new/edited messages on later syncs (not a full rebuild)', () => {
+  it('upserts only new/edited messages on later syncs (not a full rebuild)', async () => {
     const port = createFakeStatePort(state([chat('c1', [{ id: 'm1', role: 'user', text: 'hello' }])]))
     const clock = new FakeClock()
     const ops = spyOps()
@@ -47,6 +52,7 @@ describe('createChatSearchIndexer', () => {
     // first sync → full reindex
     port.set({ ...port.get(), agents: [chat('c1', [{ id: 'm1', role: 'user', text: 'hello' }])] })
     clock.advance(1500)
+    await flush()
     expect(ops.reindex).toHaveBeenCalledOnce()
 
     // add m2 and edit m1 → incremental upsert of exactly those two
@@ -60,7 +66,7 @@ describe('createChatSearchIndexer', () => {
     expect(ops.upsert.mock.calls[0][0].map(d => d.msgId).sort()).toEqual(['m1', 'm2'])
   })
 
-  it('removes messages that disappeared from the transcript', () => {
+  it('removes messages that disappeared from the transcript', async () => {
     const port = createFakeStatePort(state([chat('c1', [
       { id: 'm1', role: 'user', text: 'a' }, { id: 'm2', role: 'assistant', text: 'b' },
     ])]))
@@ -71,12 +77,32 @@ describe('createChatSearchIndexer', () => {
       { id: 'm1', role: 'user', text: 'a' }, { id: 'm2', role: 'assistant', text: 'b' },
     ])] })
     clock.advance(1500) // full reindex, indexed = {m1, m2}
+    await flush()
 
     // delete the whole chat → both removed, nothing upserted
     port.set({ ...port.get(), agents: [] })
     clock.advance(1500)
     expect(ops.remove).toHaveBeenCalledOnce()
     expect(ops.remove.mock.calls[0][0].sort()).toEqual(['m1', 'm2'])
+    expect(ops.upsert).not.toHaveBeenCalled()
+  })
+
+  it('retries a failed native sync without advancing the indexed snapshot', async () => {
+    const port = createFakeStatePort(state([chat('c1', [{ id: 'm1', role: 'user', text: 'hello' }])]))
+    const clock = new FakeClock()
+    const ops = spyOps()
+    ops.reindex.mockRejectedValueOnce(new Error('index locked'))
+    createChatSearchIndexer(port, clock, ops).start()
+
+    port.set({ ...port.get(), agents: [chat('c1', [{ id: 'm1', role: 'user', text: 'hello' }, { id: 'm2', role: 'assistant', text: 'again' }])] })
+    clock.advance(1500)
+    await flush()
+    expect(ops.reindex).toHaveBeenCalledOnce()
+    expect(clock.pending).toBe(1)
+
+    clock.advance(5000)
+    await flush()
+    expect(ops.reindex).toHaveBeenCalledTimes(2)
     expect(ops.upsert).not.toHaveBeenCalled()
   })
 
