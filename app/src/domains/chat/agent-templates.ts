@@ -3,6 +3,7 @@
 // the user picks becomes the agent's brain. AGENT.json in a home folder makes
 // an agent portable (export writes it; import reads it).
 import type { DurableAgent } from '../../core/types'
+import { describeCron } from '../schedules/cron'
 
 export interface DurableAgentTemplate {
   id: string
@@ -82,14 +83,16 @@ export function parseAgentExport(text: string): AgentExport | null {
       yaamAgent: 1,
       name: raw.name.trim().slice(0, 60),
       role: typeof raw.role === 'string' ? raw.role.slice(0, 120) : undefined,
-      color: typeof raw.color === 'string' ? raw.color : '#B78AF7',
+      color: typeof raw.color === 'string' && /^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color : '#B78AF7',
       charter: typeof raw.charter === 'string' ? raw.charter.slice(0, 8000) : '',
       loops: Array.isArray(raw.loops)
         ? raw.loops
             .filter((l): l is { name: string; schedule: string; prompt: string } =>
               !!l && typeof l === 'object'
               && typeof (l as Record<string, unknown>).schedule === 'string'
-              && typeof (l as Record<string, unknown>).prompt === 'string')
+              && describeCron((l as Record<string, unknown>).schedule as string).ok
+              && typeof (l as Record<string, unknown>).prompt === 'string'
+              && !!((l as Record<string, unknown>).prompt as string).trim())
             .map(l => ({ name: String(l.name ?? 'loop').slice(0, 40), schedule: l.schedule, prompt: l.prompt.slice(0, 600) }))
             .slice(0, 6)
         : undefined,

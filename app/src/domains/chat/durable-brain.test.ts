@@ -92,4 +92,17 @@ describe('AGENT.json round-trip', () => {
     expect(parseAgentExport('not json')).toBeNull()
     expect(parseAgentExport(JSON.stringify({ yaamAgent: 1, name: '  ' }))).toBeNull()
   })
+  it('sanitizes presentation data and drops invalid imported loops', () => {
+    const parsed = parseAgentExport(JSON.stringify({
+      yaamAgent: 1, name: 'Agent', color: 'url(https://example.test/leak)',
+      loops: [
+        { name: 'good', schedule: '0 9 * * 1-5', prompt: 'work' },
+        { name: 'bad-time', schedule: '99 25 * * *', prompt: 'never runs' },
+        { name: 'empty', schedule: '0 9 * * *', prompt: '  ' },
+      ],
+    }))!
+
+    expect(parsed.color).toBe('#B78AF7')
+    expect(parsed.loops).toEqual([{ name: 'good', schedule: '0 9 * * 1-5', prompt: 'work' }])
+  })
 })
