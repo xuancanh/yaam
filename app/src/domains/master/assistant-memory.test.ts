@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendMemory, formatHits, memoryDigest, searchMemory } from './assistant-memory'
+import { appendMemory, formatHits, memoryDigest, searchMemory, wsMemory } from './assistant-memory'
 import type { MemoryFile } from '../../core/types'
 
 const file = (name: string, content: string, updatedAt = 1): MemoryFile =>
@@ -55,5 +55,18 @@ describe('memoryDigest / formatHits', () => {
   it('formats hits with file tags and a fallback', () => {
     expect(formatHits([{ file: 'notes', line: '- x' }])).toBe('[notes] - x')
     expect(formatHits([])).toBe('no matching memory entries')
+  })
+})
+
+describe('wsMemory', () => {
+  it('uses an explicit background workspace instead of the active workspace', () => {
+    const active = [file('preferences', '- active')]
+    const background = [file('preferences', '- background')]
+    const state = {
+      activeWorkspace: 'ws-a',
+      assistantMemory: { 'ws-a': active, 'ws-b': background },
+    }
+    expect(wsMemory(state)).toBe(active)
+    expect(wsMemory(state, 'ws-b')).toBe(background)
   })
 })

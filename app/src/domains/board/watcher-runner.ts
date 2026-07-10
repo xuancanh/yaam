@@ -199,13 +199,17 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           })
           return `${suggestions.length} one-click option(s) shown in the task chat`
         },
-        memoryLookup: query => formatHits(searchMemory(wsMemory(ctx.stateRef.current), query)),
+        memoryLookup: query => {
+          const state = ctx.stateRef.current
+          return formatHits(searchMemory(wsMemory(state, findTaskInState(state, taskId)?.workspaceId), query))
+        },
       }
       const stream = makeStreamingCall(ctx, taskId)
       try {
         const curState = ctx.stateRef.current
+        const workspaceId = findTaskInState(curState, taskId)?.workspaceId
         const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec, ctx.aborts.signal(taskId), stream.call, {
-          memoryDigest: memoryDigest(wsMemory(curState), ['preferences', 'patterns', 'corrections']),
+          memoryDigest: memoryDigest(wsMemory(curState, workspaceId), ['preferences', 'patterns', 'corrections']),
           calibration: calibrationNote(curState.harnessLog, 'watcher'),
           custom: curState.settings.assistantPrompts?.watcher,
         })

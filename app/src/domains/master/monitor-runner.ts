@@ -80,7 +80,7 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
           }))
           return `${suggestions.length} suggestion(s) shown to the user`
         },
-        memoryLookup: query => formatHits(searchMemory(wsMemory(ctx.stateRef.current), query)),
+        memoryLookup: query => formatHits(searchMemory(wsMemory(ctx.stateRef.current, agent.workspaceId), query)),
         reportToMaster: (digest, importance) => {
           const a = ctx.stateRef.current.agents.find(x => x.id === id)
           ctx.dispatch(s2 => ({
@@ -100,7 +100,7 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
       try {
         const cur = ctx.stateRef.current
         await runMonitorTurn(buildCfg(st, st.monitorModel || undefined), agent, current, history, exec, ctx.aborts.signal(id), {
-          memoryDigest: memoryDigest(wsMemory(cur), ['approvals', 'preferences', 'patterns']),
+          memoryDigest: memoryDigest(wsMemory(cur, agent.workspaceId), ['approvals', 'preferences', 'patterns']),
           calibration: calibrationNote(cur.harnessLog, 'monitor'),
           custom: cur.settings.assistantPrompts?.monitor,
         })
