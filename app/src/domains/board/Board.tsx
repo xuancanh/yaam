@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
-import type { DragEvent, KeyboardEvent } from 'react'
+import { useState } from 'react'
+import type { DragEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { ACCENT, hexToRgba } from '../../core/data'
-import type { Agent, BoardCol, BoardTask, TaskChatMsg } from '../../core/types'
+import { ACCENT } from '../../core/data'
+import type { Agent, BoardCol, BoardTask } from '../../core/types'
 import { IC, Icon, ViewHeader } from '../../components/ui'
-import { Markdown } from '../../components/Markdown'
 import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from './TaskSpecForm'
 import { ReviewPanel } from './ReviewPanel'
 import { GitWorkbench } from '../session/GitPanel'
+import { MissionControl } from './MissionControl'
+import { TaskReviewFooter, WatcherChat } from './WatcherChat'
 import { confirmAction } from '../../components/Confirm'
 
 const FIELD = {
@@ -92,99 +93,9 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
 
 // ---------- task drawer: spec + watcher chat ----------
 
-/** Render one user, watcher, or system message from a task conversation. */
-function ChatBubble({ m }: { m: TaskChatMsg }) {
-  if (m.role === 'system') {
-    return (
-      <div className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', textAlign: 'center', padding: '2px 0' }}>
-        · {m.text} ·
-      </div>
-    )
-  }
-  const user = m.role === 'user'
-  return (
-    <div style={{ display: 'flex', justifyContent: user ? 'flex-end' : 'flex-start' }}>
-      <div style={{
-        maxWidth: '85%', minWidth: 0, borderRadius: 11, padding: '8px 11px', fontSize: 12.5, lineHeight: 1.5,
-        background: user ? hexToRgba(ACCENT, 0.14) : 'var(--panel2)',
-        border: `1px solid ${user ? hexToRgba(ACCENT, 0.3) : 'var(--line2)'}`,
-        color: 'var(--text)',
-      }}>
-        {!user && <div className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--accent)', marginBottom: 3 }}>WATCHER</div>}
-        <Markdown text={m.text} />
-      </div>
-    </div>
-  )
-}
-
-/** Edit a task specification and converse with its dedicated watcher. */
-/** Review-tab actions: feedback to the watcher chat, approve & merge, request changes. */
-function TaskReviewFooter({ task, onClose }: { task: BoardTask; onClose: () => void }) {
-  const { approveTaskReview, rejectTaskReview, sendTaskChat } = useActions()
-  const [comment, setComment] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  const approve = async () => {
-    setBusy(true)
-    setErr('')
-    const e = await approveTaskReview(task.id)
-    setBusy(false)
-    if (e) setErr(e)
-    else onClose()
-  }
-  return (
-    <>
-      {err && (
-        <div className="mono" style={{ borderTop: '1px solid var(--line)', padding: '9px 16px', fontSize: 11, color: 'var(--red-soft)', whiteSpace: 'pre-wrap', maxHeight: 100, overflowY: 'auto' }}>
-          {err}
-        </div>
-      )}
-      <div style={{ borderTop: '1px solid var(--line)', padding: '11px 15px', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-        <textarea
-          value={comment}
-          onChange={e => setComment(e.target.value)}
-          placeholder="Feedback — sent to the task's watcher…"
-          rows={2}
-          style={{
-            flex: 1, background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
-            padding: '7px 10px', color: 'var(--text)', outline: 'none', fontSize: 12, resize: 'vertical',
-            fontFamily: 'var(--font-sans)',
-          }}
-        />
-        <button
-          className="open-btn"
-          title="Send feedback to the watcher without changing the task's column"
-          style={{ flex: 'none', padding: '8px 12px', fontSize: 11.5, opacity: comment.trim() ? 1 : 0.5 }}
-          disabled={!comment.trim()}
-          onClick={() => { sendTaskChat(task.id, comment.trim()); setComment('') }}
-        >
-          Send
-        </button>
-        <button
-          className="deny-btn"
-          style={{ flex: 'none', padding: '8px 14px', fontSize: 12 }}
-          disabled={busy}
-          title="Bounce the task to In progress; your feedback becomes the watcher's next instruction"
-          onClick={() => { rejectTaskReview(task.id, comment); onClose() }}
-        >
-          Request changes
-        </button>
-        <button
-          className="approve-btn"
-          style={{ flex: 'none', padding: '8px 16px', fontSize: 12, opacity: busy ? 0.6 : 1 }}
-          disabled={busy}
-          onClick={() => { void approve() }}
-        >
-          {busy ? 'Merging…' : 'Approve & merge'}
-        </button>
-      </div>
-    </>
-  )
-}
-
 function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | null; onClose: () => void }) {
-  const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes, agents: x.agents, stream: x.taskStreams?.[task.id] ?? '' }), shallowEqual)
-  const { updateTask, sendTaskChat, focusTab, startTask, restartTask, archiveTask } = useActions()
+  const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes, agents: x.agents }), shallowEqual)
+  const { updateTask, focusTab, startTask, restartTask, archiveTask } = useActions()
   const [view, setView] = useState<'chat' | 'review'>('chat')
   // the task's worktree, if any of its sessions ran isolated
   const worktree = (task.agentIds ?? [])
@@ -193,29 +104,10 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
   const runWith = task.templateId
     ? `template · ${(s.templates ?? []).find(t => t.id === task.templateId)?.name ?? task.templateId}`
     : (s.agentTypes.find(t => t.id === task.typeId)?.name ?? 'default agent type')
-  const [draft, setDraft] = useState('')
   const [editingSpec, setEditingSpec] = useState(false)
   const [descDraft, setDescDraft] = useState(task.description ?? '')
   const [critDraft, setCritDraft] = useState((task.criteria ?? []).join('\n'))
   const [cwdDraft, setCwdDraft] = useState(task.cwd ?? '')
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const chat = task.chat ?? []
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [chat.length, s.stream])
-
-  // Post the current draft to the task watcher and clear the composer.
-  const send = () => {
-    if (!draft.trim()) return
-    sendTaskChat(task.id, draft)
-    setDraft('')
-  }
-  // Send on Enter while preserving Shift+Enter for multiline input.
-  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
-  }
   // Persist edited task fields after trimming blank acceptance criteria.
   const saveSpec = () => {
     updateTask(task.id, {
@@ -359,44 +251,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
           )}
         </div>
 
-        <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '14px 17px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {chat.length === 0 && (
-            <div style={{ fontSize: 12, color: 'var(--dim)', textAlign: 'center', paddingTop: 20, lineHeight: 1.6 }}>
-              This task's watcher chats here once a session is started —<br />progress notes, questions, and your replies.
-            </div>
-          )}
-          {chat.map(m => <ChatBubble key={m.id} m={m} />)}
-          {s.stream && (
-            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-              <div style={{
-                maxWidth: '85%', minWidth: 0, borderRadius: 11, padding: '8px 11px', fontSize: 12.5, lineHeight: 1.5,
-                background: 'var(--panel2)', border: '1px solid var(--line2)', color: 'var(--text)',
-              }}>
-                <div className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--accent)', marginBottom: 3 }}>WATCHER</div>
-                <Markdown text={s.stream} />
-                <span className="stream-caret" />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div style={{ borderTop: '1px solid var(--line)', padding: '11px 13px' }}>
-          <div style={{ background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 11, padding: '9px 11px' }}>
-            <textarea
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              onKeyDown={onKey}
-              placeholder="Message the task's watcher…"
-              rows={2}
-              style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none', color: 'var(--text)', fontFamily: 'var(--font-sans)', fontSize: 12.5, lineHeight: 1.5 }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="send-btn" onClick={send} style={{ width: 30, height: 30 }}>
-                <Icon paths={IC.send} size={15} stroke={2.2} />
-              </button>
-            </div>
-          </div>
-        </div>
+        <WatcherChat task={task} />
         </>
         )}
       </div>
@@ -629,8 +484,8 @@ const COLS: Array<{ id: BoardCol; label: string; dot: string }> = [
 
 /** Render the active workspace's draggable watcher-driven kanban board. */
 export function Board() {
-  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, dragOverCol: x.dragOverCol }), shallowEqual)
-  const { enterCol, dropTo } = useActions()
+  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, dragOverCol: x.dragOverCol, boardMode: x.settings.boardMode ?? 'kanban' }), shallowEqual)
+  const { enterCol, dropTo, updateSettings } = useActions()
   const [creating, setCreating] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [reviewTaskId, setReviewTaskId] = useState<string | null>(null)
@@ -647,7 +502,27 @@ export function Board() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <ViewHeader title="Task board">
-        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Each started task gets a one-shot session driven by its own watcher — click a card for details & chat</span>
+        <div style={{ display: 'flex', gap: 2, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2, flexShrink: 0 }}>
+          {([['kanban', 'Kanban'], ['mission', 'Mission Control']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              title={id === 'kanban' ? 'Plan: drag cards between columns' : 'Work: every run in one triage list — terminal, watcher & changes without leaving the view'}
+              onClick={() => updateSettings({ boardMode: id })}
+              style={{
+                border: 'none', borderRadius: 7, padding: '4px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+                background: s.boardMode === id ? 'var(--panel2)' : 'transparent',
+                color: s.boardMode === id ? 'var(--accent)' : 'var(--mut)',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>
+          {s.boardMode === 'mission'
+            ? 'Triage every run in one place — ⌘1–9 jumps between them'
+            : 'Each started task gets a one-shot session driven by its own watcher — click a card for details & chat'}
+        </span>
         <div style={{ flex: 1 }} />
         <button
           className="open-btn"
@@ -661,6 +536,7 @@ export function Board() {
           <Icon paths={IC.plus} size={14} stroke={1.8} />New task
         </button>
       </ViewHeader>
+      {s.boardMode === 'mission' ? <MissionControl /> : (
       <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', padding: 16, display: 'flex', gap: 14 }}>
         {COLS.map(col => {
           const cards = s.tasks.filter(t => t.col === col.id && !t.archived)
@@ -696,6 +572,7 @@ export function Board() {
           )
         })}
       </div>
+      )}
       {creating && <NewTaskDialog onClose={() => setCreating(false)} />}
       {archivedOpen && <ArchivedTasks onClose={() => setArchivedOpen(false)} />}
       {(() => {
