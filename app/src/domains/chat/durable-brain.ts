@@ -60,11 +60,11 @@ export function durablePromptSection(agent: DurableAgent, brain: AgentBrain): st
     + (agent.homeDir
       ? `Your home folder is ${agent.homeDir} — your working dir AND your brain: maintain ${LESSONS_FILE} via the learn_lesson tool, and file domain knowledge under knowledge/ with your normal file tools so future conversations can find it.`
       : 'You have no home folder; persist learnings with learn_lesson (they land in the shared workspace memory).'),
-    `YOUR CHARTER (user-owned — never edit it away):\n${agent.charter.trim()}`,
+    `YOUR CHARTER (your job description):\n${agent.charter.trim() || '(none yet — propose one with update_my_profile once you understand your job)'}`,
   ]
   if (brain.lessons.trim()) parts.push(`YOUR LESSONS (you wrote these from past corrections — apply them):\n${tail(brain.lessons.trim(), LESSONS_PROMPT_CHARS)}`)
   if (brain.journal.trim()) parts.push(`YOUR RECENT JOURNAL (what you did before this conversation):\n${tail(brain.journal.trim(), JOURNAL_PROMPT_CHARS)}`)
-  parts.push('RULE: when the user corrects you or a job outcome teaches you something durable, record it with learn_lesson BEFORE moving on — that is how you improve over time.')
+  parts.push('RULES: (1) when the user corrects you or a job outcome teaches you something durable, record it with learn_lesson BEFORE moving on. (2) when lessons accumulate into a better way of working — or the user asks you to change how you operate — evolve your own charter/settings with update_my_profile, carrying forward everything still true; never silently discard the user\'s intent. That is how you improve over time.')
   return parts.join('\n\n')
 }
 

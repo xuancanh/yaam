@@ -223,53 +223,6 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
   )
 }
 
-function TurnActivity({ turn, onPromote }: { turn: ChatTurn; onPromote: () => void }) {
-  const [open, setOpen] = useState(false)
-  if (!turn.tools.length && !turn.usage && turn.status === 'running') return null
-  const failed = turn.tools.filter(t => t.status === 'failed' || t.status === 'truncated').length
-  const denied = turn.tools.filter(t => t.status === 'denied').length
-  const duration = turn.completedAt ? Math.max(0, turn.completedAt - turn.startedAt) : Date.now() - turn.startedAt
-  const durationText = duration < 1000 ? `${duration}ms` : `${(duration / 1000).toFixed(duration < 10_000 ? 1 : 0)}s`
-  const totalTokens = turn.usage ? turn.usage.inputTokens + turn.usage.outputTokens : null
-  const statusColor = failed ? 'var(--red-soft)' : denied ? 'var(--amber)' : turn.status === 'running' ? 'var(--accent)' : 'var(--dim)'
-  return (
-    <div style={{ margin: '0 4px', paddingLeft: 10, borderLeft: '2px solid var(--line2)' }}>
-      <button
-        className="mono"
-        onClick={() => setOpen(v => !v)}
-        style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', padding: '3px 0', border: 'none', background: 'transparent', color: statusColor, cursor: 'pointer', textAlign: 'left', fontSize: 10.5 }}
-      >
-        <span style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▸</span>
-        <span>{turn.status === 'running' ? 'Working' : turn.tools.length ? `Worked through ${turn.tools.length} action${turn.tools.length === 1 ? '' : 's'}` : 'Turn complete'}</span>
-        {failed > 0 && <span>· {failed} failed</span>}
-        {denied > 0 && <span>· {denied} denied</span>}
-        <span style={{ color: 'var(--faint)' }}>· {durationText}{totalTokens !== null ? ` · ${totalTokens.toLocaleString()} tok` : ''}</span>
-      </button>
-      {open && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '6px 0 8px 16px' }}>
-          <div className="mono" style={{ fontSize: 9.5, color: 'var(--faint)' }}>
-            {turn.model}{turn.usage ? ` · ${turn.usage.inputTokens.toLocaleString()} in / ${turn.usage.outputTokens.toLocaleString()} out` : ' · usage unavailable'}
-          </div>
-          {turn.tools.map(tool => (
-            <div key={tool.id} style={{ minWidth: 0 }}>
-              <div className="mono" style={{ display: 'flex', gap: 7, fontSize: 10.5, color: tool.status === 'completed' ? 'var(--mut)' : tool.status === 'denied' ? 'var(--amber)' : 'var(--red-soft)' }}>
-                <strong style={{ color: 'var(--text)' }}>{tool.name}</strong>
-                <span>{tool.status}</span>
-                <span style={{ marginLeft: 'auto', color: 'var(--faint)' }}>{new Date(tool.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-              </div>
-              {tool.input && <pre className="mono" style={{ margin: '4px 0 0', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 5, fontSize: 10, color: 'var(--dim)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 110, overflowY: 'auto' }}>{tool.input}</pre>}
-              {tool.result && <pre className="mono" style={{ margin: '3px 0 0', padding: '6px 8px', fontSize: 10, color: 'var(--mut)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 130, overflowY: 'auto' }}>{tool.result}</pre>}
-            </div>
-          ))}
-          <button className="open-btn" disabled={!!turn.promotedTaskId} onClick={onPromote} style={{ alignSelf: 'flex-start', padding: '4px 10px', fontSize: 10.5 }}>
-            {turn.promotedTaskId ? 'Added to Board' : 'Add to Board'}
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
 /** Live sandboxed preview of an assistant-produced document (HTML/SVG). */
 function ArtifactPanel({ artifact, onClose }: { artifact: ChatArtifact; onClose: () => void }) {
   return (
@@ -369,7 +322,7 @@ function SlashMenu({ items, sel, onPick }: {
 }
 
 export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
-  const { sendChatMessage, sendQuickReply, stopChat, retryChat, editAndResendChat, forkChatTurn, promoteChatTurn, clearChat, chatSkills, approveChatTool, setChatComposer } = useActions()
+  const { sendChatMessage, sendQuickReply, stopChat, retryChat, editAndResendChat, forkChatTurn, clearChat, chatSkills, approveChatTool, setChatComposer } = useActions()
   const composer = agent.chatComposer ?? { draft: '', attachments: [], queue: [] }
   const draft = composer.draft
   const atts = composer.attachments
@@ -400,8 +353,6 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   const log = agent.chatLog ?? []
   const busy = agent.status === 'running'
   const turns = new Map((agent.chatTurns ?? []).map(t => [t.id, t]))
-  const lastMessageByTurn = new Map<string, string>()
-  for (const message of log) if (message.turnId) lastMessageByTurn.set(message.turnId, message.id)
   const reviseTurn = (turn: ChatTurn, mode: 'replace' | 'fork') => {
     if (busy) return
     setChatComposer(agent.id, { draft: turn.input.text, attachments: turn.input.attachments, mode, sourceTurnId: turn.id })
@@ -590,7 +541,6 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
         <div style={{ maxWidth: 860, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--chat-gap)' }}>
           {log.map((m, i) => {
             const turn = m.turnId ? turns.get(m.turnId) : undefined
-            const lastInTurn = !!turn && lastMessageByTurn.get(turn.id) === m.id
             return (
               <Fragment key={m.id}>
                 <Bubble
@@ -606,7 +556,6 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                   onFork={m.role === 'user' && turn && !busy ? () => reviseTurn(turn, 'fork') : undefined}
                   onQuickReply={(msgId, reply) => sendQuickReply(agent.id, msgId, reply)}
                 />
-                {lastInTurn && <TurnActivity turn={turn} onPromote={() => promoteChatTurn(agent.id, turn.id)} />}
               </Fragment>
             )
           })}

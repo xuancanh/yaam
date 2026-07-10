@@ -50,7 +50,6 @@ export interface ConductorActionsDeps {
   replayChatMessage: (agentId: string, turnId: string, text: string, atts?: import('../domains/chat/runner').ChatAttachment[]) => void
   resetChatRuntime: (agentId: string) => void
   resolveChatApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
-  reflectConversation: (conversationId: string) => Promise<string>
   // addons
   installPackage: (json: string, source: import('../core/types').Addon['source']) => void
   sendAddonChat: (id: string, text: string) => void
@@ -94,7 +93,6 @@ export function createConductorActions(d: ConductorActionsDeps): ConductorAction
       stopChatMessage: d.stopChatMessage, retryChatMessage: d.retryChatMessage,
       replayChatMessage: d.replayChatMessage,
       resetChatRuntime: d.resetChatRuntime, resolveChatApproval: d.resolveChatApproval, skillCatalogs: d.skillCatalogs,
-      reflectConversation: d.reflectConversation,
     }),
     ...createAddonsActions({
       dispatch, stateRef: d.stateRef, flash: d.flash, installPackage: d.installPackage, sendAddonChat: d.sendAddonChat,

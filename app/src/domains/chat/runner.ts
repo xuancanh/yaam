@@ -154,6 +154,28 @@ function makeAppPort(ctx: ChatCtx, agentId: string, turnId: string): ChatAppPort
       ctx.dispatch(s => withMemoryAppend(s, 'notes', lesson, wid))
       return 'lesson recorded in the shared workspace memory'
     },
+    updateSelf: patch => {
+      const durable = durableAgentOf(ctx, agentId)
+      if (!durable) return 'this conversation has no durable agent profile to update'
+      if (patch.homeDir && durable.builtin) return 'the built-in assistant cannot take a home folder — create a dedicated agent instead'
+      const applied: string[] = []
+      ctx.dispatch(s => ({
+        ...s,
+        durableAgents: (s.durableAgents ?? []).map(d => {
+          if (d.id !== durable.id) return d
+          const next = { ...d }
+          if (patch.name) { next.name = patch.name.slice(0, 60); applied.push('name') }
+          if (patch.role) { next.role = patch.role.slice(0, 120); applied.push('role') }
+          if (patch.charter) { next.charter = patch.charter.slice(0, 8000); applied.push('charter') }
+          if (patch.model) { next.model = patch.model; applied.push('model') }
+          if (patch.homeDir) { next.homeDir = patch.homeDir; applied.push('home folder') }
+          return next
+        }),
+      }))
+      return applied.length
+        ? `profile updated (${applied.join(', ')}) — the new charter/settings apply from your next turn`
+        : 'nothing to change'
+    },
     saveSkill: (name, description, body) => {
       const slug = name.trim()
       const existing = ctx.stateRef.current.skills.find(k => k.name.toLowerCase() === slug.toLowerCase())

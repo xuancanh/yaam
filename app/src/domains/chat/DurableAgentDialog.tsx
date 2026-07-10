@@ -9,7 +9,8 @@ import { confirmAction } from '../../components/Confirm'
 // The durable-agent profile: identity + charter (the stable job description),
 // home folder (where its LESSONS.md / JOURNAL.md / knowledge live), defaults
 // for new conversations, and its loops — schedules that send it a prompt on a
-// cadence. "Reflect now" distills the latest conversation into its brain.
+// cadence. The agent reflects on conversations automatically and can evolve
+// this profile itself via the update_my_profile tool.
 
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
@@ -80,24 +81,10 @@ function AgentSchedules({ agentId }: { agentId: string }) {
 
 export function DurableAgentDialog({ agentId, onClose }: { agentId: string; onClose: () => void }) {
   const s = useConductorSelector(x => ({ durableAgents: x.durableAgents, chatAgentTypes: x.chatAgentTypes }), shallowEqual)
-  const { updateDurableAgent, archiveDurableAgent, reflectDurableAgent } = useActions()
+  const { updateDurableAgent, archiveDurableAgent } = useActions()
   const agent = (s.durableAgents ?? []).find(d => d.id === agentId)
-  const [reflectNote, setReflectNote] = useState<string | null>(null)
-  const [reflecting, setReflecting] = useState(false)
   if (!agent) return null
   const upd = (patch: Parameters<typeof updateDurableAgent>[1]) => updateDurableAgent(agent.id, patch)
-
-  const reflect = async () => {
-    setReflecting(true)
-    setReflectNote(null)
-    try {
-      setReflectNote(await reflectDurableAgent(agent.id))
-    } catch (e) {
-      setReflectNote(e instanceof Error ? e.message : String(e))
-    } finally {
-      setReflecting(false)
-    }
-  }
 
   return (
     <EntityDialog onClose={onClose} width={700}>
@@ -107,12 +94,8 @@ export function DurableAgentDialog({ agentId, onClose }: { agentId: string; onCl
         title={<EditableName name={agent.name} onRename={name => upd({ name })} fontSize={15} />}
         sub={<>
           {agent.builtin ? 'built-in generic agent · always available' : agent.homeDir ? `brain: ${agent.homeDir} (LESSONS.md · JOURNAL.md · knowledge/)` : 'no home folder — lessons go to the shared workspace memory'}
+          {' · it reflects on conversations and can evolve this profile itself (update_my_profile)'}
         </>}
-        actions={
-          <button className="open-btn" title="Distill the latest conversation into this agent's journal & lessons" style={{ flex: 'none', padding: '6px 13px', fontSize: 11.5 }} disabled={reflecting} onClick={() => { void reflect() }}>
-            {reflecting ? 'Reflecting…' : '✦ Reflect now'}
-          </button>
-        }
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -165,7 +148,6 @@ export function DurableAgentDialog({ agentId, onClose }: { agentId: string; onCl
 
         <AgentSchedules agentId={agent.id} />
 
-        {reflectNote && <div className="mono" style={{ fontSize: 11, color: 'var(--accent)' }}>✦ {reflectNote}</div>}
       </div>
 
       <DialogFooter onClose={onClose}>

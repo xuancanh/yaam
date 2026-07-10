@@ -23,8 +23,6 @@ export interface ChatActionsCtx {
   resetChatRuntime: (agentId: string) => void
   resolveChatApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
   skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
-  /** distill one conversation into its durable agent's journal/lessons */
-  reflectConversation: (conversationId: string) => Promise<string>
 }
 
 export interface ChatActions {
@@ -33,7 +31,6 @@ export interface ChatActions {
   addDurableAgent: (patch: Partial<DurableAgent> & { name: string }) => string
   updateDurableAgent: (id: string, patch: Partial<DurableAgent>) => void
   archiveDurableAgent: (id: string) => void
-  reflectDurableAgent: (id: string) => Promise<string>
   openChat: (id: string | null) => void
   sendChatMessage: (agentId: string, text: string, atts?: ChatAttachment[]) => void
   /** click one of the assistant's quick replies: clears the chips, records the
@@ -178,16 +175,6 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
         durableAgents: (s.durableAgents ?? []).map(x => (x.id === id ? { ...x, archived: true } : x)),
       }))
       ctx.logEvent('edit', null, `Archived durable agent “${d.name}”`)
-    },
-
-    reflectDurableAgent: async id => {
-      // reflect the agent's most recent conversation with new content
-      const conv = [...stateRef.current.agents]
-        .filter(a => a.kind === 'chat' && a.durableAgentId === id && !a.archived)
-        .sort((a, b) => ((a.chatLog ?? []).at(-1)?.at ?? 0) - ((b.chatLog ?? []).at(-1)?.at ?? 0))
-        .pop()
-      if (!conv) return 'this agent has no conversations yet'
-      return await ctx.reflectConversation(conv.id)
     },
 
     sendChatMessage: (agentId, text, atts) => {

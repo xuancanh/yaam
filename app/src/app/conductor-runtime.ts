@@ -63,7 +63,6 @@ function assembleRuntimeDeps(
     retryChatMessage: chat.retryChatMessage, resetChatRuntime: chat.resetChatRuntime,
     replayChatMessage: chat.replayChatMessage,
     resolveChatApproval: chat.resolveChatApproval,
-    reflectConversation: chat.reflectConversation,
     installPackage: addon.installPackage, sendAddonChat: addon.sendAddonChat,
     makeAddonApi: addon.makeAddonApi, disposeAddon: addon.disposeAddon,
     runMaster: master.runMaster, disposeSessionRuntime: chat.disposeSessionRuntime, abortMaster: master.abortMaster,

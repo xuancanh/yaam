@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { chatSearch, isTauri, pickFolder } from '../../core/native'
+import { chatSearch } from '../../core/native'
 import type { ChatSearchHit } from '../../core/native'
-import { ACCENT, hexToRgba } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { EditableName, IC, Icon } from '../../components/ui'
 import { ChatPane } from './ChatPane'
@@ -35,79 +34,6 @@ function timeLabel(at: number): string {
   return d.toDateString() === today.toDateString()
     ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
-}
-
-/** inline "new chat" composer: agent type, model, folder */
-function NewChatRow({ onCreated }: { onCreated: (id: string) => void }) {
-  const s = useConductorSelector(x => ({ chatAgentTypes: x.chatAgentTypes, settings: x.settings, skillRegistries: x.skillRegistries, personas: x.personas, skills: x.skills }), shallowEqual)
-  const { newChatSession } = useActions()
-  const types = s.chatAgentTypes.filter(t => t.enabled)
-  const [typeId, setTypeId] = useState(types[0]?.id ?? '')
-  const [model, setModel] = useState('')
-  const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
-  const [personaId, setPersonaId] = useState('')
-  const [advanced, setAdvanced] = useState(false)
-  const [sources, setSources] = useState<string[]>(() => ['local', ...s.skillRegistries.filter(r => r.enabled).map(r => r.id)])
-  const type = s.chatAgentTypes.find(t => t.id === typeId) ?? types[0]
-  const toggleSource = (id: string) =>
-    setSources(cur => (cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]))
-  const models = ((type?.models ?? []).map(m => m.trim()).filter(Boolean))
-  const list = models.length ? models : type?.model ? [type.model] : []
-  const effModel = model && list.includes(model) ? model : list[0] ?? ''
-
-  const browse = async () => {
-    const dir = await pickFolder(cwd || undefined)
-    if (dir) setCwd(dir)
-  }
-
-  if (!types.length) {
-    return (
-      <div style={{ padding: '10px 12px', fontSize: 11.5, color: 'var(--dim)', lineHeight: 1.5 }}>
-        No chat agents enabled — add one in Settings → Chat Agents.
-      </div>
-    )
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderBottom: '1px solid var(--line)' }}>
-      {advanced && <>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <select value={type?.id ?? ''} onChange={e => { setTypeId(e.target.value); setModel('') }} className="select-field" style={{ ...FIELD, flex: 1, minWidth: 0 }}>
-            {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-          <select value={effModel} onChange={e => setModel(e.target.value)} disabled={list.length <= 1} className="select-field" style={{ ...FIELD, flex: 1, minWidth: 0 }}>
-            {list.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-        <select value={personaId} onChange={e => setPersonaId(e.target.value)} className="select-field" style={FIELD} title="Persona — appended to the agent's instructions">
-          <option value="">no persona</option>
-          {s.personas.map(pe => <option key={pe.id} value={pe.id}>{pe.name}{pe.description ? ` — ${pe.description.slice(0, 40)}` : ''}</option>)}
-        </select>
-        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }} title="Skill sources for this chat — the agent sees and loads skills from the checked sources">
-          <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)' }}>SKILLS</span>
-          {[{ id: 'local', name: 'local', count: s.skills.length }, ...s.skillRegistries.map(r => ({ id: r.id, name: r.name, count: r.skillCount }))].map(src => {
-            const on = sources.includes(src.id)
-            return <button key={src.id} className="mono" onClick={() => toggleSource(src.id)} style={{
-              fontSize: 10, fontWeight: 600, padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
-              border: `1px solid ${on ? 'rgba(61,220,151,.35)' : 'var(--line2)'}`,
-              background: on ? 'rgba(61,220,151,.1)' : 'transparent', color: on ? 'var(--green)' : 'var(--dim)',
-            }}>{src.name}{src.count !== undefined ? ` · ${src.count}` : ''}</button>
-          })}
-        </div>
-      </>}
-      <div style={{ display: 'flex', gap: 6 }}>
-        <input value={cwd} onChange={e => setCwd(e.target.value)} placeholder="working folder (optional)" className="mono" style={{ ...FIELD, flex: 1, fontSize: 11 }} />
-        <button className="open-btn" style={{ flex: 'none', padding: '0 10px', fontSize: 11.5 }} onClick={browse} disabled={!isTauri}>…</button>
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button className="icon-btn" title={advanced ? 'Hide chat configuration' : 'Configure model, persona, and skills'} onClick={() => setAdvanced(v => !v)} style={{ width: 30, height: 30, borderRadius: 7 }}>
-          <Icon paths={['M4 7h10', 'M18 7h2', 'M4 17h2', 'M10 17h10', 'M14 4v6', 'M6 14v6']} size={14} stroke={1.7} />
-        </button>
-        <button className="approve-btn" style={{ padding: 7, fontSize: 12, flex: 1 }} onClick={() => { if (type) onCreated(newChatSession(undefined, cwd, type.id, effModel || undefined, personaId || undefined, sources)) }}>
-          Start chat{advanced && type ? ` · ${type.name}` : ''}
-        </button>
-      </div>
-    </div>
-  )
 }
 
 /** Durable workspace memory editor — what every chat agent here reads at turn
@@ -210,7 +136,6 @@ export function ChatView() {
   }
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<ChatSearchHit[] | null>(null)
-  const [creating, setCreating] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   // per-chat Files-panel toggle (explorer + viewer beside the conversation)
   const [filesOpen, setFilesOpen] = useState<Record<string, boolean>>({})
@@ -241,6 +166,10 @@ export function ChatView() {
   // archived agents' conversations) shows under the built-in generic agent
   const durables = (s.durableAgents ?? []).filter(d => !d.archived)
   const [agentDialogId, setAgentDialogId] = useState<string | null>(null)
+  // per-agent folding: groups collapse entirely, and expanded groups show only
+  // the 3 most recent conversations until "show more"
+  const [collapsedAgents, setCollapsedAgents] = useState<Record<string, boolean>>({})
+  const [showAllChats, setShowAllChats] = useState<Record<string, boolean>>({})
   const groupOf = (a: Agent) => (durables.some(d => d.id === a.durableAgentId) ? a.durableAgentId! : durables.find(d => d.builtin)?.id ?? 'agent-default')
   const grouped = durables.map(d => ({ d, items: chats.filter(c => groupOf(c.agent) === d.id) }))
 
@@ -294,16 +223,7 @@ export function ChatView() {
           <button className="icon-btn" title={showArchived ? 'Show active chats' : 'Show archived chats'} onClick={() => { setShowArchived(v => !v); openChat(null) }} style={{ width: 28, height: 28, borderRadius: 7, color: showArchived ? 'var(--accent)' : undefined }}>
             <Icon paths={['M4 7h16v13H4z', 'M3 4h18v3H3z', 'M9 11h6']} size={14} stroke={1.7} />
           </button>
-          <button
-            className="icon-btn"
-            title="New chat"
-            onClick={() => setCreating(v => !v)}
-            style={{ width: 28, height: 28, borderRadius: 8, background: creating ? hexToRgba(ACCENT, 0.14) : 'transparent', color: creating ? 'var(--accent)' : undefined }}
-          >
-            <Icon paths={IC.plus} size={15} stroke={1.8} />
-          </button>
         </div>
-        {creating && <NewChatRow onCreated={id => { openChat(id); setCreating(false) }} />}
         <div style={{ padding: '4px 12px 8px' }}>
           <input
             value={query}
@@ -376,35 +296,67 @@ export function ChatView() {
                 <div style={{ fontSize: 11.5, color: 'var(--dim)', padding: '8px 10px', lineHeight: 1.6 }}>No archived chats.</div>
               )
             }
-            // active view: conversations grouped under their durable agents
-            return grouped.map(({ d, items }) => (
-              <div key={d.id} style={{ marginBottom: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 6px 3px' }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 3, background: d.color, flexShrink: 0 }} />
-                  <button
-                    className="mono"
-                    title={`${d.role ? `${d.role} · ` : ''}open agent profile (charter, brain, loops)`}
-                    onClick={() => setAgentDialogId(d.id)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--mut)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >
-                    {d.name.toUpperCase()}
-                  </button>
-                  {d.role && <span style={{ fontSize: 9.5, color: 'var(--faint)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.role}</span>}
-                  <div style={{ flex: 1 }} />
-                  <button
-                    className="icon-btn"
-                    title={`New conversation with ${d.name}`}
-                    onClick={() => openChat(newChatSession(undefined, undefined, undefined, undefined, undefined, undefined, d.id))}
-                    style={{ width: 20, height: 20, borderRadius: 5, flexShrink: 0 }}
-                  >
-                    <Icon paths={IC.plus} size={11} stroke={2} />
-                  </button>
+            // active view: conversations grouped under their durable agents —
+            // collapsible, showing the 3 most recent until expanded
+            return grouped.map(({ d, items }) => {
+              const isCollapsed = collapsedAgents[d.id] ?? false
+              const showAll = showAllChats[d.id] ?? false
+              let visible = showAll ? items : items.slice(0, 3)
+              // never hide the conversation the user is looking at
+              const active = items.find(c => c.agent.id === s.activeChatId)
+              if (active && !visible.includes(active)) visible = [...visible, active]
+              const hidden = items.length - visible.length
+              return (
+                <div key={d.id} style={{ marginBottom: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 6px 3px' }}>
+                    <button
+                      title={isCollapsed ? 'Expand' : 'Collapse'}
+                      onClick={() => setCollapsedAgents(c => ({ ...c, [d.id]: !isCollapsed }))}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, width: 12, flexShrink: 0, fontSize: 8.5, color: 'var(--dim)' }}
+                    >
+                      <span style={{ display: 'inline-block', transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform .12s' }}>▸</span>
+                    </button>
+                    <span style={{ width: 9, height: 9, borderRadius: 3, background: d.color, flexShrink: 0 }} />
+                    <button
+                      className="mono"
+                      title={`${d.role ? `${d.role} · ` : ''}open agent profile (charter, brain, loops)`}
+                      onClick={() => setAgentDialogId(d.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--mut)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      {d.name.toUpperCase()}
+                    </button>
+                    {isCollapsed
+                      ? <span className="mono" style={{ fontSize: 9.5, color: 'var(--faint)', flexShrink: 0 }}>{items.length}</span>
+                      : d.role && <span style={{ fontSize: 9.5, color: 'var(--faint)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.role}</span>}
+                    <div style={{ flex: 1 }} />
+                    <button
+                      className="icon-btn"
+                      title={`New conversation with ${d.name}`}
+                      onClick={() => openChat(newChatSession(undefined, undefined, undefined, undefined, undefined, undefined, d.id))}
+                      style={{ width: 20, height: 20, borderRadius: 5, flexShrink: 0 }}
+                    >
+                      <Icon paths={IC.plus} size={11} stroke={2} />
+                    </button>
+                  </div>
+                  {!isCollapsed && (
+                    <>
+                      {items.length
+                        ? visible.map(row)
+                        : <div style={{ fontSize: 10.5, color: 'var(--faint)', padding: '2px 22px 4px' }}>no conversations yet</div>}
+                      {(hidden > 0 || showAll) && items.length > 3 && (
+                        <button
+                          className="mono"
+                          onClick={() => setShowAllChats(c => ({ ...c, [d.id]: !showAll }))}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 22px 4px', fontSize: 10, color: 'var(--dim)' }}
+                        >
+                          {showAll ? '– show less' : `+ ${hidden} more`}
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
-                {items.length
-                  ? items.map(row)
-                  : <div style={{ fontSize: 10.5, color: 'var(--faint)', padding: '2px 22px 4px' }}>no conversations yet</div>}
-              </div>
-            ))
+              )
+            })
           })()}
         </div>
       </div>
@@ -489,7 +441,7 @@ export function ChatView() {
               Chat agents work like a desktop Claude: they browse and edit files, run commands and scripts, load your skills,
               and call your MCP servers — streaming replies as they think.
             </div>
-            <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={() => setCreating(true)}>
+            <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={() => openChat(newChatSession())}>
               New chat
             </button>
           </div>

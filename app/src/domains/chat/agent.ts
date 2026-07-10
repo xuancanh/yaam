@@ -47,6 +47,8 @@ export interface ChatAppPort {
   /** durable agents: record one lesson in the agent's LESSONS.md (or the
    *  shared memory when the agent has no home folder) */
   learnLesson: (lesson: string) => Promise<string>
+  /** durable agents: self-update the agent's own charter / role / settings */
+  updateSelf: (patch: { name?: string; role?: string; charter?: string; model?: string; homeDir?: string }) => string
 }
 
 const READ_ONLY_TOOLS = new Set([
@@ -236,6 +238,20 @@ function builtinTools(skills: CatalogSkill[]) {
       name: 'learn_lesson',
       description: 'Record one durable lesson about how to do YOUR job better — a user correction, a stated preference, an approach that failed or worked. It lands in your LESSONS.md and rides along in every future conversation. Use it the moment you are corrected; never for transient task state.',
       input_schema: { type: 'object', properties: { lesson: { type: 'string', description: 'one concise sentence' } }, required: ['lesson'] },
+    },
+    {
+      name: 'update_my_profile',
+      description: 'Rewrite parts of YOUR OWN durable profile — the charter (your system prompt / job description), role line, name, default model, or home folder. Use when accumulated lessons show your charter should evolve, or when the user asks you to change how you operate. Pass only the fields to change; the charter you pass REPLACES the current one, so carry forward everything still true. In ask mode the user approves this first.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          charter: { type: 'string', description: 'the full replacement charter' },
+          role: { type: 'string' },
+          name: { type: 'string' },
+          model: { type: 'string' },
+          home_dir: { type: 'string' },
+        },
+      },
     },
     {
       name: 'suggest_replies',
@@ -450,6 +466,18 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
       if (!app) return 'lessons are unavailable in this context'
       if (!str('lesson').trim()) throw new ToolError('learn_lesson: "lesson" is required')
       return await app.learnLesson(str('lesson').trim())
+    case 'update_my_profile': {
+      if (!app) return 'profile updates are unavailable in this context'
+      const patch = {
+        name: str('name').trim() || undefined,
+        role: str('role').trim() || undefined,
+        charter: str('charter').trim() || undefined,
+        model: str('model').trim() || undefined,
+        homeDir: str('home_dir').trim() || undefined,
+      }
+      if (!Object.values(patch).some(Boolean)) throw new ToolError('update_my_profile: pass at least one field to change')
+      return app.updateSelf(patch)
+    }
     case 'suggest_replies': {
       if (!app) return 'suggestions are unavailable in this context'
       const replies = Array.isArray(input.replies)
