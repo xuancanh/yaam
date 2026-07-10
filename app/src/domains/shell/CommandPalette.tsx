@@ -37,7 +37,7 @@ interface Command {
 
 /** Filter keyboard actions and dispatch the selected command or session focus. */
 export function CommandPalette() {
-  const s = useConductorSelector(x => ({ agents: x.agents, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery, settings: x.settings }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery, settings: x.settings }), shallowEqual)
   const a = useActions()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -60,15 +60,18 @@ export function CommandPalette() {
       { id: 'master', label: `${s.settings.sidebarHidden ? 'Show' : 'Hide'} Master panel`, hint: '⌘B', icon: 'split', run: () => a.updateSettings({ sidebarHidden: !s.settings.sidebarHidden }) },
       { id: 'build', label: 'Build a tool or panel', hint: 'compose', icon: 'build', run: a.focusComposer },
     ]
-    s.agents.filter(x => x.status === 'idle').forEach(x =>
+    const workspaceAgents = s.agents.filter(x => !x.archived
+      && x.kind !== 'chat'
+      && (x.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
+    workspaceAgents.filter(x => x.status === 'idle').forEach(x =>
       cmds.push({ id: `res-${x.id}`, label: `Resume ${x.name}`, hint: x.repo, icon: 'play', run: () => a.resume(x.id) }))
-    s.agents.filter(x => x.status === 'needs' || x.status === 'running').forEach(x =>
+    workspaceAgents.filter(x => x.status === 'needs' || x.status === 'running').forEach(x =>
       cmds.push({ id: `rev-${x.id}`, label: `Review changes · ${x.name}`, hint: x.repo, icon: 'diff', run: () => a.openDiff(x.id) }))
     NAV_COMMANDS.forEach(([v, label, kbd]) =>
       cmds.push({ id: `nav-${v}`, label, hint: kbd ?? 'navigate', icon: 'go', run: () => a.setView(v) }))
     const q = s.paletteQuery.toLowerCase().trim()
     return q ? cmds.filter(c => c.label.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q)) : cmds
-  }, [a, s.agents, s.settings.appearance, s.settings.sidebarHidden, s.paletteQuery])
+  }, [a, s.agents, s.activeWorkspace, s.settings.appearance, s.settings.sidebarHidden, s.paletteQuery])
 
   useEffect(() => {
     if (s.paletteOpen) inputRef.current?.focus()
