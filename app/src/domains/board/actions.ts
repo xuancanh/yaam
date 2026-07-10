@@ -40,7 +40,7 @@ export interface BoardActions {
   dropTo: (col: BoardCol) => void
   startTask: (taskId: string) => void
   restartTask: (taskId: string) => void
-  createTask: (input: { title: string; description: string; criteria: string[]; templateId?: string; typeId?: string; cwd?: string; machineId?: string }) => void
+  createTask: (input: { title: string; description: string; criteria: string[]; templateId?: string; typeId?: string; cwd?: string; machineId?: string; isolate?: boolean; sessionMode?: 'oneshot' | 'interactive' }) => void
   updateTask: (id: string, patch: Partial<Pick<BoardTask, 'title' | 'description' | 'criteria' | 'templateId' | 'typeId' | 'cwd' | 'machineId'>>) => void
   sendTaskChat: (taskId: string, text: string) => void
   draftTask: (input: { title: string; description: string; criteria: string[] }) => Promise<TaskSpecDraft | null>
@@ -115,6 +115,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
         void ctx.execCommand('add_task', {
           title: input.title, description: input.description, criteria: input.criteria,
           templateId: input.templateId, typeId: input.typeId, cwd: input.cwd, machineId: input.machineId,
+          isolate: input.isolate, sessionMode: input.sessionMode,
         }, { actor: { kind: 'user' } })
       } else {
         dispatch(s => ({
@@ -130,6 +131,8 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
             typeId: input.typeId || undefined,
             cwd: input.cwd?.trim() || undefined,
             machineId: input.machineId || undefined,
+            isolate: input.isolate || undefined,
+            sessionMode: input.sessionMode === 'interactive' ? 'interactive' : undefined,
             chat: [{ id: mkId('tc'), role: 'system', text: 'Task created', at: Date.now() }],
           }]),
         }))

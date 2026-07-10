@@ -4,7 +4,8 @@ import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT } from '../../core/data'
 import type { Agent, BoardCol, BoardTask } from '../../core/types'
 import { IC, Icon, ViewHeader } from '../../components/ui'
-import { TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from './TaskSpecForm'
+import { SpecVerifyDialog, TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from './TaskSpecForm'
+import type { TaskSpecPatch, VerifyOutcome } from './TaskSpecForm'
 import { ReviewPanel } from './ReviewPanel'
 import { GitWorkbench } from '../session/GitPanel'
 import { MissionControl } from './MissionControl'
@@ -35,18 +36,24 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
 
 // ---------- creation dialog: LLM helps fill in context, or rejects vague tasks ----------
 
-/** Draft, validate, and create a watcher-ready board task. */
+/** Verify (AI-gated when a brain is configured) and create a board task. AI
+ *  feedback is surfaced in a confirmation popup — never applied silently. */
 function NewTaskDialog({ onClose }: { onClose: () => void }) {
   const s = useConductorSelector(x => ({ settings: x.settings }), shallowEqual)
   const { createTask } = useActions()
   const [spec, setSpec] = useState(() => emptyTaskSpec(s.settings.defaultCwd || ''))
-  const { busy, questions, error, llmOn, draft, resolveForCreate } = useTaskSpecAssist(spec, setSpec)
+  const { busy, error, llmOn, verifyForCreate } = useTaskSpecAssist(spec)
+  const [confirm, setConfirm] = useState<Extract<VerifyOutcome, { kind: 'ai' | 'questions' }> | null>(null)
 
-  const create = async (force = false) => {
-    const patch = await resolveForCreate(force)
-    if (!patch) return
+  const create = (patch: TaskSpecPatch) => {
     createTask(patch)
     onClose()
+  }
+  const verify = async () => {
+    const out = await verifyForCreate()
+    if (!out) return
+    if (out.kind === 'create') create(out.patch)
+    else setConfirm(out)
   }
 
   return (
@@ -60,33 +67,18 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
       >
         <div className="grotesk" style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>New task</div>
         <div style={{ fontSize: 12, color: 'var(--mut)', marginBottom: 14, lineHeight: 1.5 }}>
-          A good task has a clear description and verifiable criteria — its watcher uses them to drive a one-shot agent and judge the result.
-          {llmOn ? ' The assistant fills in gaps, or asks questions when the idea is too vague.' : ''}
+          A good task has a clear description and verifiable criteria — its watcher uses them to drive the agent and judge the result.
+          {llmOn ? ' Verification flags gaps and proposes fixes; nothing changes without your say-so.' : ''}
         </div>
-        <TaskSpecFields v={spec} set={setSpec} questions={questions} error={error} autoFocus />
+        <TaskSpecFields v={spec} set={setSpec} questions={[]} error={error} autoFocus />
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-          {llmOn && (
-            <button className="open-btn" style={{ flex: 'none', padding: '9px 14px', opacity: spec.title.trim() && !busy ? 1 : 0.45 }} onClick={draft} disabled={!spec.title.trim() || !!busy}>
-              {busy === 'draft' ? 'Drafting…' : '✦ Draft with AI'}
-            </button>
-          )}
-          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: spec.title.trim() && !busy ? 1 : 0.45 }} onClick={() => { void create() }} disabled={!spec.title.trim() || !!busy}>
-            {busy === 'create' ? 'Checking…' : 'Create task'}
+          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: spec.title.trim() && !busy ? 1 : 0.45 }} onClick={() => { void verify() }} disabled={!spec.title.trim() || busy}>
+            {busy ? 'Verifying…' : llmOn ? 'Verify & create' : 'Create task'}
           </button>
-          {(questions.length > 0 || llmOn) && (
-            <button
-              className="open-btn"
-              title="Skip the spec check and create the task exactly as written"
-              style={{ flex: 'none', padding: '9px 14px', opacity: spec.title.trim() && !busy ? 1 : 0.45 }}
-              onClick={() => { void create(true) }}
-              disabled={!spec.title.trim() || !!busy}
-            >
-              Create anyway
-            </button>
-          )}
           <button className="deny-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={onClose}>Cancel</button>
         </div>
       </div>
+      {confirm && <SpecVerifyDialog outcome={confirm} onCreate={create} onClose={() => setConfirm(null)} />}
     </div>
   )
 }

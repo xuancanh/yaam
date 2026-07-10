@@ -218,6 +218,19 @@ export interface Message {
   thinking?: string
 }
 
+/** One recorded firing of a schedule: when, what happened, and where the
+ *  result lives (session / board task) so the user can jump to it. */
+export interface CronRun {
+  at: number
+  /** short outcome line, e.g. `launched: npm test` / `added task “…”` */
+  note: string
+  ok: boolean
+  /** session the firing launched, when the action was a command */
+  agentId?: string
+  /** board task the firing created, for task/template schedules */
+  taskId?: string
+}
+
 export interface Cron {
   id: string
   name: string
@@ -244,9 +257,14 @@ export interface Cron {
     templateId?: string
     typeId?: string
     cwd?: string
+    machineId?: string
+    isolate?: boolean
+    sessionMode?: 'oneshot' | 'interactive'
     startNow?: boolean
   }
   lastFiredMinute?: string
+  /** newest-first log of the last firings and what each produced */
+  runs?: CronRun[]
   /** agent template launched on fire (overrides cmd) */
   templateId?: string
   /** task text passed to the template */
@@ -553,6 +571,10 @@ export interface BoardTask {
   machineId?: string
   /** run the task's sessions in an isolated git worktree (reviewed via the queue) */
   isolate?: boolean
+  /** how the task's sessions run: one-shot (default — run the task and exit,
+   *  giving the watcher a clean exit to assess) or interactive (stays open;
+   *  the watcher assesses whenever the session eventually exits) */
+  sessionMode?: 'oneshot' | 'interactive'
   /** archived tasks leave the board but stay recoverable; deletion only
    *  happens from the Archived viewer */
   archived?: boolean

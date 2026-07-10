@@ -19,6 +19,8 @@ export interface TaskSpecValue {
   machineId: string
   /** run the task's sessions in an isolated git worktree */
   isolate: boolean
+  /** one-shot (default) or interactive session for the task's runs */
+  sessionMode: 'oneshot' | 'interactive'
 }
 
 /** the createTask/boardTask-shaped patch a resolved spec produces */
@@ -31,10 +33,11 @@ export interface TaskSpecPatch {
   cwd?: string
   machineId?: string
   isolate?: boolean
+  sessionMode?: 'oneshot' | 'interactive'
 }
 
 export function emptyTaskSpec(defaultCwd: string): TaskSpecValue {
-  return { title: '', description: '', criteria: '', runWith: '', cwd: defaultCwd, machineId: '', isolate: false }
+  return { title: '', description: '', criteria: '', runWith: '', cwd: defaultCwd, machineId: '', isolate: false, sessionMode: 'oneshot' }
 }
 
 const FIELD = {
@@ -64,69 +67,133 @@ function toPatch(v: TaskSpecValue, description: string, criteria: string[]): Tas
     cwd: v.cwd.trim() || undefined,
     machineId: v.machineId || undefined,
     isolate: v.isolate || undefined,
+    sessionMode: v.sessionMode === 'interactive' ? 'interactive' : undefined,
     ...(v.runWith.startsWith('tpl:') ? { templateId: v.runWith.slice(4) } : { typeId: v.runWith || undefined }),
   }
 }
 
-/** Drafting + validation shared by every task-creation surface. */
-export function useTaskSpecAssist(v: TaskSpecValue, set: (v: TaskSpecValue) => void) {
+/** What verification concluded: create as-is, the AI proposed a different
+ *  spec (needs the user's explicit choice), or it rejected with questions
+ *  (user may still create as written). */
+export type VerifyOutcome =
+  | { kind: 'create'; patch: TaskSpecPatch }
+  | { kind: 'ai'; patch: TaskSpecPatch; aiPatch: TaskSpecPatch }
+  | { kind: 'questions'; questions: string[]; patch: TaskSpecPatch }
+
+/** Verification + validation shared by every task-creation surface. AI output
+ *  is NEVER applied silently — a differing spec comes back as an 'ai' outcome
+ *  for the user to accept or ignore. */
+export function useTaskSpecAssist(v: TaskSpecValue) {
   const s = useConductorSelector(x => ({ settings: x.settings }), shallowEqual)
   const { draftTask } = useActions()
-  const [busy, setBusy] = useState<'draft' | 'create' | null>(null)
-  const [questions, setQuestions] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const llmOn = s.settings.masterEnabled
 
-  // Ask the task-spec assistant to complete the current draft in place.
-  const draft = async () => {
-    if (!v.title.trim() || busy) return
-    setBusy('draft')
-    setError('')
-    setQuestions([])
-    try {
-      const res = await draftTask({ title: v.title.trim(), description: v.description.trim(), criteria: parsedCriteria(v) })
-      if (!res) { setError('No brain configured — enable LLM Master in Settings to draft with AI.'); return }
-      if (!res.ok) { setQuestions(res.questions.length ? res.questions : ['Add more detail — the assistant could not write a concrete spec.']); return }
-      set({ ...v, description: res.description, criteria: res.criteria.join('\n') })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  /** Validate/complete the spec; null = rejected (questions shown), keep
-   *  editing. `force` skips both the AI gate and the manual completeness
-   *  check — the user knows what they want; create the task as written. */
-  const resolveForCreate = async (force = false): Promise<TaskSpecPatch | null> => {
+  const verifyForCreate = async (): Promise<VerifyOutcome | null> => {
     if (!v.title.trim() || busy) return null
     setError('')
-    setQuestions([])
     const crit = parsedCriteria(v)
-    if (force) return toPatch(v, v.description.trim(), crit)
+    const asWritten = toPatch(v, v.description.trim(), crit)
     if (llmOn) {
-      setBusy('create')
+      setBusy(true)
       try {
         const res = await draftTask({ title: v.title.trim(), description: v.description.trim(), criteria: crit })
         if (res && !res.ok) {
-          setQuestions(res.questions.length ? res.questions : ['This task is too vague — describe what should happen and how to verify it.'])
-          return null
+          return {
+            kind: 'questions',
+            questions: res.questions.length ? res.questions : ['This task is too vague — describe what should happen and how to verify it.'],
+            patch: asWritten,
+          }
         }
-        return toPatch(v, res?.description ?? v.description.trim(), res?.criteria ?? crit)
+        if (res) {
+          const changed = res.description.trim() !== v.description.trim()
+            || res.criteria.join('\n') !== crit.join('\n')
+          if (changed) return { kind: 'ai', patch: asWritten, aiPatch: toPatch(v, res.description, res.criteria) }
+          return { kind: 'create', patch: asWritten }
+        }
       } catch {
         // brain unreachable — fall through to manual validation
       } finally {
-        setBusy(null)
+        setBusy(false)
       }
     }
     if (!v.description.trim() || !crit.length) {
-      setQuestions(['No brain is available to fill in the gaps — write a clear description and at least one acceptance criterion.'])
-      return null
+      return {
+        kind: 'questions',
+        questions: ['No brain is available to fill in the gaps — write a clear description and at least one acceptance criterion.'],
+        patch: asWritten,
+      }
     }
-    return toPatch(v, v.description.trim(), crit)
+    return { kind: 'create', patch: asWritten }
   }
 
-  return { busy, questions, error, llmOn, draft, resolveForCreate }
+  return { busy, error, setError, llmOn, verifyForCreate }
+}
+
+/** Confirmation popup for a non-clean verification: AI-proposed changes are
+ *  shown for explicit acceptance; rejections show their questions. Either way
+ *  the user can create the task exactly as written. */
+export function SpecVerifyDialog({ outcome, onCreate, onClose }: {
+  outcome: Extract<VerifyOutcome, { kind: 'ai' | 'questions' }>
+  onCreate: (patch: TaskSpecPatch) => void
+  onClose: () => void
+}) {
+  const ai = outcome.kind === 'ai' ? outcome.aiPatch : undefined
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.55)', zIndex: 48, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '14vh' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 520, maxWidth: '92vw', maxHeight: '70vh', overflowY: 'auto', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 15, boxShadow: '0 26px 70px rgba(0,0,0,.6)', padding: 18 }}>
+        <div className="grotesk" style={{ fontWeight: 600, fontSize: 14.5, marginBottom: 6 }}>
+          {ai ? 'The assistant suggests changes' : 'The assistant flagged this spec'}
+        </div>
+        {ai ? (
+          <>
+            <div style={{ fontSize: 11.5, color: 'var(--mut)', marginBottom: 10, lineHeight: 1.5 }}>
+              Review the proposed spec — nothing is applied unless you accept it.
+            </div>
+            <div style={{ background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 10, padding: '10px 13px', marginBottom: 12 }}>
+              <FieldLabel>Proposed description</FieldLabel>
+              <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{ai.description || '—'}</div>
+              {(ai.criteria ?? []).length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <FieldLabel>Proposed criteria</FieldLabel>
+                  {ai.criteria.map((c, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 7, fontSize: 12, color: 'var(--mut)', lineHeight: 1.6 }}>
+                      <span style={{ color: 'var(--accent)' }}>◇</span>{c}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        ) : outcome.kind === 'questions' ? (
+          <div style={{ border: '1px solid rgba(255,176,32,.4)', background: 'rgba(255,176,32,.07)', borderRadius: 10, padding: '10px 13px', marginBottom: 12 }}>
+            {outcome.questions.map((q, i) => (
+              <div key={i} style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5, marginBottom: 3 }}>• {q}</div>
+            ))}
+          </div>
+        ) : null}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {ai && (
+            <button className="approve-btn" style={{ flex: 1, padding: 9, fontSize: 12 }} onClick={() => onCreate(ai)}>
+              Accept AI changes
+            </button>
+          )}
+          <button
+            className={ai ? 'open-btn' : 'approve-btn'}
+            style={{ flex: 1, padding: 9, fontSize: 12 }}
+            title="Create the task exactly as you wrote it"
+            onClick={() => onCreate(outcome.patch)}
+          >
+            Create anyway
+          </button>
+          <button className="deny-btn" style={{ flex: 'none', padding: '9px 16px', fontSize: 12 }} onClick={onClose}>
+            Keep editing
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 /** The task-spec fields, identical on every creation surface. */
@@ -183,6 +250,13 @@ export function TaskSpecFields({ v, set, questions, error, autoFocus }: {
             <input value={v.cwd} onChange={e => set({ ...v, cwd: e.target.value })} placeholder={v.machineId ? 'remote folder' : 'default'} style={{ ...FIELD, fontFamily: 'var(--font-mono)', fontSize: 11.5 }} />
             {!v.machineId && <button className="open-btn" style={{ flex: 'none', padding: '0 11px', fontSize: 11.5 }} onClick={browse} disabled={!isTauri}>…</button>}
           </div>
+        </div>
+        <div>
+          <FieldLabel hint={v.sessionMode === 'interactive' ? 'stays open; the watcher assesses when it exits' : 'runs the task and exits — the watcher assesses the result'}>Session</FieldLabel>
+          <select value={v.sessionMode} onChange={e => set({ ...v, sessionMode: e.target.value as TaskSpecValue['sessionMode'] })} className="select-field" style={FIELD}>
+            <option value="oneshot">One-shot · run task &amp; exit</option>
+            <option value="interactive">Interactive · stays open</option>
+          </select>
         </div>
       </div>
       {machines.length > 0 && (

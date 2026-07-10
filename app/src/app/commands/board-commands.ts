@@ -21,6 +21,8 @@ export interface AddTaskInput {
   typeId?: string
   templateId?: string
   machineId?: string
+  isolate?: boolean
+  sessionMode?: 'oneshot' | 'interactive'
 }
 
 export interface RemoveTaskInput { id: string }
@@ -53,6 +55,8 @@ export function registerBoardCommands(
           typeId: i.typeId || undefined,
           templateId: i.templateId || undefined,
           machineId: i.machineId || undefined,
+          isolate: i.isolate || undefined,
+          sessionMode: i.sessionMode === 'interactive' ? 'interactive' : undefined,
           chat: [{ id: mkId('tc'), role: 'system', text: i.note || 'Task created', at: Date.now() }],
         }]),
       }))

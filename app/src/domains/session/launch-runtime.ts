@@ -215,9 +215,12 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       const runCwd = prior?.workdir || task.cwd
       const isolate = !!task.isolate && !prior
       let id: string | null = null
-      // watcher-driven task sessions are ALWAYS one-shot: they run the task and exit
+      // task sessions default to one-shot (run the task and exit, giving the
+      // watcher a clean exit to assess); the spec can opt into interactive —
+      // the session stays open and the watcher assesses whenever it exits
+      const interactive = task.sessionMode === 'interactive'
       if (task.templateId && (st.templates ?? []).some(t => t.id === task.templateId)) {
-        id = launchFromTemplate(task.templateId, work, workspaceId, runCwd, true, contract, isolate)
+        id = launchFromTemplate(task.templateId, work, workspaceId, runCwd, !interactive, contract, isolate)
       } else {
         const type = (task.typeId ? st.agentTypes.find(t => t.id === task.typeId) : undefined)
           ?? st.agentTypes.find(t => t.enabled)
@@ -225,11 +228,11 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
           flash('No enabled agent type to handle the task')
           return null
         }
-        const oneShot: AgentTemplate = {
-          id: '', name: task.title.slice(0, 18), typeId: type.id, mode: 'ephemeral',
+        const synth: AgentTemplate = {
+          id: '', name: task.title.slice(0, 18), typeId: type.id, mode: interactive ? 'interactive' : 'ephemeral',
           prompt: '{task}', systemPrompt: '', model: '', approval: 'edits', cwd: '', extraArgs: '', autoArchive: false,
         }
-        id = launchSession(buildTemplateCommand(oneShot, type, work, contract), runCwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, workspaceId, { ephemeral: true, isolate, machineId: task.machineId })
+        id = launchSession(buildTemplateCommand(synth, type, work, contract), runCwd || st.settings.defaultCwd || '', task.title.slice(0, 18), type.id, workspaceId, { ephemeral: !interactive, isolate, machineId: task.machineId })
       }
       if (!id) return null
       if (prior) {
@@ -246,14 +249,14 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         col: t.col === 'backlog' || t.col === 'done' || t.col === 'failed' ? 'progress' as const : t.col,
       }), workspaceId))
       armResponseWatch(id)
-      pushTaskChat(taskId, 'system', `Spawned one-shot session “${sessionName}” for this task`)
+      pushTaskChat(taskId, 'system', `Spawned ${interactive ? 'interactive' : 'one-shot'} session “${sessionName}” for this task`)
       if (!task.cwd && !st.settings.defaultCwd && !(task.templateId && (st.templates ?? []).find(t => t.id === task.templateId)?.cwd)) {
         pushTaskChat(taskId, 'system',
           '⚠ No working folder set — the session runs in your home directory. If this task targets a repo, set the folder in the task spec and Relaunch.')
       }
       if (opts?.briefWatcher) {
         void runWatcher(taskId,
-          `A one-shot session "${sessionName}" was just spawned to work this task; it received the title, description and criteria as its prompt, with the criteria set as an explicit goal (stop condition) it must self-verify before exiting. ` +
+          `${interactive ? 'An interactive' : 'A one-shot'} session "${sessionName}" was just spawned to work this task; it received the title, description and criteria as its prompt, with the criteria set as an explicit goal (stop condition) it must self-verify before exiting. ` +
           'Set your card note, make sure the task sits in the right column, and post one short kickoff message for the user.')
       }
       logEvent('route', id, `Spawned session for task “${task.title.slice(0, 48)}”`)
