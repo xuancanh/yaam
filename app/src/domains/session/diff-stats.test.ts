@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { numstatCommand, parseNumstat, statsFromUnifiedDiff } from './diff-stats'
+import { numstatCommand, parseNumstat, pruneDiffStats, statsFromUnifiedDiff, withDiffStat } from './diff-stats'
 
 describe('parseNumstat', () => {
   it('sums added/removed lines and counts files', () => {
@@ -30,5 +30,18 @@ describe('numstatCommand', () => {
     const cmd = numstatCommand('/re po')
     expect(cmd).toContain(`git -C '/re po' diff --numstat HEAD`)
     expect(cmd).toContain('ls-files --others --exclude-standard')
+  })
+})
+
+describe('diff stat cache', () => {
+  const a = { add: 2, del: 1, files: 1 }
+  it('preserves equal entries and removes failed probes', () => {
+    const current = { a }
+    expect(withDiffStat(current, 'a', { ...a })).toBe(current)
+    expect(withDiffStat(current, 'a', undefined)).toEqual({})
+    expect(withDiffStat(current, 'missing', undefined)).toBe(current)
+  })
+  it('prunes sessions that left the current source set', () => {
+    expect(pruneDiffStats({ a, b: a }, new Set(['b']))).toEqual({ b: a })
   })
 })

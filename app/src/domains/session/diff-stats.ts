@@ -16,6 +16,25 @@ export interface DiffStats {
   files: number
 }
 
+/** Replace, remove, or preserve one cached stat without unnecessary state churn. */
+export function withDiffStat(current: Record<string, DiffStats>, id: string, next: DiffStats | undefined): Record<string, DiffStats> {
+  if (!next) {
+    if (!(id in current)) return current
+    const { [id]: _removed, ...rest } = current
+    return rest
+  }
+  const old = current[id]
+  return old?.add === next.add && old.del === next.del && old.files === next.files
+    ? current
+    : { ...current, [id]: next }
+}
+
+/** Drop cache entries for sessions no longer present in this view. */
+export function pruneDiffStats(current: Record<string, DiffStats>, ids: ReadonlySet<string>): Record<string, DiffStats> {
+  if (Object.keys(current).every(id => ids.has(id))) return current
+  return Object.fromEntries(Object.entries(current).filter(([id]) => ids.has(id)))
+}
+
 /** Sum a `git diff --numstat` output; non-numstat lines (untracked paths
  *  appended by the stats command) count as one file each. Binary files show
  *  `-\t-\tpath` — counted as a file with no line stats. */
@@ -93,12 +112,13 @@ export function useDiffStats(sources: StatsSource[], intervalMs = 15_000): Recor
   useEffect(() => {
     let live = true
     let timer: number | undefined
+    setStats(cur => pruneDiffStats(cur, new Set(ref.current.map(s => s.id))))
     const sweep = async () => {
       for (const src of ref.current) {
         if (!live) return
         const st = await fetchDiffStats(src)
         if (!live) return
-        if (st) setStats(cur => (cur[src.id]?.add === st.add && cur[src.id]?.del === st.del && cur[src.id]?.files === st.files ? cur : { ...cur, [src.id]: st }))
+        setStats(cur => withDiffStat(cur, src.id, st))
       }
       if (live) timer = window.setTimeout(() => { void sweep() }, intervalMs)
     }
