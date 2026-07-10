@@ -486,9 +486,10 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <div style={{
           ...(fileColShare != null
-            ? { flexBasis: `${fileColShare * 100}%`, flexGrow: 0, flexShrink: 1, minWidth: 150 }
+            ? { flexBasis: `${fileColShare * 100}%`, flexGrow: 0, flexShrink: 1 }
             : { width: compact ? 200 : 280, flexShrink: 0 }),
-          borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, background: 'var(--bg2)',
+          borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0,
+          minWidth: fileColShare != null ? 150 : 0, background: 'var(--bg2)',
         }}>
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 6 }}>
             {error

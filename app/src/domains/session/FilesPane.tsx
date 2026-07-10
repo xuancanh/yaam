@@ -628,9 +628,9 @@ export function FilesPane({ agent, active, showSession = true }: { agent: Agent;
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{
         ...(treeShare != null
-          ? { flexBasis: `${treeShare * 100}%`, flexGrow: 0, flexShrink: 1, minWidth: 120 }
+          ? { flexBasis: `${treeShare * 100}%`, flexGrow: 0, flexShrink: 1 }
           : { width: showSession ? 220 : 180, flexShrink: 0 }),
-        display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0,
+        display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: treeShare != null ? 120 : 0,
         background: 'var(--bg2)', borderRight: '1px solid var(--line)',
       }}>
         <div style={{
@@ -732,9 +732,9 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{
         ...(treeShare != null
-          ? { flexBasis: `${treeShare * 100}%`, flexGrow: 0, flexShrink: 1, minWidth: 120 }
+          ? { flexBasis: `${treeShare * 100}%`, flexGrow: 0, flexShrink: 1 }
           : { width: 240, flexShrink: 0 }),
-        display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0,
+        display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: treeShare != null ? 120 : 0,
         background: 'var(--bg2)', borderRight: '1px solid var(--line)',
       }}>
         <div style={{
