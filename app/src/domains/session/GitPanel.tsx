@@ -6,6 +6,9 @@ import type { GitStatusResult } from '../../core/native'
 import { buildCfg, callApi, hasCreds } from '../../llm/client'
 import type { Agent } from '../../core/types'
 import { Icon } from '../../components/ui'
+import { CodeEditor } from './lazy-editor'
+import { splitDiffRows } from './diff-split'
+import type { SplitCell } from './diff-split'
 import { WorktreeMergeBar } from './WorktreeMergeBar'
 import { FolderExplorer } from './FilesPane'
 import { sessionFs } from './remote-native'
@@ -156,9 +159,51 @@ function Section({ title, files, bulkLabel, onBulk, selectedPath, selectedStaged
   )
 }
 
-/** colored unified-diff body */
-function DiffView({ diff }: { diff: string }) {
+const CELL_STYLE: Record<string, { color: string; bg: string }> = {
+  add: { color: 'var(--green)', bg: 'rgba(61,220,151,.06)' },
+  del: { color: 'var(--red-soft)', bg: 'rgba(255,92,92,.06)' },
+  ctx: { color: 'var(--mut)', bg: 'transparent' },
+  empty: { color: 'var(--mut)', bg: 'var(--bg2)' },
+  hunk: { color: 'var(--accent)', bg: 'transparent' },
+  meta: { color: 'var(--text)', bg: 'var(--panel2)' },
+}
+
+/** one side-by-side cell: gutter line number + text */
+function SplitCellView({ cell }: { cell: SplitCell }) {
+  const st = CELL_STYLE[cell.kind]
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', background: st.bg }}>
+      <span style={{ width: 40, flexShrink: 0, textAlign: 'right', paddingRight: 7, color: 'var(--faint)', userSelect: 'none' }}>
+        {cell.n ?? ''}
+      </span>
+      <span style={{ flex: 1, minWidth: 0, padding: '0 10px', color: st.color, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        {cell.text || ' '}
+      </span>
+    </div>
+  )
+}
+
+/** colored diff body: unified, or side-by-side (old left, new right) */
+function DiffView({ diff, split }: { diff: string; split?: boolean }) {
   if (!diff.trim()) return <div style={{ padding: 16, fontSize: 12, color: 'var(--dim)' }}>no diff — select a file on the left</div>
+  if (split) {
+    const rows = splitDiffRows(diff)
+    return (
+      <div className="mono" style={{ padding: '8px 0', fontSize: 11.5, lineHeight: 1.55 }}>
+        {rows.map((row, i) => row.left.kind === 'hunk' || row.left.kind === 'meta' ? (
+          <div key={i} style={{ padding: '0 14px', color: CELL_STYLE[row.left.kind].color, background: CELL_STYLE[row.left.kind].bg, whiteSpace: 'pre-wrap', fontWeight: row.left.kind === 'meta' ? 700 : 400 }}>
+            {row.left.text}
+          </div>
+        ) : (
+          <div key={i} style={{ display: 'flex' }}>
+            <SplitCellView cell={row.left} />
+            <div style={{ width: 1, flexShrink: 0, background: 'var(--line)' }} />
+            <SplitCellView cell={row.right} />
+          </div>
+        ))}
+      </div>
+    )
+  }
   return (
     <pre className="mono" style={{ margin: 0, padding: '8px 0', fontSize: 11.5, lineHeight: 1.55 }}>
       {diff.split('\n').map((line, i) => {
@@ -209,6 +254,11 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
   /** single = one file at a time · all = continuous scroll of every diff
    *  (worktree sessions review vs their fork point in all-files mode) */
   const [viewMode, setViewMode] = useState<'single' | 'all'>('single')
+  /** side-by-side (old | new) instead of the unified diff */
+  const [sideBySide, setSideBySide] = useState(false)
+  /** editing the selected file in place of its diff */
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState<string | null>(null)
   const [sections, setSections] = useState<DiffSection[]>([])
   const sectionRefs = useRef(new Map<string, HTMLDivElement>())
 
@@ -288,8 +338,21 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
     return () => { live = false }
   }, [viewMode, status, worktree, loadFileDiff])
 
+  // open the selected file in the inline editor (fix-as-you-review)
+  const startEdit = async () => {
+    if (!status || !selected) return
+    try {
+      setEditText(await fs.readTextFile(`${status.root}/${selected.path}`))
+      setEditing(true)
+    } catch (e) {
+      setDiff(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   // in all-files view, picking a file on the left scrolls to its section
   const selectFile = (f: FileRow) => {
+    setEditing(false)
+    setEditText(null)
     setSelected({ path: f.path, staged: f.staged })
     if (viewMode !== 'all') return
     const repoPrefix = worktree && repos.length > 1 ? `${repo.slice(repo.lastIndexOf('/') + 1)}/` : ''
@@ -390,6 +453,14 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
         )}
         <button
           className="icon-btn"
+          title={sideBySide ? 'Side-by-side diff — click for unified' : 'Unified diff — click for side-by-side (old | new)'}
+          onClick={() => setSideBySide(v => !v)}
+          style={{ width: 25, height: 25, borderRadius: 7, color: sideBySide ? 'var(--accent)' : undefined }}
+        >
+          <Icon paths={['M4 5h16v14H4z', 'M12 5v14']} size={13} stroke={1.7} />
+        </button>
+        <button
+          className="icon-btn"
           title={viewMode === 'single'
             ? `Single-file view — click for a continuous scroll of all diffs${worktree ? ' (vs the worktree fork point)' : ''}`
             : 'All-files view — click for one file at a time'}
@@ -471,15 +542,40 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
           </div>
         </div>
 
-        <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', background: 'var(--bg3)' }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflowY: editing ? 'hidden' : 'auto', background: 'var(--bg3)' }}>
           {viewMode === 'single' ? (
             <>
               {selected && (
-                <div className="mono" style={{ position: 'sticky', top: 0, padding: '7px 14px', fontSize: 11, fontWeight: 600, color: 'var(--text2)', background: 'var(--panel2)', borderBottom: '1px solid var(--line)' }}>
-                  {selected.path} <span style={{ color: 'var(--dim)', fontWeight: 400 }}>· {selected.staged ? 'staged' : 'unstaged'}</span>
+                <div className="mono" style={{ position: 'sticky', top: 0, zIndex: 2, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '4px 14px', minHeight: 30, fontSize: 11, fontWeight: 600, color: 'var(--text2)', background: 'var(--panel2)', borderBottom: '1px solid var(--line)' }}>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {selected.path} <span style={{ color: 'var(--dim)', fontWeight: 400 }}>· {editing ? 'editing' : selected.staged ? 'staged' : 'unstaged'}</span>
+                  </span>
+                  <div style={{ flex: 1 }} />
+                  {!editing && (
+                    <button
+                      className="icon-btn"
+                      title="Edit this file in place (⌘S saves; the diff refreshes)"
+                      onClick={() => { void startEdit() }}
+                      style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0 }}
+                    >
+                      <Icon paths={['M12 20h9', 'M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z']} size={12} stroke={1.7} />
+                    </button>
+                  )}
                 </div>
               )}
-              <DiffView diff={diff} />
+              {editing && editText !== null && selected && status ? (
+                <CodeEditor
+                  path={`${status.root}/${selected.path}`}
+                  initial={editText}
+                  onSave={async text => {
+                    await fs.writeTextFile(`${status.root}/${selected.path}`, text)
+                    await refresh()
+                  }}
+                  onClose={() => { setEditing(false); setEditText(null); void refresh() }}
+                />
+              ) : (
+                <DiffView diff={diff} split={sideBySide} />
+              )}
             </>
           ) : sections.length ? (
             sections.map(sec => (
@@ -502,7 +598,7 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
                     · {worktree ? 'vs fork point' : sec.staged ? 'staged' : 'unstaged'}
                   </span>
                 </div>
-                <DiffView diff={sec.diff} />
+                <DiffView diff={sec.diff} split={sideBySide} />
               </div>
             ))
           ) : (

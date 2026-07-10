@@ -9,11 +9,12 @@ export const IMG_MIME: Record<string, string> = {
 }
 
 /** How a viewer should treat one file, by extension. */
-export function viewKind(name: string): 'image' | 'pdf' | 'office' | 'text' {
+export function viewKind(name: string): 'image' | 'pdf' | 'office' | 'html' | 'text' {
   const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
   if (IMG_MIME[ext]) return 'image'
   if (ext === 'pdf') return 'pdf'
-  if (ext === 'docx' || ext === 'xlsx' || ext === 'pptx') return 'office'
+  if (ext === 'docx' || ext === 'xlsx' || ext === 'xls' || ext === 'ods' || ext === 'pptx') return 'office'
+  if (ext === 'html' || ext === 'htm') return 'html'
   return 'text'
 }
 

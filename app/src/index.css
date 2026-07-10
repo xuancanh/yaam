@@ -165,6 +165,28 @@ input {
   user-select: text;
 }
 
+/* SheetJS-rendered workbook tables (file viewer office mode) */
+.sheet-html table {
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+.sheet-html td,
+.sheet-html th {
+  border: 1px solid var(--line2);
+  padding: 3px 9px;
+  color: var(--text2);
+  white-space: nowrap;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet-html tr:first-child td {
+  background: var(--panel2);
+  font-weight: 600;
+  color: var(--text);
+}
+
 /* Dropdowns share inline field styles with text inputs, but WebKit's native
    menulist ignores padding/height — strip it so a select sizes exactly like
    the input next to it, and draw our own chevron. */

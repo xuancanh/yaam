@@ -10,7 +10,10 @@ import type { DirEntryInfo } from '../../core/native'
 import { sessionFs } from './remote-native'
 import type { SessionFs } from './remote-native'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
+import { renderDocx, renderWorkbook } from '../../shared/office-render'
+import type { OfficeRender } from '../../shared/office-render'
 import { IMG_MIME, viewKind } from '../../shared/file-preview'
+import { CodeEditor } from './lazy-editor'
 import { parseDiffLines } from './diff-marks'
 import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
@@ -174,6 +177,14 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
   const [marks, setMarks] = useState<{ added: Set<number>; modified: Set<number>; deletedAfter: Set<number> } | null>(null)
   const [mdView, setMdView] = useState<'rendered' | 'raw'>('rendered')
   const [dataUrl, setDataUrl] = useState<string | null>(null)
+  // rich office render (docx html / workbook tables); null = extracted-text fallback
+  const [office, setOffice] = useState<OfficeRender | null>(null)
+  const [sheetIx, setSheetIx] = useState(0)
+  // html files render live in a sandboxed iframe; 'source' shows/edits markup
+  const [htmlView, setHtmlView] = useState<'rendered' | 'source'>('rendered')
+  const [editing, setEditing] = useState(false)
+  const editingRef = useRef(false)
+  editingRef.current = editing
   const contentRef = useRef<string | null>(null)
   // virtualized code view: track the scroll viewport so only visible rows render
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -189,6 +200,7 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
 
   // Read the selected file and its diff, ignoring stale async completions.
   const load = useCallback(async () => {
+    if (editingRef.current) return // never clobber an open editor buffer
     try {
       if (kind === 'image' || kind === 'pdf') {
         // rendered natively from a data URL; no diff/polling semantics
@@ -199,8 +211,16 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         return
       }
       if (kind === 'office') {
-        // office docs preview as extracted text (viewer stays read-only)
-        const extracted = await extractFileText(name, b64ToBytes(await fs.readFileB64(path)))
+        // rich render first (docx → formatted HTML, workbooks → tables);
+        // fall back to the dependency-free text extraction
+        const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+        const bytes = b64ToBytes(await fs.readFileB64(path))
+        try {
+          if (ext === 'docx') { setOffice(await renderDocx(bytes)); setErr(null); return }
+          if (ext === 'xlsx' || ext === 'xls' || ext === 'ods') { setOffice(await renderWorkbook(bytes)); setErr(null); return }
+        } catch { /* fall through to extracted text */ }
+        setOffice(null)
+        const extracted = await extractFileText(name, bytes)
         const text = extracted.text ?? '(no text extracted)'
         if (text !== contentRef.current) {
           contentRef.current = text
@@ -248,7 +268,11 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
     setErr(null)
     setMarks(null)
     setDataUrl(null)
+    setOffice(null)
+    setSheetIx(0)
     setMdView('rendered')
+    setHtmlView('rendered')
+    setEditing(false)
     void load()
     if (kind === 'image' || kind === 'pdf') return
     if (isTauri) return onFsChange(() => void load())
@@ -334,6 +358,26 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
             <span className="mono" style={{ fontSize: 10, fontWeight: 700 }}>M↓</span>
           </button>
         )}
+        {kind === 'html' && !editing && (
+          <button
+            className="icon-btn"
+            title={htmlView === 'rendered' ? 'Live page (sandboxed) — click for the markup' : 'Markup — click for the live page'}
+            onClick={() => setHtmlView(v => (v === 'rendered' ? 'source' : 'rendered'))}
+            style={{ width: 26, height: 26, borderRadius: 6, color: htmlView === 'rendered' ? 'var(--accent)' : undefined }}
+          >
+            <Icon paths={['M4 5h16v14H4z', 'M4 9h16', 'M7 7h.01']} size={14} stroke={1.7} />
+          </button>
+        )}
+        {(kind === 'text' || kind === 'html') && content !== null && !editing && (
+          <button
+            className="icon-btn"
+            title="Edit this file (⌘S saves in place — local or over SSH)"
+            onClick={() => { setHtmlView('source'); setEditing(true) }}
+            style={{ width: 26, height: 26, borderRadius: 6 }}
+          >
+            <Icon paths={['M12 20h9', 'M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z']} size={13} stroke={1.7} />
+          </button>
+        )}
         <button
           className="icon-btn"
           title={gutter === 'numbers' ? 'Gutter: line numbers — click for git change markers' : 'Gutter: git change markers — click for line numbers'}
@@ -365,6 +409,58 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
         <div style={{ padding: 18, fontSize: 12, color: 'var(--red-soft)' }}>
           Can't display this file — {err.includes('stream did not contain valid UTF-8') ? 'it is binary or not UTF-8 text.' : err}
         </div>
+      ) : editing && content !== null ? (
+        <CodeEditor
+          path={path}
+          initial={content}
+          onSave={async text => {
+            await fs.writeTextFile(path, text)
+            contentRef.current = text
+            setContent(text)
+          }}
+          onClose={() => { setEditing(false); void load() }}
+        />
+      ) : kind === 'office' && office ? (
+        office.kind === 'docx' ? (
+          <iframe
+            title={name}
+            sandbox=""
+            srcDoc={`<!doctype html><meta charset="utf-8"><style>body{font-family:system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 20px;line-height:1.6;color:#1c1f26;background:#fff}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px}img{max-width:100%}</style>${office.html ?? ''}`}
+            style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }}
+          />
+        ) : (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {(office.sheets?.length ?? 0) > 1 && (
+              <div style={{ display: 'flex', gap: 2, padding: '6px 10px 0', flexShrink: 0, overflowX: 'auto' }}>
+                {office.sheets!.map((sh, i) => (
+                  <button
+                    key={sh.name}
+                    onClick={() => setSheetIx(i)}
+                    style={{
+                      border: '1px solid var(--line2)', borderRadius: 7, padding: '3px 10px', fontSize: 11, fontWeight: 600,
+                      cursor: 'pointer', whiteSpace: 'nowrap',
+                      background: sheetIx === i ? 'var(--panel2)' : 'transparent',
+                      color: sheetIx === i ? 'var(--accent)' : 'var(--mut)',
+                    }}
+                  >
+                    {sh.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div
+              className="sheet-html"
+              style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 12 }}
+              dangerouslySetInnerHTML={{ __html: office.sheets?.[sheetIx]?.html ?? '<div>empty workbook</div>' }}
+            />
+          </div>
+        )
+      ) : kind === 'html' && htmlView === 'rendered' ? (
+        content !== null ? (
+          // same trust model as chat artifacts: opaque origin, scripts allowed,
+          // no reach back into the app
+          <iframe title={name} sandbox="allow-scripts" srcDoc={content} style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }} />
+        ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
       ) : kind === 'image' ? (
         dataUrl ? (
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>

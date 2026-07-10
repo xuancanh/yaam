@@ -7,7 +7,7 @@
 import type { Machine } from '../../core/types'
 import {
   execCommand, gitCommit, gitFileDiff, gitFileDiffSide, gitStage, gitStatus, gitUnstage,
-  listDir, readFileB64, readTextFile,
+  listDir, readFileB64, readTextFile, writeTextFile,
 } from '../../core/native'
 import type { DirEntryInfo, GitStatusResult } from '../../core/native'
 import { detectRepoDirs } from '../../shared/git-repos'
@@ -19,6 +19,7 @@ const REMOTE_B64_CAP = 24_000
 export interface SessionFs {
   listDir(path: string): Promise<DirEntryInfo[]>
   readTextFile(path: string): Promise<string>
+  writeTextFile(path: string, contents: string): Promise<void>
   readFileB64(path: string): Promise<string>
   gitStatus(cwd: string): Promise<GitStatusResult>
   gitFileDiff(cwd: string, path: string): Promise<string>
@@ -52,6 +53,7 @@ async function detectReposVia(a: Pick<SessionFs, 'gitStatus' | 'listDir'>, cwd: 
 /** The local (in-process native) adapter — the existing behavior verbatim. */
 const localFs: SessionFs = {
   listDir, readTextFile, readFileB64, gitStatus, gitFileDiff, gitFileDiffSide, gitStage, gitUnstage, gitCommit,
+  writeTextFile: (path, contents) => writeTextFile(path, contents),
   detectRepos: detectRepoDirs,
   remote: false,
 }
@@ -105,6 +107,14 @@ export function remoteFs(machine: Machine, id: string): SessionFs {
     },
     async readTextFile(path) {
       return ok(await run(`cat -- ${shq(path)}`))
+    },
+    async writeTextFile(path, contents) {
+      // the content travels base64 inside the command line (like wrapLaunch's
+      // inner command) — keep it well under ARG_MAX
+      if (contents.length > 200_000) throw new Error('file too large to save over SSH (200 KB limit)')
+      let bin = ''
+      for (const b of new TextEncoder().encode(contents)) bin += String.fromCharCode(b)
+      ok(await run(`printf %s ${btoa(bin)} | base64 -d > ${shq(path)}`))
     },
     async readFileB64(path) {
       // execCommand caps its output (~40 KB) and base64 inflates ~4/3, so a big

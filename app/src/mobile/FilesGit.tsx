@@ -100,7 +100,7 @@ export function FilesBrowser({ root, onAttach }: {
             </button>
           </div>
         )}
-        {(file.kind === 'text' || file.kind === 'office') && <RichText name={name} text={file.text ?? ''} />}
+        {(file.kind === 'text' || file.kind === 'office' || file.kind === 'html') && <RichText name={name} text={file.text ?? ''} />}
         {onAttach && file.kind !== 'image' && file.kind !== 'pdf' && (
           <div className="btnrow">
             <button
