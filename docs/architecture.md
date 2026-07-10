@@ -340,6 +340,9 @@ New turns also persist a structured work record: original text and attachment
 descriptors, model, tool inputs/results, status, provider token usage, and any
 board-task handoff. Turns older than the recent provider window feed a bounded
 extractive context summary, preserving continuity without another LLM call.
+Provider-reported input/output usage accumulates on the turn and session. Each
+chat has a token ceiling (200k by default, zero for unlimited); a turn is refused
+before its API call when the ceiling has already been reached.
 
 ## Board and schedule flow
 

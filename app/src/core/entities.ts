@@ -192,6 +192,8 @@ export interface SessionRecord {
   approvedToolCalls?: string[]
   chatPinned?: boolean
   chatTags?: string[]
+  /** provider-reported total-token ceiling; zero disables the limit */
+  chatTokenBudget?: number
   /** git-worktree isolation this session runs in (cwd === workdir) */
   worktree?: { root: string; base: string; workdir: string }
   /** the PTY lives in a detached host process that outlives the app; the

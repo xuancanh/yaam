@@ -67,6 +67,7 @@ The **Chat** rail is a home for **chat agents**: in-app LLM assistants (no PTY) 
 - **File import** — drag & drop or attach files: text inlines, PDFs and office documents (docx/xlsx/pptx) are text-extracted, images go to vision-capable models; a Files toggle mounts the same explorer/rich viewer terminal sessions use (real system file icons, images, PDFs, office previews) — every file row has a one-click ＋ attach, and the viewer offers "Add to chat".
 - **Durable workspace memory** — agents read shared memory each turn and append facts via a `remember` tool; a Memory editor lets you prune what they've learned.
 - **Streaming replies** — token-by-token, with reasoning models' thinking shown in a collapsible block; stop, retry, copy, and a send queue while the agent is busy.
+- **Usage and budgets** — provider-reported input/output tokens are recorded per turn; each chat has an editable token ceiling that pauses new turns when reached.
 - **Artifacts pane** — when a reply contains substantial HTML or SVG, an artifact chip opens it rendered live in a sandboxed (no-network) side panel.
 - **Configurable agent types** — each with its own provider, credentials, and a per-chat model list; an optional persona and chosen skill sources.
 - **Full-text search** across every conversation via an embedded tantivy index, rebuilt automatically.

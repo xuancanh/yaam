@@ -35,6 +35,8 @@ describe('chat composer actions', () => {
     expect(state.agents[0]).toMatchObject({ chatTags: ['research', 'Q3'], chatPinned: false, archived: true })
     actions.restoreChat('chat-1')
     expect(state.agents[0].archived).toBe(false)
+    actions.setChatTokenBudget('chat-1', 12_345.4)
+    expect(state.agents[0].chatTokenBudget).toBe(12_345)
   })
 
   it('forks before the selected turn and runs the revised input in the new chat', () => {

@@ -15,7 +15,7 @@ import type { AbortRegistry } from '../../core/abort-registry'
 import { isAbortError } from '../../core/abort-registry'
 import { readFileB64 } from '../../core/native'
 import { ESTIMATED_OUTPUT_COST_PER_KTOK } from '../../core/usage'
-import { buildContextSummary } from './turns'
+import { buildContextSummary, chatBudgetState } from './turns'
 
 export interface ChatCtx {
   stateRef: MutableRefObject<AppState>
@@ -143,6 +143,12 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
   if (!chatTypeHasCreds(chatType, st)) {
     ctx.pushChatLog(agentId, { role: 'user', text })
     ctx.pushChatLog(agentId, { role: 'assistant', text: `“${chatType.name}” has no credentials — set an API key in Settings → Agent Types → Chat agents (or match the Master Brain provider to share its key).` })
+    return
+  }
+  const budget = chatBudgetState(agent)
+  if (budget.blocked) {
+    ctx.pushChatLog(agentId, { role: 'user', text })
+    ctx.pushChatLog(agentId, { role: 'assistant', text: `Token budget reached (${budget.used.toLocaleString()} / ${budget.budget.toLocaleString()}). Increase or disable the budget in the chat header before continuing.` })
     return
   }
   if (ctx.busy.has(agentId)) {

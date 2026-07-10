@@ -1,5 +1,11 @@
 import type { Agent, ChatTurn } from '../../core/types'
 
+export function chatBudgetState(agent: Agent): { budget: number; used: number; blocked: boolean } {
+  const budget = agent.chatTokenBudget ?? 200_000
+  const used = Math.round(agent.used * 1000)
+  return { budget, used, blocked: budget > 0 && used >= budget }
+}
+
 export function buildContextSummary(turns: ChatTurn[], keepRecent = 12): string | undefined {
   const settled = turns.filter(t => t.status !== 'running')
   if (settled.length <= keepRecent) return undefined

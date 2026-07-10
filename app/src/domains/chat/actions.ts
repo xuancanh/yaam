@@ -39,6 +39,7 @@ export interface ChatActions {
   setChatTags: (agentId: string, tags: string[]) => void
   archiveChat: (agentId: string) => void
   restoreChat: (agentId: string) => void
+  setChatTokenBudget: (agentId: string, tokens: number) => void
   /** answer a pending ask-mode tool approval */
   approveChatTool: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
   /** flip a chat between ask (approve risky tools) and auto */
@@ -80,6 +81,7 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
           text: `Hi${dir ? ` — I'm working in \`${dir}\`` : ''}. What would you like to work on? You can describe an outcome or attach files.`,
         }],
         chatComposer: { draft: '', attachments: [], queue: [] },
+        chatTokenBudget: 200_000,
         ...defaultDetail(), usageVersion: 1,
       }
       dispatch(s => ({ ...s, agents: s.agents.concat([agent]), activeChatId: id, view: 'chat' }))
@@ -198,6 +200,11 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
     restoreChat: agentId => dispatch(s => ({
       ...s,
       agents: s.agents.map(a => a.id === agentId ? { ...a, archived: false } : a),
+    })),
+
+    setChatTokenBudget: (agentId, tokens) => dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === agentId ? { ...a, chatTokenBudget: Math.max(0, Math.round(tokens)) } : a),
     })),
 
     approveChatTool: (agentId, msgId, decision) => ctx.resolveChatApproval(agentId, msgId, decision),

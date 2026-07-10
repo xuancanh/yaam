@@ -158,6 +158,34 @@ function TagsEditor({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   )
 }
 
+function BudgetEditor({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+  const { setChatTokenBudget } = useActions()
+  const [thousands, setThousands] = useState(String((agent.chatTokenBudget ?? 200_000) / 1000))
+  const parsed = Number(thousands)
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.55)', zIndex: 48, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 380, maxWidth: '92vw', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 8, padding: 16 }}>
+        <div className="grotesk" style={{ fontSize: 14, fontWeight: 600 }}>Chat token budget</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+          <input autoFocus type="number" min="0" step="10" value={thousands} onChange={e => setThousands(e.target.value)} style={{ ...FIELD, flex: 1 }} />
+          <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>thousand tokens</span>
+        </div>
+        <div className="mono" style={{ fontSize: 10, color: 'var(--faint)', marginTop: 7 }}>0 = unlimited · provider-reported input + output</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+          <button className="deny-btn" style={{ padding: '7px 14px' }} onClick={onClose}>Cancel</button>
+          <button className="approve-btn" disabled={!Number.isFinite(parsed) || parsed < 0} style={{ padding: '7px 16px' }} onClick={() => { setChatTokenBudget(agent.id, parsed * 1000); onClose() }}>Save</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function compactTokens(tokens: number): string {
+  if (tokens < 1000) return String(Math.round(tokens))
+  if (tokens < 100_000) return `${(tokens / 1000).toFixed(1)}k`
+  return `${Math.round(tokens / 1000)}k`
+}
+
 export function ChatView() {
   const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId, activeWorkspace: x.activeWorkspace, settings: x.settings }), shallowEqual)
   const { openChat, deleteSession, renameSession, setChatPermMode, setChatPinned, archiveChat, restoreChat, updateSettings } = useActions()
@@ -187,6 +215,7 @@ export function ChatView() {
   const [filesOpen, setFilesOpen] = useState<Record<string, boolean>>({})
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [tagsOpen, setTagsOpen] = useState(false)
+  const [budgetOpen, setBudgetOpen] = useState(false)
 
   // chats are workspace-specific (each carries the workspace it was created in)
   const inWorkspace = (a: Agent) => a.kind === 'chat'
@@ -333,6 +362,9 @@ export function ChatView() {
               <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{selected.model}</span>
               {selected.cwd && <span className="mono" style={{ fontSize: 10.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selected.cwd}</span>}
               <div style={{ flex: 1 }} />
+              <button className="mono" title="Set token budget" onClick={() => setBudgetOpen(true)} style={{ padding: '3px 8px', borderRadius: 6, border: '1px solid var(--line2)', background: 'transparent', color: selected.chatTokenBudget && selected.used * 1000 >= selected.chatTokenBudget ? 'var(--red-soft)' : 'var(--dim)', fontSize: 9.5, cursor: 'pointer' }}>
+                {compactTokens(selected.used * 1000)} / {selected.chatTokenBudget === 0 ? '∞' : compactTokens(selected.chatTokenBudget ?? 200_000)} tok
+              </button>
               <button className="icon-btn" title={selected.chatPinned ? 'Unpin conversation' : 'Pin conversation'} onClick={() => setChatPinned(selected.id, !selected.chatPinned)} style={{ width: 26, height: 26, borderRadius: 7, color: selected.chatPinned ? 'var(--accent)' : undefined }}>
                 <Icon paths={['M9 4h6l-1 6 3 3v1H7v-1l3-3-1-6z', 'M12 14v7']} size={14} stroke={1.7} />
               </button>
@@ -402,6 +434,7 @@ export function ChatView() {
       </div>
       {memoryOpen && <MemoryEditor workspaceId={s.activeWorkspace} onClose={() => setMemoryOpen(false)} />}
       {tagsOpen && selected && <TagsEditor agent={selected} onClose={() => setTagsOpen(false)} />}
+      {budgetOpen && selected && <BudgetEditor agent={selected} onClose={() => setBudgetOpen(false)} />}
     </div>
   )
 }

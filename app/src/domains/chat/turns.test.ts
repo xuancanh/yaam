@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent, ChatTurn } from '../../core/types'
-import { buildContextSummary, lastReplayableTurn, removeStructuredTurn, rewindFromTurn } from './turns'
+import { buildContextSummary, chatBudgetState, lastReplayableTurn, removeStructuredTurn, rewindFromTurn } from './turns'
 
 const turn = (id: string, status: ChatTurn['status']): ChatTurn => ({
   id, status, at: 1, startedAt: 1, model: 'test', input: { text: id, attachments: [] }, tools: [],
@@ -51,5 +51,11 @@ describe('structured chat turns', () => {
     expect(summary).toContain('request 0')
     expect(summary).toContain('request 2')
     expect(summary).not.toContain('request 3')
+  })
+
+  it('blocks at the provider-token budget and supports unlimited chats', () => {
+    expect(chatBudgetState({ ...agent, used: 200, chatTokenBudget: 200_000 } as Agent).blocked).toBe(true)
+    expect(chatBudgetState({ ...agent, used: 900, chatTokenBudget: 0 } as Agent).blocked).toBe(false)
+    expect(chatBudgetState({ ...agent, used: 1 } as Agent).budget).toBe(200_000)
   })
 })
