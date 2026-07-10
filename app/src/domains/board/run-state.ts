@@ -59,10 +59,14 @@ export function runStatusLabel(run: RunRef): { label: string; tone: 'amber' | 'g
 }
 
 /** Fold non-archived tasks + loose (non-task, non-chat) sessions into triage
- *  groups. Task runs come first inside each group, keeping board order. */
-export function groupRuns(tasks: BoardTask[], agents: Agent[], filter: RunFilter = 'all'): RunGroup[] {
+ *  groups. Task runs come first inside each group, keeping board order. When a
+ *  workspace is supplied, global sessions are narrowed to that workspace. */
+export function groupRuns(tasks: BoardTask[], agents: Agent[], filter: RunFilter = 'all', workspaceId?: string): RunGroup[] {
   const liveTasks = tasks.filter(t => !t.archived)
-  const byId = new Map(agents.map(a => [a.id, a]))
+  const scopedAgents = workspaceId
+    ? agents.filter(a => (a.workspaceId ?? workspaceId) === workspaceId)
+    : agents
+  const byId = new Map(scopedAgents.map(a => [a.id, a]))
   // every agent any live task points at (current or historical one-shots)
   const taskAgentIds = new Set(liveTasks.flatMap(t => [t.agentId, ...(t.agentIds ?? [])]).filter(Boolean))
 
@@ -71,7 +75,7 @@ export function groupRuns(tasks: BoardTask[], agents: Agent[], filter: RunFilter
       kind: 'task', key: `task:${t.id}`, task: t,
       agent: t.agentId ? byId.get(t.agentId) : undefined,
     })),
-    ...agents
+    ...scopedAgents
       .filter(a => !a.archived && a.kind !== 'chat' && !taskAgentIds.has(a.id))
       .map((a): RunRef => ({ kind: 'session', key: `sess:${a.id}`, agent: a })),
   ]

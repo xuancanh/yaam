@@ -66,4 +66,18 @@ describe('groupRuns', () => {
     )
     expect(groups.map(g => g.id)).toEqual(['needs', 'running', 'done'])
   })
+  it('keeps task and loose-session agents inside the active workspace', () => {
+    const local = agent({ id: 'local', workspaceId: 'ws-a' })
+    const remote = agent({ id: 'remote', workspaceId: 'ws-b', status: 'running' })
+    const untagged = agent({ id: 'legacy', workspaceId: undefined })
+    const groups = groupRuns(
+      [task({ id: 't1', agentId: 'remote' })],
+      [local, remote, untagged],
+      'all',
+      'ws-a',
+    )
+    const runs = groups.flatMap(g => g.runs)
+    expect(runs.map(r => r.key)).toEqual(['task:t1', 'sess:local', 'sess:legacy'])
+    expect(runs.find(r => r.key === 'task:t1')).toMatchObject({ agent: undefined })
+  })
 })

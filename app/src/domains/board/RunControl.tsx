@@ -307,9 +307,12 @@ const FILTERS: Array<{ id: RunFilter; label: string }> = [
 
 /** The Control Center's Runs view: run list + selected-run cockpit. */
 export function RunControl() {
-  const s = useConductorSelector(x => ({ tasks: x.tasks, agents: x.agents }), shallowEqual)
+  const s = useConductorSelector(x => ({ tasks: x.tasks, agents: x.agents, activeWorkspace: x.activeWorkspace }), shallowEqual)
   const [filter, setFilter] = useState<RunFilter>('all')
-  const groups = useMemo(() => groupRuns(s.tasks, s.agents, filter), [s.tasks, s.agents, filter])
+  const groups = useMemo(
+    () => groupRuns(s.tasks, s.agents, filter, s.activeWorkspace),
+    [s.tasks, s.agents, filter, s.activeWorkspace],
+  )
   const flat = useMemo(() => groups.flatMap(g => g.runs), [groups])
   const [selKey, setSelKey] = useState<string | null>(null)
   const selected = flat.find(r => r.key === selKey) ?? flat[0]
