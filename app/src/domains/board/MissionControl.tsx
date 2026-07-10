@@ -9,7 +9,7 @@ import { sessionFs } from '../session/remote-native'
 import { WorktreeMergeBar } from '../session/WorktreeMergeBar'
 import { useDiffStats } from '../session/diff-stats'
 import { groupRuns, runStatusLabel } from './mission-state'
-import type { RunRef } from './mission-state'
+import type { RunFilter, RunRef } from './mission-state'
 import { TaskReviewFooter, WatcherChat } from './WatcherChat'
 
 // Mission Control: the board's triage mode (toggle in the board header).
@@ -26,7 +26,8 @@ function runTitle(run: RunRef): string {
   return run.kind === 'task' ? run.task.title : run.agent.name
 }
 
-/** One selectable run row: status dot, title, chip, live diff stats. */
+/** One selectable run row: status dot, title, chip, live diff stats, and an
+ *  inline start for unstarted tasks (backlog). */
 function RunRow({ run, stats, selected, shortcut, onSelect }: {
   run: RunRef
   stats?: { add: number; del: number; files: number }
@@ -34,9 +35,12 @@ function RunRow({ run, stats, selected, shortcut, onSelect }: {
   shortcut?: number
   onSelect: () => void
 }) {
+  const { startTask } = useActions()
   const agent = run.agent
+  const task = run.kind === 'task' ? run.task : undefined
   const st = runStatusLabel(run)
   const flash = st.tone === 'amber'
+  const startable = !!task && !agent && task.col !== 'done' && task.col !== 'failed'
   return (
     <button
       className="palette-item"
@@ -56,6 +60,16 @@ function RunRow({ run, stats, selected, shortcut, onSelect }: {
         <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: selected ? 'var(--text)' : 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {runTitle(run)}
         </span>
+        {startable && (
+          <span
+            role="button"
+            title="Start a session for this task"
+            onClick={e => { e.stopPropagation(); startTask(task.id) }}
+            style={{ display: 'flex', alignItems: 'center', color: 'var(--green)', flexShrink: 0, padding: '0 2px' }}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z" /></svg>
+          </span>
+        )}
         {shortcut != null && <span className="mono" style={{ fontSize: 9, color: 'var(--faint)', flexShrink: 0 }}>⌘{shortcut}</span>}
       </div>
       <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', fontSize: 10, paddingLeft: 15 }}>
@@ -98,37 +112,106 @@ function SpecBlock({ task }: { task: BoardTask }) {
   )
 }
 
-type Tab = 'agent' | 'watcher' | 'changes'
-/** how the Changes tab lays out: alone, or docked beside/below the terminal */
-type ChangesView = 'full' | 'right' | 'bottom'
-const changesViewCache = new Map<string, ChangesView>()
+/** per-run panel layout, remembered across selection changes */
+const detailCache = new Map<string, { changes: boolean; watcher: boolean; dock: 'right' | 'bottom' }>()
 
-/** Right side: the selected run's terminal / watcher chat / changes. */
+/** Slim panel header strip: label + host-supplied controls, matching the
+ *  session pane's Changes strip. */
+function PanelStrip({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ height: 28, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, padding: '0 8px', borderBottom: '1px solid var(--line)' }}>
+      <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: 'var(--dim)' }}>{label}</span>
+      <div style={{ flex: 1 }} />
+      {children}
+    </div>
+  )
+}
+
+/** Right side: session-pane-style cockpit — the terminal (or spec) always in
+ *  the center, with Changes and the task's Watcher chat as toggleable docked
+ *  panels instead of tabs. The watcher lands in the bottom-right quarter. */
 function RunDetail({ run }: { run: RunRef }) {
   const { focusTab } = useActions()
   const agent = run.agent
   const task = run.kind === 'task' ? run.task : undefined
   const inReview = task?.col === 'review'
-  // land on what the run most likely needs: review → changes, else the agent
-  const [tab, setTab] = useState<Tab>(inReview ? 'changes' : 'agent')
-  useEffect(() => { setTab(inReview ? 'changes' : 'agent') }, [run.key, inReview])
-  const [changesView, setChangesView] = useState<ChangesView>(changesViewCache.get(run.key) ?? 'full')
+  const cached = detailCache.get(run.key)
+  // land open on what the run most likely needs: review → changes; a task
+  // that is talking to (or waiting on) the user → its watcher chat
+  const [changesOpen, setChangesOpen] = useState(cached?.changes ?? !!inReview)
+  const [watcherOpen, setWatcherOpen] = useState(cached?.watcher ?? !!(task && (task.awaitingUser || (task.chat ?? []).some(m => m.role !== 'system'))))
+  const [changesDock, setChangesDock] = useState<'right' | 'bottom'>(cached?.dock ?? 'right')
   const [popup, setPopup] = useState(false)
-  useEffect(() => { setChangesView(changesViewCache.get(run.key) ?? 'full'); setPopup(false) }, [run.key])
-  const setView = (v: ChangesView) => { changesViewCache.set(run.key, v); setChangesView(v) }
+  useEffect(() => {
+    const c = detailCache.get(run.key)
+    setChangesOpen(c?.changes ?? (run.kind === 'task' && run.task.col === 'review'))
+    setWatcherOpen(c?.watcher ?? (run.kind === 'task' && !!(run.task.awaitingUser || (run.task.chat ?? []).some(m => m.role !== 'system'))))
+    setChangesDock(c?.dock ?? 'right')
+    setPopup(false)
+    // defaults are a snapshot at selection time — live task updates must not
+    // reopen/close panels the user just toggled
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.key])
+  const remember = (patch: Partial<{ changes: boolean; watcher: boolean; dock: 'right' | 'bottom' }>) => {
+    detailCache.set(run.key, { changes: changesOpen, watcher: watcherOpen, dock: changesDock, ...patch })
+  }
 
   const cwd = agent?.worktree?.workdir ?? agent?.cwd ?? task?.cwd
   const fs = useMemo(() => sessionFs(agent?.machine, agent?.id ?? ''), [agent?.machine, agent?.id])
 
-  const tabs: { id: Tab; label: string; on: boolean }[] = [
-    { id: 'agent', label: agent ? 'Agent' : 'Spec', on: true },
-    { id: 'watcher', label: 'Watcher', on: !!task },
-    { id: 'changes', label: 'Changes', on: !!cwd },
-  ]
+  const showChanges = changesOpen && !!cwd
+  const showWatcher = watcherOpen && !!task
+  const changesRight = showChanges && changesDock === 'right'
+  const rightColOpen = changesRight || showWatcher
+
+  const workbench = showChanges && (
+    <GitWorkbench
+      key={run.key}
+      cwd={agent?.cwd ?? task?.cwd}
+      worktree={agent?.worktree}
+      fs={fs}
+      compact={changesRight}
+      footer={
+        task && inReview
+          ? <TaskReviewFooter task={task} onClose={() => {}} />
+          : agent?.worktree
+            ? <WorktreeMergeBar agent={agent} />
+            : undefined
+      }
+    />
+  )
+  const changesStrip = (
+    <PanelStrip label="CHANGES">
+      <button
+        className="icon-btn"
+        title="Dock to the right"
+        style={{ width: 22, height: 22, borderRadius: 6, color: changesDock === 'right' ? 'var(--accent)' : undefined }}
+        onClick={() => { setChangesDock('right'); remember({ dock: 'right' }) }}
+      >
+        <Icon paths={['M4 5h16v14H4z', 'M14 5v14']} size={12} stroke={1.7} />
+      </button>
+      <button
+        className="icon-btn"
+        title="Dock below the terminal (full width)"
+        style={{ width: 22, height: 22, borderRadius: 6, color: changesDock === 'bottom' ? 'var(--accent)' : undefined }}
+        onClick={() => { setChangesDock('bottom'); remember({ dock: 'bottom' }) }}
+      >
+        <Icon paths={['M4 5h16v14H4z', 'M4 13h16']} size={12} stroke={1.7} />
+      </button>
+      {agent && (
+        <button className="icon-btn" title="Open as a full-size popup" style={{ width: 22, height: 22, borderRadius: 6 }} onClick={() => setPopup(true)}>
+          <Icon paths={['M14 4h6v6', 'M20 4L11 13', 'M10 5H5a1 1 0 00-1 1v13a1 1 0 001 1h13a1 1 0 001-1v-5']} size={12} stroke={1.7} />
+        </button>
+      )}
+      <button className="icon-btn" title="Close" style={{ width: 22, height: 22, borderRadius: 6 }} onClick={() => { setChangesOpen(false); remember({ changes: false }) }}>
+        <Icon paths={['M6 6l12 12', 'M18 6L6 18']} size={10} stroke={2} />
+      </button>
+    </PanelStrip>
+  )
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{runTitle(run)}</div>
           <div className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -137,66 +220,31 @@ function RunDetail({ run }: { run: RunRef }) {
             {agent?.worktree ? <span style={{ color: 'var(--amber)' }}> · isolated</span> : null}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 2, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2, flexShrink: 0 }}>
-          {tabs.filter(t => t.on).map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              style={{
-                border: 'none', borderRadius: 7, padding: '4px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
-                background: tab === t.id ? 'var(--panel2)' : 'transparent',
-                color: tab === t.id ? 'var(--accent)' : 'var(--mut)',
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        {tab === 'changes' && cwd && (
-          <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-            <button
-              className="icon-btn"
-              title="Changes only (full width)"
-              style={{ width: 24, height: 24, borderRadius: 6, color: changesView === 'full' ? 'var(--accent)' : undefined }}
-              onClick={() => setView('full')}
-            >
-              <Icon paths={['M4 5h16v14H4z']} size={12} stroke={1.7} />
-            </button>
-            {agent && (
-              <>
-                <button
-                  className="icon-btn"
-                  title="Changes beside the terminal"
-                  style={{ width: 24, height: 24, borderRadius: 6, color: changesView === 'right' ? 'var(--accent)' : undefined }}
-                  onClick={() => setView('right')}
-                >
-                  <Icon paths={['M4 5h16v14H4z', 'M14 5v14']} size={12} stroke={1.7} />
-                </button>
-                <button
-                  className="icon-btn"
-                  title="Changes below the terminal"
-                  style={{ width: 24, height: 24, borderRadius: 6, color: changesView === 'bottom' ? 'var(--accent)' : undefined }}
-                  onClick={() => setView('bottom')}
-                >
-                  <Icon paths={['M4 5h16v14H4z', 'M4 13h16']} size={12} stroke={1.7} />
-                </button>
-                <button
-                  className="icon-btn"
-                  title="Open the changes as a full-size popup"
-                  style={{ width: 24, height: 24, borderRadius: 6 }}
-                  onClick={() => setPopup(true)}
-                >
-                  <Icon paths={['M14 4h6v6', 'M20 4L11 13', 'M10 5H5a1 1 0 00-1 1v13a1 1 0 001 1h13a1 1 0 001-1v-5']} size={12} stroke={1.7} />
-                </button>
-              </>
-            )}
-          </div>
+        {task && (
+          <button
+            className="icon-btn"
+            title={showWatcher ? 'Hide the watcher chat' : 'Watcher chat — progress notes, questions & your replies'}
+            style={{ width: 27, height: 27, borderRadius: 7, flexShrink: 0, color: showWatcher ? 'var(--accent)' : task.awaitingUser ? 'var(--amber)' : undefined }}
+            onClick={() => { setWatcherOpen(v => { remember({ watcher: !v }); return !v }) }}
+          >
+            <Icon paths={['M4 5h16v11H9l-5 4z', 'M8 9h8', 'M8 12h5']} size={15} stroke={1.7} />
+          </button>
+        )}
+        {cwd && (
+          <button
+            className="icon-btn"
+            title={showChanges ? 'Hide the changes panel' : agent?.worktree ? 'Changes — diff, stage, commit & merge the worktree back' : 'Changes — live diff, stage & commit'}
+            style={{ width: 27, height: 27, borderRadius: 7, flexShrink: 0, color: showChanges ? 'var(--accent)' : agent?.worktree ? 'var(--amber)' : undefined }}
+            onClick={() => { setChangesOpen(v => { remember({ changes: !v }); return !v }) }}
+          >
+            <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={15} stroke={1.7} />
+          </button>
         )}
         {agent && (
           <button
             className="icon-btn"
             title="Open in the Work view (full pane: files, splits, session settings)"
-            style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0 }}
+            style={{ width: 27, height: 27, borderRadius: 7, flexShrink: 0 }}
             onClick={() => focusTab(agent.id)}
           >
             <Icon paths={['M14 4h6v6', 'M20 4L11 13', 'M10 5H5a1 1 0 00-1 1v13a1 1 0 001 1h13a1 1 0 001-1v-5']} size={13} stroke={1.8} />
@@ -204,58 +252,62 @@ function RunDetail({ run }: { run: RunRef }) {
         )}
       </div>
 
-      {tab === 'agent' && (
-        agent
-          ? <TerminalPane agent={agent} active />
-          : task
-            ? <SpecBlock task={task} />
-            : null
-      )}
-      {tab === 'watcher' && task && <WatcherChat task={task} />}
-      {tab === 'changes' && cwd && (() => {
-        const workbench = (
-          <GitWorkbench
-            key={run.key}
-            cwd={agent?.cwd ?? task?.cwd}
-            worktree={agent?.worktree}
-            fs={fs}
-            compact={changesView === 'right'}
-            footer={
-              task && inReview
-                ? <TaskReviewFooter task={task} onClose={() => {}} />
-                : agent?.worktree
-                  ? <WorktreeMergeBar agent={agent} />
-                  : undefined
-            }
-          />
-        )
-        // full: changes alone · right/bottom: terminal + docked changes
-        if (changesView === 'full' || !agent) return workbench
-        return (
-          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: changesView === 'bottom' ? 'column' : 'row' }}>
-            <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              <TerminalPane agent={agent} active />
-            </div>
-            <div style={{
-              ...(changesView === 'bottom'
-                ? { height: 'clamp(220px, 44%, 480px)', borderTop: '1px solid var(--line)' }
-                : { width: 'clamp(380px, 46%, 760px)', borderLeft: '1px solid var(--line)' }),
-              flexShrink: 0, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--panel)',
-            }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
+        {/* center column: terminal/spec, with changes below when bottom-docked */}
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {agent ? <TerminalPane agent={agent} active /> : task ? <SpecBlock task={task} /> : <div style={{ flex: 1 }} />}
+          {showChanges && changesDock === 'bottom' && (
+            <div style={{ height: 'clamp(220px, 44%, 480px)', flexShrink: 0, minHeight: 0, display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--line)', background: 'var(--panel)' }}>
+              {changesStrip}
               {workbench}
             </div>
+          )}
+        </div>
+        {/* right column: changes on top, watcher chat in the bottom-right quarter */}
+        {rightColOpen && (
+          <div style={{
+            width: 'clamp(360px, 42%, 720px)', flexShrink: 0, minHeight: 0, minWidth: 0,
+            display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--line)', background: 'var(--panel)',
+          }}>
+            {changesRight && (
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                {changesStrip}
+                {workbench}
+              </div>
+            )}
+            {showWatcher && task && (
+              <div style={{
+                ...(changesRight ? { height: '45%', borderTop: '1px solid var(--line)' } : { flex: 1 }),
+                flexShrink: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
+              }}>
+                <PanelStrip label="WATCHER">
+                  <button className="icon-btn" title="Close" style={{ width: 22, height: 22, borderRadius: 6 }} onClick={() => { setWatcherOpen(false); remember({ watcher: false }) }}>
+                    <Icon paths={['M6 6l12 12', 'M18 6L6 18']} size={10} stroke={2} />
+                  </button>
+                </PanelStrip>
+                <WatcherChat task={task} />
+              </div>
+            )}
           </div>
-        )
-      })()}
+        )}
+      </div>
       {popup && agent && <GitPopup agent={agent} onClose={() => setPopup(false)} />}
     </div>
   )
 }
 
+const FILTERS: Array<{ id: RunFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'task', label: 'Tasks' },
+  { id: 'session', label: 'Sessions' },
+  { id: 'scheduled', label: 'Scheduled' },
+]
+
 /** The board's Mission Control mode: run list + selected-run cockpit. */
 export function MissionControl() {
   const s = useConductorSelector(x => ({ tasks: x.tasks, agents: x.agents }), shallowEqual)
-  const groups = useMemo(() => groupRuns(s.tasks, s.agents), [s.tasks, s.agents])
+  const [filter, setFilter] = useState<RunFilter>('all')
+  const groups = useMemo(() => groupRuns(s.tasks, s.agents, filter), [s.tasks, s.agents, filter])
   const flat = useMemo(() => groups.flatMap(g => g.runs), [groups])
   const [selKey, setSelKey] = useState<string | null>(null)
   const selected = flat.find(r => r.key === selKey) ?? flat[0]
@@ -280,7 +332,7 @@ export function MissionControl() {
     return () => window.removeEventListener('keydown', onKey)
   }, [flat])
 
-  if (!flat.length) {
+  if (!flat.length && filter === 'all') {
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10, background: 'var(--bg2)' }}>
         <div className="grotesk" style={{ fontSize: 15, fontWeight: 600, color: 'var(--mut)' }}>Nothing in flight</div>
@@ -293,6 +345,26 @@ export function MissionControl() {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{ width: 264, flexShrink: 0, borderRight: '1px solid var(--line)', overflowY: 'auto', background: 'var(--panel)', padding: '6px 6px 12px' }}>
+        <div style={{ display: 'flex', gap: 2, padding: '4px 4px 6px' }}>
+          {FILTERS.map(f => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              style={{
+                flex: 1, border: 'none', borderRadius: 7, padding: '4px 0', fontSize: 10.5, fontWeight: 600, cursor: 'pointer',
+                background: filter === f.id ? 'var(--panel2)' : 'transparent',
+                color: filter === f.id ? 'var(--accent)' : 'var(--dim)',
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        {!flat.length && (
+          <div style={{ padding: '18px 10px', fontSize: 11.5, color: 'var(--dim)', textAlign: 'center' }}>
+            No runs match this filter.
+          </div>
+        )}
         {groups.map(g => (
           <div key={g.id}>
             <div className="mono" style={{

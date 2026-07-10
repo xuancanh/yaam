@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupRuns, runGroupOf, runStatusLabel } from './mission-state'
+import { groupRuns, runGroupOf, runMatchesFilter, runStatusLabel } from './mission-state'
 import type { Agent, BoardTask } from '../../core/types'
 
 const task = (over: Partial<BoardTask>): BoardTask =>
@@ -19,11 +19,29 @@ describe('runGroupOf / runStatusLabel', () => {
     const r3 = { kind: 'session' as const, key: 'sess:a1', agent: agent({ status: 'needs' }) }
     expect(runGroupOf(r3)).toBe('needs')
   })
-  it('live agents run, finished tasks are done, the rest idles', () => {
+  it('live agents run, unstarted backlog tasks are startable, finished tasks are done, the rest idles', () => {
     expect(runGroupOf({ kind: 'session', key: 'sess:a1', agent: agent({ status: 'running' }) })).toBe('running')
     expect(runGroupOf({ kind: 'task', key: 'task:t1', task: task({ col: 'done' }) })).toBe('done')
-    expect(runGroupOf({ kind: 'task', key: 'task:t1', task: task({ col: 'backlog' }) })).toBe('idle')
+    expect(runGroupOf({ kind: 'task', key: 'task:t1', task: task({ col: 'backlog' }) })).toBe('backlog')
     expect(runGroupOf({ kind: 'session', key: 'sess:a1', agent: agent({ status: 'idle' }) })).toBe('idle')
+  })
+})
+
+describe('runMatchesFilter', () => {
+  const taskRun = { kind: 'task' as const, key: 'task:t1', task: task({}) }
+  const sessRun = { kind: 'session' as const, key: 'sess:a1', agent: agent({}) }
+  it('splits tasks from sessions', () => {
+    expect(runMatchesFilter(taskRun, 'task')).toBe(true)
+    expect(runMatchesFilter(taskRun, 'session')).toBe(false)
+    expect(runMatchesFilter(sessRun, 'session')).toBe(true)
+    expect(runMatchesFilter(sessRun, 'all')).toBe(true)
+  })
+  it('scheduled = pending start time or schedule-created', () => {
+    expect(runMatchesFilter(taskRun, 'scheduled')).toBe(false)
+    expect(runMatchesFilter({ ...taskRun, task: task({ scheduleAt: 123 }) }, 'scheduled')).toBe(true)
+    const cronMade = task({ chat: [{ id: 'c1', role: 'system', text: 'Added by schedule “nightly”', at: 1 }] })
+    expect(runMatchesFilter({ ...taskRun, task: cronMade }, 'scheduled')).toBe(true)
+    expect(runMatchesFilter(sessRun, 'scheduled')).toBe(false)
   })
 })
 
