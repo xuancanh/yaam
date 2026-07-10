@@ -4,7 +4,7 @@ import type { LaunchRuntimeCtx } from './launch-runtime'
 import type { SessionProcessPort } from './ports'
 import { useAppStore } from '../../core/store'
 import type { MutableRefObject } from 'react'
-import type { AppState, AgentType } from '../../core/types'
+import type { AgentTemplate, AppState, AgentType, BoardTask, Machine } from '../../core/types'
 
 const agentType = (over: Partial<AgentType> = {}): AgentType =>
   ({ id: 'cli', name: 'CLI', model: 'mycli', enabled: true, ...over } as unknown as AgentType)
@@ -161,5 +161,31 @@ describe('detached launches', () => {
     // cmd keeps the ORIGINAL command — resume re-derives the attach wrapper
     // (and relaunches the command if the host ended)
     expect(a?.cmd).toBe('sleep 999')
+  })
+})
+
+describe('task template launches', () => {
+  it('uses the task-specific machine instead of the template default', () => {
+    const templateMachine = { id: 'template-host', label: 'Template host', host: 'template.test', user: 'tpl' } as Machine
+    const taskMachine = { id: 'task-host', label: 'Task host', host: 'task.test', user: 'task' } as Machine
+    const template = {
+      id: 'tpl', name: 'Worker', typeId: 'cli', mode: 'ephemeral', prompt: '{task}', systemPrompt: '',
+      model: '', approval: 'edits', cwd: '/template', extraArgs: '', autoArchive: false,
+      machineId: templateMachine.id,
+    } as AgentTemplate
+    const task = {
+      id: 't1', title: 'Run remotely', col: 'backlog', agentId: null,
+      templateId: template.id, machineId: taskMachine.id, cwd: '/task',
+    } as BoardTask
+    useAppStore.setState({
+      templates: [template], tasks: [task],
+      settings: { shell: 'zsh', machines: [templateMachine, taskMachine] } as AppState['settings'],
+    } as Partial<AppState> as AppState)
+
+    const port = fakePort()
+    const id = createLaunchRuntime(ctx(port)).spawnTaskSession(task.id)
+    expect(id).toBeTruthy()
+    expect(useAppStore.getState().agents.find(a => a.id === id)?.machine?.id).toBe(taskMachine.id)
+    expect(port.spawnSession).toHaveBeenCalledWith(id, expect.stringContaining("'task@task.test'"), undefined, undefined, undefined, undefined, 'zsh')
   })
 })

@@ -38,7 +38,7 @@ export interface LaunchRuntimeCtx {
 export interface LaunchRuntime {
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
   launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string }) => string | null
-  launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string) => string | null
+  launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string, isolate?: boolean, machineIdOverride?: string) => string | null
   spawnTaskSession: (taskId: string, opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string }) => string | null
   spawnSessionForTask: (taskId: string, workspaceId?: string) => void
   startTaskViaWatcher: (taskId: string) => void
@@ -175,7 +175,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
     }
 
     // Resolve a persisted template into a command and launch it in the target workspace.
-    const launchFromTemplate = (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string, isolate?: boolean): string | null => {
+    const launchFromTemplate = (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string, isolate?: boolean, machineIdOverride?: string): string | null => {
       const st = stateRef.current
       const stored = (st.templates ?? []).find(t => t.id === templateId)
       if (!stored) {
@@ -187,7 +187,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       const command = buildTemplateCommand(tpl, type, task, contract)
       const id = launchSession(command, cwdOverride || tpl.cwd || st.settings.defaultCwd || '', tpl.name, type?.id, workspaceId, {
         ephemeral: tpl.mode === 'ephemeral', autoArchive: tpl.autoArchive, templateId: tpl.id, isolate,
-        machineId: tpl.machineId,
+        machineId: machineIdOverride ?? tpl.machineId,
       })
       if (id) logEvent('route', id, `Launched template “${tpl.name}”${task ? ` · ${task.slice(0, 48)}` : ''}`)
       return id
@@ -220,7 +220,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       // the session stays open and the watcher assesses whenever it exits
       const interactive = task.sessionMode === 'interactive'
       if (task.templateId && (st.templates ?? []).some(t => t.id === task.templateId)) {
-        id = launchFromTemplate(task.templateId, work, workspaceId, runCwd, !interactive, contract, isolate)
+        id = launchFromTemplate(task.templateId, work, workspaceId, runCwd, !interactive, contract, isolate, task.machineId)
       } else {
         const type = (task.typeId ? st.agentTypes.find(t => t.id === task.typeId) : undefined)
           ?? st.agentTypes.find(t => t.enabled)
