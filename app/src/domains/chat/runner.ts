@@ -18,7 +18,7 @@ import { ESTIMATED_OUTPUT_COST_PER_KTOK } from '../../core/usage'
 import { buildContextSummary, chatBudgetState } from './turns'
 import { formatHits, memoryDigest, searchMemory, withMemoryAppend, wsMemory } from '../master/assistant-memory'
 import { recordDecision } from '../master/harness-stats'
-import { LESSONS_FILE, JOURNAL_FILE, appendBrainFile, durablePromptSection, journalEntry, loadBrain, reflectTranscript } from './durable-brain'
+import { LESSONS_FILE, JOURNAL_FILE, appendBrainFile, commitBrain, durablePromptSection, journalEntry, loadBrain, reflectTranscript, searchKnowledge } from './durable-brain'
 
 /** quick replies proposed mid-turn, attached to the final bubble at seal time */
 const pendingReplies = new Map<string, string[]>()
@@ -142,10 +142,16 @@ function makeAppPort(ctx: ChatCtx, agentId: string, turnId: string): ChatAppPort
       }))
       return `${replies.length} quick replies will be offered under your answer`
     },
+    knowledgeSearch: async query => {
+      const durable = durableAgentOf(ctx, agentId)
+      if (!durable) return 'this conversation has no durable agent'
+      return searchKnowledge(durable, query)
+    },
     learnLesson: async lesson => {
       const durable = durableAgentOf(ctx, agentId)
       if (durable?.homeDir?.trim()) {
         await appendBrainFile(durable, LESSONS_FILE, `- ${lesson.replace(/\s+/g, ' ').trim()}`)
+        void commitBrain(durable, `lesson · ${lesson.slice(0, 40)}`)
         return `lesson recorded in ${LESSONS_FILE}`
       }
       // no home folder (built-in assistant): shared workspace memory instead
@@ -522,6 +528,7 @@ export async function reflectDurableConversation(ctx: ChatCtx, conversationId: s
   if (durable.homeDir?.trim()) {
     await appendBrainFile(durable, JOURNAL_FILE, journalEntry(conv.name, reflection.journal))
     for (const l of reflection.lessons) await appendBrainFile(durable, LESSONS_FILE, `- ${l}`)
+    void commitBrain(durable, `reflection · ${conv.name.slice(0, 40)}`)
   } else if (reflection.lessons.length) {
     // brainless (built-in) agents keep lessons in the shared workspace memory
     ctx.dispatch(s => reflection.lessons.reduce((acc, l) => withMemoryAppend(acc, 'notes', l, conv.workspaceId), s))

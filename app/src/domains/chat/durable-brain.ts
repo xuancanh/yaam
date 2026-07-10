@@ -4,7 +4,7 @@
 // Files are the storage — transparent, portable, user-editable. Agents without
 // a homeDir (the built-in assistant) fall back to the shared workspace memory.
 import type { Agent, DurableAgent } from '../../core/types'
-import { readTextFile, writeTextFile } from '../../core/native'
+import { execCommand, readTextFile, writeTextFile } from '../../core/native'
 import { callApi } from '../../llm/client'
 import type { ApiContentBlock, LlmConfig } from '../../llm/client'
 
@@ -58,7 +58,7 @@ export function durablePromptSection(agent: DurableAgent, brain: AgentBrain): st
   const parts = [
     `YOUR IDENTITY — you are "${agent.name}"${agent.role ? ` (${agent.role})` : ''}, a durable agent: you persist across conversations, and your accumulated lessons/journal below ARE your continuity. `
     + (agent.homeDir
-      ? `Your home folder is ${agent.homeDir} — your working dir AND your brain: maintain ${LESSONS_FILE} via the learn_lesson tool, and file domain knowledge under knowledge/ with your normal file tools so future conversations can find it.`
+      ? `Your home folder is ${agent.homeDir} — your working dir AND your brain: maintain ${LESSONS_FILE} via the learn_lesson tool, file domain knowledge under knowledge/ with your normal file tools, and RETRIEVE from it with knowledge_search before answering anything your past self may already know.`
       : 'You have no home folder; persist learnings with learn_lesson (they land in the shared workspace memory).'),
     `YOUR CHARTER (your job description):\n${agent.charter.trim() || '(none yet — propose one with update_my_profile once you understand your job)'}`,
   ]
@@ -114,4 +114,68 @@ export async function reflectTranscript(cfg: LlmConfig, agent: DurableAgent, con
 export function journalEntry(conversationName: string, journal: string, now = new Date()): string {
   const day = now.toISOString().slice(0, 10)
   return `## ${day} — ${conversationName}\n${journal.trim()}`
+}
+
+// ---------------------------------------------------------------- knowledge
+
+/** Shell-quote one argument (POSIX). */
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+
+/** The grep sweep behind knowledge_search: case-insensitive, line-numbered,
+ *  .git excluded, bounded output. One pattern alternating the query tokens. */
+export function knowledgeSearchCommand(homeDir: string, query: string): string | null {
+  const tokens = query.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter(t => t.length > 1).slice(0, 6)
+  if (!tokens.length) return null
+  const pattern = tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+  return `grep -rin --include='*' --exclude-dir=.git -E ${shq(pattern)} ${shq(homeDir.replace(/\/+$/, ''))} 2>/dev/null | head -80`
+}
+
+/** Rank grep hits by how many query tokens each line matches (then keep file
+ *  order), and trim to `limit` compact `file:line: text` rows. */
+export function rankKnowledgeHits(grepOutput: string, query: string, homeDir: string, limit = 12): string[] {
+  const tokens = query.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter(t => t.length > 1)
+  const base = homeDir.replace(/\/+$/, '') + '/'
+  const scored = grepOutput.split('\n').filter(Boolean).map(line => {
+    const low = line.toLowerCase()
+    const score = tokens.reduce((n, t) => n + (low.includes(t) ? 1 : 0), 0)
+    return { line: line.startsWith(base) ? line.slice(base.length) : line, score }
+  })
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(h => h.line.length > 220 ? `${h.line.slice(0, 220)}…` : h.line)
+}
+
+/** Search the agent's whole home folder (brain files + knowledge/ + anything
+ *  it filed) — the retrieval layer over the files-as-brain design. */
+export async function searchKnowledge(agent: DurableAgent, query: string): Promise<string> {
+  if (!agent.homeDir?.trim()) return 'this agent has no home folder to search'
+  const cmd = knowledgeSearchCommand(agent.homeDir, query)
+  if (!cmd) return 'query too short — use a few keywords'
+  try {
+    const { code, output } = await execCommand(cmd, undefined, 12_000)
+    if (code !== 0 || !output.trim()) return 'no matches in the home folder'
+    const hits = rankKnowledgeHits(output, query, agent.homeDir)
+    return hits.length ? hits.join('\n') : 'no matches in the home folder'
+  } catch (e) {
+    return `search failed: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
+// ---------------------------------------------------------------- versioning
+
+/** Auto-commit brain changes when the home folder is a git repository, so the
+ *  agent's learning history is diffable and reversible. A non-repo home folder
+ *  is left untouched (no surprise `git init` in the user's directory). */
+export async function commitBrain(agent: DurableAgent, message: string): Promise<void> {
+  const dir = agent.homeDir?.trim()
+  if (!dir) return
+  const d = shq(dir.replace(/\/+$/, ''))
+  const probe = await execCommand(`git -C ${d} rev-parse --is-inside-work-tree 2>/dev/null`, undefined, 8000).catch(() => null)
+  if (!probe || probe.code !== 0) return
+  // stage + commit ONLY the brain paths that exist — never the user's other
+  // staged work (a PM agent's home folder may be a real project repo)
+  const script = `cd ${d} && paths=""; for p in ${LESSONS_FILE} ${JOURNAL_FILE} knowledge; do [ -e "$p" ] && paths="$paths $p"; done; `
+    + `[ -n "$paths" ] && git add -A -- $paths && git commit -m ${shq(`brain: ${message.slice(0, 60)}`)} -- $paths`
+  await execCommand(`${script} 2>/dev/null`, undefined, 12_000).catch(() => {})
 }

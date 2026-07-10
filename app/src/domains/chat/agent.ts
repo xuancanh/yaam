@@ -47,6 +47,8 @@ export interface ChatAppPort {
   /** durable agents: record one lesson in the agent's LESSONS.md (or the
    *  shared memory when the agent has no home folder) */
   learnLesson: (lesson: string) => Promise<string>
+  /** durable agents: ranked search over the agent's whole home folder */
+  knowledgeSearch: (query: string) => Promise<string>
   /** durable agents: self-update the agent's own charter / role / settings */
   updateSelf: (patch: { name?: string; role?: string; charter?: string; model?: string; homeDir?: string }) => string
 }
@@ -54,7 +56,7 @@ export interface ChatAppPort {
 const READ_ONLY_TOOLS = new Set([
   'list_dir', 'read_file', 'glob_files', 'grep_files', 'web_search', 'fetch_url',
   'list_board_tasks', 'list_schedules', 'load_skill', 'memory_lookup', 'suggest_replies',
-  'learn_lesson',
+  'learn_lesson', 'knowledge_search',
 ])
 
 export function toolNeedsApproval(name: string): boolean {
@@ -238,6 +240,11 @@ function builtinTools(skills: CatalogSkill[]) {
       name: 'learn_lesson',
       description: 'Record one durable lesson about how to do YOUR job better — a user correction, a stated preference, an approach that failed or worked. It lands in your LESSONS.md and rides along in every future conversation. Use it the moment you are corrected; never for transient task state.',
       input_schema: { type: 'object', properties: { lesson: { type: 'string', description: 'one concise sentence' } }, required: ['lesson'] },
+    },
+    {
+      name: 'knowledge_search',
+      description: 'Ranked keyword search over YOUR whole home folder — lessons, journal, and everything filed under knowledge/. Use it before answering anything your past self may already know (recipes, decisions, notes, project facts). Returns file:line hits; read_file the promising ones.',
+      input_schema: { type: 'object', properties: { query: { type: 'string', description: 'a few keywords' } }, required: ['query'] },
     },
     {
       name: 'update_my_profile',
@@ -466,6 +473,10 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
       if (!app) return 'lessons are unavailable in this context'
       if (!str('lesson').trim()) throw new ToolError('learn_lesson: "lesson" is required')
       return await app.learnLesson(str('lesson').trim())
+    case 'knowledge_search':
+      if (!app) return 'knowledge search is unavailable in this context'
+      if (!str('query').trim()) throw new ToolError('knowledge_search: "query" is required')
+      return await app.knowledgeSearch(str('query').trim())
     case 'update_my_profile': {
       if (!app) return 'profile updates are unavailable in this context'
       const patch = {

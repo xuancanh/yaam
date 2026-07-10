@@ -1,9 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { isTauri, pickFolder } from '../../core/native'
+import { isTauri, pickFolder, writeTextFile } from '../../core/native'
+import type { DurableAgent } from '../../core/types'
+import { exportRecord } from './agent-templates'
 import { EditableName, IC, Icon, Switch } from '../../components/ui'
 import { DialogField, DialogFooter, DialogGrid, DialogHeader, EntityDialog } from '../../components/EntityDialog'
 import { buildCron, describeCron } from '../schedules/cron'
+import { loadBrain } from './durable-brain'
 import { confirmAction } from '../../components/Confirm'
 
 // The durable-agent profile: identity + charter (the stable job description),
@@ -79,10 +82,47 @@ function AgentSchedules({ agentId }: { agentId: string }) {
   )
 }
 
+/** How the agent is doing: conversations, brain size, and how often its quick
+ *  replies get accepted (from the harness's implicit-feedback log). */
+function AgentStats({ agent }: { agent: DurableAgent }) {
+  const s = useConductorSelector(x => ({ agents: x.agents, harnessLog: x.harnessLog }), shallowEqual)
+  const [brain, setBrain] = useState<{ lessons: number; journal: number } | null>(null)
+  useEffect(() => {
+    let live = true
+    void loadBrain(agent).then(b => {
+      if (live) setBrain({
+        lessons: b.lessons.split('\n').filter(l => l.trim().startsWith('- ')).length,
+        journal: b.journal.split('\n').filter(l => l.startsWith('## ')).length,
+      })
+    }).catch(() => {})
+    return () => { live = false }
+  }, [agent])
+  const convs = s.agents.filter(a => a.kind === 'chat' && a.durableAgentId === agent.id && !a.archived)
+  const convIds = new Set(convs.map(c => c.id))
+  const replies = (s.harnessLog ?? []).filter(d => d.role === 'chat' && d.agentId && convIds.has(d.agentId) && d.outcome)
+  const accepted = replies.filter(d => d.outcome === 'accepted').length
+  const chips: string[] = [
+    `${convs.length} conversation${convs.length === 1 ? '' : 's'}`,
+    ...(brain && agent.homeDir ? [`${brain.lessons} lesson${brain.lessons === 1 ? '' : 's'}`, `${brain.journal} journal entr${brain.journal === 1 ? 'y' : 'ies'}`] : []),
+    ...(replies.length >= 3 ? [`${Math.round((accepted / replies.length) * 100)}% quick replies accepted`] : []),
+  ]
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {chips.map(c => (
+        <span key={c} className="mono" style={{ fontSize: 10.5, color: 'var(--mut)', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 7, padding: '3px 9px' }}>
+          {c}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export function DurableAgentDialog({ agentId, onClose }: { agentId: string; onClose: () => void }) {
-  const s = useConductorSelector(x => ({ durableAgents: x.durableAgents, chatAgentTypes: x.chatAgentTypes }), shallowEqual)
+  const s = useConductorSelector(x => ({ durableAgents: x.durableAgents, chatAgentTypes: x.chatAgentTypes, crons: x.crons }), shallowEqual)
   const { updateDurableAgent, archiveDurableAgent } = useActions()
   const agent = (s.durableAgents ?? []).find(d => d.id === agentId)
+  const crons = s.crons
+  const [exportNote, setExportNote] = useState<string | null>(null)
   if (!agent) return null
   const upd = (patch: Parameters<typeof updateDurableAgent>[1]) => updateDurableAgent(agent.id, patch)
 
@@ -99,6 +139,7 @@ export function DurableAgentDialog({ agentId, onClose }: { agentId: string; onCl
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <AgentStats agent={agent} />
         <DialogGrid>
           <DialogField label="ROLE" hint="one line, shown in the sidebar">
             <input value={agent.role ?? ''} onChange={e => upd({ role: e.target.value || undefined })} placeholder="e.g. project manager for loom" style={FIELD} />
@@ -166,6 +207,25 @@ export function DurableAgentDialog({ agentId, onClose }: { agentId: string; onCl
             Archive agent
           </button>
         )}
+        {!agent.builtin && agent.homeDir?.trim() && (
+          <button
+            className="open-btn"
+            title="Write AGENT.json into the home folder — the folder becomes a portable agent (share it; import adopts it)"
+            style={{ flex: 'none', padding: '8px 14px', fontSize: 12 }}
+            onClick={() => {
+              const loops = crons
+                .filter(c => c.durableAgentId === agent.id && c.agentPrompt)
+                .map(c => ({ name: c.name, schedule: c.schedule, prompt: c.agentPrompt! }))
+              const dest = `${agent.homeDir!.replace(/\/+$/, '')}/AGENT.json`
+              void writeTextFile(dest, `${JSON.stringify(exportRecord(agent, loops), null, 2)}\n`)
+                .then(() => setExportNote(`exported → ${dest}`))
+                .catch(e => setExportNote(`export failed: ${e instanceof Error ? e.message : e}`))
+            }}
+          >
+            Export
+          </button>
+        )}
+        {exportNote && <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{exportNote}</span>}
       </DialogFooter>
     </EntityDialog>
   )

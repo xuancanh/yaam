@@ -7,6 +7,7 @@ import type { Agent } from '../../core/types'
 import { EditableName, IC, Icon } from '../../components/ui'
 import { ChatPane } from './ChatPane'
 import { DurableAgentDialog } from './DurableAgentDialog'
+import { HireAgentDialog } from './HireAgentDialog'
 import { FilesPane } from '../session/FilesPane'
 import { confirmAction } from '../../components/Confirm'
 
@@ -115,7 +116,7 @@ function compactTokens(tokens: number): string {
 
 export function ChatView() {
   const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId, activeWorkspace: x.activeWorkspace, settings: x.settings, durableAgents: x.durableAgents }), shallowEqual)
-  const { openChat, deleteSession, renameSession, setChatPermMode, setChatPinned, archiveChat, restoreChat, updateSettings, newChatSession, addDurableAgent } = useActions()
+  const { openChat, deleteSession, renameSession, setChatPermMode, setChatPinned, archiveChat, restoreChat, updateSettings, newChatSession } = useActions()
   // drag-resizable conversation list (persisted like the Master sidebar)
   const listWidth = Math.max(220, Math.min(520, s.settings.chatListWidth ?? 300))
   const startListResize = (e: ReactPointerEvent) => {
@@ -166,6 +167,7 @@ export function ChatView() {
   // archived agents' conversations) shows under the built-in generic agent
   const durables = (s.durableAgents ?? []).filter(d => !d.archived)
   const [agentDialogId, setAgentDialogId] = useState<string | null>(null)
+  const [hiring, setHiring] = useState(false)
   // per-agent folding: groups collapse entirely, and expanded groups show only
   // the 3 most recent conversations until "show more"
   const [collapsedAgents, setCollapsedAgents] = useState<Record<string, boolean>>({})
@@ -214,8 +216,8 @@ export function ChatView() {
           <span className="grotesk" style={{ fontSize: 14.5, fontWeight: 600, flex: 1 }}>Chats</span>
           <button
             className="icon-btn"
-            title="New durable agent — a persistent identity with its own charter, brain files, and loops"
-            onClick={() => setAgentDialogId(addDurableAgent({ name: 'New agent' }))}
+            title="Hire a durable agent — a persistent identity with its own charter, brain files, and loops"
+            onClick={() => setHiring(true)}
             style={{ width: 28, height: 28, borderRadius: 7 }}
           >
             <Icon paths={['M12 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7z', 'M5 20a7 7 0 0110-6.3', 'M17 14v6', 'M14 17h6']} size={15} stroke={1.7} />
@@ -451,6 +453,7 @@ export function ChatView() {
       {tagsOpen && selected && <TagsEditor agent={selected} onClose={() => setTagsOpen(false)} />}
       {budgetOpen && selected && <BudgetEditor agent={selected} onClose={() => setBudgetOpen(false)} />}
       {agentDialogId && <DurableAgentDialog agentId={agentDialogId} onClose={() => setAgentDialogId(null)} />}
+      {hiring && <HireAgentDialog onClose={() => setHiring(false)} onHired={id => { setHiring(false); setAgentDialogId(id) }} />}
     </div>
   )
 }

@@ -109,6 +109,25 @@ export function buildChatSession(st: AppState, opts: {
   }
 }
 
+/** Memory hygiene by default: agents with a file brain get a weekly loop that
+ *  rewrites LESSONS.md — merge duplicates, drop stale items, promote repeated
+ *  lessons into principles. Deduped by cron name per agent. */
+function seedConsolidationLoop(dispatch: ChatActionsCtx['dispatch'], durableAgentId: string): void {
+  dispatch(s => {
+    if (s.crons.some(c => c.durableAgentId === durableAgentId && c.name === 'consolidate-lessons')) return s
+    return {
+      ...s,
+      crons: s.crons.concat([{
+        id: mkId('c'), name: 'consolidate-lessons', schedule: '0 18 * * 0',
+        human: 'Runs at 18:00 on Sunday', target: 'agent', agent: 'Chat', color: '#B78AF7',
+        on: true, built: true, last: '—',
+        durableAgentId,
+        agentPrompt: 'Memory hygiene: read your LESSONS.md and rewrite it in place — merge duplicates, drop stale or contradicted items, and promote lessons that keep repeating into short principles near the top. Keep everything still true; keep the file under ~150 lines. Then reply with a one-line summary of what changed.',
+      }]),
+    }
+  })
+}
+
 /** Plain (non-React) factory for the chat actions. */
 export function createChatActions(ctx: ChatActionsCtx): ChatActions {
   const { dispatch, stateRef } = ctx
@@ -159,15 +178,20 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
           ...patch, name: patch.name.trim() || 'Agent',
         }],
       }))
+      if (patch.homeDir?.trim()) seedConsolidationLoop(dispatch, id)
       ctx.logEvent('build', null, `Created durable agent “${patch.name}”`)
       return id
     },
 
     updateDurableAgent: (id, patch) => {
+      const before = (stateRef.current.durableAgents ?? []).find(d => d.id === id)
       dispatch(s => ({
         ...s,
         durableAgents: (s.durableAgents ?? []).map(d => (d.id === id ? { ...d, ...patch, id: d.id, builtin: d.builtin } : d)),
       }))
+      // an agent gaining a home folder gets memory hygiene by default: the
+      // weekly consolidate-lessons loop (delete it in the profile to opt out)
+      if (patch.homeDir?.trim() && !before?.homeDir?.trim()) seedConsolidationLoop(dispatch, id)
     },
 
     archiveDurableAgent: id => {
