@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupRuns, runGroupOf, runMatchesFilter, runStatusLabel } from './mission-state'
+import { groupRuns, runGroupOf, runMatchesFilter, runStatusLabel } from './run-state'
 import type { Agent, BoardTask } from '../../core/types'
 
 const task = (over: Partial<BoardTask>): BoardTask =>

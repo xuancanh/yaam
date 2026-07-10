@@ -1,4 +1,4 @@
-// Pure state helpers for the board's Mission Control mode: fold tasks and
+// Pure state helpers for the Control Center's Runs view: fold tasks and
 // loose workspace sessions into one triage-ordered list of "runs", grouped by
 // what they need from the user — decisions first, live work second, everything
 // else after. The board columns stay the planning view; this is the working

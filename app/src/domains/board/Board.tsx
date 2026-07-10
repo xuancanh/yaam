@@ -8,7 +8,6 @@ import { SpecVerifyDialog, TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } fr
 import type { TaskSpecPatch, VerifyOutcome } from './TaskSpecForm'
 import { ReviewPanel } from './ReviewPanel'
 import { GitWorkbench } from '../session/GitPanel'
-import { MissionControl } from './MissionControl'
 import { TaskReviewFooter, WatcherChat } from './WatcherChat'
 import { confirmAction } from '../../components/Confirm'
 
@@ -476,8 +475,8 @@ const COLS: Array<{ id: BoardCol; label: string; dot: string }> = [
 
 /** Render the active workspace's draggable watcher-driven kanban board. */
 export function Board() {
-  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, dragOverCol: x.dragOverCol, boardMode: x.settings.boardMode ?? 'kanban', newTaskOpen: x.newTaskOpen }), shallowEqual)
-  const { enterCol, dropTo, updateSettings, closeNewTask } = useActions()
+  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, dragOverCol: x.dragOverCol, newTaskOpen: x.newTaskOpen }), shallowEqual)
+  const { enterCol, dropTo, closeNewTask } = useActions()
   const [creating, setCreating] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [reviewTaskId, setReviewTaskId] = useState<string | null>(null)
@@ -494,26 +493,8 @@ export function Board() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <ViewHeader title="Task board">
-        <div style={{ display: 'flex', gap: 2, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2, flexShrink: 0 }}>
-          {([['kanban', 'Kanban'], ['mission', 'Mission Control']] as const).map(([id, label]) => (
-            <button
-              key={id}
-              title={id === 'kanban' ? 'Plan: drag cards between columns' : 'Work: every run in one triage list — terminal, watcher & changes without leaving the view'}
-              onClick={() => updateSettings({ boardMode: id })}
-              style={{
-                border: 'none', borderRadius: 7, padding: '4px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
-                background: s.boardMode === id ? 'var(--panel2)' : 'transparent',
-                color: s.boardMode === id ? 'var(--accent)' : 'var(--mut)',
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
         <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>
-          {s.boardMode === 'mission'
-            ? 'Triage every run in one place — ⌘1–9 jumps between them'
-            : 'Each started task gets a one-shot session driven by its own watcher — click a card for details & chat'}
+          Each started task gets a one-shot session driven by its own watcher — click a card for details & chat
         </span>
         <div style={{ flex: 1 }} />
         <button
@@ -528,7 +509,6 @@ export function Board() {
           <Icon paths={IC.plus} size={14} stroke={1.8} />New task
         </button>
       </ViewHeader>
-      {s.boardMode === 'mission' ? <MissionControl /> : (
       <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', padding: 16, display: 'flex', gap: 14 }}>
         {COLS.map(col => {
           const cards = s.tasks.filter(t => t.col === col.id && !t.archived)
@@ -564,7 +544,6 @@ export function Board() {
           )
         })}
       </div>
-      )}
       {(creating || s.newTaskOpen) && <NewTaskDialog onClose={() => { setCreating(false); closeNewTask() }} />}
       {archivedOpen && <ArchivedTasks onClose={() => setArchivedOpen(false)} />}
       {(() => {

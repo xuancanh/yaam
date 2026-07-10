@@ -3,10 +3,11 @@ import { hexToRgba, ACCENT } from '../../core/data'
 import type { View } from '../../core/types'
 import { IC, Icon, MasterMark } from '../../components/ui'
 
-const NAV: Array<{ id: View; label: string; paths: string[] }> = [
+const NAV: Array<{ id: View; label: string; title?: string; paths: string[] }> = [
   { id: 'workspace', label: 'Work', paths: ['M3 5.5h18v13H3z', 'M9.5 5.5v13'] },
   { id: 'chat', label: 'Chat', paths: ['M4 5h16v11H9l-5 4z', 'M8 9h8', 'M8 12h5'] },
-  { id: 'overview', label: 'Agents', paths: ['M4 4h6.5v6.5H4z', 'M13.5 4H20v6.5h-6.5z', 'M4 13.5h6.5V20H4z', 'M13.5 13.5H20V20h-6.5z'] },
+  // rail keeps the short "Agents" label; the view itself is the Control Center
+  { id: 'overview', label: 'Agents', title: 'Control Center', paths: ['M4 4h6.5v6.5H4z', 'M13.5 4H20v6.5h-6.5z', 'M4 13.5h6.5V20H4z', 'M13.5 13.5H20V20h-6.5z'] },
   { id: 'board', label: 'Board', paths: ['M4 5h4v14H4z', 'M10 5h4v9h-4z', 'M16 5h4v12h-4z'] },
   { id: 'crons', label: 'Schedule', paths: ['M12 3.6a8.4 8.4 0 100 16.8 8.4 8.4 0 000-16.8z', 'M12 8v4.3l2.9 1.7'] },
   { id: 'templates', label: 'Templates', paths: ['M4 5h16v4H4z', 'M4 13h9', 'M4 17h9', 'M15 13l4 4', 'M19 13l-4 4'] },
@@ -32,7 +33,7 @@ export function IconRail() {
           <button
             key={n.id}
             className="rail-btn"
-            title={n.label}
+            title={n.title ?? n.label}
             onClick={() => setView(n.id)}
             style={{
               background: active ? hexToRgba(ACCENT, 0.14) : 'transparent',

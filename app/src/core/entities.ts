@@ -548,8 +548,8 @@ export interface OrchestrationSettings {
   sidebarHidden?: boolean
   /** Chat view conversation-list width (px, drag-resizable) */
   chatListWidth?: number
-  /** Board view mode: kanban columns (planning) or mission control (triage) */
-  boardMode?: 'kanban' | 'mission'
+  /** Control Center view: the Runs triage cockpit or the Fleet overview */
+  controlView?: 'runs' | 'fleet'
   /** phone remote companion: LAN server for fleet status + approvals */
   remoteEnabled?: boolean
   /** devices that completed the pairing handshake (token minted on explicit

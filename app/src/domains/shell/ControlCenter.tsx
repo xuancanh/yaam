@@ -2,6 +2,7 @@ import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { formatEstimatedTokens } from '../../core/usage'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from '../../components/ui'
 import { UsageSummary } from './UsageSummary'
+import { RunControl } from '../board/RunControl'
 import { confirmAction } from '../../components/Confirm'
 
 /** Compact inline token/cost readout with a slim budget bar for one agent row. */
@@ -31,9 +32,49 @@ function FleetStat({ label, value, tone }: { label: string; value: string | numb
   )
 }
 
+const CONTROL_VIEWS = [
+  { id: 'runs', label: 'Runs', hint: 'Work: every run in one triage list — terminal, watcher & changes without leaving the view' },
+  { id: 'fleet', label: 'Fleet', hint: 'Overview: session, chat & watched-task cards with usage and the archived shelf' },
+] as const
+
+/** Control Center: everything the agents are doing behind one rail stop —
+ *  the Runs triage cockpit and the Fleet ops console. */
+export function ControlCenter() {
+  const mode = useConductorSelector(x => x.settings.controlView ?? 'runs')
+  const { updateSettings } = useActions()
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <ViewHeader title="Control Center">
+        <div style={{ display: 'flex', gap: 2, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2, flexShrink: 0 }}>
+          {CONTROL_VIEWS.map(v => (
+            <button
+              key={v.id}
+              title={v.hint}
+              onClick={() => updateSettings({ controlView: v.id })}
+              style={{
+                border: 'none', borderRadius: 7, padding: '4px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+                background: mode === v.id ? 'var(--panel2)' : 'transparent',
+                color: mode === v.id ? 'var(--accent)' : 'var(--mut)',
+              }}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>
+          {mode === 'runs'
+            ? 'Triage every run in one place — ⌘1–9 jumps between them'
+            : 'Every session, chat & watched task at a glance'}
+        </span>
+      </ViewHeader>
+      {mode === 'runs' ? <RunControl /> : <FleetView />}
+    </div>
+  )
+}
+
 /** The fleet as an ops console: aggregate stats, Master's routing, live
  *  session/chat/watcher cards, and the archived shelf. */
-export function Overview() {
+function FleetView() {
   const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, tasks: x.tasks }), shallowEqual)
   const { focusTab, resume, openPanel, openAgent, openDiff, renameSession, archiveSession, unarchiveSession, deleteSession, openChat, setView } = useActions()
   // Keep legacy sessions without workspaceId in the active workspace.
@@ -47,12 +88,6 @@ export function Overview() {
   const spend = [...active, ...chats, ...archived].reduce((n, a) => n + a.cost, 0)
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <ViewHeader title="Fleet">
-        <span className="mono" style={{ fontSize: 11, color: 'var(--dim)', border: '1px solid var(--line)', borderRadius: 6, padding: '2px 8px' }}>
-          {active.length} sessions · {chats.length} chats · {watched.length} watched tasks{archived.length ? ` · ${archived.length} archived` : ''}
-        </span>
-      </ViewHeader>
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
         {/* ── ops strip: the fleet at a glance ── */}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -208,6 +243,5 @@ export function Overview() {
           </div>
         )}
       </div>
-    </div>
   )
 }

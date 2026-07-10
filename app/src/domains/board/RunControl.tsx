@@ -8,11 +8,11 @@ import { GitPopup, GitWorkbench } from '../session/GitPanel'
 import { sessionFs } from '../session/remote-native'
 import { WorktreeMergeBar } from '../session/WorktreeMergeBar'
 import { useDiffStats } from '../session/diff-stats'
-import { groupRuns, runStatusLabel } from './mission-state'
-import type { RunFilter, RunRef } from './mission-state'
+import { groupRuns, runStatusLabel } from './run-state'
+import type { RunFilter, RunRef } from './run-state'
 import { TaskReviewFooter, WatcherChat } from './WatcherChat'
 
-// Mission Control: the board's triage mode (toggle in the board header).
+// Runs: the Control Center's triage view (toggle in its header).
 // Conductor-style single view — every run (task sessions + loose sessions) in
 // one urgency-grouped list on the left with live diff stats; the selected
 // run's terminal, watcher chat, and changes (diff → stage → commit → merge)
@@ -303,8 +303,8 @@ const FILTERS: Array<{ id: RunFilter; label: string }> = [
   { id: 'scheduled', label: 'Scheduled' },
 ]
 
-/** The board's Mission Control mode: run list + selected-run cockpit. */
-export function MissionControl() {
+/** The Control Center's Runs view: run list + selected-run cockpit. */
+export function RunControl() {
   const s = useConductorSelector(x => ({ tasks: x.tasks, agents: x.agents }), shallowEqual)
   const [filter, setFilter] = useState<RunFilter>('all')
   const groups = useMemo(() => groupRuns(s.tasks, s.agents, filter), [s.tasks, s.agents, filter])

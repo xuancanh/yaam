@@ -3,7 +3,7 @@ import { TitleBar } from './domains/shell/TitleBar'
 import { IconRail } from './domains/shell/IconRail'
 import { Sidebar } from './domains/master/Sidebar'
 import { Workspace } from './domains/session/Workspace'
-import { Overview } from './domains/shell/Overview'
+import { ControlCenter } from './domains/shell/ControlCenter'
 import { Board } from './domains/board/Board'
 import { Timeline } from './domains/shell/Timeline'
 import { Schedules } from './domains/schedules/Schedules'
@@ -25,7 +25,7 @@ function MainArea() {
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       {view === 'workspace' && <Workspace />}
-      {view === 'overview' && <Overview />}
+      {view === 'overview' && <ControlCenter />}
       {view === 'board' && <Board />}
       {view === 'timeline' && <Timeline />}
       {view === 'crons' && <Schedules />}
