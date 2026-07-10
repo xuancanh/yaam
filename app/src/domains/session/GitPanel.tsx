@@ -10,9 +10,14 @@ import { CodeEditor } from './lazy-editor'
 import { splitDiffRows } from './diff-split'
 import type { SplitCell } from './diff-split'
 import { WorktreeMergeBar } from './WorktreeMergeBar'
+import { Divider } from './Divider'
 import { FolderExplorer } from './FilesPane'
 import { sessionFs } from './remote-native'
 import type { SessionFs } from './remote-native'
+
+// drag-adjusted file-list share of the workbench (per reviewed folder);
+// absent = the fixed default width until the user first drags the divider
+const fileColSplitCache = new Map<string, number>()
 
 // Fork/GitKraken-style git workbench for one session: a tree of changed files
 // on the left split into STAGED and CHANGES (stage/unstage per file or per
@@ -249,6 +254,8 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
   const [noRepo, setNoRepo] = useState(false)
   const [status, setStatus] = useState<GitStatusResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // file-list/diff split — fixed default width until first dragged
+  const [fileColShare, setFileColShare] = useState<number | null>(fileColSplitCache.get(cwd ?? '') ?? null)
   const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null)
   const [diff, setDiff] = useState('')
   /** single = one file at a time · all = continuous scroll of every diff
@@ -477,7 +484,12 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <div style={{ width: compact ? 200 : 280, flexShrink: 0, borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg2)' }}>
+        <div style={{
+          ...(fileColShare != null
+            ? { flexBasis: `${fileColShare * 100}%`, flexGrow: 0, flexShrink: 1, minWidth: 150 }
+            : { width: compact ? 200 : 280, flexShrink: 0 }),
+          borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, background: 'var(--bg2)',
+        }}>
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 6 }}>
             {error
               ? <div style={{ padding: 14, fontSize: 12, color: 'var(--red-soft)' }}>{error}</div>
@@ -541,6 +553,7 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
             </div>
           </div>
         </div>
+        <Divider dir="col" onRatio={r => { fileColSplitCache.set(cwd ?? '', r); setFileColShare(r) }} />
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflowY: editing ? 'hidden' : 'auto', background: 'var(--bg3)' }}>
           {viewMode === 'single' ? (

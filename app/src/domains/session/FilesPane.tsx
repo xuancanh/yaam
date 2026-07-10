@@ -22,6 +22,7 @@ import { Markdown } from '../../components/Markdown'
 import { ChatPane } from '../chat/ChatPane'
 import { artifactSrcDoc } from '../chat/artifacts'
 import { requestAttach } from '../chat/attach-bus'
+import { Divider } from './Divider'
 import { TerminalPane } from './TerminalPane'
 
 export type FilesMode = 'split' | 'replace'
@@ -34,6 +35,9 @@ interface FilesState {
   expanded: string[]
 }
 const stateCache = new Map<string, FilesState>()
+// drag-adjusted explorer-column share (per session / folder); absent = the
+// fixed default width until the user first drags the divider
+const explorerSplitCache = new Map<string, number>()
 
 /** Return the persistent per-session file-browser cache, creating it on demand. */
 function cached(id: string): FilesState {
@@ -559,6 +563,8 @@ export function FilesPane({ agent, active, showSession = true }: { agent: Agent;
   const [expanded, setExpanded] = useState<Set<string>>(new Set(init.expanded))
   const [git, setGit] = useState<GitInfo | null>(null)
   const [treeKey, setTreeKey] = useState(0)
+  // explorer/viewer split — fixed default width until first dragged
+  const [treeShare, setTreeShare] = useState<number | null>(explorerSplitCache.get(agent.id) ?? null)
   const root = agent.cwd || '~'
   // machine sessions browse the remote host over ssh (using the session's own
   // connection snapshot); local sessions use native fs
@@ -621,7 +627,10 @@ export function FilesPane({ agent, active, showSession = true }: { agent: Agent;
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{
-        width: showSession ? 220 : 180, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0,
+        ...(treeShare != null
+          ? { flexBasis: `${treeShare * 100}%`, flexGrow: 0, flexShrink: 1, minWidth: 120 }
+          : { width: showSession ? 220 : 180, flexShrink: 0 }),
+        display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0,
         background: 'var(--bg2)', borderRight: '1px solid var(--line)',
       }}>
         <div style={{
@@ -656,6 +665,7 @@ export function FilesPane({ agent, active, showSession = true }: { agent: Agent;
           />
         </div>
       </div>
+      <Divider dir="col" onRatio={r => { explorerSplitCache.set(agent.id, r); setTreeShare(r) }} />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         {file && (
@@ -703,6 +713,7 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
   const [gutter, setGutter] = useState<'numbers' | 'git'>('numbers')
   const [expanded, setExpanded] = useState<Set<string>>(new Set(init.expanded))
   const [treeKey, setTreeKey] = useState(0)
+  const [treeShare, setTreeShare] = useState<number | null>(explorerSplitCache.get(`folder:${root}`) ?? null)
 
   useEffect(() => {
     stateCache.set(`folder:${root}`, { file, mode: 'replace', gutter, expanded: [...expanded] })
@@ -720,7 +731,10 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{
-        width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0,
+        ...(treeShare != null
+          ? { flexBasis: `${treeShare * 100}%`, flexGrow: 0, flexShrink: 1, minWidth: 120 }
+          : { width: 240, flexShrink: 0 }),
+        display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0,
         background: 'var(--bg2)', borderRight: '1px solid var(--line)',
       }}>
         <div style={{
@@ -754,6 +768,7 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
           />
         </div>
       </div>
+      <Divider dir="col" onRatio={r => { explorerSplitCache.set(`folder:${root}`, r); setTreeShare(r) }} />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         {file ? (
