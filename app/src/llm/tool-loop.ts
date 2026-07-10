@@ -62,6 +62,17 @@ export function sanitizeToolHistory(history: ApiMessage[]): void {
   while (history.length && !(history[0].role === 'user' && typeof history[0].content === 'string')) history.shift()
 }
 
+/** Cap a retained tool-loop history in place, then re-establish the invariants.
+ *  A blind shift() cap can split a tool_use/tool_result pair or leave an
+ *  orphaned tool_result opener — providers then reject every later call, which
+ *  silently mutes that assistant (this froze monitor status cards and muted
+ *  watchers). Every runtime that caps a private history must cap through this
+ *  or capChatHistory — enforced by llm/history-guard.test.ts. */
+export function capToolHistory(history: ApiMessage[], max: number): void {
+  while (history.length > max) history.shift()
+  sanitizeToolHistory(history)
+}
+
 export async function runToolLoop(p: ToolLoopParams): Promise<ToolLoopResult> {
   const call = p.callApi ?? realCallApi
   const sys = () => (typeof p.system === 'function' ? p.system() : p.system)

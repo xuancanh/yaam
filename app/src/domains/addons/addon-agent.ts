@@ -5,7 +5,7 @@
 import type { Addon } from '../../core/types'
 import type { AddonApi } from '../../core/addons'
 import type { ApiMessage, LlmConfig } from '../../llm/client'
-import { runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
+import { capToolHistory, runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
 
 // The API surface projected as LLM tools. Each entry maps a tool call onto
 // the (permission-enforced) AddonApi — denied scopes surface as tool errors.
@@ -198,9 +198,8 @@ export async function runAddonAgentTurn(
       return typeof out === 'string' ? out : JSON.stringify(out ?? 'ok')
     },
   })
-  // cap, then re-establish the invariants — a blind shift() can split a
+  // cap through the sanitizing helper — a blind shift() can split a
   // tool_use/tool_result pair or leave an orphaned tool_result at the head
-  while (history.length > 24) history.shift()
-  sanitizeToolHistory(history)
+  capToolHistory(history, 24)
   return reply
 }

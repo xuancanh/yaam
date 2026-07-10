@@ -5,7 +5,7 @@
 // terminal output from the watchers.
 import type { Agent } from '../../core/types'
 import type { ApiMessage, LlmConfig } from '../../llm/client'
-import { runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
+import { capToolHistory, runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
 
 export interface MonitorExec {
   updateStatus: (task?: string, summary?: string, actionNeeded?: string) => string
@@ -173,10 +173,7 @@ export async function runMonitorTurn(
     terminalAssistant: 'text', sequential: true,
     execute: async (name, input) => runMonitorTool(name, input, exec),
   })
-  // cap the private history so long-running sessions stay cheap — then
-  // re-establish the invariants, because a blind shift() can split a
-  // tool_use/tool_result pair or leave an orphaned tool_result at the head
-  // (the exact corruption that froze status cards and muted suggestions)
-  while (history.length > 16) history.shift()
-  sanitizeToolHistory(history)
+  // cap the private history so long-running sessions stay cheap (the helper
+  // re-establishes the invariants — a blind shift() froze status cards)
+  capToolHistory(history, 16)
 }

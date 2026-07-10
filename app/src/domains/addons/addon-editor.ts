@@ -1,7 +1,7 @@
 // Per-addon customization chat: a small dedicated LLM conversation that knows
 // one addon package and edits it via the update_addon tool.
 import type { ApiMessage, LlmConfig } from '../../llm/client'
-import { runToolLoop } from '../../llm/tool-loop'
+import { capToolHistory, runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
 
 const EDITOR_TOOLS = [
   {
@@ -46,13 +46,17 @@ export async function runAddonEditorTurn(
   userText: string,
   apply: (packageJson: string) => string,
 ): Promise<string> {
+  // a previous failed/aborted turn can leave dangling tool rounds — providers
+  // reject those, which would silence this editor on every later turn
+  sanitizeToolHistory(history)
   history.push({ role: 'user', content: userText })
   const { text } = await runToolLoop({
     cfg, system: editorSystem(addonJson), history, tools: EDITOR_TOOLS, maxRounds: 4,
     sequential: true, terminalAssistant: 'text',
     execute: async (_name, input) => apply(typeof input?.package_json === 'string' ? input.package_json : ''),
   })
-  while (history.length > 20) history.shift()
-  if (history.length && history[0].role !== 'user') history.shift()
+  // cap through the sanitizing helper — a blind shift() can split a
+  // tool_use/tool_result pair or leave an orphaned tool_result at the head
+  capToolHistory(history, 20)
   return text
 }

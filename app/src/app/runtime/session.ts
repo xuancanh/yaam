@@ -103,10 +103,15 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
       messages: s.messages.map(m => (m.escFor === id && m.esc && !m.esc.resolved
         ? { ...m, esc: { ...m.esc, resolved: true, choice: 'handled in the terminal' } }
         : m)),
-      // implicit-feedback eval: the user acted in the terminal instead of the
-      // card/chips — the flag was right but the proposals went unused
+      // implicit-feedback eval: typing into a flagged session means the user IS
+      // supplying the input the flag predicted — a correct detection, resolved
+      // as accepted. (Counting it as overridden made "answered in the terminal"
+      // — the NORMAL way to answer in a terminal app — drive monitor precision
+      // toward zero, and the calibration note then told the monitor to stop
+      // flagging and suggesting.) The suggestion chips DID go unused, though —
+      // that stays an override so chip quality still gets real signal.
       harnessLog: resolveDecision(
-        resolveDecision(s.harnessLog, { kind: 'needs_input', agentId: id }, 'overridden', 'handled in terminal'),
+        resolveDecision(s.harnessLog, { kind: 'needs_input', agentId: id }, 'accepted', 'handled in the terminal'),
         { kind: 'suggestion', agentId: id }, 'overridden'),
     }))
   }

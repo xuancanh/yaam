@@ -565,6 +565,27 @@ RULES
 - When your answer ends on an enumerable choice, call suggest_replies so the user can answer with one click.${persona?.trim() ? `\n\nPERSONA (set by the user for this agent type)\n${persona.trim()}` : ''}${custom?.trim() ? `\n\nUSER'S CUSTOM INSTRUCTIONS FOR CHAT AGENTS (follow on top of the rules above)\n${custom.trim()}` : ''}`
 }
 
+/** Re-establish the provider invariants on a chat history: no dangling tool
+ *  round at the tail, no orphaned tool carrier at the head. Chat conversations
+ *  legitimately OPEN with attachment block arrays (text+image), so the generic
+ *  tool-loop sanitizer — which demands a plain-string opener — would eat them;
+ *  this variant only drops tool_use/tool_result carriers. */
+export function sanitizeChatHistory(history: ApiMessage[]): void {
+  const carriesTool = (m: ApiMessage) => Array.isArray(m.content)
+    && (m.content as ApiContentBlock[]).some(b => b.type === 'tool_use' || b.type === 'tool_result')
+  while (history.length && carriesTool(history[history.length - 1])) history.pop()
+  while (history.length && (history[0].role !== 'user' || carriesTool(history[0]))) history.shift()
+}
+
+/** Cap the persistent conversation, then re-establish the invariants — a blind
+ *  shift() can split a tool_use/tool_result pair or leave an orphaned
+ *  tool_result opener. Providers reject such a history on EVERY later call,
+ *  and chat histories persist across restarts, so the corruption would too. */
+export function capChatHistory(history: ApiMessage[], max: number): void {
+  while (history.length > max) history.shift()
+  sanitizeChatHistory(history)
+}
+
 /** Replace image blocks in the history with text placeholders (for models
  *  without vision, whose APIs reject multimodal content outright). Returns
  *  true when anything was stripped; all-text arrays flatten back to strings. */
@@ -610,14 +631,10 @@ export async function runChatTurn(
   durable?: string,
 ): Promise<ApiUsage | undefined> {
   // a stopped/aborted turn can leave the history mid-tool-round (assistant
-  // tool_use without its tool_result) — providers reject that; drop the debris.
-  // Attachment messages (text+image block arrays) are NOT debris — only
-  // tool_use/tool_result carriers are.
-  const isDangling = (m: ApiMessage) => Array.isArray(m.content)
-    && (m.content as ApiContentBlock[]).some(b => b.type === 'tool_use' || b.type === 'tool_result')
-  while (history.length && isDangling(history[history.length - 1])) history.pop()
-  while (history.length > 58) history.shift()
-  while (history.length && history[0].role !== 'user') history.shift()
+  // tool_use without its tool_result) — providers reject that; drop the debris
+  // and cap through the sanitizing helper (attachment block arrays are kept).
+  sanitizeChatHistory(history)
+  capChatHistory(history, 58)
   history.push({ role: 'user', content: userText })
   const tools = [...builtinTools(skills), ...mcpToolDefs(mcp)]
   let usage: ApiUsage | undefined
@@ -717,7 +734,6 @@ export async function runChatTurn(
     history.push({ role: 'user', content: results })
   }
   // cap the persistent conversation so long chats stay affordable
-  while (history.length > 60) history.shift()
-  if (history.length && history[0].role !== 'user') history.shift()
+  capChatHistory(history, 60)
   return usage
 }

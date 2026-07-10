@@ -6,7 +6,7 @@
 import type { Agent, BoardTask } from '../../core/types'
 import { callApi } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
-import { runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
+import { capToolHistory, runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
 import { promptExtraSections } from '../master/monitor'
 import type { PromptExtras } from '../master/monitor'
 
@@ -244,10 +244,8 @@ export async function runWatcherTurn(
     system: () => { const t = getTask(); return t ? watcherSystem(t, getAgents(), extras) : '' },
     execute: async (name, input) => runWatcherTool(name, input, exec),
   })
-  // cap the private history so long tasks stay cheap — then re-establish the
-  // invariants, because a blind shift() can split a tool_use/tool_result pair
-  // (the exact corruption that permanently muted watchers before)
-  while (history.length > 20) history.shift()
-  sanitizeToolHistory(history)
+  // cap the private history so long tasks stay cheap (the helper re-establishes
+  // the invariants — a blind shift() permanently muted watchers before)
+  capToolHistory(history, 20)
   return reply
 }
