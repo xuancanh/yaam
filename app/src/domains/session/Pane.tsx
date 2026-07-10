@@ -6,6 +6,7 @@ import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../component
 import { confirmAction } from '../../components/Confirm'
 import { ChatPane } from '../chat/ChatPane'
 import { TaskReviewFooter } from '../board/WatcherChat'
+import { Divider } from './Divider'
 import { FilesPane } from './FilesPane'
 import { GitPopup, GitWorkbench } from './GitPanel'
 import { sessionFs } from './remote-native'
@@ -16,10 +17,64 @@ import { WorktreeMergeBar } from './WorktreeMergeBar'
 // explorer/changes visibility survives tab switches (panes remount freely)
 const filesOpenCache = new Map<string, boolean>()
 const gitOpenCache = new Map<string, boolean>()
-// where the changes panel docks — right (beside) or bottom (below, full width
-// for split layouts where a side dock is too cramped)
-type GitDock = 'right' | 'bottom'
-const gitDockCache = new Map<string, GitDock>()
+// where each panel docks — right (beside) or bottom (below, full width for
+// split layouts where a side dock is too cramped)
+type PanelDock = 'right' | 'bottom'
+const gitDockCache = new Map<string, PanelDock>()
+const filesDockCache = new Map<string, PanelDock>()
+// drag-resizable split ratios: the CENTER's share of the row/column
+const splitCache = new Map<string, { right: number; bottom: number }>()
+
+/** Slim docked-panel header: label + dock switches + host extras + close,
+ *  shared by the Files and Changes panels so they behave identically. */
+function DockStrip({ label, dock, onDock, onPopup, onClose }: {
+  label: string
+  dock: PanelDock
+  onDock: (d: PanelDock) => void
+  onPopup?: () => void
+  onClose: () => void
+}) {
+  return (
+    <div style={{ height: 28, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, padding: '0 8px', borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
+      <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: 'var(--dim)' }}>{label}</span>
+      <div style={{ flex: 1 }} />
+      <button
+        className="icon-btn"
+        title="Dock to the right of the session"
+        style={{ width: 22, height: 22, borderRadius: 6, color: dock === 'right' ? 'var(--accent)' : undefined }}
+        onClick={e => { e.stopPropagation(); onDock('right') }}
+      >
+        <Icon paths={['M4 5h16v14H4z', 'M14 5v14']} size={12} stroke={1.7} />
+      </button>
+      <button
+        className="icon-btn"
+        title="Dock below the session (full width — better for split tabs)"
+        style={{ width: 22, height: 22, borderRadius: 6, color: dock === 'bottom' ? 'var(--accent)' : undefined }}
+        onClick={e => { e.stopPropagation(); onDock('bottom') }}
+      >
+        <Icon paths={['M4 5h16v14H4z', 'M4 13h16']} size={12} stroke={1.7} />
+      </button>
+      {onPopup && (
+        <button
+          className="icon-btn"
+          title="Open as a full-size popup"
+          style={{ width: 22, height: 22, borderRadius: 6 }}
+          onClick={e => { e.stopPropagation(); onPopup() }}
+        >
+          <Icon paths={['M14 4h6v6', 'M20 4L11 13', 'M10 5H5a1 1 0 00-1 1v13a1 1 0 001 1h13a1 1 0 001-1v-5']} size={12} stroke={1.7} />
+        </button>
+      )}
+      <button
+        className="icon-btn"
+        title={`Close the ${label.toLowerCase()} panel`}
+        style={{ width: 22, height: 22, borderRadius: 6 }}
+        onClick={e => { e.stopPropagation(); onClose() }}
+      >
+        <Icon paths={IC.close} size={10} stroke={2} />
+      </button>
+    </div>
+  )
+}
 
 /** Render one terminal pane with session controls and optional file explorer.
  *  `standalone` hosts the pane outside the tab-group grid (the Runs rail):
@@ -34,9 +89,19 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
   // a task waiting on review lands with its changes open (snapshot at mount —
   // live task updates must not fight the user's toggle)
   const [gitOpen, setGitOpen] = useState(() => gitOpenCache.get(agent.id) ?? task?.col === 'review')
-  const [gitDock, setGitDock] = useState<GitDock>(gitDockCache.get(agent.id) ?? 'right')
+  const [gitDock, setGitDock] = useState<PanelDock>(gitDockCache.get(agent.id) ?? 'right')
+  const [filesDock, setFilesDock] = useState<PanelDock>(filesDockCache.get(agent.id) ?? 'right')
   const [gitPopup, setGitPopup] = useState(false)
-  const setDock = (d: GitDock) => { gitDockCache.set(agent.id, d); setGitDock(d) }
+  const setDock = (d: PanelDock) => { gitDockCache.set(agent.id, d); setGitDock(d) }
+  const setFDock = (d: PanelDock) => { filesDockCache.set(agent.id, d); setFilesDock(d) }
+  // drag-resizable panel splits: the center's share of the width/height
+  const [split, setSplitState] = useState(() => splitCache.get(agent.id) ?? { right: 0.55, bottom: 0.58 })
+  const setSplit = (patch: Partial<{ right: number; bottom: number }>) =>
+    setSplitState(cur => {
+      const next = { ...cur, ...patch }
+      splitCache.set(agent.id, next)
+      return next
+    })
   const [settingsOpen, setSettingsOpen] = useState(false)
   // open the settings menu upward when a bottom-row pane lacks room below, so it
   // never renders off the bottom edge of the window
@@ -88,7 +153,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         <div style={{ flex: 1 }} />
         <button
           className="icon-btn"
-          title={filesOpen ? 'Hide file explorer' : 'File explorer & viewer'}
+          title={filesOpen ? 'Hide the files panel' : 'Files — explorer & viewer beside the session'}
           style={{ width: 27, height: 27, borderRadius: 7, color: filesOpen ? 'var(--accent)' : undefined }}
           onClick={e => { e.stopPropagation(); toggleFiles() }}
         >
@@ -196,58 +261,18 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
 
       <SuggestionChips agent={agent} />
 
-      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: gitDock === 'bottom' ? 'column' : 'row' }}>
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          {filesOpen
-            ? <FilesPane agent={agent} active={active} />
-            : agent.kind === 'chat'
-              ? <ChatPane agent={agent} active={active} />
-              : <TerminalPane agent={agent} active={active} />}
-        </div>
-        {gitOpen && agent.cwd && (
-          <div style={{
-            ...(gitDock === 'bottom'
-              ? { height: 'clamp(220px, 42%, 460px)', borderTop: '1px solid var(--line)' }
-              : { width: 'clamp(360px, 46%, 720px)', borderLeft: '1px solid var(--line)' }),
-            flexShrink: 0, minHeight: 0, minWidth: 0,
-            display: 'flex', flexDirection: 'column', background: 'var(--panel)',
-          }}>
-            <div style={{ height: 28, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, padding: '0 8px', borderBottom: '1px solid var(--line)' }}>
-              <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: 'var(--dim)' }}>CHANGES</span>
-              <div style={{ flex: 1 }} />
-              <button
-                className="icon-btn"
-                title="Dock to the right of the session"
-                style={{ width: 22, height: 22, borderRadius: 6, color: gitDock === 'right' ? 'var(--accent)' : undefined }}
-                onClick={e => { e.stopPropagation(); setDock('right') }}
-              >
-                <Icon paths={['M4 5h16v14H4z', 'M14 5v14']} size={12} stroke={1.7} />
-              </button>
-              <button
-                className="icon-btn"
-                title="Dock below the session (full width — better for split tabs)"
-                style={{ width: 22, height: 22, borderRadius: 6, color: gitDock === 'bottom' ? 'var(--accent)' : undefined }}
-                onClick={e => { e.stopPropagation(); setDock('bottom') }}
-              >
-                <Icon paths={['M4 5h16v14H4z', 'M4 13h16']} size={12} stroke={1.7} />
-              </button>
-              <button
-                className="icon-btn"
-                title="Open as a full-size popup"
-                style={{ width: 22, height: 22, borderRadius: 6 }}
-                onClick={e => { e.stopPropagation(); setGitPopup(true) }}
-              >
-                <Icon paths={['M14 4h6v6', 'M20 4L11 13', 'M10 5H5a1 1 0 00-1 1v13a1 1 0 001 1h13a1 1 0 001-1v-5']} size={12} stroke={1.7} />
-              </button>
-              <button
-                className="icon-btn"
-                title="Close the changes panel"
-                style={{ width: 22, height: 22, borderRadius: 6 }}
-                onClick={e => { e.stopPropagation(); gitOpenCache.set(agent.id, false); setGitOpen(false) }}
-              >
-                <Icon paths={IC.close} size={10} stroke={2} />
-              </button>
-            </div>
+      {(() => {
+        const closeFiles = () => { filesOpenCache.set(agent.id, false); setFilesOpen(false) }
+        const closeGit = () => { gitOpenCache.set(agent.id, false); setGitOpen(false) }
+        const filesPanel = filesOpen && (
+          <>
+            <DockStrip label="FILES" dock={filesDock} onDock={setFDock} onClose={closeFiles} />
+            <FilesPane agent={agent} active={active} />
+          </>
+        )
+        const gitPanel = gitOpen && agent.cwd && (
+          <>
+            <DockStrip label="CHANGES" dock={gitDock} onDock={setDock} onPopup={() => setGitPopup(true)} onClose={closeGit} />
             <GitWorkbench
               cwd={agent.cwd}
               worktree={agent.worktree}
@@ -255,15 +280,62 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
               compact={gitDock === 'right'}
               footer={
                 task && task.col === 'review'
-                  ? <TaskReviewFooter task={task} onClose={() => { gitOpenCache.set(agent.id, false); setGitOpen(false) }} />
+                  ? <TaskReviewFooter task={task} onClose={closeGit} />
                   : agent.worktree
                     ? <WorktreeMergeBar agent={agent} />
                     : undefined
               }
             />
+          </>
+        )
+        const rightPanels = [
+          ...(filesPanel && filesDock === 'right' ? [filesPanel] : []),
+          ...(gitPanel && gitDock === 'right' ? [gitPanel] : []),
+        ]
+        const bottomPanels = [
+          ...(filesPanel && filesDock === 'bottom' ? [filesPanel] : []),
+          ...(gitPanel && gitDock === 'bottom' ? [gitPanel] : []),
+        ]
+        return (
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <div style={{
+              flexBasis: bottomPanels.length ? `${split.bottom * 100}%` : undefined,
+              flexGrow: bottomPanels.length ? 0 : 1, flexShrink: 1,
+              minWidth: 0, minHeight: 0, display: 'flex',
+            }}>
+              <div style={{
+                flexBasis: rightPanels.length ? `${split.right * 100}%` : undefined,
+                flexGrow: rightPanels.length ? 0 : 1, flexShrink: 1,
+                minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
+              }}>
+                {agent.kind === 'chat'
+                  ? <ChatPane agent={agent} active={active} />
+                  : <TerminalPane agent={agent} active={active} />}
+              </div>
+              {rightPanels.length > 0 && <>
+                <Divider dir="col" onRatio={r => setSplit({ right: r })} />
+                <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--line)' }}>
+                  {rightPanels.map((p, i) => (
+                    <div key={i} style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--panel)', borderTop: i > 0 ? '1px solid var(--line)' : undefined }}>
+                      {p}
+                    </div>
+                  ))}
+                </div>
+              </>}
+            </div>
+            {bottomPanels.length > 0 && <>
+              <Divider dir="row" onRatio={r => setSplit({ bottom: r })} />
+              <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', borderTop: '1px solid var(--line)' }}>
+                {bottomPanels.map((p, i) => (
+                  <div key={i} style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--panel)', borderLeft: i > 0 ? '1px solid var(--line)' : undefined }}>
+                    {p}
+                  </div>
+                ))}
+              </div>
+            </>}
           </div>
-        )}
-      </div>
+        )
+      })()}
 
       {gitPopup && agent.cwd && <GitPopup agent={agent} onClose={() => setGitPopup(false)} />}
 
