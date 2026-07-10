@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { seedState } from '../../core/data'
-import type { Agent } from '../../core/types'
+import type { Agent, DurableAgent } from '../../core/types'
 import type { ApiMessage } from '../../llm/client'
-import { compactConversation, rebuildChatHistory } from './runner'
+import { compactConversation, rebuildChatHistory, reflectDurableConversation } from './runner'
 import type { ChatCtx } from './runner'
 
 const mocks = vi.hoisted(() => ({ callApi: vi.fn() }))
@@ -90,5 +90,28 @@ describe('compactConversation', () => {
     expect(request).toContain('Durable earlier decision')
     expect(request).toContain('message 7')
     expect(request).not.toContain('message 0')
+  })
+})
+
+describe('reflectDurableConversation', () => {
+  beforeEach(() => mocks.callApi.mockReset())
+
+  it('deduplicates overlapping reflections for one conversation', async () => {
+    let resolve!: (value: unknown) => void
+    mocks.callApi.mockReturnValue(new Promise(r => { resolve = r }))
+    const { ctx, stateRef } = context()
+    const durable: DurableAgent = { id: 'durable', name: 'Assistant', charter: 'Help', color: '#fff', builtin: true, createdAt: 1 }
+    stateRef.current = {
+      ...stateRef.current,
+      durableAgents: [durable],
+      agents: [{ ...stateRef.current.agents[0], durableAgentId: durable.id }],
+    }
+
+    const pending = reflectDurableConversation(ctx, 'chat', true)
+    await expect(reflectDurableConversation(ctx, 'chat', true)).resolves.toBe('reflection already in progress')
+    resolve({ content: [{ type: 'tool_use', name: 'submit_reflection', input: { journal: '- finished work', lessons: [] } }] })
+
+    await expect(pending).resolves.toMatch(/reflected/)
+    expect(stateRef.current.agents[0].reflectedAt).toEqual(expect.any(Number))
   })
 })

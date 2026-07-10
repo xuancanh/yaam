@@ -22,6 +22,7 @@ import { LESSONS_FILE, JOURNAL_FILE, appendBrainFile, commitBrain, durablePrompt
 
 /** quick replies proposed mid-turn, attached to the final bubble at seal time */
 const pendingReplies = new Map<string, string[]>()
+const reflectingConversations = new Set<string>()
 
 const compactedSummaryMessage = (summary: string): ApiMessage => ({
   role: 'user',
@@ -542,21 +543,27 @@ export async function reflectDurableConversation(ctx: ChatCtx, conversationId: s
   if (fresh.length < (force ? 2 : 8)) return 'not enough new conversation to reflect on'
   const chatType = st.chatAgentTypes.find(t => t.id === conv.chatTypeId) ?? st.chatAgentTypes.find(t => t.enabled)
   if (!chatType || !chatTypeHasCreds(chatType, st.settings)) return 'no chat credentials available for reflection'
-  const reflection = await reflectTranscript(buildChatCfg(chatType, st.settings), durable, conv, since)
-  if (!reflection) return 'nothing worth recording'
-  if (durable.homeDir?.trim()) {
-    await appendBrainFile(durable, JOURNAL_FILE, journalEntry(conv.name, reflection.journal))
-    for (const l of reflection.lessons) await appendBrainFile(durable, LESSONS_FILE, `- ${l}`)
-    void commitBrain(durable, `reflection · ${conv.name.slice(0, 40)}`)
-  } else if (reflection.lessons.length) {
-    // brainless (built-in) agents keep lessons in the shared workspace memory
-    ctx.dispatch(s => reflection.lessons.reduce((acc, l) => withMemoryAppend(acc, 'notes', l, conv.workspaceId), s))
+  if (reflectingConversations.has(conversationId)) return 'reflection already in progress'
+  reflectingConversations.add(conversationId)
+  try {
+    const reflection = await reflectTranscript(buildChatCfg(chatType, st.settings), durable, conv, since)
+    if (!reflection) return 'nothing worth recording'
+    if (durable.homeDir?.trim()) {
+      await appendBrainFile(durable, JOURNAL_FILE, journalEntry(conv.name, reflection.journal))
+      for (const l of reflection.lessons) await appendBrainFile(durable, LESSONS_FILE, `- ${l}`)
+      void commitBrain(durable, `reflection · ${conv.name.slice(0, 40)}`)
+    } else if (reflection.lessons.length) {
+      // brainless (built-in) agents keep lessons in the shared workspace memory
+      ctx.dispatch(s => reflection.lessons.reduce((acc, l) => withMemoryAppend(acc, 'notes', l, conv.workspaceId), s))
+    }
+    ctx.dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => (a.id === conversationId ? { ...a, reflectedAt: Date.now() } : a)),
+    }))
+    return `reflected · journal updated${reflection.lessons.length ? ` · ${reflection.lessons.length} lesson(s) learned` : ''}`
+  } finally {
+    reflectingConversations.delete(conversationId)
   }
-  ctx.dispatch(s => ({
-    ...s,
-    agents: s.agents.map(a => (a.id === conversationId ? { ...a, reflectedAt: Date.now() } : a)),
-  }))
-  return `reflected · journal updated${reflection.lessons.length ? ` · ${reflection.lessons.length} lesson(s) learned` : ''}`
 }
 
 /** Default auto-compact trigger: one turn's input tokens reaching this. */
