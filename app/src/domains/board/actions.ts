@@ -107,6 +107,9 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
           chat: (t.chat ?? []).map(m => (m.id === msgId ? { ...m, suggestions: undefined } : m))
             .concat([{ id: mkId('tc'), role: 'user' as const, text: `▶ ${sug.label}`, at: Date.now() }]),
         })),
+        // the click answers the ask — clear it from the worker card the
+        // watcher mirrored it onto
+        agents: s.agents.map(a => (a.id === target.id && a.actionNeeded ? { ...a, actionNeeded: undefined } : a)),
         harnessLog: resolveDecision(s.harnessLog, { kind: 'suggestion', taskId }, 'accepted', sug.label),
       }, 'patterns', `task "${task.title.slice(0, 70)}" → user picked "${sug.label}" (${sug.send.slice(0, 80)})`))
       ctx.flash(`Sent “${sug.label}”`)
@@ -199,10 +202,19 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
       const msg = text.trim()
       if (!msg) return
       ctx.pushTaskChat(taskId, 'user', msg)
-      dispatch(s => ({
-        ...s,
-        tasks: s.tasks.map(t => (t.id === taskId ? { ...t, awaitingUser: false } : t)),
-      }))
+      dispatch(s => {
+        // the reply answers the ask — clear it from the task AND from the
+        // worker card the watcher mirrored it onto
+        const task = s.tasks.find(t => t.id === taskId)
+        const workerIds = new Set([...(task?.agentIds ?? []), ...(task?.agentId ? [task.agentId] : [])])
+        return {
+          ...s,
+          tasks: s.tasks.map(t => (t.id === taskId ? { ...t, awaitingUser: false } : t)),
+          agents: task?.awaitingUser
+            ? s.agents.map(a => (workerIds.has(a.id) && a.actionNeeded ? { ...a, actionNeeded: undefined } : a))
+            : s.agents,
+        }
+      })
       void ctx.runWatcher(taskId, `[user message] ${msg}`)
     },
     draftTask: async input => {

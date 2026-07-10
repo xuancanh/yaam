@@ -131,10 +131,15 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
         },
         updateNote: n => {
           ctx.dispatch(s2 => updateLocatedTask(s2, taskId, x => ({ ...x, watcherNote: n.slice(0, 140) })))
-          // mirror onto the live worker's status card — the watcher IS its monitor
+          // mirror onto the live worker's status card — the watcher IS its
+          // monitor. When the task is not waiting on the user, a fresh note is
+          // authoritative: clear any stale action_needed instead of keeping it
+          // forever (nothing else manages that field for task sessions).
           const a = primaryAgent()
           const t = getTask()
-          if (a && t && (a.status === 'running' || a.status === 'needs')) ctx.applyAgentStatus(a.id, t.title.slice(0, 60), n.slice(0, 140))
+          if (a && t && (a.status === 'running' || a.status === 'needs')) {
+            ctx.applyAgentStatus(a.id, t.title.slice(0, 60), n.slice(0, 140), t.awaitingUser ? undefined : '')
+          }
           return 'note updated'
         },
         sendToSession: (text, session) => {
@@ -151,6 +156,12 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           const t = getTask()
           ctx.pushTaskChat(taskId, 'watcher', q)
           ctx.dispatch(s2 => updateLocatedTask(s2, taskId, x => ({ ...x, awaitingUser: true })))
+          // mirror the ask onto the live worker's card so the Runs rail and
+          // remote show WHAT is needed, not just that something is
+          const a = primaryAgent()
+          if (a && (a.status === 'running' || a.status === 'needs')) {
+            ctx.applyAgentStatus(a.id, undefined, undefined, q.slice(0, 140))
+          }
           ctx.notify('escalate', `Task “${(t?.title ?? '').slice(0, 40)}” needs you`, q.slice(0, 90), t?.agentId ?? null)
           return 'asked — the user will reply in the task chat'
         },

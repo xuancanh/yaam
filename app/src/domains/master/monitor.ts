@@ -40,7 +40,7 @@ export function promptExtraSections(x: PromptExtras | undefined): string {
 const MONITOR_TOOLS = [
   {
     name: 'update_status',
-    description: 'Update this session\'s card: task (what it is working on), summary (1-2 sentences), action_needed (what the user must do, empty string to clear).',
+    description: 'Update this session\'s card. Each call is a COMPLETE statement: always pass summary (1-2 sentences) and action_needed (what the user must do right now, or "" when nothing — it REPLACES the previous value, so stale asks never linger). task (what it is working on) may be omitted to keep the current one.',
     input_schema: {
       type: 'object',
       properties: {
@@ -48,6 +48,7 @@ const MONITOR_TOOLS = [
         summary: { type: 'string' },
         action_needed: { type: 'string' },
       },
+      required: ['summary', 'action_needed'],
     },
   },
   {
@@ -109,7 +110,7 @@ function monitorSystem(agent: Agent, extras?: PromptExtras): string {
 - currently tracked: task="${agent.task || '-'}" summary="${agent.summary || '-'}" action_needed="${agent.actionNeeded || '-'}"
 
 You receive the session's output whenever it settles. Your duties, in order:
-1. Keep the status card current with update_status (terse: task, 1-2 sentence summary, action_needed or empty string).
+1. Keep the status card current with update_status (terse: task, 1-2 sentence summary; action_needed = what the user must do RIGHT NOW, or "" — each call replaces the old value, so re-state it while it still applies).
 2. If the session is waiting on the user (permission prompt, question, selection menu), call flag_needs_input.
 3. When the session is blocked, errored, or finished with obvious next moves, ALSO call suggest_actions with 1-4 one-click options (exact text to send) — the user prefers choosing over typing. Check learned memory / memory_lookup first so the suggestions match how this user actually responds; put the likeliest choice first.
 4. Call report_to_master ONLY when noteworthy: task completed, error/blocked, user decision required, or a major milestone. Routine progress = update_status only, no report. Master is busy — do not spam it.
