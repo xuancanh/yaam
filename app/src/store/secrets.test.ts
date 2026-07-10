@@ -21,6 +21,10 @@ describe('secretEntries', () => {
       { account: 'mcp.m1.headers', value: 'Authorization: Bearer tok' },
     ])
   })
+  it('includes per-brain-profile API keys', () => {
+    const s = mkState({ settings: { apiKey: 'sk-master', brainProfiles: [{ id: 'bp1', apiKey: 'sk-profile' }] } as AppState['settings'] })
+    expect(secretEntries(s)).toContainEqual({ account: 'brain.bp1.apiKey', value: 'sk-profile' })
+  })
 })
 
 describe('redactSecrets', () => {
@@ -41,6 +45,14 @@ describe('redactSecrets', () => {
     expect(red.settings!.apiKey).toBe('sk-master')
     expect(red.mcpServers![0].headers).toBe('Authorization: Bearer tok')
   })
+  it('blanks brain-profile keys only when their account is ready', () => {
+    const m = {
+      settings: { apiKey: '', brainProfiles: [{ id: 'bp1', apiKey: 'sk-a' }, { id: 'bp2', apiKey: 'sk-b' }] },
+    } as unknown as MainPartition
+    const red = redactSecrets(m, new Set(['brain.bp1.apiKey']))
+    expect(red.settings!.brainProfiles![0].apiKey).toBe('')
+    expect(red.settings!.brainProfiles![1].apiKey).toBe('sk-b')
+  })
 })
 
 describe('applyResolvedSecrets', () => {
@@ -49,5 +61,11 @@ describe('applyResolvedSecrets', () => {
     const next = applyResolvedSecrets(s, { 'master.apiKey': 'sk-restored', 'chat.ct1.apiKey': 'ignored' })
     expect(next.settings.apiKey).toBe('sk-restored')
     expect(next.chatAgentTypes[0].apiKey).toBe('sk-chat') // already present → untouched
+  })
+  it('restores brain-profile keys into empty profiles only', () => {
+    const s = mkState({ settings: { apiKey: 'sk-master', brainProfiles: [{ id: 'bp1', apiKey: '' }, { id: 'bp2', apiKey: 'sk-kept' }] } as AppState['settings'] })
+    const next = applyResolvedSecrets(s, { 'brain.bp1.apiKey': 'sk-restored', 'brain.bp2.apiKey': 'ignored' })
+    expect(next.settings.brainProfiles![0].apiKey).toBe('sk-restored')
+    expect(next.settings.brainProfiles![1].apiKey).toBe('sk-kept')
   })
 })

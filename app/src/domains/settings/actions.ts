@@ -22,7 +22,7 @@ export interface SettingsActionsCtx {
 
 export interface SettingsActions {
   toggleAgentType: (id: string) => void
-  addMcpServer: (name: string, url: string, headers?: string, extra?: Partial<Pick<McpServer, 'transport' | 'command' | 'args' | 'env' | 'cwd'>>) => void
+  addMcpServer: (name: string, url: string, headers?: string, extra?: Partial<Pick<McpServer, 'transport' | 'command' | 'args' | 'env' | 'cwd'>>) => string
   updateMcpServer: (id: string, patch: Partial<Pick<McpServer, 'name' | 'url' | 'headers' | 'enabled' | 'transport' | 'command' | 'args' | 'env' | 'cwd'>>) => void
   removeMcpServer: (id: string) => void
   connectMcpServer: (id: string) => Promise<string>
@@ -36,14 +36,14 @@ export interface SettingsActions {
   updateSkillRegistry: (id: string, patch: Partial<Pick<SkillRegistry, 'name' | 'url' | 'enabled'>>) => void
   removeSkillRegistry: (id: string) => void
   refreshSkillRegistry: (id: string) => Promise<string>
-  addChatAgentType: () => void
+  addChatAgentType: () => string
   updateChatAgentType: (id: string, patch: Partial<Omit<ChatAgentType, 'id'>>) => void
   deleteChatAgentType: (id: string) => void
   toggleSetting: (k: 'autoRoute' | 'approveDestructive' | 'followMode') => void
   updateSettings: (patch: Partial<AppState['settings']>) => void
   setAgentTypeCmd: (id: string, cmd: string) => void
   updateAgentType: (id: string, patch: Partial<AppState['agentTypes'][number]>) => void
-  addAgentType: () => void
+  addAgentType: () => string
   deleteAgentType: (id: string) => void
   cycleCatalogPerm: (id: string) => void
 }
@@ -72,6 +72,7 @@ export function createSettingsActions(ctx: SettingsActionsCtx): SettingsActions 
         }]),
       }))
       later(50, () => { void ctx.connectMcp(id) })
+      return id
     },
 
     updateMcpServer: (id, patch) => {
@@ -157,13 +158,17 @@ export function createSettingsActions(ctx: SettingsActionsCtx): SettingsActions 
 
     refreshSkillRegistry: id => ctx.refreshSkillCatalog(id),
 
-    addChatAgentType: () => dispatch(s => ({
-      ...s,
-      chatAgentTypes: s.chatAgentTypes.concat([{
-        id: mkId('ct'), name: `chat-${s.chatAgentTypes.length + 1}`, provider: 'anthropic',
-        model: 'claude-sonnet-5', enabled: true,
-      }]),
-    })),
+    addChatAgentType: () => {
+      const id = mkId('ct')
+      dispatch(s => ({
+        ...s,
+        chatAgentTypes: s.chatAgentTypes.concat([{
+          id, name: `chat-${s.chatAgentTypes.length + 1}`, provider: 'anthropic',
+          model: 'claude-sonnet-5', enabled: true,
+        }]),
+      }))
+      return id
+    },
 
     updateChatAgentType: (id, patch) => dispatch(s => ({
       ...s,
@@ -185,14 +190,18 @@ export function createSettingsActions(ctx: SettingsActionsCtx): SettingsActions 
       ...s,
       agentTypes: s.agentTypes.map(t => (t.id === id ? { ...t, ...patch } : t)),
     })),
-    addAgentType: () => dispatch(s => ({
-      ...s,
-      agentTypes: s.agentTypes.concat([{
-        id: mkId('custom'),
-        name: 'New agent', color: '#7FD1FF', model: '', tools: 0,
-        desc: 'Custom agent type.', enabled: true, custom: true, env: '',
-      }]),
-    })),
+    addAgentType: () => {
+      const id = mkId('custom')
+      dispatch(s => ({
+        ...s,
+        agentTypes: s.agentTypes.concat([{
+          id,
+          name: 'New agent', color: '#7FD1FF', model: '', tools: 0,
+          desc: 'Custom agent type.', enabled: true, custom: true, env: '',
+        }]),
+      }))
+      return id
+    },
     deleteAgentType: id => dispatch(s => ({
       ...s,
       agentTypes: s.agentTypes.filter(t => t.id !== id),

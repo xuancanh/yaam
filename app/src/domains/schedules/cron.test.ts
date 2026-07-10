@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCron, cronMatches, describeCron, fieldMatches, humanizeCron } from './cron'
+import { buildCron, cronFiresOnDay, cronMatches, cronTimeLabel, describeCron, fieldMatches, humanizeCron } from './cron'
 
 describe('fieldMatches', () => {
   it('matches wildcards, values, ranges, lists, and steps', () => {
@@ -75,5 +75,39 @@ describe('buildCron', () => {
     expect(buildCron({ freq: 'minutes', every: 0, time: 'zz', dow: 9, dom: 40 })).toBe('*/1 * * * *')
     expect(buildCron({ freq: 'weekly', every: 5, time: '25:99', dow: 9, dom: 40 })).toBe('99 25 * * 6')
     expect(buildCron({ freq: 'monthly', every: 5, time: '09:00', dow: 1, dom: 40 })).toBe('0 9 31 * *')
+  })
+})
+
+describe('cronFiresOnDay', () => {
+  // Wed 2026-01-07 local
+  const wed = new Date(2026, 0, 7)
+  it('ignores time fields — any-minute schedules fire every day', () => {
+    expect(cronFiresOnDay('*/10 * * * *', wed)).toBe(true)
+    expect(cronFiresOnDay('30 9 * * *', wed)).toBe(true)
+  })
+  it('respects weekday and day-of-month restrictions', () => {
+    expect(cronFiresOnDay('0 9 * * 3', wed)).toBe(true)
+    expect(cronFiresOnDay('0 9 * * 1', wed)).toBe(false)
+    expect(cronFiresOnDay('0 9 7 * *', wed)).toBe(true)
+    expect(cronFiresOnDay('0 9 8 * *', wed)).toBe(false)
+  })
+  it('applies the either-matches rule when both day fields are set', () => {
+    expect(cronFiresOnDay('0 9 8 * 3', wed)).toBe(true) // dow matches even though dom does not
+    expect(cronFiresOnDay('0 9 8 * 1', wed)).toBe(false)
+  })
+  it('respects the month field and rejects malformed expressions', () => {
+    expect(cronFiresOnDay('0 9 * 1 *', wed)).toBe(true)
+    expect(cronFiresOnDay('0 9 * 2 *', wed)).toBe(false)
+    expect(cronFiresOnDay('0 9 * *', wed)).toBe(false)
+  })
+})
+
+describe('cronTimeLabel', () => {
+  it('renders the common shapes compactly', () => {
+    expect(cronTimeLabel('30 9 * * *')).toBe('09:30')
+    expect(cronTimeLabel('15 * * * *')).toBe(':15 hourly')
+    expect(cronTimeLabel('*/10 * * * *')).toBe('every 10 min')
+    expect(cronTimeLabel('0 */2 * * *')).toBe(':00 every 2 h')
+    expect(cronTimeLabel('* * * * *')).toBe('every minute')
   })
 })

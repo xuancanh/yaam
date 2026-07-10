@@ -3,6 +3,7 @@ import { useConductorSelector, shallowEqual, useActions } from '../../store'
 import { buildTemplateCommand } from './template-command'
 import type { AgentTemplate, TemplateApproval, TemplateMode } from '../../core/types'
 import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
+import { DialogField, DialogFooter, DialogGrid, DialogHeader, EntityDialog } from '../../components/EntityDialog'
 import { confirmAction } from '../../components/Confirm'
 
 const FIELD_STYLE = {
@@ -17,21 +18,7 @@ const APPROVALS: Array<{ id: TemplateApproval; label: string; hint: string }> = 
   { id: 'full', label: 'Full access — no approvals', hint: 'claude: --dangerously-skip-permissions · codex: --dangerously-bypass-approvals-and-sandbox' },
 ]
 
-/** Pair a template editor control with its label and optional hint. */
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--mut)', letterSpacing: 0.3 }}>{label}</span>
-        {hint && <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{hint}</span>}
-      </div>
-      {children}
-    </div>
-  )
-}
-
-/** Full-view editor for one template — opened by create / edit */
-/** Edit every persisted launch option for one agent template. */
+/** Full-view editor for one template — opened by clicking its card. */
 function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => void }) {
   // `?? []` must stay OUT of the selector: a fresh array per snapshot never
   // shallow-equals the last one and loops useSyncExternalStore until React's
@@ -45,130 +32,116 @@ function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => v
   const upd = (patch: Partial<AgentTemplate>) => updateTemplate(tpl.id, patch)
 
   return (
-    <div
-      onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.55)', zIndex: 46, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '7vh' }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          width: 640, maxWidth: '94vw', maxHeight: '84vh', overflowY: 'auto', background: 'var(--panel2)',
-          border: '1px solid var(--line2)', borderRadius: 15, boxShadow: '0 26px 70px rgba(0,0,0,.6)', padding: 24,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+    <EntityDialog onClose={onClose} width={820}>
+      <DialogHeader
+        onClose={onClose}
+        lead={
           <span className="mono" style={{
-            fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, padding: '2px 8px', borderRadius: 5,
+            fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, padding: '2px 8px', borderRadius: 5, marginTop: 4,
             color: tpl.mode === 'ephemeral' ? 'var(--accent)' : 'var(--green)',
             border: `1px solid ${tpl.mode === 'ephemeral' ? 'rgba(245,196,81,.4)' : 'rgba(61,220,151,.4)'}`,
           }}>
             {tpl.mode === 'ephemeral' ? 'ONE-SHOT' : 'INTERACTIVE'}
           </span>
-          <EditableName name={tpl.name} onRename={name => upd({ name })} fontSize={15} />
-          <div style={{ flex: 1 }} />
+        }
+        title={<EditableName name={tpl.name} onRename={name => upd({ name })} fontSize={15} />}
+        sub={<>{type?.name ?? tpl.typeId}{tpl.model ? ` · ${tpl.model}` : ''} · {APPROVALS.find(a => a.id === tpl.approval)?.label} · changes save as you type</>}
+        actions={
           <button className="open-btn" style={{ flex: 'none', padding: '5px 14px', fontSize: 12 }} onClick={() => { runTemplate(tpl.id); onClose() }}>
             ▶ Run now
           </button>
-          <button className="icon-btn" title="Close" style={{ width: 28, height: 28, borderRadius: 7 }} onClick={onClose}>
-            <Icon paths={IC.close} size={13} stroke={1.8} />
-          </button>
-        </div>
-        <div style={{ fontSize: 11.5, color: 'var(--dim)', marginBottom: 18, lineHeight: 1.5 }}>
-          Changes save as you type.
-        </div>
+        }
+      />
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="AGENT TYPE" hint="binary + env vars">
-              <select value={tpl.typeId} onChange={e => upd({ typeId: e.target.value })} className="select-field" style={FIELD_STYLE}>
-                {s.agentTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </Field>
-            <Field label="MODE">
-              <select value={tpl.mode} onChange={e => upd({ mode: e.target.value as TemplateMode })} className="select-field" style={FIELD_STYLE} title="Ephemeral runs one task and exits by itself (claude -p / codex exec)">
-                <option value="ephemeral">One-shot — run task & exit</option>
-                <option value="interactive">Interactive — stays open</option>
-              </select>
-            </Field>
-            <Field label="APPROVALS" hint={APPROVALS.find(a => a.id === tpl.approval)?.hint}>
-              <select value={tpl.approval} onChange={e => upd({ approval: e.target.value as TemplateApproval })} className="select-field" style={FIELD_STYLE}>
-                {APPROVALS.map(a => <option key={a.id} value={a.id} title={a.hint}>{a.label}</option>)}
-              </select>
-            </Field>
-            <Field label="MODEL" hint="passed as --model / -m">
-              <input value={tpl.model} onChange={e => upd({ model: e.target.value })} placeholder="CLI default" style={FIELD_STYLE} />
-            </Field>
-          </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <DialogGrid>
+          <DialogField label="AGENT TYPE" hint="binary + env vars">
+            <select value={tpl.typeId} onChange={e => upd({ typeId: e.target.value })} className="select-field" style={FIELD_STYLE}>
+              {s.agentTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </DialogField>
+          <DialogField label="MODE">
+            <select value={tpl.mode} onChange={e => upd({ mode: e.target.value as TemplateMode })} className="select-field" style={FIELD_STYLE} title="Ephemeral runs one task and exits by itself (claude -p / codex exec)">
+              <option value="ephemeral">One-shot — run task & exit</option>
+              <option value="interactive">Interactive — stays open</option>
+            </select>
+          </DialogField>
+          <DialogField label="APPROVALS" hint={APPROVALS.find(a => a.id === tpl.approval)?.hint}>
+            <select value={tpl.approval} onChange={e => upd({ approval: e.target.value as TemplateApproval })} className="select-field" style={FIELD_STYLE}>
+              {APPROVALS.map(a => <option key={a.id} value={a.id} title={a.hint}>{a.label}</option>)}
+            </select>
+          </DialogField>
+          <DialogField label="MODEL" hint="passed as --model / -m">
+            <input value={tpl.model} onChange={e => upd({ model: e.target.value })} placeholder="CLI default" style={FIELD_STYLE} />
+          </DialogField>
+        </DialogGrid>
 
-          <Field label="PROMPT" hint="{task} is replaced with the task text">
-            <textarea
-              value={tpl.prompt}
-              onChange={e => upd({ prompt: e.target.value })}
-              placeholder="what should the agent do?"
-              rows={4}
-              style={{ ...FIELD_STYLE, resize: 'vertical', lineHeight: 1.55 }}
-            />
-          </Field>
+        <DialogField label="PROMPT" hint="{task} is replaced with the task text">
+          <textarea
+            value={tpl.prompt}
+            onChange={e => upd({ prompt: e.target.value })}
+            placeholder="what should the agent do?"
+            rows={5}
+            style={{ ...FIELD_STYLE, width: '100%', resize: 'vertical', lineHeight: 1.55 }}
+          />
+        </DialogField>
 
-          <Field label="SYSTEM PROMPT" hint="optional · claude: --append-system-prompt; others: prepended to the prompt">
-            <textarea
-              value={tpl.systemPrompt}
-              onChange={e => upd({ systemPrompt: e.target.value })}
-              placeholder="persona, constraints, house rules…"
-              rows={3}
-              style={{ ...FIELD_STYLE, resize: 'vertical', lineHeight: 1.55 }}
-            />
-          </Field>
+        <DialogField label="SYSTEM PROMPT" hint="optional · claude: --append-system-prompt; others: prepended to the prompt">
+          <textarea
+            value={tpl.systemPrompt}
+            onChange={e => upd({ systemPrompt: e.target.value })}
+            placeholder="persona, constraints, house rules…"
+            rows={4}
+            style={{ ...FIELD_STYLE, width: '100%', resize: 'vertical', lineHeight: 1.55 }}
+          />
+        </DialogField>
 
-          {machines.length > 0 && (
-            <Field label="RUN ON" hint={tpl.machineId ? 'over SSH + tmux; the working directory is on the remote host' : 'this machine'}>
-              <select value={tpl.machineId ?? ''} onChange={e => upd({ machineId: e.target.value || undefined })} className="select-field" style={FIELD_STYLE}>
-                <option value="">This machine (local)</option>
-                {machines.map(m => {
-                  const incomplete = !m.host?.trim() || !m.user?.trim()
-                  return <option key={m.id} value={m.id} disabled={incomplete}>{m.label || 'Unnamed'}{incomplete ? ' · incomplete' : ` · ${m.user}@${m.host}`}</option>
-                })}
-              </select>
-            </Field>
-          )}
+        {machines.length > 0 && (
+          <DialogField label="RUN ON" hint={tpl.machineId ? 'over SSH + tmux; the working directory is on the remote host' : 'this machine'}>
+            <select value={tpl.machineId ?? ''} onChange={e => upd({ machineId: e.target.value || undefined })} className="select-field" style={FIELD_STYLE}>
+              <option value="">This machine (local)</option>
+              {machines.map(m => {
+                const incomplete = !m.host?.trim() || !m.user?.trim()
+                return <option key={m.id} value={m.id} disabled={incomplete}>{m.label || 'Unnamed'}{incomplete ? ' · incomplete' : ` · ${m.user}@${m.host}`}</option>
+              })}
+            </select>
+          </DialogField>
+        )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label={tpl.machineId ? 'WORKING DIRECTORY (remote host)' : 'WORKING DIRECTORY'}>
-              <input value={tpl.cwd} onChange={e => upd({ cwd: e.target.value })} placeholder="session default" style={FIELD_STYLE} />
-            </Field>
-            <Field label="EXTRA CLI FLAGS" hint="verbatim">
-              <input value={tpl.extraArgs} onChange={e => upd({ extraArgs: e.target.value })} placeholder="e.g. --verbose" style={FIELD_STYLE} />
-            </Field>
-          </div>
+        <DialogGrid>
+          <DialogField label={tpl.machineId ? 'WORKING DIRECTORY (remote host)' : 'WORKING DIRECTORY'}>
+            <input value={tpl.cwd} onChange={e => upd({ cwd: e.target.value })} placeholder="session default" style={FIELD_STYLE} />
+          </DialogField>
+          <DialogField label="EXTRA CLI FLAGS" hint="verbatim">
+            <input value={tpl.extraArgs} onChange={e => upd({ extraArgs: e.target.value })} placeholder="e.g. --verbose" style={FIELD_STYLE} />
+          </DialogField>
+        </DialogGrid>
 
-          {tpl.mode === 'ephemeral' && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px',
-              background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10,
-            }}>
-              <div style={{ flex: 1, fontSize: 12, color: 'var(--mut)', lineHeight: 1.5 }}>
-                <b style={{ color: 'var(--text)' }}>Auto-archive after a successful run</b><br />
-                <span style={{ color: 'var(--dim)' }}>tidies the tab away once the monitor has summarized it</span>
-              </div>
-              <Switch on={tpl.autoArchive} onToggle={() => upd({ autoArchive: !tpl.autoArchive })} />
+        {tpl.mode === 'ephemeral' && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px',
+            background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10,
+          }}>
+            <div style={{ flex: 1, fontSize: 12, color: 'var(--mut)', lineHeight: 1.5 }}>
+              <b style={{ color: 'var(--text)' }}>Auto-archive after a successful run</b><br />
+              <span style={{ color: 'var(--dim)' }}>tidies the tab away once the monitor has summarized it</span>
             </div>
-          )}
+            <Switch on={tpl.autoArchive} onToggle={() => upd({ autoArchive: !tpl.autoArchive })} />
+          </div>
+        )}
 
-          <Field label="COMMAND PREVIEW" hint="what this template launches">
-            <div className="mono" style={{
-              fontSize: 11, color: 'var(--dim)', background: 'var(--bg3)', border: '1px solid var(--line)',
-              borderRadius: 9, padding: '10px 12px', whiteSpace: 'nowrap', overflowX: 'auto',
-            }}>
-              $ {preview}
-            </div>
-          </Field>
-        </div>
-
-        <div style={{ display: 'flex', marginTop: 20 }}>
-          <button className="approve-btn" style={{ flex: 1, padding: 10 }} onClick={onClose}>Done</button>
-        </div>
+        <DialogField label="COMMAND PREVIEW" hint="what this template launches">
+          <div className="mono" style={{
+            fontSize: 11, color: 'var(--dim)', background: 'var(--bg3)', border: '1px solid var(--line)',
+            borderRadius: 9, padding: '10px 12px', whiteSpace: 'nowrap', overflowX: 'auto',
+          }}>
+            $ {preview}
+          </div>
+        </DialogField>
       </div>
-    </div>
+
+      <DialogFooter onClose={onClose} />
+    </EntityDialog>
   )
 }
 

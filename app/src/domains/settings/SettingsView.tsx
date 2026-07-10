@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { hexToRgba } from '../../core/data'
 import { pickFolder } from '../../core/native'
 import { PROVIDERS, providerFor } from '../../master'
 import { SHELLS } from '../../core/data'
-import { EditableName, IC, Icon, Switch, ViewHeader } from '../../components/ui'
-import { DraftInput, DraftTextarea } from '../../components/DraftInput'
+import { Icon, Switch, ViewHeader } from '../../components/ui'
+import { DraftInput } from '../../components/DraftInput'
 import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
 
@@ -37,11 +36,12 @@ function ConnectLink({ label, url }: { label: string; url: string }) {
 import { ToolsSection } from './ToolsView'
 import { McpSection } from './McpSection'
 import { MachinesSection } from './MachinesSection'
+import { TerminalAgentsSection } from './TerminalAgentsSection'
+import { BrainProfilesBar } from './BrainProfiles'
 import { PluginsSection } from './PluginsSection'
 import { AppearanceSection } from './AppearanceSection'
 import { AssistantsSection } from './AssistantsSection'
 import { SkillsSection, PersonasSection, SkillRegistriesSection, ChatTypesSection, AddChatTypeButton } from './ChatAgentSections'
-import { confirmAction } from '../../components/Confirm'
 
 const ORCHESTRATION: Array<{ id: 'autoRoute' | 'approveDestructive' | 'followMode'; label: string; detail: string }> = [
   { id: 'autoRoute', label: 'Auto-route requests', detail: 'Master assigns tasks to the right agent without asking first.' },
@@ -65,10 +65,11 @@ const SETTINGS_TABS = [
 type SettingsTab = (typeof SETTINGS_TABS)[number][0]
 
 export function SettingsView() {
-  const s = useConductorSelector(x => ({ settings: x.settings, agentTypes: x.agentTypes, remoteInfo: x.remoteInfo }), shallowEqual)
-  const { toggleSetting, toggleAgentType, updateSettings, setAgentTypeCmd, updateAgentType, addAgentType, deleteAgentType } = useActions()
+  const s = useConductorSelector(x => ({ settings: x.settings, remoteInfo: x.remoteInfo }), shallowEqual)
+  const { toggleSetting, updateSettings } = useActions()
   const [tab, setTab] = useState<SettingsTab>('general')
   const [chatTab, setChatTab] = useState<'agents' | 'personas' | 'skills'>('agents')
+  const [openChatTypeId, setOpenChatTypeId] = useState<string | null>(null)
 
   // Fill the default working directory from the native folder picker.
   const browseDefaultCwd = async () => {
@@ -105,6 +106,7 @@ export function SettingsView() {
         <div style={{ maxWidth: 820 }}>
 
           {tab === 'brain' && <>
+          <BrainProfilesBar />
           <SectionLabel>MASTER BRAIN</SectionLabel>
           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
@@ -351,62 +353,7 @@ export function SettingsView() {
 
           </>}
 
-          {tab === 'types' && <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
-            <SectionLabel>TERMINAL AGENTS — external CLIs in PTY sessions</SectionLabel>
-            <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5, marginBottom: 11 }} onClick={addAgentType}>+ Add terminal agent</button>
-          </div>
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', marginBottom: 26 }}>
-            {s.agentTypes.map(t => (
-              <div key={t.id} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: 15, display: 'flex', gap: 12 }}>
-                <div className="mono" style={{
-                  width: 38, height: 38, borderRadius: 10, background: hexToRgba(t.color, 0.14),
-                  border: `1px solid ${hexToRgba(t.color, 0.4)}`, display: 'flex', alignItems: 'center',
-                  justifyContent: 'center', fontSize: 12, fontWeight: 600, color: t.color, flexShrink: 0,
-                }}>
-                  {t.name.slice(0, 2).toUpperCase()}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <EditableName name={t.name} onRename={name => updateAgentType(t.id, { name })} />
-                    {t.custom && (
-                      <button
-                        className="icon-btn danger"
-                        title="Delete agent type"
-                        style={{ width: 22, height: 22, borderRadius: 6, marginLeft: 'auto' }}
-                        onClick={() => { void confirmAction({ title: `Delete agent type “${t.name.slice(0, 40)}”?`, detail: 'Sessions, templates, and tasks referencing it fall back to defaults. This cannot be undone.' }).then(ok => { if (ok) deleteAgentType(t.id) }) }}
-                      >
-                        <Icon paths={IC.close} size={11} stroke={2} />
-                      </button>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 4, lineHeight: 1.45 }}>{t.desc}</div>
-                  <DraftInput
-                    value={t.model}
-                    onCommit={v => setAgentTypeCmd(t.id, v)}
-                    placeholder="launch command · e.g. claude"
-                    title="Command used to launch this agent type"
-                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 8, padding: '5px 9px', fontSize: 11.5 }}
-                  />
-                  <DraftTextarea
-                    value={t.env ?? ''}
-                    onCommit={v => updateAgentType(t.id, { env: v })}
-                    placeholder={'environment · one per line\nANTHROPIC_MODEL=claude-sonnet-5\nHTTP_PROXY=…'}
-                    rows={2}
-                    title="Environment variables applied when launching this agent type"
-                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11, resize: 'vertical', minHeight: 34 }}
-                  />
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
-                    <span style={{ fontSize: 11, color: t.enabled ? 'var(--green)' : '#6B7280', fontWeight: 600 }}>
-                      {t.enabled ? 'Enabled' : 'Disabled'} · {t.tools} tools
-                    </span>
-                    <Switch on={t.enabled} onToggle={() => toggleAgentType(t.id)} />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          </>}
+          {tab === 'types' && <TerminalAgentsSection />}
 
           {tab === 'chatagents' && <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -426,13 +373,13 @@ export function SettingsView() {
               ))}
             </div>
             <div style={{ flex: 1 }} />
-            {chatTab === 'agents' && <AddChatTypeButton />}
+            {chatTab === 'agents' && <AddChatTypeButton onAdded={setOpenChatTypeId} />}
           </div>
           {chatTab === 'agents' && <>
             <div style={{ fontSize: 11.5, color: 'var(--dim)', marginBottom: 12, lineHeight: 1.5 }}>
-              Each chat agent picks a provider, a model list (pickable per chat), credentials, and an optional base persona. Empty API key = share the Master Brain credentials when the provider matches.
+              Each chat agent picks a provider, a model list (pickable per chat), credentials, and an optional base persona. Empty API key = share the Master Brain credentials when the provider matches. Click an agent to configure it.
             </div>
-            <ChatTypesSection />
+            <ChatTypesSection openId={openChatTypeId} setOpenId={setOpenChatTypeId} />
           </>}
           {chatTab === 'personas' && <PersonasSection />}
           {chatTab === 'skills' && <>

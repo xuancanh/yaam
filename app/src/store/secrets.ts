@@ -21,6 +21,7 @@ export function secretEntries(s: AppState): SecretEntry[] {
   ]
   for (const t of s.chatAgentTypes ?? []) out.push({ account: `chat.${t.id}.apiKey`, value: t.apiKey ?? '' })
   for (const m of s.mcpServers ?? []) out.push({ account: `mcp.${m.id}.headers`, value: m.headers ?? '' })
+  for (const p of s.settings.brainProfiles ?? []) out.push({ account: `brain.${p.id}.apiKey`, value: p.apiKey ?? '' })
   return out
 }
 
@@ -42,6 +43,13 @@ export function redactSecrets(main: MainPartition, keychainReady: Set<string>): 
     red.mcpServers = red.mcpServers.map(m =>
       keychainReady.has(`mcp.${m.id}.headers`) ? { ...m, headers: '' } : m)
   }
+  if (red.settings?.brainProfiles?.length) {
+    red.settings = {
+      ...red.settings,
+      brainProfiles: red.settings.brainProfiles.map(p =>
+        keychainReady.has(`brain.${p.id}.apiKey`) ? { ...p, apiKey: '' } : p),
+    }
+  }
   return red
 }
 
@@ -61,5 +69,14 @@ export function applyResolvedSecrets(s: AppState, resolved: Record<string, strin
     const v = resolved[`mcp.${m.id}.headers`]
     return v && !m.headers ? { ...m, headers: v } : m
   })
+  if (next.settings.brainProfiles?.length) {
+    next.settings = {
+      ...next.settings,
+      brainProfiles: next.settings.brainProfiles.map(p => {
+        const v = resolved[`brain.${p.id}.apiKey`]
+        return v && !p.apiKey ? { ...p, apiKey: v } : p
+      }),
+    }
+  }
   return next
 }

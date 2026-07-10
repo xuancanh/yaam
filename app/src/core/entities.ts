@@ -515,6 +515,25 @@ export interface Machine {
   options?: string
 }
 
+/** A named snapshot of the Master Brain connection settings — lets the user
+ *  keep several provider/model/credential setups and switch between them.
+ *  Applying a profile copies these fields onto the live settings, so
+ *  everything downstream keeps reading the flat settings object. */
+export interface BrainProfile {
+  id: string
+  name: string
+  provider: string
+  masterModel: string
+  monitorModel: string
+  /** keychain-backed like the live settings key (see store/secrets) */
+  apiKey: string
+  baseUrl: string
+  awsRegion: string
+  awsProfile: string
+  awsRefreshCmd: string
+  credCmd: string
+}
+
 export interface OrchestrationSettings {
   autoRoute: boolean
   approveDestructive: boolean
@@ -549,6 +568,10 @@ export interface OrchestrationSettings {
   /** shell command that prints the API credential (raw key or JSON);
    *  re-run automatically on expiry or when the API rejects it */
   credCmd: string
+  /** saved Master Brain setups; applying one copies its fields onto settings */
+  brainProfiles?: BrainProfile[]
+  /** the last-applied profile (highlights it; edits can be saved back) */
+  brainProfileId?: string
   /** Settings → Appearance: theme, scale, density, typography */
   appearance?: AppearanceSettings
   /** native desktop notifications for escalations/finished work when the app

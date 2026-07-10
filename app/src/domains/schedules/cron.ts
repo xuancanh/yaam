@@ -104,6 +104,34 @@ export function buildCron(sp: SimpleSchedule): string {
   }
 }
 
+/** Does this cron expression fire at all on the given calendar day?
+ *  (month + day-of-month/day-of-week only — time fields are ignored). */
+export function cronFiresOnDay(expr: string, d: Date): boolean {
+  const fields = expr.trim().split(/\s+/)
+  if (fields.length !== 5) return false
+  const [, , dom, mon, dow] = fields
+  if (!fieldMatches(mon, d.getMonth() + 1)) return false
+  // standard crontab rule: when BOTH day fields are restricted, either matches
+  return dom !== '*' && dow !== '*'
+    ? fieldMatches(dom, d.getDate()) || fieldMatches(dow, d.getDay())
+    : fieldMatches(dom, d.getDate()) && fieldMatches(dow, d.getDay())
+}
+
+/** Short time-of-day label for a calendar chip: "09:00", ":15 hourly",
+ *  "every 10 min", or a raw fallback for exotic time fields. */
+export function cronTimeLabel(expr: string): string {
+  const f = expr.trim().split(/\s+/)
+  if (f.length !== 5) return expr
+  const [min, hour] = f
+  const two = (x: string) => x.padStart(2, '0')
+  if (/^\d+$/.test(min) && /^\d+$/.test(hour)) return `${two(hour)}:${two(min)}`
+  if (/^\d+$/.test(min) && hour === '*') return `:${two(min)} hourly`
+  if (min.startsWith('*/') && hour === '*') return `every ${min.slice(2)} min`
+  if (/^\d+$/.test(min) && hour.startsWith('*/')) return `:${two(min)} every ${hour.slice(2)} h`
+  if (min === '*' && hour === '*') return 'every minute'
+  return `${min} ${hour}`
+}
+
 /** Render common cron expressions as short labels and preserve uncommon input. */
 export function humanizeCron(expr: string): string {
   const f = expr.trim().split(/\s+/)

@@ -2,55 +2,116 @@ import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { hexToRgba } from '../../core/data'
 import { PROVIDERS, providerFor } from '../../master'
+import type { ChatAgentType } from '../../core/types'
 import { EditableName, IC, Icon, Switch } from '../../components/ui'
 import { DraftInput, DraftTextarea } from '../../components/DraftInput'
+import { DialogField, DialogFooter, DialogGrid, DialogHeader, EntityDialog } from '../../components/EntityDialog'
 import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
 import { confirmAction } from '../../components/Confirm'
 
-/** Skills registry: reusable instruction packs chat agents load on demand. */
+/** Shared spacious popup for the name + description + instructions entities
+ *  (skills and personas): both are instruction packs with the same shape. */
+function InstructionPackDialog({ noun, value, hints, onPatch, onDelete, onClose }: {
+  noun: 'skill' | 'persona'
+  value: { name: string; description: string; body: string }
+  hints: { name: string; description: string; body: string; deleteDetail: string }
+  onPatch: (patch: Partial<{ name: string; description: string; body: string }>) => void
+  onDelete: () => void
+  onClose: () => void
+}) {
+  return (
+    <EntityDialog onClose={onClose} width={720}>
+      <DialogHeader
+        onClose={onClose}
+        title={<span className="mono" style={{ fontSize: 15, fontWeight: 600 }}>{value.name || `unnamed ${noun}`}</span>}
+        sub={<>{value.description || 'no description'} · changes save on blur</>}
+      />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <DialogGrid>
+          <DialogField label="NAME" hint={hints.name}>
+            <DraftInput
+              value={value.name}
+              onCommit={v => onPatch({ name: v.replace(/\s+/g, '-').toLowerCase() })}
+              placeholder={`${noun}-name`}
+              style={{ ...FIELD_STYLE, width: '100%' }}
+            />
+          </DialogField>
+          <DialogField label="DESCRIPTION" hint={hints.description}>
+            <DraftInput
+              value={value.description}
+              onCommit={v => onPatch({ description: v })}
+              placeholder="one line"
+              style={{ ...FIELD_STYLE, width: '100%', fontFamily: 'var(--font-sans)' }}
+            />
+          </DialogField>
+        </DialogGrid>
+        <DialogField label="INSTRUCTIONS" hint={hints.body}>
+          <DraftTextarea
+            value={value.body}
+            onCommit={v => onPatch({ body: v })}
+            placeholder={noun === 'skill' ? 'the instructions injected when a chat agent loads this skill' : "the persona instructions appended to the chat agent's system prompt"}
+            rows={12}
+            style={{ ...FIELD_STYLE, width: '100%', resize: 'vertical', fontFamily: 'var(--font-sans)', fontSize: 12.5, lineHeight: 1.55 }}
+          />
+        </DialogField>
+      </div>
+      <DialogFooter onClose={onClose}>
+        <button
+          className="deny-btn"
+          style={{ flex: 'none', padding: '8px 16px', color: 'var(--red-soft)', borderColor: 'rgba(255,92,92,.4)' }}
+          onClick={() => {
+            void confirmAction({ title: `Delete ${noun} “${value.name.slice(0, 40)}”?`, detail: hints.deleteDetail })
+              .then(ok => { if (ok) { onDelete(); onClose() } })
+          }}
+        >
+          Delete
+        </button>
+      </DialogFooter>
+    </EntityDialog>
+  )
+}
+
+/** One compact skill/persona row; click for the full editor popup. */
+function InstructionPackRow({ name, description, extra, onOpen }: {
+  name: string
+  description: string
+  extra?: string
+  onOpen: () => void
+}) {
+  return (
+    <div style={{ borderBottom: '1px solid var(--line-soft)' }}>
+      <div className="palette-item" onClick={onOpen} title="Click to view & edit" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 6px', margin: '0 -6px', cursor: 'pointer', borderRadius: 7 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{name}</span>
+          <span style={{ fontSize: 11.5, color: 'var(--mut)', marginLeft: 8 }}>{description || 'no description'}</span>
+        </div>
+        {extra && <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', flexShrink: 0 }}>{extra}</span>}
+      </div>
+    </div>
+  )
+}
+
+/** Skills registry: reusable instruction packs chat agents load on demand.
+ *  Compact rows; click one for the full editor popup. */
 export function SkillsSection() {
   const s = useConductorSelector(x => ({ skills: x.skills }), shallowEqual)
   const { addSkill, updateSkill, removeSkill } = useActions()
   const [openId, setOpenId] = useState<string | null>(null)
+  const open = openId ? s.skills.find(sk => sk.id === openId) : undefined
 
   return (
     <>
-      <SectionLabel>SKILLS — reusable instructions for chat agents</SectionLabel>
+      <SectionLabel>SKILLS — reusable instructions for chat agents · click one to edit</SectionLabel>
       <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
         {s.skills.map(sk => (
-          <div key={sk.id} style={{ padding: '11px 0', borderBottom: '1px solid var(--line-soft)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <button
-                onClick={() => setOpenId(openId === sk.id ? null : sk.id)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--dim)', fontSize: 10, width: 16, cursor: 'pointer' }}
-              >
-                {openId === sk.id ? '▾' : '▸'}
-              </button>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{sk.name}</span>
-                <span style={{ fontSize: 11.5, color: 'var(--mut)', marginLeft: 8 }}>{sk.description || 'no description'}</span>
-              </div>
-              <button className="icon-btn danger" title="Remove skill" style={{ width: 24, height: 24 }} onClick={() => { void confirmAction({ title: `Delete skill “${sk.name.slice(0, 40)}”?`, detail: 'The skill and its instructions are removed for every chat. This cannot be undone.' }).then(ok => { if (ok) removeSkill(sk.id) }) }}>
-                <Icon paths={IC.close} size={11} stroke={2} />
-              </button>
-            </div>
-            {openId === sk.id && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '9px 0 4px 26px' }}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <DraftInput value={sk.name} onCommit={v => updateSkill(sk.id, { name: v.replace(/\s+/g, '-').toLowerCase() })} placeholder="name (agents load it by this)" style={{ ...FIELD_STYLE, width: 200 }} />
-                  <DraftInput value={sk.description} onCommit={v => updateSkill(sk.id, { description: v })} placeholder="one-line description — agents pick skills by this" style={{ ...FIELD_STYLE, flex: 1 }} />
-                </div>
-                <DraftTextarea
-                  value={sk.body}
-                  onCommit={v => updateSkill(sk.id, { body: v })}
-                  placeholder="the instructions injected when a chat agent loads this skill"
-                  rows={4}
-                  style={{ ...FIELD_STYLE, resize: 'vertical', fontFamily: 'var(--font-sans)', lineHeight: 1.5 }}
-                />
-              </div>
-            )}
-          </div>
+          <InstructionPackRow
+            key={sk.id}
+            name={sk.name}
+            description={sk.description}
+            extra={sk.body.trim() ? `${sk.body.trim().split(/\s+/).length} words` : 'empty'}
+            onOpen={() => setOpenId(sk.id)}
+          />
         ))}
         <div style={{ padding: '12px 0' }}>
           <button className="open-btn" style={{ flex: 'none', padding: '6px 13px', fontSize: 12 }} onClick={() => setOpenId(addSkill())}>
@@ -58,20 +119,37 @@ export function SkillsSection() {
           </button>
         </div>
       </div>
+      {open && (
+        <InstructionPackDialog
+          noun="skill"
+          value={open}
+          hints={{
+            name: 'agents load it by this',
+            description: 'agents pick skills by this line',
+            body: 'injected into the chat when the skill is loaded',
+            deleteDetail: 'The skill and its instructions are removed for every chat. This cannot be undone.',
+          }}
+          onPatch={patch => updateSkill(open.id, patch)}
+          onDelete={() => removeSkill(open.id)}
+          onClose={() => setOpenId(null)}
+        />
+      )}
     </>
   )
 }
 
-/** Personas: named voices/roles a chat adopts (picked per chat). */
+/** Personas: named voices/roles a chat adopts (picked per chat).
+ *  Compact rows; click one for the full editor popup. */
 export function PersonasSection() {
   const s = useConductorSelector(x => ({ personas: x.personas }), shallowEqual)
   const { addPersona, updatePersona, removePersona } = useActions()
   const [openId, setOpenId] = useState<string | null>(null)
+  const open = openId ? s.personas.find(pe => pe.id === openId) : undefined
 
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
-        <SectionLabel>PERSONAS — pick one when starting a chat; appended to the agent's instructions</SectionLabel>
+        <SectionLabel>PERSONAS — pick one when starting a chat; appended to the agent's instructions · click one to edit</SectionLabel>
         <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5, marginBottom: 11 }} onClick={() => setOpenId(addPersona())}>
           + New persona
         </button>
@@ -81,40 +159,30 @@ export function PersonasSection() {
           <div style={{ padding: '14px 0', fontSize: 12, color: 'var(--dim)' }}>No personas yet.</div>
         )}
         {s.personas.map(pe => (
-          <div key={pe.id} style={{ padding: '11px 0', borderBottom: '1px solid var(--line-soft)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <button
-                onClick={() => setOpenId(openId === pe.id ? null : pe.id)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--dim)', fontSize: 10, width: 16, cursor: 'pointer' }}
-              >
-                {openId === pe.id ? '▾' : '▸'}
-              </button>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{pe.name}</span>
-                <span style={{ fontSize: 11.5, color: 'var(--mut)', marginLeft: 8 }}>{pe.description || 'no description'}</span>
-              </div>
-              <button className="icon-btn danger" title="Remove persona" style={{ width: 24, height: 24 }} onClick={() => { void confirmAction({ title: `Delete persona “${pe.name.slice(0, 40)}”?`, detail: 'Chats using it keep running without a persona. This cannot be undone.' }).then(ok => { if (ok) removePersona(pe.id) }) }}>
-                <Icon paths={IC.close} size={11} stroke={2} />
-              </button>
-            </div>
-            {openId === pe.id && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '9px 0 4px 26px' }}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <DraftInput value={pe.name} onCommit={v => updatePersona(pe.id, { name: v.replace(/\s+/g, '-').toLowerCase() })} placeholder="name" style={{ ...FIELD_STYLE, width: 200 }} />
-                  <DraftInput value={pe.description} onCommit={v => updatePersona(pe.id, { description: v })} placeholder="one-line description (shown in the picker)" style={{ ...FIELD_STYLE, flex: 1 }} />
-                </div>
-                <DraftTextarea
-                  value={pe.body}
-                  onCommit={v => updatePersona(pe.id, { body: v })}
-                  placeholder="the persona instructions appended to the chat agent's system prompt"
-                  rows={4}
-                  style={{ ...FIELD_STYLE, resize: 'vertical', fontFamily: 'var(--font-sans)', lineHeight: 1.5 }}
-                />
-              </div>
-            )}
-          </div>
+          <InstructionPackRow
+            key={pe.id}
+            name={pe.name}
+            description={pe.description}
+            extra={pe.body.trim() ? `${pe.body.trim().split(/\s+/).length} words` : 'empty'}
+            onOpen={() => setOpenId(pe.id)}
+          />
         ))}
       </div>
+      {open && (
+        <InstructionPackDialog
+          noun="persona"
+          value={open}
+          hints={{
+            name: 'shown in the per-chat picker',
+            description: 'shown in the picker',
+            body: "appended to the chat agent's system prompt",
+            deleteDetail: 'Chats using it keep running without a persona. This cannot be undone.',
+          }}
+          onPatch={patch => updatePersona(open.id, patch)}
+          onDelete={() => removePersona(open.id)}
+          onClose={() => setOpenId(null)}
+        />
+      )}
     </>
   )
 }
@@ -173,118 +241,198 @@ export function SkillRegistriesSection() {
   )
 }
 
-/** Small header button that adds a chat-agent type (needs its own hook scope). */
-export function AddChatTypeButton() {
+function ChatTypeAvatar({ t, size = 38 }: { t: ChatAgentType; size?: number }) {
+  return (
+    <div className="mono" style={{
+      width: size, height: size, borderRadius: 10, background: hexToRgba('#7FD1FF', 0.14),
+      border: '1px solid ' + hexToRgba('#7FD1FF', 0.4), display: 'flex', alignItems: 'center',
+      justifyContent: 'center', fontSize: 12, fontWeight: 600, color: '#7FD1FF', flexShrink: 0,
+    }}>
+      {t.name.slice(0, 2).toUpperCase()}
+    </div>
+  )
+}
+
+/** Credential summary for one chat agent type. */
+function credLabel(t: ChatAgentType, masterProvider: string): string {
+  if (t.provider === 'bedrock') return 'AWS chain'
+  if (t.apiKey) return 'own key'
+  if (t.provider === masterProvider) return 'shares Master creds'
+  return 'no credentials'
+}
+
+/** Spacious popup for one chat agent type: provider, models, credentials, persona. */
+function ChatTypeDialog({ t, onClose }: { t: ChatAgentType; onClose: () => void }) {
+  const masterProvider = useConductorSelector(x => x.settings.provider)
+  const { updateChatAgentType, deleteChatAgentType } = useActions()
+  const upd = (patch: Partial<Omit<ChatAgentType, 'id'>>) => updateChatAgentType(t.id, patch)
+  const prov = providerFor(t.provider)
+  const needsBase = prov.models.length === 0
+  const sharesMaster = t.provider === masterProvider && !t.apiKey
+
+  return (
+    <EntityDialog onClose={onClose} width={720}>
+      <DialogHeader
+        onClose={onClose}
+        lead={<ChatTypeAvatar t={t} />}
+        title={<EditableName name={t.name} onRename={name => upd({ name })} fontSize={15} />}
+        sub={<>{prov.label} · {t.model || 'no model'} · {credLabel(t, masterProvider)} · changes save on blur</>}
+      />
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <DialogField label="DESCRIPTION" hint="shown in pickers">
+          <DraftInput value={t.desc ?? ''} onCommit={v => upd({ desc: v || undefined })} placeholder="what this agent is for" style={{ ...FIELD_STYLE, width: '100%', fontFamily: 'var(--font-sans)' }} />
+        </DialogField>
+
+        <DialogGrid>
+          <DialogField label="PROVIDER">
+            <select
+              value={t.provider}
+              onChange={e => {
+                const next = providerFor(e.target.value)
+                upd({ provider: next.id, models: next.models.length ? next.models : [], model: next.models[0] ?? '' })
+              }}
+              className="select-field"
+              style={{ ...FIELD_STYLE, width: '100%' }}
+            >
+              {PROVIDERS.map(pr => <option key={pr.id} value={pr.id}>{pr.label}</option>)}
+            </select>
+          </DialogField>
+          {t.provider !== 'bedrock' && (
+            <DialogField label="API KEY" hint={sharesMaster ? 'empty = share Master Brain credentials' : prov.keyHint}>
+              <DraftInput
+                type="password"
+                value={t.apiKey ?? ''}
+                onCommit={v => upd({ apiKey: v || undefined })}
+                placeholder={sharesMaster ? 'shares Master Brain credentials' : prov.keyHint}
+                style={{ ...FIELD_STYLE, width: '100%' }}
+              />
+            </DialogField>
+          )}
+        </DialogGrid>
+
+        {needsBase && (
+          <DialogField label="BASE URL" hint={prov.protocol === 'anthropic' ? 'Anthropic-compatible /v1/messages endpoint' : 'OpenAI-compatible endpoint root'}>
+            <DraftInput
+              value={t.baseUrl ?? ''}
+              onCommit={v => upd({ baseUrl: v || undefined })}
+              placeholder={prov.protocol === 'anthropic' ? 'https://…' : 'https://…/v1'}
+              style={{ ...FIELD_STYLE, width: '100%' }}
+            />
+          </DialogField>
+        )}
+
+        <DialogField label="MODELS" hint="one per line — pickable per chat; the first is the default">
+          <DraftTextarea
+            value={(t.models ?? (t.model ? [t.model] : [])).join('\n')}
+            onCommit={v => {
+              const models = v.split('\n').map(x => x.trim())
+              upd({ models, model: models.find(Boolean) ?? '' })
+            }}
+            placeholder={prov.models[0] ?? 'model-id'}
+            rows={Math.min(8, Math.max(3, (t.models?.length ?? 1) + 1))}
+            style={{ ...FIELD_STYLE, width: '100%', resize: 'vertical', lineHeight: 1.5 }}
+          />
+          {prov.models.length > 0 && (
+            <button
+              className="open-btn"
+              title="Fill the model list with this provider's known models"
+              style={{ flex: 'none', padding: '4px 12px', fontSize: 11, marginTop: 6 }}
+              onClick={() => upd({ models: prov.models, model: prov.models[0] })}
+            >
+              Fill with {prov.label} defaults
+            </button>
+          )}
+        </DialogField>
+
+        <DialogField label="PERSONA" hint="optional · appended to the agent's system prompt">
+          <DraftTextarea
+            value={t.systemPrompt ?? ''}
+            onCommit={v => upd({ systemPrompt: v || undefined })}
+            placeholder="voice, role, house rules…"
+            rows={4}
+            style={{ ...FIELD_STYLE, width: '100%', resize: 'vertical', lineHeight: 1.5, fontFamily: 'var(--font-sans)' }}
+          />
+        </DialogField>
+
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px',
+          background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10,
+        }}>
+          <div style={{ flex: 1, fontSize: 12, color: 'var(--mut)', lineHeight: 1.5 }}>
+            <b style={{ color: 'var(--text)' }}>Enabled</b><br />
+            <span style={{ color: 'var(--dim)' }}>offered when starting new chats</span>
+          </div>
+          <Switch on={t.enabled} onToggle={() => upd({ enabled: !t.enabled })} />
+        </div>
+      </div>
+
+      <DialogFooter onClose={onClose}>
+        <button
+          className="deny-btn"
+          style={{ flex: 'none', padding: '8px 16px', color: 'var(--red-soft)', borderColor: 'rgba(255,92,92,.4)' }}
+          onClick={() => {
+            void confirmAction({ title: `Delete chat agent “${t.name.slice(0, 40)}”?`, detail: 'Its configuration and API key entry are removed. Existing chats fall back to another enabled agent.' })
+              .then(ok => { if (ok) { deleteChatAgentType(t.id); onClose() } })
+          }}
+        >
+          Delete
+        </button>
+      </DialogFooter>
+    </EntityDialog>
+  )
+}
+
+/** Small header button that adds a chat-agent type and opens its editor. */
+export function AddChatTypeButton({ onAdded }: { onAdded?: (id: string) => void }) {
   const { addChatAgentType } = useActions()
   return (
-    <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5 }} onClick={addChatAgentType}>
+    <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5 }} onClick={() => { const id = addChatAgentType(); onAdded?.(id) }}>
       + Add chat agent
     </button>
   )
 }
 
-/** Configurable chat-agent types: provider, model, credentials, persona. */
-export function ChatTypesSection() {
+/** Chat-agent types as compact cards; click one for the full editor popup. */
+export function ChatTypesSection({ openId, setOpenId }: { openId: string | null; setOpenId: (id: string | null) => void }) {
   const s = useConductorSelector(x => ({ chatAgentTypes: x.chatAgentTypes, settings: x.settings }), shallowEqual)
-  const { updateChatAgentType, deleteChatAgentType } = useActions()
+  const { updateChatAgentType } = useActions()
+  const open = openId ? s.chatAgentTypes.find(t => t.id === openId) : undefined
   return (
     <>
-      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', marginBottom: 26 }}>
+      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', marginBottom: 26 }}>
         {s.chatAgentTypes.map(t => {
           const prov = providerFor(t.provider)
-          const needsBase = prov.models.length === 0
-          const sharesMaster = t.provider === s.settings.provider && !t.apiKey
           return (
-            <div key={t.id} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: 15, display: 'flex', gap: 12 }}>
-              <div className="mono" style={{
-                width: 38, height: 38, borderRadius: 10, background: hexToRgba('#7FD1FF', 0.14),
-                border: '1px solid ' + hexToRgba('#7FD1FF', 0.4), display: 'flex', alignItems: 'center',
-                justifyContent: 'center', fontSize: 12, fontWeight: 600, color: '#7FD1FF', flexShrink: 0,
-              }}>
-                {t.name.slice(0, 2).toUpperCase()}
-              </div>
+            <div
+              key={t.id}
+              className="palette-item"
+              onClick={() => setOpenId(t.id)}
+              style={{
+                background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: 14,
+                display: 'flex', gap: 12, cursor: 'pointer', opacity: t.enabled ? 1 : 0.65,
+              }}
+            >
+              <ChatTypeAvatar t={t} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <EditableName name={t.name} onRename={name => updateChatAgentType(t.id, { name })} />
-                  <button
-                    className="icon-btn danger"
-                    title="Delete chat agent type"
-                    style={{ width: 22, height: 22, borderRadius: 6, marginLeft: 'auto' }}
-                    onClick={() => { void confirmAction({ title: `Delete chat agent “${t.name.slice(0, 40)}”?`, detail: 'Its configuration and API key entry are removed. Existing chats fall back to another enabled agent.' }).then(ok => { if (ok) deleteChatAgentType(t.id) }) }}
-                  >
-                    <Icon paths={IC.close} size={11} stroke={2} />
-                  </button>
-                </div>
-                {t.desc && <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 4, lineHeight: 1.45 }}>{t.desc}</div>}
-                <div style={{ display: 'flex', gap: 6, marginTop: 8, minWidth: 0 }}>
-                  <select
-                    value={t.provider}
-                    onChange={e => {
-                      const next = providerFor(e.target.value)
-                      updateChatAgentType(t.id, { provider: next.id, models: next.models.length ? next.models : [], model: next.models[0] ?? '' })
-                    }}
-                    className="select-field"
-                    style={{ ...FIELD_STYLE, flex: 1, minWidth: 0, padding: '5px 9px', fontSize: 11.5 }}
-                  >
-                    {PROVIDERS.map(pr => <option key={pr.id} value={pr.id}>{pr.label}</option>)}
-                  </select>
-                  {prov.models.length > 0 && (
-                    <button
-                      className="open-btn"
-                      title="Fill the model list with this provider's known models"
-                      style={{ flex: 'none', padding: '0 10px', fontSize: 10.5 }}
-                      onClick={() => updateChatAgentType(t.id, { models: prov.models, model: prov.models[0] })}
-                    >
-                      defaults
-                    </button>
-                  )}
-                </div>
-                <DraftTextarea
-                  value={(t.models ?? (t.model ? [t.model] : [])).join('\n')}
-                  onCommit={v => {
-                    const models = v.split('\n').map(x => x.trim())
-                    updateChatAgentType(t.id, { models, model: models.find(Boolean) ?? '' })
-                  }}
-                  placeholder={'models — one per line, first is the default\n' + (prov.models[0] ?? 'model-id')}
-                  rows={Math.min(5, Math.max(2, (t.models?.length ?? 1) + 1))}
-                  title="Pickable per session in the new-session dialog; the first line is the default"
-                  style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11.5, resize: 'vertical', minHeight: 34 }}
-                />
-                {t.provider !== 'bedrock' && (
-                  <DraftInput
-                    type="password"
-                    value={t.apiKey ?? ''}
-                    onCommit={v => updateChatAgentType(t.id, { apiKey: v || undefined })}
-                    placeholder={sharesMaster ? 'API key (empty = share Master Brain credentials)' : 'API key · ' + prov.keyHint}
-                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11.5 }}
-                  />
-                )}
-                {needsBase && (
-                  <DraftInput
-                    value={t.baseUrl ?? ''}
-                    onCommit={v => updateChatAgentType(t.id, { baseUrl: v || undefined })}
-                    placeholder={prov.protocol === 'anthropic' ? 'base URL · https://…  (Anthropic-compatible /v1/messages)' : 'base URL · https://…/v1  (OpenAI-compatible)'}
-                    style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11.5 }}
-                  />
-                )}
-                <DraftTextarea
-                  value={t.systemPrompt ?? ''}
-                  onCommit={v => updateChatAgentType(t.id, { systemPrompt: v || undefined })}
-                  placeholder="persona (optional) · appended to the agent's system prompt"
-                  rows={2}
-                  style={{ ...FIELD_STYLE, width: '100%', marginTop: 6, padding: '5px 9px', fontSize: 11, resize: 'vertical', minHeight: 30, fontFamily: 'var(--font-sans)' }}
-                />
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
-                  <span style={{ fontSize: 11, color: t.enabled ? 'var(--green)' : '#6B7280', fontWeight: 600 }}>
-                    {t.enabled ? 'Enabled' : 'Disabled'}{t.provider === 'bedrock' ? ' · AWS chain' : t.apiKey ? ' · own key' : sharesMaster ? ' · shares Master creds' : ' · no credentials'}
+                  <span style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
+                  <span onClick={e => e.stopPropagation()} style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                    <Switch on={t.enabled} onToggle={() => updateChatAgentType(t.id, { enabled: !t.enabled })} />
                   </span>
-                  <Switch on={t.enabled} onToggle={() => updateChatAgentType(t.id, { enabled: !t.enabled })} />
+                </div>
+                <div className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {prov.label} · {t.model || 'no model'}{(t.models?.length ?? 0) > 1 ? ` +${(t.models?.length ?? 1) - 1}` : ''}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--mut)', marginTop: 5 }}>
+                  {credLabel(t, s.settings.provider)}{t.systemPrompt ? ' · persona' : ''}
                 </div>
               </div>
             </div>
           )
         })}
       </div>
+      {open && <ChatTypeDialog t={open} onClose={() => setOpenId(null)} />}
     </>
   )
 }
