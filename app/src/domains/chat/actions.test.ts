@@ -28,6 +28,13 @@ describe('chat composer actions', () => {
 
     expect(state.agents[0].chatComposer?.draft).toBe('revised')
     expect(state.agents[0].chatComposer?.queue.map(q => q.id)).toEqual(['q1'])
+
+    actions.setChatTags('chat-1', [' research ', 'research', 'Q3'])
+    actions.setChatPinned('chat-1', true)
+    actions.archiveChat('chat-1')
+    expect(state.agents[0]).toMatchObject({ chatTags: ['research', 'Q3'], chatPinned: false, archived: true })
+    actions.restoreChat('chat-1')
+    expect(state.agents[0].archived).toBe(false)
   })
 
   it('forks before the selected turn and runs the revised input in the new chat', () => {

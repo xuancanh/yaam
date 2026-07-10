@@ -141,9 +141,26 @@ function MemoryEditor({ workspaceId, onClose }: { workspaceId: string; onClose: 
   )
 }
 
+function TagsEditor({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+  const { setChatTags } = useActions()
+  const [text, setText] = useState((agent.chatTags ?? []).join(', '))
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.55)', zIndex: 48, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 420, maxWidth: '92vw', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 8, padding: 16 }}>
+        <div className="grotesk" style={{ fontSize: 14, fontWeight: 600 }}>Conversation tags</div>
+        <input autoFocus value={text} onChange={e => setText(e.target.value)} placeholder="research, client-a, q3" style={{ ...FIELD, marginTop: 10 }} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+          <button className="deny-btn" style={{ padding: '7px 14px' }} onClick={onClose}>Cancel</button>
+          <button className="approve-btn" style={{ padding: '7px 16px' }} onClick={() => { setChatTags(agent.id, text.split(',')); onClose() }}>Save</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function ChatView() {
   const s = useConductorSelector(x => ({ agents: x.agents, activeChatId: x.activeChatId, activeWorkspace: x.activeWorkspace, settings: x.settings }), shallowEqual)
-  const { openChat, deleteSession, renameSession, setChatPermMode, updateSettings } = useActions()
+  const { openChat, deleteSession, renameSession, setChatPermMode, setChatPinned, archiveChat, restoreChat, updateSettings } = useActions()
   // drag-resizable conversation list (persisted like the Master sidebar)
   const listWidth = Math.max(220, Math.min(520, s.settings.chatListWidth ?? 300))
   const startListResize = (e: ReactPointerEvent) => {
@@ -165,16 +182,20 @@ export function ChatView() {
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<ChatSearchHit[] | null>(null)
   const [creating, setCreating] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
   // per-chat Files-panel toggle (explorer + viewer beside the conversation)
   const [filesOpen, setFilesOpen] = useState<Record<string, boolean>>({})
   const [memoryOpen, setMemoryOpen] = useState(false)
+  const [tagsOpen, setTagsOpen] = useState(false)
 
   // chats are workspace-specific (each carries the workspace it was created in)
-  const inWorkspace = (a: Agent) => a.kind === 'chat' && !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace
+  const inWorkspace = (a: Agent) => a.kind === 'chat'
+    && !!a.archived === showArchived
+    && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace
   const chats = s.agents
     .filter(inWorkspace)
     .map(a => ({ agent: a, last: lastSnippet(a) }))
-    .sort((x, y) => y.last.at - x.last.at)
+    .sort((x, y) => Number(!!y.agent.chatPinned) - Number(!!x.agent.chatPinned) || y.last.at - x.last.at)
 
   const selected = s.agents.find(a => a.id === s.activeChatId && inWorkspace(a))
 
@@ -215,6 +236,9 @@ export function ChatView() {
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px 8px' }}>
           <span className="grotesk" style={{ fontSize: 14.5, fontWeight: 600, flex: 1 }}>Chats</span>
+          <button className="icon-btn" title={showArchived ? 'Show active chats' : 'Show archived chats'} onClick={() => { setShowArchived(v => !v); openChat(null) }} style={{ width: 28, height: 28, borderRadius: 7, color: showArchived ? 'var(--accent)' : undefined }}>
+            <Icon paths={['M4 7h16v13H4z', 'M3 4h18v3H3z', 'M9 11h6']} size={14} stroke={1.7} />
+          </button>
           <button
             className="icon-btn"
             title="New chat"
@@ -266,6 +290,7 @@ export function ChatView() {
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  {a.chatPinned && <span title="Pinned" style={{ color: 'var(--accent)', fontSize: 10 }}>◆</span>}
                   <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
                     {a.name}
                   </span>
@@ -274,19 +299,24 @@ export function ChatView() {
                 <div style={{ fontSize: 10.5, color: a.status === 'running' ? 'var(--accent)' : 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
                   {a.status === 'running' ? 'thinking…' : last.text || 'empty chat'}
                 </div>
+                {!!a.chatTags?.length && <div className="mono" style={{ marginTop: 3, fontSize: 9.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.chatTags.map(tag => `#${tag}`).join(' ')}</div>}
               </div>
-              <button
-                className="icon-btn danger"
-                title="Delete chat"
-                style={{ width: 20, height: 20, borderRadius: 5, flexShrink: 0 }}
-                onClick={e => { e.stopPropagation(); void confirmAction({ title: `Delete chat “${a.name.slice(0, 40)}”?`, detail: 'Permanently removes the conversation and its transcript. This cannot be undone.' }).then(ok => { if (ok) deleteSession(a.id) }) }}
-              >
-                <Icon paths={IC.close} size={10} stroke={2} />
-              </button>
+              {showArchived ? <>
+                <button className="icon-btn" title="Restore chat" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} onClick={e => { e.stopPropagation(); restoreChat(a.id) }}>
+                  <Icon paths={['M4 12a8 8 0 101.8-5', 'M4 4v5h5']} size={11} stroke={1.8} />
+                </button>
+                <button className="icon-btn danger" title="Delete permanently" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} onClick={e => { e.stopPropagation(); void confirmAction({ title: `Permanently delete “${a.name.slice(0, 40)}”?`, detail: 'Removes the conversation and transcript. This cannot be undone.' }).then(ok => { if (ok) deleteSession(a.id) }) }}>
+                  <Icon paths={IC.close} size={10} stroke={2} />
+                </button>
+              </> : (
+                <button className="icon-btn" title="Archive chat" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} onClick={e => { e.stopPropagation(); archiveChat(a.id) }}>
+                  <Icon paths={['M4 7h16v13H4z', 'M3 4h18v3H3z']} size={11} stroke={1.8} />
+                </button>
+              )}
             </div>
           )) : (
             <div style={{ fontSize: 11.5, color: 'var(--dim)', padding: '8px 10px', lineHeight: 1.6 }}>
-              No chats yet — hit + to start one. Chat agents browse & edit files, run commands, load skills, and call MCP servers.
+              {showArchived ? 'No archived chats.' : 'No chats yet — hit + to start one.'}
             </div>
           )}
         </div>
@@ -303,6 +333,12 @@ export function ChatView() {
               <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{selected.model}</span>
               {selected.cwd && <span className="mono" style={{ fontSize: 10.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selected.cwd}</span>}
               <div style={{ flex: 1 }} />
+              <button className="icon-btn" title={selected.chatPinned ? 'Unpin conversation' : 'Pin conversation'} onClick={() => setChatPinned(selected.id, !selected.chatPinned)} style={{ width: 26, height: 26, borderRadius: 7, color: selected.chatPinned ? 'var(--accent)' : undefined }}>
+                <Icon paths={['M9 4h6l-1 6 3 3v1H7v-1l3-3-1-6z', 'M12 14v7']} size={14} stroke={1.7} />
+              </button>
+              <button className="icon-btn" title="Edit conversation tags" onClick={() => setTagsOpen(true)} style={{ width: 26, height: 26, borderRadius: 7, color: selected.chatTags?.length ? 'var(--accent)' : undefined }}>
+                <Icon paths={['M3 12V5a2 2 0 012-2h7l9 9-9 9-9-9z', 'M8 8h.01']} size={14} stroke={1.7} />
+              </button>
               {selected.status === 'running' && (
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--accent)' }}>
                   <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', animation: 'cpulse 0.9s ease-in-out infinite' }} />
@@ -365,6 +401,7 @@ export function ChatView() {
         )}
       </div>
       {memoryOpen && <MemoryEditor workspaceId={s.activeWorkspace} onClose={() => setMemoryOpen(false)} />}
+      {tagsOpen && selected && <TagsEditor agent={selected} onClose={() => setTagsOpen(false)} />}
     </div>
   )
 }

@@ -381,7 +381,8 @@ Provide in-app LLM agents that operate on files and applications without a PTY.
   extractive context for older turns.
 - `search-indexer.ts` subscribes only to transcript-reference changes and
   debounces Tantivy reindexing.
-- `ChatView.tsx` provides chat selection and full-text search.
+- `ChatView.tsx` provides chat selection, pin/tag organization, recoverable
+  archive management, and full-text search.
 - `ChatPane.tsx` renders messages, attachments, files panel, tool traces,
   approval bubbles, slash menu, retry/copy/export, and stop/send controls.
 

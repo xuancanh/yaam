@@ -190,6 +190,8 @@ export interface SessionRecord {
   permMode?: 'ask' | 'auto'
   /** exact tool+preview approvals remembered for this chat */
   approvedToolCalls?: string[]
+  chatPinned?: boolean
+  chatTags?: string[]
   /** git-worktree isolation this session runs in (cwd === workdir) */
   worktree?: { root: string; base: string; workdir: string }
   /** the PTY lives in a detached host process that outlives the app; the

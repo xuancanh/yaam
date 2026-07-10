@@ -49,7 +49,10 @@ export function createChatSearchIndexer(
     .filter(isChatSession)
     .flatMap(a => a.chatLog
       .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({ chatId: a.id, msgId: m.id, role: m.role, text: `${a.name}\n${m.text}` })))
+      .map(m => ({
+        chatId: a.id, msgId: m.id, role: m.role,
+        text: `${a.name}${a.chatTags?.length ? `\n${a.chatTags.join(' ')}` : ''}\n${m.text}`,
+      })))
 
   const sync = () => {
     const docs = collect()

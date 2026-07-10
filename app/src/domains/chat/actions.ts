@@ -35,6 +35,10 @@ export interface ChatActions {
   promoteChatTurn: (agentId: string, turnId: string) => string | null
   clearChat: (agentId: string) => void
   setChatComposer: (agentId: string, patch: Partial<ChatComposerState>) => void
+  setChatPinned: (agentId: string, pinned: boolean) => void
+  setChatTags: (agentId: string, tags: string[]) => void
+  archiveChat: (agentId: string) => void
+  restoreChat: (agentId: string) => void
   /** answer a pending ask-mode tool approval */
   approveChatTool: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
   /** flip a chat between ask (approve risky tools) and auto */
@@ -170,6 +174,30 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
         const current = a.chatComposer ?? { draft: '', attachments: [], queue: [] }
         return { ...a, chatComposer: { ...current, ...patch } }
       }),
+    })),
+
+    setChatPinned: (agentId, pinned) => dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === agentId ? { ...a, chatPinned: pinned } : a),
+    })),
+
+    setChatTags: (agentId, tags) => dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === agentId ? {
+        ...a,
+        chatTags: [...new Set(tags.map(tag => tag.trim()).filter(Boolean))].slice(0, 12),
+      } : a),
+    })),
+
+    archiveChat: agentId => dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === agentId ? { ...a, archived: true, chatPinned: false } : a),
+      activeChatId: s.activeChatId === agentId ? null : s.activeChatId,
+    })),
+
+    restoreChat: agentId => dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === agentId ? { ...a, archived: false } : a),
     })),
 
     approveChatTool: (agentId, msgId, decision) => ctx.resolveChatApproval(agentId, msgId, decision),

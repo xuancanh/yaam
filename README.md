@@ -70,7 +70,9 @@ The **Chat** rail is a home for **chat agents**: in-app LLM assistants (no PTY) 
 - **Artifacts pane** — when a reply contains substantial HTML or SVG, an artifact chip opens it rendered live in a sandboxed (no-network) side panel.
 - **Configurable agent types** — each with its own provider, credentials, and a per-chat model list; an optional persona and chosen skill sources.
 - **Full-text search** across every conversation via an embedded tantivy index, rebuilt automatically.
-- Conversations persist and auto-title themselves; transcripts render markdown.
+- Conversations persist and auto-title themselves; they can be pinned, tagged,
+  archived/restored, searched by content or tag, and permanently deleted only
+  from the Archived viewer. Transcripts render markdown.
 
 ## Task board — watcher-driven kanban
 
