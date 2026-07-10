@@ -71,6 +71,16 @@ describe('chatTranscriptsChanged', () => {
     const b = { ...a, agents: [chat('c', [{ id: 'm1' }, { id: 'm2' }])] as AppState['agents'] } as AppState
     expect(chatTranscriptsChanged(a, b)).toBe(true)
   })
+  it('is true when indexed chat metadata changes', () => {
+    const log = [{ id: 'm1' }]
+    const a = baseState({ agents: [{ ...chat('c', log), name: 'Old', chatTags: ['one'] }] as AppState['agents'] })
+    const renamed = { ...a, agents: [{ ...a.agents[0], name: 'New' }] } as AppState
+    const retagged = { ...a, agents: [{ ...a.agents[0], chatTags: ['two'] }] } as AppState
+    const statusOnly = { ...a, agents: [{ ...a.agents[0], status: 'running' }] } as AppState
+    expect(chatTranscriptsChanged(a, renamed)).toBe(true)
+    expect(chatTranscriptsChanged(a, retagged)).toBe(true)
+    expect(chatTranscriptsChanged(a, statusOnly)).toBe(false)
+  })
   it('is true when a chat session is added or removed', () => {
     const a = baseState({ agents: [chat('c', [])] as AppState['agents'] })
     expect(chatTranscriptsChanged(a, { ...a, agents: [] as AppState['agents'] } as AppState)).toBe(true)
