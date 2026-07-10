@@ -1,0 +1,56 @@
+<!DOCTYPE html><html><head><style>
+/* @include ../ui.css */
+/* your own styles below */
+</style></head><body>
+<h1>🧩 my-addon</h1>
+<div class="sub">one line on what this tab shows</div>
+
+<h2>Live state</h2>
+<div class="card" id="summary"><span class="empty">waiting for the first state push…</span></div>
+
+<h2>Notes (private storage)</h2>
+<div class="card">
+  <div class="row">
+    <input id="note" class="grow" placeholder="write yourself a note…">
+    <button class="primary" onclick="saveNote()">Save</button>
+  </div>
+  <div id="notes" style="margin-top:8px"></div>
+</div>
+
+<script>
+/* @include ../sdk.js */
+'use strict'
+
+// live snapshot pushes (~3s) — render whatever your addon cares about
+yaam.onState(state => {
+  if (!state) { yaam.banner('grant the state:read scope to see live data'); return }
+  document.getElementById('summary').innerHTML =
+    `<div class="row"><span class="chip"><b>${state.sessions.length}</b> sessions</span>`
+    + `<span class="chip"><b>${state.tasks.length}</b> tasks</span>`
+    + `<span class="chip"><b>$${state.totals.cost}</b> spent</span>`
+    + `<span class="grow"></span><span class="meta">workspace: ${yaam.esc(state.workspace)}</span></div>`
+})
+
+async function saveNote(){
+  const input = document.getElementById('note')
+  if (!input.value.trim()) return
+  const notes = (await yaam.guard(yaam.api.storage.get('notes'), [])) || []
+  notes.unshift({ text: input.value.trim(), at: Date.now() })
+  await yaam.guard(yaam.api.storage.set('notes', notes.slice(0, 20)))
+  input.value = ''
+  renderNotes()
+}
+async function renderNotes(){
+  const notes = (await yaam.guard(yaam.api.storage.get('notes'), [])) || []
+  const el = document.getElementById('notes')
+  el.innerHTML = ''
+  for (const n of notes) {
+    el.appendChild(yaam.el('div', { class: 'lrow' },
+      yaam.el('span', { class: 'grow' }, n.text),
+      yaam.el('span', { class: 'meta' }, yaam.ago(n.at)),
+    ))
+  }
+  if (!notes.length) el.innerHTML = '<div class="empty">nothing saved yet</div>'
+}
+renderNotes()
+</script></body></html>

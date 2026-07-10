@@ -1,0 +1,45 @@
+# Starter addon — copy this folder, rename things, delete what you don't use.
+# Install in the app via Addons → Install from folder, or pack for sharing:
+#   node scripts/pack-addon.mjs <your-folder>
+manifest: 3
+name: my-addon
+version: 0.1.0
+icon: 🧩
+description: One line on what this addon does.
+author: you
+
+# request ONLY the scopes your code calls — extra scopes scare users away
+permissions:
+  - state:read
+  - storage
+  - ui
+
+# uncomment for HTTP access (https only, exact hosts or *.suffix wildcards):
+# hosts:
+#   - api.example.com
+# secrets:
+#   - name: EXAMPLE_TOKEN
+#     label: what the user should paste here
+
+view: view.html
+
+# tools Master can call — see toolkit/README.md for the handler contract
+# tools:
+#   - name: my_tool
+#     description: what it does, for the model
+#     input:
+#       query: string! · what to look for
+#     handler: tools/my_tool.js
+
+# lifecycle hooks (async JS bodies) — delete the ones you don't need
+# hooks:
+#   onSessionExit: hooks/onSessionExit.js
+#   onTaskMoved: hooks/onTaskMoved.js
+#   onCronFired: hooks/onCronFired.js
+
+# the addon's own LLM agent — a customizable mini monitor
+# agent:
+#   system: prompts/agent.md
+#   on:
+#     - onTaskMoved
+#   every: "*/30 * * * *"

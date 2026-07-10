@@ -1,12 +1,13 @@
-# Workflows — DAG pipelines over board tasks.
-# Chain tasks with dependencies, drag nodes around, trigger runs by cron,
-# and keep a run history. Pack for distribution with:
+# Workflows — state machines over board tasks.
+# Each step is a task spec; when its task finishes, the machine takes the
+# step's on-done / on-fail transition — branch into remediation, loop back for
+# retries (visit-capped), halt anywhere. Pack for distribution with:
 #   node scripts/pack-addon.mjs registry/packages/workflows
 manifest: 3
 name: Workflows
-version: 1.0.0
+version: 2.0.0
 icon: ⛓
-description: Task pipelines as a DAG — draw nodes (task specs) and dependency edges, run the graph on demand or on a cron, and watch each run advance as the board tasks it spawned reach done. Full run history included.
+description: Task workflows as state machines — every step is a board-task spec with on-done / on-fail transitions, so runs branch into remediation steps, loop back for visit-capped retries, and halt where you choose. Drag-and-drop editor, cron triggers, and a per-run path history.
 author: yaam
 
 permissions:

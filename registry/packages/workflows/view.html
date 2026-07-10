@@ -1,73 +1,161 @@
 <!DOCTYPE html><html><head><style>
-body{margin:0;background:#0A0B0F;color:#E7E9F0;font-family:'IBM Plex Sans',system-ui,sans-serif;display:flex;height:100vh;overflow:hidden}
-#side{width:240px;border-right:1px solid #1a1e26;padding:16px;display:flex;flex-direction:column;gap:6px;overflow-y:auto}
-h1{font-size:14px;margin:0 0 2px;display:flex;gap:8px;align-items:center}
-small{color:#8B93A1;font-size:11px}
-h2{font-size:10.5px;letter-spacing:.5px;color:#8B93A1;margin:14px 0 4px;text-transform:uppercase}
-.wf{background:#12151C;border:1px solid #1a1e26;border-radius:8px;padding:8px 10px;font-size:12.5px;cursor:pointer;display:flex;gap:8px;align-items:center}
-.wf.sel{border-color:rgba(245,196,81,.5)}
-.wf b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-button{background:transparent;border:1px solid #2a2f3a;border-radius:7px;color:#E7E9F0;font-size:11px;padding:4px 10px;cursor:pointer}
-button:hover{border-color:#F5C451;color:#F5C451}
-button.primary{border-color:rgba(61,220,151,.5);color:#3DDC97}
-button.danger:hover{border-color:#FF5C5C;color:#FF5C5C}
-input,textarea{background:#0A0B0F;border:1px solid #2a2f3a;border-radius:7px;color:#E7E9F0;font-size:11.5px;padding:5px 8px;outline:none;font-family:inherit;width:100%;box-sizing:border-box}
+:root{--bg:#0A0B0F;--panel:#12151C;--panel2:#0D0F14;--line:#1a1e26;--line2:#23272F;--text:#E7E9F0;--mut:#8B93A1;--dim:#5a6170;--acc:#F5C451;--green:#3DDC97;--red:#FF5C5C;--amber:#FFB020}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',system-ui,sans-serif;display:flex;height:100vh;overflow:hidden;font-size:13px}
+.mono{font-family:'JetBrains Mono',monospace}
+h2{font-size:10px;letter-spacing:.6px;color:var(--dim);margin:0 0 8px;text-transform:uppercase;font-weight:600}
+button{background:transparent;border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:11.5px;padding:6px 13px;cursor:pointer;font-family:inherit;transition:border-color .12s,color .12s,background .12s}
+button:hover{border-color:var(--acc);color:var(--acc)}
+button:disabled{opacity:.4;cursor:default;pointer-events:none}
+button.primary{border-color:rgba(61,220,151,.45);color:var(--green)}
+button.primary:hover{background:rgba(61,220,151,.08)}
+button.danger:hover{border-color:var(--red);color:var(--red)}
+button.ghost{border-color:transparent;color:var(--mut);padding:6px 8px}
+button.ghost:hover{color:var(--acc)}
+button.linkdone{border-color:rgba(61,220,151,.4);color:var(--green);font-size:10.5px;padding:5px 9px}
+button.linkfail{border-color:rgba(255,92,92,.4);color:var(--red);font-size:10.5px;padding:5px 9px}
+input,textarea,select{background:var(--bg);border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:11.5px;padding:6px 9px;outline:none;font-family:inherit;width:100%}
+input:focus,textarea:focus{border-color:rgba(245,196,81,.45)}
+
+#side{width:232px;border-right:1px solid var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:none}
+#side .brand{font-size:14px;font-weight:600;display:flex;gap:8px;align-items:center;padding:0 4px}
+#side .tag{font-size:10.5px;color:var(--dim);padding:0 4px;margin-bottom:12px}
+.wf{background:transparent;border:1px solid transparent;border-radius:9px;padding:9px 10px;cursor:pointer;display:flex;gap:8px;align-items:center}
+.wf:hover{background:var(--panel)}
+.wf.sel{background:var(--panel);border-color:var(--line2)}
+.wf .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:12.5px}
+.wf .meta{font-size:9.5px;color:var(--dim)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--line2);flex:none}
+.dot.running{background:var(--amber);animation:pulse 1.1s ease-in-out infinite}
+.dot.done{background:var(--green)}.dot.failed{background:var(--red)}
+@keyframes pulse{50%{opacity:.35}}
+.cron-chip{font-family:'JetBrains Mono',monospace;font-size:8.5px;color:var(--acc);border:1px solid rgba(245,196,81,.3);border-radius:4px;padding:1px 4px}
+
 #main{flex:1;display:flex;flex-direction:column;min-width:0}
-#bar{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid #1a1e26;flex-wrap:wrap}
-#canvasWrap{flex:1;position:relative;overflow:auto}
+#bar{display:flex;gap:8px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--line);flex:none;flex-wrap:wrap}
+#wfName{background:transparent;border:1px solid transparent;font-size:14.5px;font-weight:600;width:190px;padding:4px 8px}
+#wfName:hover,#wfName:focus{border-color:var(--line2)}
+.sep{width:1px;height:22px;background:var(--line);margin:0 2px}
+#linkHint{font-size:11px;display:none;align-items:center;gap:6px}
+
+#canvasWrap{flex:1;position:relative;overflow:auto;background-image:radial-gradient(circle,#161a22 1px,transparent 1px);background-size:22px 22px}
 svg{display:block}
-.node rect{fill:#12151C;stroke:#2a2f3a;rx:9}
-.node.sel rect{stroke:#F5C451}
-.node text{fill:#E7E9F0;font-size:12px;font-weight:600;pointer-events:none}
-.node .sub{fill:#8B93A1;font-size:9.5px;font-weight:400}
-.edge{stroke:#3a4150;stroke-width:1.6;fill:none;marker-end:url(#arr);cursor:pointer}
-.edge:hover{stroke:#FF5C5C}
-#editor{position:absolute;right:12px;top:12px;width:250px;background:#12151C;border:1px solid #2a2f3a;border-radius:10px;padding:12px;display:none;flex-direction:column;gap:6px;box-shadow:0 12px 30px rgba(0,0,0,.5)}
-#editor label{font-size:10px;color:#8B93A1;letter-spacing:.4px;text-transform:uppercase}
-#hist{max-height:200px;overflow-y:auto;border-top:1px solid #1a1e26;padding:10px 14px}
-.run{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#8B93A1;padding:4px 0;display:flex;gap:10px;align-items:center}
-.run .st-done{color:#3DDC97}.run .st-failed{color:#FF5C5C}.run .st-running{color:#F5C451}
-.dot{width:6px;height:6px;border-radius:50%;background:#3a4150;display:inline-block;margin-right:2px}
-.dot.done{background:#3DDC97}.dot.failed{background:#FF5C5C}.dot.running{background:#F5C451}
-#hint{font-size:10.5px;color:#5a6170;padding:4px 14px}
-.chk{display:flex;gap:6px;align-items:center;font-size:11px;color:#8B93A1}
-.chk input{width:auto}
+.node{cursor:grab}
+.node rect.body{fill:var(--panel);stroke:var(--line2);stroke-width:1.2}
+.node.sel rect.body{stroke:var(--acc);filter:drop-shadow(0 0 6px rgba(245,196,81,.25))}
+.node.linksrc rect.body{stroke:var(--acc);stroke-dasharray:4 3}
+.node rect.stripe{fill:var(--line2)}
+.node.running rect.stripe{fill:var(--amber)}
+.node.done rect.stripe{fill:var(--green)}
+.node.failed rect.stripe{fill:var(--red)}
+.node text{fill:var(--text);font-size:12px;font-weight:600;pointer-events:none;font-family:'IBM Plex Sans',system-ui}
+.node .sub{fill:var(--mut);font-size:9.5px;font-weight:400}
+.node .startbadge{fill:var(--acc);font-size:9px;font-weight:700}
+.edge{stroke-width:1.7;fill:none;cursor:pointer}
+.edge.done{stroke:rgba(61,220,151,.65);marker-end:url(#arrG)}
+.edge.fail{stroke:rgba(255,92,92,.6);stroke-dasharray:6 4;marker-end:url(#arrR)}
+.edge:hover{stroke-width:2.6}
+#ghost{stroke-width:1.4;stroke-dasharray:5 4;fill:none;pointer-events:none}
+
+#editor{position:absolute;right:14px;top:14px;width:268px;background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:14px;display:none;flex-direction:column;gap:7px;box-shadow:0 14px 34px rgba(0,0,0,.55)}
+#editor label{font-size:9.5px;color:var(--dim);letter-spacing:.4px;text-transform:uppercase;font-weight:600}
+.chk{display:flex;gap:7px;align-items:center;font-size:11.5px;color:var(--mut);cursor:pointer}
+.chk input{width:auto;accent-color:var(--acc)}
+.trow{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--mut)}
+.trow b{font-size:10.5px}
+
+#bottom{border-top:1px solid var(--line);padding:12px 16px;max-height:240px;overflow-y:auto;flex:none}
+.run{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:6px;cursor:pointer}
+.run .head{display:flex;gap:10px;align-items:center}
+.run .st{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;border-radius:5px;padding:1px 8px;border:1px solid}
+.st.running{color:var(--amber);border-color:rgba(255,176,32,.4)}
+.st.done{color:var(--green);border-color:rgba(61,220,151,.4)}
+.st.failed{color:var(--red);border-color:rgba(255,92,92,.4)}
+.run .meta{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim)}
+.run .path{display:none;margin-top:8px;border-top:1px solid var(--line);padding-top:7px;flex-wrap:wrap;gap:4px;align-items:center}
+.run.open .path{display:flex}
+.step{display:inline-flex;gap:6px;align-items:center;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;padding:3px 8px;font-size:10.5px}
+.via{font-size:10px;color:var(--dim)}
+.via.done{color:var(--green)}.via.failed{color:var(--red)}
+.empty{color:var(--dim);font-size:12px;padding:8px 2px}
+#banner{display:none;background:rgba(255,92,92,.08);border-bottom:1px solid rgba(255,92,92,.3);color:var(--red);font-size:11.5px;padding:7px 16px}
+#onboard{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+#onboard .card{background:var(--panel);border:1px solid var(--line2);border-radius:14px;padding:28px 32px;max-width:440px;text-align:center}
+#onboard h3{margin:0 0 8px;font-size:15px}
+#onboard p{color:var(--mut);font-size:12px;line-height:1.6;margin:0 0 16px}
+.hintline{font-size:10px;color:var(--dim);padding:5px 16px;border-bottom:1px solid var(--line)}
+.hintline b.g{color:var(--green)}.hintline b.r{color:var(--red)}
+kbd{font-family:'JetBrains Mono',monospace;font-size:9px;border:1px solid var(--line2);border-radius:4px;padding:0 4px;color:var(--mut)}
 </style></head><body>
 <div id="side">
-  <h1>⛓ Workflows</h1>
-  <small>DAG pipelines over board tasks</small>
-  <h2>Pipelines</h2>
+  <div class="brand">⛓ Workflows</div>
+  <div class="tag">state machines over board tasks</div>
+  <h2 style="padding:0 4px">Machines</h2>
   <div id="wfList"></div>
-  <button onclick="addWorkflow()">+ New workflow</button>
+  <button class="ghost" style="text-align:left" onclick="addWorkflow()">＋ New workflow</button>
 </div>
 <div id="main">
+  <div id="banner"></div>
   <div id="bar">
-    <b id="wfName" style="font-size:13px"></b>
-    <button class="primary" onclick="runNow()">▶ Run now</button>
-    <button onclick="addNode()">+ Node</button>
+    <input id="wfName" onchange="renameWf(this.value)" spellcheck="false">
+    <button class="primary" id="runBtn" onclick="runNow()">▶ Run now</button>
+    <button onclick="addNode()">＋ Step</button>
+    <span id="linkHint"></span>
     <span style="flex:1"></span>
-    <input id="cron" placeholder="0 6 * * *" style="width:110px;font-family:'JetBrains Mono',monospace">
-    <button id="cronBtn" onclick="toggleCron()">Enable cron</button>
-    <button class="danger" onclick="removeWorkflow()">Delete</button>
+    <select id="cronSel" onchange="cronPreset()" style="width:150px">
+      <option value="">no cron trigger</option>
+      <option value="0 * * * *">hourly, on the hour</option>
+      <option value="0 6 * * *">daily · 06:00</option>
+      <option value="0 6 * * 1">Mondays · 06:00</option>
+      <option value="custom">custom…</option>
+    </select>
+    <input id="cron" class="mono" placeholder="*/30 * * * *" style="width:110px;display:none">
+    <button id="cronBtn" onclick="toggleCron()">Arm</button>
+    <div class="sep"></div>
+    <button class="danger" id="delWf" onclick="removeWorkflow()">Delete</button>
   </div>
-  <div id="hint">drag nodes to arrange · “link →” then click a target to draw a dependency · click an edge to remove it</div>
-  <div id="canvasWrap"><svg id="svg" width="1600" height="900">
-    <defs><marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3a4150"/></marker></defs>
-    <g id="edges"></g><g id="nodes"></g>
-  </svg></div>
-  <div id="editor">
-    <label>Title</label><input id="eTitle">
-    <label>Description (what the agent should do)</label><textarea id="eDesc" rows="4"></textarea>
-    <label>Acceptance criteria — one per line</label><textarea id="eCrit" rows="3"></textarea>
-    <label>Working directory</label><input id="eCwd" placeholder="(workspace default)">
-    <div class="chk"><input type="checkbox" id="eIso"><span>isolate in a git worktree</span></div>
-    <div style="display:flex;gap:6px;margin-top:4px">
-      <button class="primary" style="flex:1" onclick="saveNode()">Save</button>
-      <button onclick="linkFrom()">link →</button>
-      <button class="danger" onclick="deleteNode()">✕</button>
+  <div class="hintline">one active step per run · select a step, then <b class="g">on done →</b> / <b class="r">on fail →</b> and click the target · loops allowed (visit-capped) · no transition = the machine halts there · <kbd>⌫</kbd> deletes · <kbd>Esc</kbd> cancels linking</div>
+  <div id="canvasWrap">
+    <svg id="svg" width="1600" height="900">
+      <defs>
+        <marker id="arrG" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3DDC97"/></marker>
+        <marker id="arrR" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#FF5C5C"/></marker>
+      </defs>
+      <g id="edges"></g><path id="ghost" d=""/><g id="nodes"></g>
+    </svg>
+    <div id="editor">
+      <label>Step title</label><input id="eTitle">
+      <label>What the agent should do</label><textarea id="eDesc" rows="4" placeholder="clear instructions for a one-shot agent…"></textarea>
+      <label>Acceptance criteria — one per line</label><textarea id="eCrit" rows="3" placeholder="tests pass&#10;docs updated"></textarea>
+      <label>Working directory</label><input id="eCwd" placeholder="(workspace default)">
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><label>Max visits / run</label><input id="eMax" type="number" min="1" max="9" placeholder="3"></div>
+        <div style="flex:1.4;display:flex;align-items:flex-end"><div class="chk"><input type="checkbox" id="eIso"><span>worktree ⑂</span></div></div>
+      </div>
+      <label style="margin-top:3px">Transitions</label>
+      <div class="trow"><b style="color:var(--green)">on done</b><span id="tDone" style="flex:1">— halt (success)</span><button class="linkdone" onclick="linkFrom('done')">set →</button><button class="ghost" onclick="clearLink('onDone')">✕</button></div>
+      <div class="trow"><b style="color:var(--red)">on fail</b><span id="tFail" style="flex:1">— halt (failure)</span><button class="linkfail" onclick="linkFrom('fail')">set →</button><button class="ghost" onclick="clearLink('onFail')">✕</button></div>
+      <div style="display:flex;gap:6px;margin-top:5px">
+        <button class="primary" style="flex:1" onclick="saveNode()">Save</button>
+        <button onclick="setStart()" title="the machine enters here">▶ start</button>
+        <button class="danger" onclick="deleteNode()">✕</button>
+      </div>
+    </div>
+    <div id="onboard" style="display:none">
+      <div class="card">
+        <h3>⛓ Workflows are state machines</h3>
+        <p>Each step is a board-task spec. When its task finishes, the machine takes the <b style="color:var(--green)">on&nbsp;done</b> or
+        <b style="color:var(--red)">on&nbsp;fail</b> transition — so you can branch into remediation steps, loop back for retries
+        (visit-capped), and halt wherever you choose. Trigger runs by hand or on a cron.</p>
+        <button class="primary" onclick="seedDemo()">Create an example machine</button>
+        <button onclick="addWorkflow()">Start empty</button>
+      </div>
     </div>
   </div>
-  <div id="hist"><h2 style="margin-top:0">Run history</h2><div id="runList"></div></div>
+  <div id="bottom">
+    <h2>Run history <span id="histCount" class="mono" style="color:var(--dim);text-transform:none;letter-spacing:0"></span></h2>
+    <div id="runList"></div>
+  </div>
 </div>
 <script>
 'use strict'
@@ -86,103 +174,173 @@ window.addEventListener('message', e => {
     d.error ? pending[d.callId].reject(new Error(d.error)) : pending[d.callId].resolve(d.result)
     delete pending[d.callId]
   }
-  if (d && d.type === 'yaam:state') refreshRuns() // state push ≈ every 3s — reuse as our poll tick
+  if (d && d.type === 'yaam:state') refreshRuns() // pushed ~3s — our poll tick
 })
-
-let workflows = [], runs = [], selWf = null, selNode = null, linkSrc = null
-
+function banner(msg){
+  const b = document.getElementById('banner')
+  if (!msg) { b.style.display = 'none'; return }
+  b.textContent = /permission "/.test(msg) ? msg + ' — grant it in the Addons view, then retry.' : msg
+  b.style.display = 'block'
+  setTimeout(() => { b.style.display = 'none' }, 6000)
+}
 const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
+const ago = t => { const s = (Date.now() - t) / 1000; return s < 90 ? 'just now' : s < 3600 ? Math.round(s / 60) + 'm ago' : s < 86400 ? Math.round(s / 3600) + 'h ago' : Math.round(s / 86400) + 'd ago' }
+
+let workflows = [], runs = [], selWf = null, selNode = null, openRun = null
+let linkSrc = null, linkKind = null // linking a transition: source node + 'done'|'fail'
 const wf = () => workflows.find(w => w.id === selWf)
+const nodeOf = id => { const w = wf(); return w && w.nodes.find(n => n.id === id) }
+const save = () => call('storage.set', 'workflows', workflows).catch(e => banner(e.message))
 
 async function load(){
-  workflows = (await call('storage.get', 'workflows')) || []
+  try { workflows = (await call('storage.get', 'workflows')) || [] } catch (e) { banner(e.message); workflows = [] }
   if (!selWf && workflows.length) selWf = workflows[0].id
   render()
   refreshRuns()
 }
-const save = () => call('storage.set', 'workflows', workflows)
+
+// live step status: from this workflow's newest run (fresh for 2 min after it ends)
+function liveStatus(){
+  const r = runs.find(x => x.wfId === selWf)
+  const map = {}
+  if (r && (r.status === 'running' || Date.now() - (r.finishedAt || r.startedAt) < 120000)) {
+    for (const p of r.path || []) map[p.nodeId] = p.outcome
+    if (r.status === 'running' && r.current) map[r.current] = 'running'
+  }
+  return map
+}
 
 function render(){
+  const w = wf()
   const list = document.getElementById('wfList')
   list.innerHTML = ''
-  for (const w of workflows) {
+  for (const x of workflows) {
+    const running = runs.some(r => r.wfId === x.id && r.status === 'running')
     const el = document.createElement('div')
-    el.className = 'wf' + (w.id === selWf ? ' sel' : '')
-    el.innerHTML = `<b>${esc(w.name)}</b><small>${w.nodes.length}</small>`
-    el.onclick = () => { selWf = w.id; selNode = null; render() }
+    el.className = 'wf' + (x.id === selWf ? ' sel' : '')
+    el.innerHTML = `<span class="dot${running ? ' running' : ''}"></span><span class="nm">${esc(x.name)}</span>`
+      + (x.cronOn ? `<span class="cron-chip">${esc(x.cron)}</span>` : '')
+      + `<span class="meta">${x.nodes.length}</span>`
+    el.onclick = () => { selWf = x.id; selNode = null; cancelLink(); render(); refreshRuns() }
     list.appendChild(el)
   }
-  const w = wf()
-  document.getElementById('wfName').textContent = w ? w.name : '—'
-  document.getElementById('cron').value = w && w.cron ? w.cron : ''
-  document.getElementById('cronBtn').textContent = w && w.cronOn ? 'Disable cron' : 'Enable cron'
+  document.getElementById('onboard').style.display = workflows.length ? 'none' : 'flex'
+  document.getElementById('bar').style.visibility = w ? 'visible' : 'hidden'
+  if (w) {
+    document.getElementById('wfName').value = w.name
+    const sel = document.getElementById('cronSel')
+    const preset = [...sel.options].some(o => o.value === w.cron) ? w.cron : (w.cron ? 'custom' : '')
+    sel.value = preset
+    const cronIn = document.getElementById('cron')
+    cronIn.style.display = preset === 'custom' ? '' : 'none'
+    cronIn.value = w.cron || ''
+    const btn = document.getElementById('cronBtn')
+    btn.textContent = w.cronOn ? '✓ Armed' : 'Arm'
+    btn.className = w.cronOn ? 'primary' : ''
+    const running = runs.some(r => r.wfId === w.id && r.status === 'running')
+    const runBtn = document.getElementById('runBtn')
+    runBtn.disabled = running || !w.nodes.length
+    runBtn.textContent = running ? '● Running…' : '▶ Run now'
+  }
+  const hint = document.getElementById('linkHint')
+  hint.style.display = linkSrc ? 'flex' : 'none'
+  if (linkSrc) {
+    hint.style.color = linkKind === 'done' ? 'var(--green)' : 'var(--red)'
+    hint.innerHTML = `◈ click the <b>on ${linkKind}</b> target — <kbd>Esc</kbd> cancels`
+  }
   drawGraph()
   drawEditor()
+}
+
+function edgePath(s, t){
+  const x1 = s.x + 172, y1 = s.y + 28, x2 = t.x, y2 = t.y + 28
+  if (x2 >= x1 - 20) return `M${x1},${y1} C${x1 + 46},${y1} ${x2 - 46},${y2} ${x2},${y2}`
+  // back-edge (a loop): swing underneath so it stays readable
+  const dip = Math.max(y1, y2) + 58
+  return `M${x1},${y1} C${x1 + 60},${dip} ${x2 - 60},${dip} ${x2},${y2}`
 }
 
 function drawGraph(){
   const w = wf()
   const gN = document.getElementById('nodes'), gE = document.getElementById('edges')
   gN.innerHTML = ''; gE.innerHTML = ''
+  document.getElementById('ghost').setAttribute('d', '')
   if (!w) return
+  const live = liveStatus()
   const byId = {}
   for (const n of w.nodes) byId[n.id] = n
-  for (const n of w.nodes) for (const d of (n.deps || [])) {
-    const s = byId[d]; if (!s) continue
+  for (const n of w.nodes) for (const [field, cls] of [['onDone', 'done'], ['onFail', 'fail']]) {
+    const t = n[field] && byId[n[field]]
+    if (!t) continue
     const p = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    const x1 = s.x + 150, y1 = s.y + 24, x2 = n.x, y2 = n.y + 24
-    p.setAttribute('d', `M${x1},${y1} C${x1 + 50},${y1} ${x2 - 50},${y2} ${x2},${y2}`)
-    p.setAttribute('class', 'edge')
-    p.onclick = () => { n.deps = n.deps.filter(x => x !== d); save(); render() }
+    p.setAttribute('d', edgePath(n, t))
+    p.setAttribute('class', 'edge ' + cls)
+    const tt = document.createElementNS('http://www.w3.org/2000/svg', 'title')
+    tt.textContent = `${n.title} — on ${cls === 'done' ? 'done' : 'fail'} → ${t.title} (click to remove)`
+    p.appendChild(tt)
+    p.onclick = ev => { ev.stopPropagation(); n[field] = null; save(); render() }
     gE.appendChild(p)
   }
+  const start = w.start && byId[w.start] ? w.start : (w.nodes[0] && w.nodes[0].id)
   for (const n of w.nodes) {
+    const st = live[n.id] || ''
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
-    g.setAttribute('class', 'node' + (n.id === selNode ? ' sel' : ''))
+    g.setAttribute('class', 'node' + (n.id === selNode ? ' sel' : '') + (n.id === linkSrc ? ' linksrc' : '') + (st ? ' ' + st : ''))
     g.setAttribute('transform', `translate(${n.x},${n.y})`)
-    const crit = (n.criteria || []).length
-    g.innerHTML = `<rect width="150" height="48" rx="9"/><text x="10" y="20">${esc(n.title.slice(0, 18))}</text><text x="10" y="36" class="sub">${(n.deps || []).length ? '⤝ ' + (n.deps || []).length + ' dep(s) · ' : ''}${crit ? crit + ' criteria' : 'no criteria'}${n.isolate ? ' · ⑂' : ''}</text>`
+    const bits = []
+    if ((n.criteria || []).length) bits.push(n.criteria.length + ' crit')
+    if (n.isolate) bits.push('⑂')
+    if (!n.onDone) bits.push('halts on ✓')
+    if (st && st !== 'pending') bits.push(st)
+    g.innerHTML = `<rect class="body" width="172" height="56" rx="10"/><rect class="stripe" x="0" y="0" width="4" height="56" rx="2"/>`
+      + (n.id === start ? `<text x="160" y="15" text-anchor="end" class="startbadge">▶ START</text>` : '')
+      + `<text x="14" y="23">${esc(n.title.slice(0, 19))}</text>`
+      + `<text x="14" y="41" class="sub">${esc(bits.join(' · ') || 'new step')}</text>`
     g.onmousedown = ev => startDrag(ev, n)
     g.onclick = ev => { ev.stopPropagation(); clickNode(n) }
     gN.appendChild(g)
   }
 }
 
+// ---------- drag (grid snap) + transition ghost line ----------
 let drag = null
-function startDrag(ev, n){ drag = { n, dx: ev.clientX - n.x, dy: ev.clientY - n.y, moved: false } }
+function startDrag(ev, n){ if (!linkSrc) drag = { n, dx: ev.clientX - n.x, dy: ev.clientY - n.y, moved: false } }
 window.addEventListener('mousemove', ev => {
+  if (linkSrc) {
+    const s = nodeOf(linkSrc)
+    if (s) {
+      const wrapEl = document.getElementById('canvasWrap')
+      const wrap = wrapEl.getBoundingClientRect()
+      const mx = ev.clientX - wrap.left + wrapEl.scrollLeft
+      const my = ev.clientY - wrap.top + wrapEl.scrollTop
+      const gh = document.getElementById('ghost')
+      gh.setAttribute('d', `M${s.x + 172},${s.y + 28} L${mx},${my}`)
+      gh.setAttribute('stroke', linkKind === 'done' ? '#3DDC97' : '#FF5C5C')
+    }
+  }
   if (!drag) return
   drag.moved = true
-  drag.n.x = Math.max(0, ev.clientX - drag.dx)
-  drag.n.y = Math.max(0, ev.clientY - drag.dy)
+  drag.n.x = Math.max(0, Math.round((ev.clientX - drag.dx) / 10) * 10)
+  drag.n.y = Math.max(0, Math.round((ev.clientY - drag.dy) / 10) * 10)
   drawGraph()
 })
 window.addEventListener('mouseup', () => { if (drag && drag.moved) save(); drag = null })
+window.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') cancelLink(true)
+  if ((ev.key === 'Backspace' || ev.key === 'Delete') && selNode && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) deleteNode()
+})
+function cancelLink(rerender){ linkSrc = null; linkKind = null; if (rerender) render() }
 
 function clickNode(n){
   if (linkSrc && linkSrc !== n.id) {
-    // an edge means "n depends on linkSrc" — reject cycles with a reach check
-    if (reaches(n.id, linkSrc)) { linkSrc = null; return }
-    n.deps = [...new Set([...(n.deps || []), linkSrc])]
-    linkSrc = null
+    const s = nodeOf(linkSrc)
+    if (s) s[linkKind === 'done' ? 'onDone' : 'onFail'] = n.id // cycles are legal — visit caps break loops at run time
+    cancelLink()
     save(); render()
     return
   }
   selNode = n.id
   render()
-}
-function reaches(from, to){
-  const w = wf(); const byId = {}
-  for (const x of w.nodes) byId[x.id] = x
-  const stack = [from], seen = new Set()
-  while (stack.length) {
-    const cur = stack.pop()
-    if (cur === to) return true
-    if (seen.has(cur)) continue
-    seen.add(cur)
-    for (const d of (byId[cur] && byId[cur].deps) || []) stack.push(d)
-  }
-  return false
 }
 
 function drawEditor(){
@@ -195,43 +353,86 @@ function drawEditor(){
   document.getElementById('eDesc').value = n.description || ''
   document.getElementById('eCrit').value = (n.criteria || []).join('\n')
   document.getElementById('eCwd').value = n.cwd || ''
+  document.getElementById('eMax').value = n.maxVisits || ''
   document.getElementById('eIso').checked = !!n.isolate
+  const name = id => { const t = nodeOf(id); return t ? '→ ' + t.title : null }
+  document.getElementById('tDone').textContent = name(n.onDone) || '— halt (success)'
+  document.getElementById('tFail').textContent = name(n.onFail) || '— halt (failure)'
 }
 function saveNode(){
-  const n = wf().nodes.find(x => x.id === selNode); if (!n) return
+  const n = nodeOf(selNode); if (!n) return
   n.title = document.getElementById('eTitle').value.trim() || n.title
   n.description = document.getElementById('eDesc').value
   n.criteria = document.getElementById('eCrit').value.split('\n').map(x => x.trim()).filter(Boolean)
   n.cwd = document.getElementById('eCwd').value.trim()
+  n.maxVisits = Math.max(0, Math.min(9, parseInt(document.getElementById('eMax').value, 10) || 0)) || undefined
   n.isolate = document.getElementById('eIso').checked
   save(); render()
 }
 function deleteNode(){
   const w = wf()
   w.nodes = w.nodes.filter(x => x.id !== selNode)
-  for (const n of w.nodes) n.deps = (n.deps || []).filter(d => d !== selNode)
-  selNode = null
+  for (const n of w.nodes) {
+    if (n.onDone === selNode) n.onDone = null
+    if (n.onFail === selNode) n.onFail = null
+  }
+  if (w.start === selNode) w.start = w.nodes[0] && w.nodes[0].id
+  selNode = null; cancelLink()
   save(); render()
 }
-function linkFrom(){ linkSrc = selNode }
+function linkFrom(kind){ if (!selNode) return; linkSrc = selNode; linkKind = kind; render() }
+function clearLink(field){ const n = nodeOf(selNode); if (!n) return; n[field] = null; save(); render() }
+function setStart(){ const w = wf(); if (w && selNode) { w.start = selNode; save(); render() } }
 
+function renameWf(name){
+  const w = wf(); if (!w) return
+  w.name = name.trim() || w.name
+  save(); render()
+}
 function addWorkflow(){
   const id = 'w' + Date.now().toString(36)
-  workflows.push({ id, name: 'workflow ' + (workflows.length + 1), cron: '', cronOn: false, nodes: [] })
+  workflows.push({ id, name: 'workflow ' + (workflows.length + 1), cron: '', cronOn: false, start: null, nodes: [] })
+  selWf = id; selNode = null
+  save(); render()
+}
+function seedDemo(){
+  const id = 'w' + Date.now().toString(36)
+  const mk = (nid, title, description, x, y, criteria) => ({ id: nid, title, description, criteria: criteria || [], x, y, onDone: null, onFail: null })
+  const plan = mk('plan', 'plan', 'Study the codebase and write IMPLEMENTATION_PLAN.md for the change described in this workflow run.', 40, 130, ['plan file exists with concrete steps'])
+  const impl = mk('impl', 'implement', 'Implement the change following IMPLEMENTATION_PLAN.md.', 290, 130, ['typecheck passes', 'lint passes'])
+  const test = mk('test', 'verify', 'Run the full test suite and typecheck; fix nothing — only verify and report.', 540, 130, ['test suite green'])
+  const fix = mk('fix', 'fix failures', 'The verify step failed. Diagnose the failing tests/typecheck and repair the implementation.', 540, 300, ['previously failing checks now pass'])
+  const rel = mk('rel', 'release notes', 'Summarize what shipped into RELEASE_NOTES.md.', 790, 130, [])
+  plan.onDone = 'impl'
+  impl.onDone = 'test'
+  test.onDone = 'rel'
+  test.onFail = 'fix'      // failure branch…
+  fix.onDone = 'test'      // …loops back to verify (visit-capped)
+  fix.maxVisits = 2
+  workflows.push({ id, name: 'ship a change', cron: '', cronOn: false, start: 'plan', nodes: [plan, impl, test, fix, rel] })
   selWf = id
   save(); render()
 }
+let delArmed = 0
 async function removeWorkflow(){
   const w = wf(); if (!w) return
-  if (w.cronOn) await call('schedules.remove', 'wf-' + w.id)
+  if (Date.now() - delArmed > 2500) { // two-click confirm — sandbox blocks modals
+    delArmed = Date.now()
+    document.getElementById('delWf').textContent = 'sure? click again'
+    setTimeout(() => { document.getElementById('delWf').textContent = 'Delete' }, 2600)
+    return
+  }
+  if (w.cronOn) await call('schedules.remove', 'wf-' + w.id).catch(() => {})
   workflows = workflows.filter(x => x.id !== w.id)
   selWf = workflows.length ? workflows[0].id : null
+  document.getElementById('delWf').textContent = 'Delete'
   save(); render()
 }
 function addNode(){
   const w = wf(); if (!w) return
   const id = 'n' + Date.now().toString(36)
-  w.nodes.push({ id, title: 'step ' + (w.nodes.length + 1), description: '', criteria: [], deps: [], x: 40 + (w.nodes.length % 5) * 180, y: 40 + Math.floor(w.nodes.length / 5) * 90 })
+  w.nodes.push({ id, title: 'step ' + (w.nodes.length + 1), description: '', criteria: [], onDone: null, onFail: null, x: 60 + (w.nodes.length % 5) * 210, y: 60 + Math.floor(w.nodes.length / 5) * 110 })
+  if (!w.start) w.start = id
   selNode = id
   save(); render()
 }
@@ -239,55 +440,77 @@ function addNode(){
 async function runNow(){
   const w = wf()
   if (!w || !w.nodes.length) return
-  const allRuns = (await call('storage.get', 'runs')) || []
-  if (allRuns.some(r => r.wfId === w.id && r.status === 'running')) { await call('flash', 'a run of this workflow is already going'); return }
-  const run = { id: 'run' + Date.now().toString(36), wfId: w.id, wfName: w.name, startedAt: Date.now(), status: 'running', trigger: 'manual', nodes: {} }
-  for (const n of w.nodes) run.nodes[n.id] = { taskId: null, status: 'pending' }
-  for (const n of w.nodes) {
-    if ((n.deps || []).length) continue
-    const taskId = await call('tasks.add', n.title, 'backlog', {
-      description: ['[workflow "' + w.name + '" · run ' + run.id + ' · node ' + n.id + ']', n.description || ''].filter(Boolean).join('\n\n'),
-      criteria: n.criteria || [], cwd: n.cwd || undefined, isolate: n.isolate === true ? true : undefined,
+  try {
+    const allRuns = (await call('storage.get', 'runs')) || []
+    if (allRuns.some(r => r.wfId === w.id && r.status === 'running')) { banner('a run of this machine is already going'); return }
+    const start = w.nodes.find(n => n.id === w.start) || w.nodes[0]
+    const run = { id: 'run' + Date.now().toString(36), wfId: w.id, wfName: w.name, startedAt: Date.now(), status: 'running', trigger: 'manual', current: start.id, taskId: null, visits: {}, path: [] }
+    const taskId = await call('tasks.add', start.title, 'backlog', {
+      description: ['[workflow "' + w.name + '" · run ' + run.id + ' · step ' + start.id + ']', start.description || ''].filter(Boolean).join('\n\n'),
+      criteria: start.criteria || [], cwd: start.cwd || undefined, isolate: start.isolate === true ? true : undefined,
     })
     await call('tasks.start', taskId)
-    run.nodes[n.id] = { taskId, status: 'running' }
-  }
-  await call('storage.set', 'runs', [run, ...allRuns].slice(0, 30))
-  await call('flash', 'workflow started — root tasks launched')
+    run.taskId = taskId
+    run.visits[start.id] = 1
+    run.path.push({ nodeId: start.id, title: start.title, taskId, outcome: 'running', at: Date.now() })
+    await call('storage.set', 'runs', [run, ...allRuns].slice(0, 30))
+    await call('flash', 'machine entered "' + start.title + '"')
+  } catch (e) { banner(e.message) }
   refreshRuns()
 }
 
+function cronPreset(){
+  const v = document.getElementById('cronSel').value
+  document.getElementById('cron').style.display = v === 'custom' ? '' : 'none'
+  if (v && v !== 'custom') document.getElementById('cron').value = v
+}
 async function toggleCron(){
   const w = wf(); if (!w) return
-  if (w.cronOn) {
-    await call('schedules.remove', 'wf-' + w.id)
-    w.cronOn = false
-  } else {
-    const cron = document.getElementById('cron').value.trim()
-    if (cron.split(/\s+/).length !== 5) { await call('flash', 'cron needs 5 fields, e.g. 0 6 * * *'); return }
-    const res = await call('schedules.add', { name: 'wf-' + w.id, schedule: cron })
-    if (typeof res === 'string' && res.indexOf('created') === -1) { await call('flash', res); return }
-    w.cron = cron
-    w.cronOn = true
-  }
+  try {
+    if (w.cronOn) {
+      await call('schedules.remove', 'wf-' + w.id)
+      w.cronOn = false
+    } else {
+      const sel = document.getElementById('cronSel').value
+      const cron = (sel === 'custom' ? document.getElementById('cron').value : sel).trim()
+      if (cron.split(/\s+/).length !== 5) { banner('pick a preset or give a 5-field cron, e.g. 0 6 * * *'); return }
+      const res = await call('schedules.add', { name: 'wf-' + w.id, schedule: cron })
+      if (typeof res === 'string' && res.indexOf('created') === -1) { banner(res); return }
+      w.cron = cron
+      w.cronOn = true
+    }
+  } catch (e) { banner(e.message); return }
   save(); render()
 }
 
 async function refreshRuns(){
-  runs = (await call('storage.get', 'runs')) || []
+  try { runs = (await call('storage.get', 'runs')) || [] } catch (e) { return }
+  const mine = runs.filter(x => !selWf || x.wfId === selWf)
+  document.getElementById('histCount').textContent = mine.length ? '· ' + mine.length : ''
   const el = document.getElementById('runList')
   el.innerHTML = ''
-  for (const r of runs.filter(x => !selWf || x.wfId === selWf).slice(0, 12)) {
-    const dots = Object.values(r.nodes).map(n => `<span class="dot ${n.status}"></span>`).join('')
-    const row = document.createElement('div')
-    row.className = 'run'
-    row.innerHTML = `<span class="st-${r.status}">${r.status}</span><span>${esc(r.wfName)}</span><span>${dots}</span><span>${new Date(r.startedAt).toLocaleString()}</span><span>${r.trigger || ''}</span>`
-    el.appendChild(row)
+  for (const r of mine.slice(0, 10)) {
+    const steps = r.path || []
+    const dur = r.finishedAt ? Math.max(1, Math.round((r.finishedAt - r.startedAt) / 60000)) + ' min' : ''
+    const d = document.createElement('div')
+    d.className = 'run' + (openRun === r.id ? ' open' : '')
+    const pathHtml = steps.map((p, i) => {
+      const via = i ? `<span class="via ${p.via || ''}">${p.via === 'failed' ? '✗→' : '✓→'}</span>` : ''
+      return via + `<span class="step"><span class="dot ${p.outcome}"></span>${esc(p.title || p.nodeId)}</span>`
+    }).join('')
+    d.innerHTML = `<div class="head"><span class="st ${r.status}">${r.status}</span>`
+      + `<b style="font-size:12px">${esc(r.wfName)}</b>`
+      + `<span class="meta">${steps.length} step(s)${dur ? ' · ' + dur : ''} · ${r.trigger || 'manual'} · ${ago(r.startedAt)}</span>`
+      + `<span style="flex:1"></span><span class="meta">${openRun === r.id ? '▾' : '▸'}</span></div>`
+      + `<div class="path">${pathHtml || '<span class="empty">no steps recorded</span>'}</div>`
+    d.onclick = () => { openRun = openRun === r.id ? null : r.id; refreshRuns() }
+    el.appendChild(d)
   }
-  if (!el.children.length) el.innerHTML = '<div class="run">no runs yet</div>'
+  if (!mine.length) el.innerHTML = '<div class="empty">no runs yet — hit ▶ Run now or arm a cron trigger</div>'
+  drawGraph() // repaint live step stripes
 }
 
-document.getElementById('svg').onclick = () => { selNode = null; linkSrc = null; render() }
+document.getElementById('svg').onclick = () => { selNode = null; cancelLink(); render() }
 load()
 parent.postMessage({ type: 'yaam:getState' }, '*')
 </script></body></html>

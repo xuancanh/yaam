@@ -31,9 +31,9 @@
     },
     {
       "name": "workflows",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "icon": "⛓",
-      "description": "Task pipelines as a DAG — draw nodes and dependency edges, run the graph on demand or on a cron, and watch runs advance as their board tasks finish. Drag-and-drop editor + run history.",
+      "description": "Task workflows as state machines — steps with on-done / on-fail transitions, remediation branches, visit-capped retry loops, drag-and-drop editor, cron triggers, per-run path history.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/workflows.yaam.json"
     },
     {
@@ -49,6 +49,13 @@
       "icon": "⏳",
       "description": "Tasks that failed on an API usage/rate limit get automatically rescheduled for right after the limit resets — detected from session output or the Anthropic usage API.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/usage-limit-rescheduler.yaam.json"
+    },
+    {
+      "name": "dev-kitchen-sink",
+      "version": "1.0.0",
+      "icon": "🧪",
+      "description": "Developer reference — exercises every addon capability (state, sessions, tasks with review verbs, templates, schedules, storage, allowlisted HTTP, keychain secrets, the addon agent, UI calls, all hooks, a Master tool). Built on the toolkit.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/dev-kitchen-sink.yaam.json"
     }
   ]
 }

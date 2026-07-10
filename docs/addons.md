@@ -39,7 +39,9 @@ the kanban board is fully reproducible as an addon
         └───────────▶│    AddonApi  (permission-enforced)      │
                      │  getState · sendToSession · launch…     │
                      │  focusSession · flash/notify/logEvent   │
-                     │  tasks.* · storage.*                    │
+                     │  tasks.* · schedules.* · storage.*      │
+                     │  http.request (host-allowlisted)        │
+                     │  secrets.list (values stay in keychain) │
                      └───────────────────┬─────────────────────┘
                                          │
                               store actions / PTY layer
@@ -83,6 +85,7 @@ Key properties:
 | `app/src/domains/addons/addon-editor.ts` | Per-addon Customize chat harness (`update_addon` tool) |
 | `app/src/domains/addons/addon-gen.ts` | Addon generator and author-facing API/package instructions |
 | `registry/` | Seed registry: `index.json` + example packages |
+| `toolkit/` | Author kit: view SDK (`sdk.js`), UI kit (`ui.css`), starter template, UX guidelines |
 
 To **extend the API surface**: add the method to `AddonApi` + implement it in
 `domains/addons/addon-api.ts` → add its scope to `METHOD_PERMISSION` and, if new,
@@ -118,6 +121,12 @@ description: what it does
 permissions:
   - state:read
   - tasks
+hosts:                             # http.request allowlist (https only) — omit if no network
+  - api.github.com
+  - "*.example.com"                # wildcard also matches example.com itself
+secrets:                           # keychain slots; user fills values in the Addons view
+  - name: GITHUB_TOKEN
+    label: personal access token (repo read)
 view: view.html                    # file ref → becomes "html"
 tools:
   - name: audit_task
@@ -133,7 +142,14 @@ agent:
   system: prompts/agent.md
   on:
     - onSessionExit
+  every: "*/30 * * * *"            # optional: cron that wakes the agent (mini monitor)
 ```
+
+Views may pull in the shared toolkit with `@include` markers —
+`/* @include ../../toolkit/ui.css */` inside `<style>`,
+`/* @include ../../toolkit/sdk.js */` inside `<script>`, or
+`<!-- @include file -->` in markup — replaced with the file's contents at
+install/pack time (see [`toolkit/README.md`](../toolkit/README.md)).
 
 Install via **Settings → Addons → Install folder…**. The manifest YAML is a
 strict subset: `key: value` maps, `- item` lists (incl. lists of maps),
@@ -165,7 +181,9 @@ For URL/registry distribution, pack a folder into a single file:
 Validation rules (`parseAddonPackage`):
 
 - `name` is required; a package must contain at least one of `html`, `tools`,
-  `hooks`.
+  `hooks`, `agent`.
+- `hosts` entries must look like hostnames (`api.x.com` or `*.x.com`);
+  `secrets` names are `[A-Za-z0-9_]`; `agent.every` must be a 5-field cron.
 - Tool names are normalized to `[a-z0-9_]`; tools without a `handler` are
   dropped.
 - An absent `permissions` array means *request everything* (legacy
@@ -184,19 +202,22 @@ three entry points.
 
 | Scope | Grants access to |
 |---|---|
-| `state:read` | `getState()`, `sessions.readOutput`, `templates.list` |
+| `state:read` | `getState()`, `sessions.readOutput`, `templates.list`, `tasks.get` |
 | `sessions:send` | `sendToSession(id, text)`, `sessions.stop(id)` |
 | `sessions:launch` | `launchSession(cmd, cwd?, name?)`, `templates.run` |
-| `tasks` | `tasks.add/update/rename/move/remove/start/restart/chat` |
+| `tasks` | `tasks.add/update/rename/move/remove/start/restart/chat/approve/reject` |
 | `schedules` | `schedules.add/toggle/remove` |
 | `agent` | `agent.wake` (runs the addon's own LLM agent — spends API tokens) |
 | `master:prompt` | lets `masterPromptAppend` inject into Master's system prompt |
 | `ui` | `flash`, `notify`, `logEvent`, `focusSession` |
-| `storage` | `storage.get/set` |
+| `storage` | `storage.get/set/list/remove` |
+| `http` | `http.request` against the manifest's `hosts` allowlist (https only) |
+| `secrets` | `secrets.list` + `{{secret:NAME}}` templating inside `http.request` |
 
 Scopes split into **low-risk** (`state:read`, `ui`, `storage`) and **dangerous**
-— those that act on the machine or steer LLMs (`sessions:send`,
-`sessions:launch`, `tasks`, `schedules`, `agent`, `master:prompt`).
+— those that act on the machine, reach the network, or steer LLMs
+(`sessions:send`, `sessions:launch`, `tasks`, `schedules`, `agent`,
+`master:prompt`, `http`, `secrets`).
 
 Grant lifecycle:
 
@@ -217,6 +238,23 @@ and a disabled addon has an empty grant set (no RPC, tools, or hooks run).
 
 An ungranted call throws / RPC-rejects with:
 `permission "<scope>" not granted to this addon (Settings → Addons)`.
+
+### 3.1 HTTP + secrets
+
+`http.request(method, url, { headers?, body? })` is the only network path an
+addon has (the sandbox CSP blocks everything else), and it is double-gated:
+
+- the URL's host must match the manifest's `hosts` allowlist (exact or
+  `*.suffix`; https only, plain http allowed just for localhost);
+- header and body values may embed `{{secret:NAME}}` for a secret declared in
+  the manifest — the value is read from the **OS keychain** and substituted
+  host-side, so addon code (and the addon's agent) never sees it. Secrets are
+  refused in URLs (query strings leak into logs). `secrets.list()` returns
+  only names + whether a value is stored.
+
+Users fill secret values per addon in the **Addons view → Secrets** (rows show
+set/unset); uninstalling the addon deletes its keychain entries. Responses are
+truncated to ~200 KB.
 
 ---
 
@@ -242,13 +280,17 @@ Pushed on iframe load and every ~3 s. Shape:
   workspace: string,                        // active workspace name
   sessions: { id, name, status, ephemeral,  // running | idle | needs | error
               repo, task, summary, actionNeeded,
-              cwd, cost, used }[],
+              cwd, cost, used,
+              machineId, isolated }[],      // remote machine · git-worktree flag
   tasks:    { id, title, col, agentId,      // col: backlog|progress|review|done|failed
               description, criteria, watcherNote, awaitingUser,
               cwd, templateId, typeId,
+              machineId, isolate, sessionMode, scheduleAt,
               chatTail }[],                 // last 5 watcher-chat messages
   templates:{ id, name, mode, typeId }[],
-  crons:    { name, schedule, at, on, last, action }[], // action: task|template|command|log
+  machines: { id, label }[],                // saved remote machines (for tasks.add machineId)
+  crons:    { name, schedule, at, on, last, action,     // action: task|template|command|log
+              runs: { at, note, ok, taskId, agentId }[] }[], // last 5 firings
   events:   { time, type, text }[],         // latest 10
   totals:   { cost, used, running }
 }
@@ -291,7 +333,7 @@ Method reference (permission in brackets):
 | `yaam('logEvent', text)` | — | [ui] Activity-timeline entry, prefixed `[addon]` |
 | `yaam('sessions.readOutput', id, lines?)` | string | [state:read] rendered screen for TUIs, log tail otherwise |
 | `yaam('sessions.stop', id)` | — | [sessions:send] kills the session's process |
-| `yaam('tasks.add', title, col?, spec?)` | new task id | [tasks] spec = `{ description, criteria, cwd, typeId, templateId }` |
+| `yaam('tasks.add', title, col?, spec?)` | new task id | [tasks] spec = `{ description, criteria, cwd, typeId, templateId, machineId, isolate, sessionMode: 'oneshot'\|'interactive', scheduleAt: epochMs }` |
 | `yaam('tasks.update', id, patch)` | — | [tasks] patch any spec field + title |
 | `yaam('tasks.rename', id, title)` | — | [tasks] |
 | `yaam('tasks.move', id, col)` | — | [tasks] fires `onTaskMoved` |
@@ -299,6 +341,9 @@ Method reference (permission in brackets):
 | `yaam('tasks.start', id)` | — | [tasks] watcher-driven one-shot with the full task spec + goal contract |
 | `yaam('tasks.restart', id)` | — | [tasks] detach a dead session, spawn a fresh one-shot |
 | `yaam('tasks.chat', id, text)` | — | [tasks] posts into the task's watcher chat; the watcher reacts |
+| `yaam('tasks.get', id)` | full task detail \| null | [state:read] spec, watcher note, sessions, 20-message chat tail |
+| `yaam('tasks.approve', id)` | status string | [tasks] approve a review task; merges its isolated worktree |
+| `yaam('tasks.reject', id, feedback)` | — | [tasks] send a review task back; the watcher relaunches with the feedback |
 | `yaam('templates.list')` | `{id,name,mode,typeId}[]` | [state:read] |
 | `yaam('templates.run', idOrName, task?)` | session id \| null | [sessions:launch] |
 | `yaam('schedules.add', spec)` | status string | [schedules] `{ name, schedule?/at?, cmd?, task? }` — task specs land on the board |
@@ -306,9 +351,13 @@ Method reference (permission in brackets):
 | `yaam('schedules.remove', name)` | — | [schedules] |
 | `yaam('agent.wake', note)` | agent's reply | [agent] chat with / poke the addon's own agent |
 | `yaam('storage.get', key)` | stored value | [storage] |
-| `yaam('storage.set', key, value)` | — | [storage] persists across restarts, namespaced per addon |
+| `yaam('storage.set', key, value)` | — | [storage] persists across restarts, namespaced per addon; ≤256 KB per value |
+| `yaam('storage.list')` | key names | [storage] |
+| `yaam('storage.remove', key)` | — | [storage] |
+| `yaam('http.request', method, url, {headers?, body?})` | `{status, contentType, text}` | [http] host must match the manifest `hosts`; `{{secret:NAME}}` allowed in headers/body (§3.1) |
+| `yaam('secrets.list')` | `{name, label, set}[]` | [secrets] names only — values never leave the keychain |
 
-### 4.3 Theme
+### 4.3 Theme & the toolkit
 
 Match the app: background `#0A0B0F`, panel `#0D0F14`, panel-2 `#12151C`,
 border `#23272F`, text `#E7E9F0`, muted `#8B93A1`, dim `#626B79`, accent
@@ -316,6 +365,16 @@ border `#23272F`, text `#E7E9F0`, muted `#8B93A1`, dim `#626B79`, accent
 `'IBM Plex Sans'` (UI) and `'JetBrains Mono'` (code/numbers) — both are loaded
 in the host but **not** inside the iframe, so declare fallbacks:
 `font-family:'IBM Plex Sans',system-ui,sans-serif`.
+
+Don't hand-roll this: **[`toolkit/`](../toolkit)** ships `ui.css` (these tokens
+as CSS variables plus card/button/chip/pill/dot/banner components) and `sdk.js`
+(the RPC bridge as `yaam.call`/`yaam.api`, `yaam.onState` subscriptions, a
+`yaam.guard` error banner for permission denials, `esc`/`ago`/`el`/`confirm`
+helpers). Folder-format views pull both in with `@include` markers (§2.1);
+single-file packages paste them. Start new addons from
+[`toolkit/template/`](../toolkit/template); UX guidelines (ungranted-state
+design, checklist onboarding, no modals, escaping, liveness, empty states) are
+in [`toolkit/README.md`](../toolkit/README.md).
 
 ### 4.4 Minimal complete view
 
@@ -383,7 +442,7 @@ Handler contract:
 - `onTaskMoved` — fired when a board task changes column (drag, watcher, or
   addon). `input = { taskId, title, col, from }`.
 - `onCronFired` — fired when a schedule fires.
-  `input = { name, kind: 'task' | 'command' | 'log' }`.
+  `input = { name, kind: 'task' | 'command' | 'log' | 'agent' }`.
 - All are async JS function bodies `(input, api) => Promise<void>` run in the
   same sandboxed iframe as tool handlers (`await` api calls); each addon's hook
   runs independently and failures are contained (logged to the Activity feed as
@@ -401,21 +460,28 @@ Handler contract:
 An addon can declare an `agent`: a persistent LLM conversation (same brain as
 Master/monitors, configured in Settings) whose **tools are the addon's
 permission-scoped API** — `get_state`, `read_output`, `launch_session`,
-`add_task` (full spec, optionally auto-started), `move_task`, `task_chat`
-(talks to a task's watcher!), `run_template`, `add_schedule`, `storage`,
-`notify_user`, `send_to_session`, `stop_session`. Denied scopes fail loudly
-as tool errors, so the agent works within exactly what the user granted.
+`add_task` (full spec incl. isolate/session-mode/machine/schedule, optionally
+auto-started), `get_task`, `move_task`, `restart_task`, `approve_task`,
+`reject_task`, `task_chat` (talks to a task's watcher!), `run_template`,
+`add_schedule`, `storage` (get/set/list/remove), `http_request` (allowlisted;
+secrets templated host-side), `notify_user`, `send_to_session`,
+`stop_session`. Denied scopes fail loudly as tool errors, so the agent works
+within exactly what the user granted.
 
 ```jsonc
 "agent": {
   "system": "You are the QA officer… (persona + duties)",
-  "on": ["onSessionExit"]     // hook events that wake it (optional)
+  "on": ["onSessionExit"],    // hook events that wake it (optional)
+  "every": "*/30 * * * *"     // cron that wakes it periodically (optional)
 }
 ```
 
-- **Waking**: hook events listed in `on` wake it with the event JSON; views
+- **Waking**: hook events listed in `on` wake it with the event JSON; a 5-field
+  `every` cron wakes it on matching minutes (the *customizable mini monitor*
+  pattern — its `system` policy is user-editable via the Customize chat); views
   and tool handlers wake it with `agent.wake(note)` — the promise resolves to
-  its reply, so a view can render a real chat UI around it (see QA Gate).
+  its reply, so a view can render a real chat UI around it (see QA Gate,
+  Dev Kitchen Sink).
 - **Memory**: per-addon private history (in-memory, capped), like a watcher's.
 - **Cost**: each wake is an LLM turn — that's why `agent` is its own
   permission. One turn runs at a time per addon; concurrent wakes are politely
@@ -496,10 +562,14 @@ seed.
   whose addon has been granted `state:read`.
 - **Install-time grants**: fresh installs auto-grant only the low-risk scopes
   (`state:read`, `ui`, `storage`). Scopes that act on the machine or steer
-  LLMs (`sessions:send`, `sessions:launch`, `tasks`, `schedules`, `agent`,
-  `master:prompt`) start **off** and must be enabled per-addon in
-  Settings → Addons. Appending to Master's system prompt requires the
-  dedicated `master:prompt` scope.
+  LLMs or the network (`sessions:send`, `sessions:launch`, `tasks`,
+  `schedules`, `agent`, `master:prompt`, `http`, `secrets`) start **off** and
+  must be enabled per-addon in Settings → Addons. Appending to Master's system
+  prompt requires the dedicated `master:prompt` scope.
+- **Network & secrets**: `http.request` can only reach hosts the package
+  declares, over https; secret values live in the OS keychain, are injected
+  host-side via `{{secret:NAME}}` in headers/body (refused in URLs), and are
+  never readable by addon code or the addon's agent. Uninstall deletes them.
 - **Tools/hooks**: run in the app context. The `api` argument is
   permission-checked, but this is app-privileged JS — treat installing a
   package with tools/hooks like installing a browser extension. Read the
@@ -515,4 +585,8 @@ seed.
 | `kanban-lite` | Full parity with a built-in feature: board rendering from state push, drag & drop, task CRUD over RPC, `tasks.start` spawning sessions, `focusSession` navigation |
 | `cost-pulse` | Minimal read-only view (state push only, one permission) |
 | `session-bell` | Hooks + a Master tool + `masterPromptAppend`, no view |
-| `qa-gate` | **The full platform** (folder format): `onTaskMoved` review gate spawning auditor sessions, `onSessionExit` verdict parsing via `sessions.readOutput`, watcher-chat reporting, auto bounce-back on fail, Master tools, `schedules.add` automation, storage history, a dashboard view, and its own chatable QA-officer agent |
+| `qa-gate` | Review gate (folder format): `onTaskMoved` spawning auditor sessions, `onSessionExit` verdict parsing, watcher-chat reporting, auto bounce-back, Master tools, schedules, storage history, dashboard view, chatable QA-officer agent |
+| `workflows` | **State machines over tasks**: drag-and-drop step editor, on-done/on-fail transitions with visit-capped loops, cron triggers via `wf-<id>` schedules, `onTaskMoved` advancing runs, per-run path history |
+| `github-issues` | **External integration**: `hosts`-allowlisted `http.request`, keychain `secrets` (`{{secret:GITHUB_TOKEN}}`), scheduled sync via `onCronFired`, review queue in storage, agent-driven auto-triage with a user-customizable policy |
+| `usage-limit-rescheduler` | **Event-driven monitor agent**: `on: [onTaskMoved]` wake, failure diagnosis via `get_task`/`read_output`, one-time `at:` schedules, `tasks.restart` on `onCronFired`, attempt caps |
+| `dev-kitchen-sink` | **The whole surface, live** — one section per capability (state, sessions, tasks incl. review verbs, templates, schedules + run history, storage, HTTP + secrets, agent chat, UI calls, hook log), built on `toolkit/` via `@include` |

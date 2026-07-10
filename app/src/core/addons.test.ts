@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hostAllowed, parseAddonPackage, resolveSecretRefs } from './addons'
+import { hostAllowed, inlineIncludes, parseAddonPackage, resolveSecretRefs } from './addons'
 
 describe('hostAllowed', () => {
   const hosts = ['api.github.com', '*.example.com']
@@ -47,6 +47,24 @@ describe('resolveSecretRefs', () => {
 
   it('throws for an unset secret', async () => {
     await expect(resolveSecretRefs('x {{secret:MISSING}}', get)).rejects.toThrow(/MISSING/)
+  })
+})
+
+describe('inlineIncludes', () => {
+  const files: Record<string, string> = { 'lib/sdk.js': 'const yaam = 1', '../toolkit/ui.css': '.card{color:red}' }
+  const read = async (p: string) => {
+    if (!(p in files)) throw new Error('missing ' + p)
+    return files[p]
+  }
+
+  it('inlines HTML-comment and CSS/JS-comment markers', async () => {
+    const html = '<style>/* @include ../toolkit/ui.css */</style><script><!-- @include lib/sdk.js --></script>'
+    expect(await inlineIncludes(html, read)).toBe('<style>.card{color:red}</style><script>const yaam = 1</script>')
+  })
+
+  it('leaves plain documents untouched and surfaces missing refs', async () => {
+    expect(await inlineIncludes('<b>no includes</b>', read)).toBe('<b>no includes</b>')
+    await expect(inlineIncludes('<!-- @include nope.js -->', read)).rejects.toThrow(/missing/)
   })
 })
 

@@ -1,0 +1,298 @@
+<!DOCTYPE html><html><head><style>
+/* @include ../../../toolkit/ui.css */
+body{max-width:940px}
+pre{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-family:var(--font-mono);font-size:10.5px;color:var(--mut);overflow:auto;max-height:220px;margin:8px 0 0;white-space:pre-wrap;word-break:break-word}
+details summary{cursor:pointer;font-size:11px;color:var(--mut);user-select:none}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sess .nm,.task .nm{font-size:12px;font-weight:600}
+.bubble{max-width:85%;border:1px solid var(--line2);border-radius:10px;padding:7px 11px;font-size:12px;line-height:1.5;margin-bottom:6px}
+.bubble.you{margin-left:auto;background:var(--panel2);border-radius:10px 10px 3px 10px}
+.bubble.bot{background:var(--panel);border-radius:10px 10px 10px 3px;color:var(--mut)}
+.sect-note{font-size:10.5px;color:var(--dim);margin:-4px 0 8px;line-height:1.5}
+</style></head><body>
+<h1>🧪 Dev Kitchen Sink</h1>
+<div class="sub">every addon capability, live — read alongside <span class="mono">docs/addons.md</span> and <span class="mono">toolkit/README.md</span></div>
+
+<h2>1 · State snapshot <span class="mono" style="letter-spacing:0;text-transform:none">state:read</span></h2>
+<div class="sect-note">pushed into the view every ~3s; also sync via <span class="mono">yaam.onState(cb)</span></div>
+<div class="card" id="snapshot"><span class="empty">waiting…</span></div>
+
+<h2>2 · Sessions <span class="mono" style="letter-spacing:0;text-transform:none">sessions:send · sessions:launch</span></h2>
+<div class="card">
+  <div class="row">
+    <label class="f">command<input id="lCmd" value="sleep 30 && echo done" style="width:220px"></label>
+    <label class="f">cwd<input id="lCwd" placeholder="(default)" style="width:140px"></label>
+    <label class="f">name<input id="lName" value="sink demo" style="width:110px"></label>
+    <button class="primary" style="align-self:flex-end" onclick="launch()">Launch session</button>
+  </div>
+</div>
+<div id="sessions"></div>
+
+<h2>3 · Tasks <span class="mono" style="letter-spacing:0;text-transform:none">tasks — full spec + review verbs</span></h2>
+<div class="card">
+  <div class="row">
+    <label class="f">title<input id="tTitle" value="kitchen-sink demo task" style="width:200px"></label>
+    <label class="f">column<select id="tCol"><option>backlog</option><option>progress</option><option>review</option></select></label>
+    <label class="f">session<select id="tMode"><option value="">one-shot</option><option value="interactive">interactive</option></select></label>
+    <label class="f">start in<select id="tWhen"><option value="">now / manual</option><option value="2">2 min (scheduleAt)</option><option value="10">10 min</option></select></label>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label class="f grow">description<input id="tDesc" value="Say hello and exit — created by the Dev Kitchen Sink addon."></label>
+    <label class="chk" style="align-self:flex-end"><input type="checkbox" id="tIso"> worktree ⑂</label>
+    <label class="chk" style="align-self:flex-end"><input type="checkbox" id="tStart"> start now</label>
+    <button class="primary" style="align-self:flex-end" onclick="addTask()">Create</button>
+  </div>
+</div>
+<div id="tasks"></div>
+
+<h2>4 · Templates <span class="mono" style="letter-spacing:0;text-transform:none">templates.list / templates.run</span></h2>
+<div id="templates" class="card"></div>
+
+<h2>5 · Schedules <span class="mono" style="letter-spacing:0;text-transform:none">schedules + run history</span></h2>
+<div class="card row">
+  <label class="f">name<input id="cName" value="sink-heartbeat" style="width:130px"></label>
+  <label class="f">cron<input id="cCron" class="mono" value="*/5 * * * *" style="width:110px"></label>
+  <label class="f">or one-time in<select id="cAt"><option value="">use cron</option><option value="2">2 min</option><option value="5">5 min</option></select></label>
+  <button class="primary" style="align-self:flex-end" onclick="addSchedule()">Add schedule</button>
+  <span class="grow"></span>
+  <span class="meta">firing = an onCronFired hook + a row in §9</span>
+</div>
+<div id="crons"></div>
+
+<h2>6 · Storage <span class="mono" style="letter-spacing:0;text-transform:none">get / set / list / remove · 256 KB per value</span></h2>
+<div class="card">
+  <div class="row">
+    <label class="f">key<input id="sKey" value="demo" style="width:120px"></label>
+    <label class="f grow">value (JSON or plain text)<input id="sVal" value='{"hello":"world"}'></label>
+    <button onclick="storSet()" style="align-self:flex-end">set</button>
+    <button onclick="storGet()" style="align-self:flex-end">get</button>
+    <button class="danger" onclick="storDel()" style="align-self:flex-end">remove</button>
+  </div>
+  <pre id="sOut">keys: …</pre>
+</div>
+
+<h2>7 · HTTP + secrets <span class="mono" style="letter-spacing:0;text-transform:none">http (host-allowlisted) · secrets (keychain, write-only)</span></h2>
+<div class="sect-note">this addon declares <span class="mono">hosts: [api.github.com]</span> — anything else is rejected before it leaves the app. Header/body values may embed <span class="mono">{{secret:DEMO_TOKEN}}</span>; the value is injected host-side and never enters addon code.</div>
+<div class="card">
+  <div class="row">
+    <label class="f">method<select id="hMethod"><option>GET</option><option>POST</option></select></label>
+    <label class="f grow">url (must match the hosts allowlist)<input id="hUrl" class="mono" value="https://api.github.com/zen"></label>
+    <button class="primary" id="hGo" style="align-self:flex-end" onclick="httpGo()">Send</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label class="f grow">headers (JSON — try {"x-demo": "{{secret:DEMO_TOKEN}}"})<input id="hHead" class="mono" value='{"accept": "application/vnd.github+json"}'></label>
+  </div>
+  <pre id="hOut">response appears here — try a disallowed host to see the allowlist reject it</pre>
+  <div class="row" style="margin-top:6px"><span class="meta" id="secretsLine">secrets: …</span></div>
+</div>
+
+<h2>8 · The addon's agent <span class="mono" style="letter-spacing:0;text-transform:none">agent.wake → its tools are this addon's API</span></h2>
+<div class="sect-note">the same harness the GitHub-issues triage and usage-limit monitors use — its instructions live in <span class="mono">prompts/agent.md</span> and are editable via the addon's Customize chat. Add <span class="mono">every:</span>/<span class="mono">on:</span> in the manifest to wake it on crons/events.</div>
+<div class="card">
+  <div id="chat" style="display:flex;flex-direction:column"></div>
+  <div class="row">
+    <input id="aMsg" class="grow" placeholder='try: "how many sessions are running? store the answer under key agent-note"' onkeydown="if(event.key==='Enter')wake()">
+    <button class="primary" id="aGo" onclick="wake()">Wake agent</button>
+  </div>
+</div>
+
+<h2>9 · UI calls + hook log <span class="mono" style="letter-spacing:0;text-transform:none">ui · hooks: onSessionExit / onNeedsInput / onTaskMoved / onCronFired</span></h2>
+<div class="card row">
+  <button onclick="yaam.guard(yaam.api.flash('flash from the kitchen sink'))">flash()</button>
+  <button onclick="yaam.guard(yaam.api.notify('Kitchen sink', 'notify() lands in the bell popover'))">notify()</button>
+  <button onclick="yaam.guard(yaam.api.logEvent('logEvent() lands in the Activity timeline'))">logEvent()</button>
+  <span class="grow"></span>
+  <span class="meta">all four hooks append to the log below (hooks/log.js)</span>
+</div>
+<div class="card"><div id="hookLog"><span class="empty">no hook events yet — exit a session, move a task, or let a schedule fire</span></div></div>
+
+<script>
+/* @include ../../../toolkit/sdk.js */
+'use strict'
+const $ = id => document.getElementById(id)
+const pretty = v => { try { return JSON.stringify(v, null, 2) } catch (e) { return String(v) } }
+
+// ---------- 1 · snapshot ----------
+let snap = null
+yaam.onState(state => {
+  snap = state
+  if (!state) { $('snapshot').innerHTML = '<span class="empty">state:read not granted — grant it in the Addons view</span>'; return }
+  $('snapshot').innerHTML =
+    `<div class="row"><span class="chip"><b>${state.sessions.length}</b> sessions</span>`
+    + `<span class="chip"><b>${state.tasks.length}</b> tasks</span>`
+    + `<span class="chip"><b>${state.templates.length}</b> templates</span>`
+    + `<span class="chip"><b>${state.machines.length}</b> machines</span>`
+    + `<span class="chip"><b>$${state.totals.cost}</b> spent</span>`
+    + `<span class="grow"></span><span class="meta">workspace: ${yaam.esc(state.workspace)}</span></div>`
+    + `<details style="margin-top:8px"><summary>raw snapshot JSON</summary><pre>${yaam.esc(pretty(state))}</pre></details>`
+  renderSessions(); renderTasks(); renderTemplates(); renderCrons(); renderHookLog()
+})
+
+// ---------- 2 · sessions ----------
+async function launch(){
+  const id = await yaam.guard(yaam.api.launchSession($('lCmd').value, $('lCwd').value, $('lName').value))
+  if (id) yaam.api.flash('launched ' + id).catch(() => {})
+}
+function renderSessions(){
+  const el = $('sessions')
+  el.innerHTML = ''
+  for (const s of (snap ? snap.sessions : []).slice(0, 8)) {
+    const card = yaam.el('div', { class: 'card sess row' },
+      yaam.el('span', { class: 'dot ' + (s.status === 'running' ? 'running' : s.status === 'needs' ? 'err' : 'on') }),
+      yaam.el('span', { class: 'nm' }, s.name),
+      yaam.el('span', { class: 'meta grow' }, `${s.status} · $${s.cost}${s.machineId ? ' · remote' : ''}${s.isolated ? ' · ⑂' : ''}`),
+      yaam.el('button', { onclick: async () => {
+        const out = await yaam.guard(yaam.api.sessions.readOutput(s.id, 15), '')
+        card.querySelector('pre')?.remove()
+        card.appendChild(yaam.el('pre', { style: { width: '100%' } }, out || '(no output)'))
+      } }, 'read output'),
+      yaam.el('button', { onclick: () => yaam.guard(yaam.api.sendToSession(s.id, 'hello from the kitchen sink')) }, 'send line'),
+      yaam.el('button', { onclick: () => yaam.guard(yaam.api.focusSession(s.id)) }, 'focus'),
+      yaam.el('button', { class: 'danger', onclick: ev => yaam.confirm(ev.target, () => yaam.guard(yaam.api.sessions.stop(s.id))) }, 'stop'),
+    )
+    el.appendChild(card)
+  }
+  if (!el.children.length) el.innerHTML = '<div class="empty">no live sessions — launch one above</div>'
+}
+
+// ---------- 3 · tasks ----------
+async function addTask(){
+  const mins = $('tWhen').value
+  const id = await yaam.guard(yaam.api.tasks.add($('tTitle').value, $('tCol').value, {
+    description: $('tDesc').value,
+    criteria: ['the session ran and exited cleanly'],
+    isolate: $('tIso').checked || undefined,
+    sessionMode: $('tMode').value || undefined,
+    scheduleAt: mins ? Date.now() + Number(mins) * 60000 : undefined,
+  }))
+  if (id && $('tStart').checked && !mins) await yaam.guard(yaam.api.tasks.start(id))
+}
+function renderTasks(){
+  const el = $('tasks')
+  el.innerHTML = ''
+  for (const t of (snap ? snap.tasks : []).slice(-8).reverse()) {
+    const card = yaam.el('div', { class: 'card task row' },
+      yaam.el('span', { class: 'pill ' + (t.col === 'done' ? 'done' : t.col === 'failed' ? 'failed' : t.col === 'review' ? 'warn' : 'mut') }, t.col),
+      yaam.el('span', { class: 'nm' }, t.title),
+      yaam.el('span', { class: 'meta grow' }, `${t.sessionMode}${t.isolate ? ' · ⑂' : ''}${t.scheduleAt ? ' · starts ' + new Date(t.scheduleAt).toLocaleTimeString() : ''}${t.watcherNote ? ' · ' + t.watcherNote.slice(0, 40) : ''}`),
+      yaam.el('button', { onclick: async () => {
+        const detail = await yaam.guard(yaam.api.tasks.get(t.id))
+        card.querySelector('pre')?.remove()
+        card.appendChild(yaam.el('pre', { style: { width: '100%' } }, pretty(detail)))
+      } }, 'get'),
+      t.col === 'backlog' ? yaam.el('button', { class: 'primary', onclick: () => yaam.guard(yaam.api.tasks.start(t.id)) }, '▶ start') : null,
+      t.col === 'review' ? yaam.el('button', { class: 'primary', onclick: () => yaam.guard(yaam.api.tasks.approve(t.id)) }, '✓ approve') : null,
+      t.col === 'review' ? yaam.el('button', { onclick: () => yaam.guard(yaam.api.tasks.reject(t.id, 'sent back by the kitchen sink — please double-check')) }, '↩ reject') : null,
+      yaam.el('button', { class: 'ghost danger', onclick: ev => yaam.confirm(ev.target, () => yaam.guard(yaam.api.tasks.remove(t.id)), '✕ sure?') }, '✕'),
+    )
+    el.appendChild(card)
+  }
+  if (!el.children.length) el.innerHTML = '<div class="empty">no tasks — create one above</div>'
+}
+
+// ---------- 4 · templates ----------
+function renderTemplates(){
+  const el = $('templates')
+  const tpls = snap ? snap.templates : []
+  el.innerHTML = ''
+  for (const t of tpls) {
+    el.appendChild(yaam.el('div', { class: 'lrow' },
+      yaam.el('span', {}, t.name),
+      yaam.el('span', { class: 'meta grow' }, t.mode),
+      yaam.el('button', { onclick: () => yaam.guard(yaam.api.templates.run(t.id, 'say hello — kitchen-sink template run')) }, 'run with task'),
+    ))
+  }
+  if (!tpls.length) el.innerHTML = '<div class="empty">no templates defined in this workspace (Templates view)</div>'
+}
+
+// ---------- 5 · schedules ----------
+async function addSchedule(){
+  const mins = $('cAt').value
+  const spec = mins
+    ? { name: $('cName').value, at: Date.now() + Number(mins) * 60000 }
+    : { name: $('cName').value, schedule: $('cCron').value }
+  const res = await yaam.guard(yaam.api.schedules.add(spec))
+  if (typeof res === 'string') yaam.api.flash(res.slice(0, 76)).catch(() => {})
+}
+function renderCrons(){
+  const el = $('crons')
+  el.innerHTML = ''
+  for (const c of (snap ? snap.crons : [])) {
+    el.appendChild(yaam.el('div', { class: 'card row' },
+      yaam.el('span', { class: 'dot ' + (c.on ? 'on' : '') }),
+      yaam.el('span', { style: { fontWeight: 600, fontSize: '12px' } }, c.name),
+      yaam.el('span', { class: 'meta' }, (c.schedule || (c.at ? 'once ' + new Date(c.at).toLocaleTimeString() : '')) + ' · ' + c.action + ' · last: ' + c.last),
+      yaam.el('span', { class: 'meta grow' }, (c.runs || []).map(r => (r.ok ? '✓' : '✗')).join(' ') || 'no runs'),
+      yaam.el('button', { onclick: () => yaam.guard(yaam.api.schedules.toggle(c.name)) }, c.on ? 'pause' : 'resume'),
+      yaam.el('button', { class: 'ghost danger', onclick: ev => yaam.confirm(ev.target, () => yaam.guard(yaam.api.schedules.remove(c.name)), '✕ sure?') }, '✕'),
+    ))
+  }
+  if (!el.children.length) el.innerHTML = '<div class="empty">no schedules — add the heartbeat above and watch §9 catch its onCronFired</div>'
+}
+
+// ---------- 6 · storage ----------
+async function storKeys(){
+  const keys = await yaam.guard(yaam.api.storage.list(), [])
+  return 'keys: ' + (keys && keys.length ? keys.join(', ') : '(none)')
+}
+async function storSet(){
+  let v = $('sVal').value
+  try { v = JSON.parse(v) } catch (e) { /* keep as plain string */ }
+  await yaam.guard(yaam.api.storage.set($('sKey').value, v))
+  $('sOut').textContent = await storKeys()
+}
+async function storGet(){
+  const v = await yaam.guard(yaam.api.storage.get($('sKey').value))
+  $('sOut').textContent = pretty(v) + '\n\n' + await storKeys()
+}
+async function storDel(){
+  await yaam.guard(yaam.api.storage.remove($('sKey').value))
+  $('sOut').textContent = await storKeys()
+}
+storKeys().then(t => { $('sOut').textContent = t })
+
+// ---------- 7 · http + secrets ----------
+async function httpGo(){
+  const btn = $('hGo')
+  btn.disabled = true
+  try {
+    let headers
+    try { headers = JSON.parse($('hHead').value || '{}') } catch (e) { yaam.banner('headers must be JSON'); btn.disabled = false; return }
+    const res = await yaam.api.http.request($('hMethod').value, $('hUrl').value, { headers })
+    $('hOut').textContent = `HTTP ${res.status} · ${res.contentType}\n\n${res.text.slice(0, 4000)}`
+  } catch (e) {
+    $('hOut').textContent = '✗ ' + e.message
+  }
+  btn.disabled = false
+}
+yaam.guard(yaam.api.secrets.list(), null).then(list => {
+  $('secretsLine').textContent = list
+    ? 'secrets: ' + list.map(s => `${s.name} ${s.set ? '● set' : '○ unset'}`).join(' · ') + ' — values live in the OS keychain; set them in the Addons view'
+    : 'secrets: grant the "secrets" scope to list slots'
+})
+
+// ---------- 8 · agent ----------
+async function wake(){
+  const msg = $('aMsg').value.trim()
+  if (!msg) return
+  $('aMsg').value = ''
+  const chat = $('chat')
+  chat.appendChild(yaam.el('div', { class: 'bubble you' }, msg))
+  const btn = $('aGo')
+  btn.disabled = true
+  btn.innerHTML = '<span class="spin">✳</span> thinking…'
+  const reply = await yaam.guard(yaam.api.agent.wake(msg), '(agent unavailable)')
+  chat.appendChild(yaam.el('div', { class: 'bubble bot' }, String(reply)))
+  btn.disabled = false
+  btn.textContent = 'Wake agent'
+  chat.scrollTop = chat.scrollHeight
+}
+
+// ---------- 9 · hook log ----------
+async function renderHookLog(){
+  const log = await yaam.guard(yaam.api.storage.get('hookLog'), null)
+  if (!log || !log.length) return
+  $('hookLog').innerHTML = log.slice(0, 20).map(x =>
+    `<div class="lrow"><span class="meta">${yaam.ago(x.at)}</span><span class="mono" style="font-size:10.5px;color:var(--mut)">${yaam.esc(JSON.stringify(x.event))}</span></div>`).join('')
+}
+</script></body></html>

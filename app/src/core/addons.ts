@@ -391,6 +391,26 @@ export function parseSimpleYaml(text: string): Record<string, unknown> {
 const FILE_REF = /\.(js|html|txt|md)$/i
 const SHORTHAND_TYPES = ['string', 'number', 'boolean', 'array', 'object']
 
+/** `<!-- @include path -->` (in markup) or `/* @include path *​/` (in CSS/JS)
+ *  markers inside a folder addon's view HTML are replaced with the referenced
+ *  file's contents at load/pack time — this is how views stay single-document
+ *  (the sandbox CSP forbids external resources) while sharing the toolkit's
+ *  sdk.js / ui.css instead of pasting them. Paths resolve like other refs
+ *  (relative to the addon folder; ../ may reach the repo's toolkit/). */
+export const INCLUDE_RE = /<!--\s*@include\s+(\S+)\s*-->|\/\*\s*@include\s+(\S+)\s*\*\//g
+
+/** Resolve every @include marker in view HTML (one level — includes don't nest). */
+export async function inlineIncludes(html: string, readRef: (relPath: string) => Promise<string>): Promise<string> {
+  const jobs: Promise<string>[] = []
+  html.replace(INCLUDE_RE, (_m, a: string, b: string) => {
+    jobs.push(readRef(a || b))
+    return ''
+  })
+  const bodies = await Promise.all(jobs)
+  let i = 0
+  return html.replace(INCLUDE_RE, () => bodies[i++])
+}
+
 /** Expand the manifest's `input:` shorthand (`name: string! · what it is`)
  *  into a JSON tool schema; full `input_schema` passes through untouched. */
 export function expandInputShorthand(input: Record<string, unknown>): Record<string, unknown> {
@@ -426,7 +446,7 @@ export async function loadAddonFolder(
   }
   const out: Record<string, unknown> = { ...raw }
   if (typeof raw.view === 'string') {
-    out.html = await readRef(raw.view.trim())
+    out.html = await inlineIncludes(await readRef(raw.view.trim()), readRef)
     delete out.view
   }
   if (Array.isArray(raw.tools)) {

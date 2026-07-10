@@ -1,7 +1,8 @@
 // (input = { name, kind }, api) — a schedule fired. Workflow triggers are
-// schedules named "wf-<workflow id>" created from the Workflows tab; when one
-// fires, start a run of that workflow: spawn every root node (no deps) as a
-// board task and record the run in history.
+// schedules named "wf-<workflow id>" armed from the Workflows tab. Workflows
+// are STATE MACHINES: one active step at a time; each step declares where the
+// machine goes on done / on fail (loops allowed, capped per run). Firing one
+// starts a run at the workflow's start step.
 if (!String(input.name || '').startsWith('wf-')) return
 
 const wfId = String(input.name).slice(3)
@@ -9,32 +10,31 @@ const workflows = (await api.storage.get('workflows')) || []
 const wf = workflows.find(w => w.id === wfId)
 if (!wf || !Array.isArray(wf.nodes) || !wf.nodes.length) return
 
-// one running run per workflow — a slow pipeline must not stack on itself
+// one running machine per workflow — a slow pipeline must not stack on itself
 const runs = (await api.storage.get('runs')) || []
 if (runs.some(r => r.wfId === wf.id && r.status === 'running')) {
   await api.logEvent(`workflow "${wf.name}" skipped a cron trigger — previous run still going`)
   return
 }
 
+const start = wf.nodes.find(n => n.id === wf.start) || wf.nodes[0]
 const run = {
   id: 'run' + Date.now().toString(36),
   wfId: wf.id, wfName: wf.name, startedAt: Date.now(), status: 'running',
-  trigger: 'cron', nodes: {},
+  trigger: 'cron', current: start.id, taskId: null,
+  visits: {}, path: [],
 }
-for (const n of wf.nodes) run.nodes[n.id] = { taskId: null, status: 'pending' }
 
-// start every root (a node whose deps are all… nonexistent)
-for (const n of wf.nodes) {
-  if ((n.deps || []).length) continue
-  const taskId = await api.tasks.add(n.title, 'backlog', {
-    description: [`[workflow "${wf.name}" · run ${run.id} · node ${n.id}]`, n.description || ''].filter(Boolean).join('\n\n'),
-    criteria: n.criteria || [],
-    cwd: n.cwd || undefined,
-    isolate: n.isolate === true ? true : undefined,
-  })
-  await api.tasks.start(taskId)
-  run.nodes[n.id] = { taskId, status: 'running' }
-}
+const taskId = await api.tasks.add(start.title, 'backlog', {
+  description: [`[workflow "${wf.name}" · run ${run.id} · step ${start.id}]`, start.description || ''].filter(Boolean).join('\n\n'),
+  criteria: start.criteria || [],
+  cwd: start.cwd || undefined,
+  isolate: start.isolate === true ? true : undefined,
+})
+await api.tasks.start(taskId)
+run.taskId = taskId
+run.visits[start.id] = 1
+run.path.push({ nodeId: start.id, title: start.title, taskId, outcome: 'running', at: Date.now() })
 
 await api.storage.set('runs', [run, ...runs].slice(0, 30))
-await api.notify('Workflow started', `"${wf.name}" — ${Object.values(run.nodes).filter(x => x.status === 'running').length} root task(s) launched`)
+await api.notify('Workflow started', `"${wf.name}" — entered step "${start.title}"`)

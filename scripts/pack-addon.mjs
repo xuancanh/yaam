@@ -103,9 +103,15 @@ const raw = manifestText.trim().startsWith('{') ? JSON.parse(manifestText) : par
 const readRef = rel => readFileSync(join(dir, rel), 'utf8')
 const ref = v => (typeof v === 'string' && v.trim() && FILE_REF.test(v.trim()) ? readRef(v.trim()) : v)
 
+// <!-- @include path --> / /* @include path */ markers in view HTML inline
+// the referenced file (e.g. the shared toolkit sdk.js / ui.css) — mirrors
+// the in-app folder loader (core/addons.ts inlineIncludes)
+const INCLUDE_RE = /<!--\s*@include\s+(\S+)\s*-->|\/\*\s*@include\s+(\S+)\s*\*\//g
+const inlineIncludes = html => html.replace(INCLUDE_RE, (_m, a, b) => readRef(a || b))
+
 const out = { ...raw }
 if (typeof raw.view === 'string') {
-  out.html = readRef(raw.view.trim())
+  out.html = inlineIncludes(readRef(raw.view.trim()))
   delete out.view
 }
 if (Array.isArray(raw.tools)) {
