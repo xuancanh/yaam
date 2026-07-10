@@ -33,7 +33,13 @@ export function Divider({ dir, onRatio }: { dir: 'col' | 'row'; onRatio: (r: num
       onMouseDown={onMouseDown}
       style={{
         flexShrink: 0,
-        ...(dir === 'col' ? { width: 5, cursor: 'col-resize' } : { height: 5, cursor: 'row-resize' }),
+        // 2px visible bar; transparent borders + negative margins keep a 6px
+        // grab area without widening the layout (z-index in .pane-divider)
+        boxSizing: 'content-box',
+        backgroundClip: 'padding-box',
+        ...(dir === 'col'
+          ? { width: 2, borderLeft: '2px solid transparent', borderRight: '2px solid transparent', margin: '0 -2px', cursor: 'col-resize' }
+          : { height: 2, borderTop: '2px solid transparent', borderBottom: '2px solid transparent', margin: '-2px 0', cursor: 'row-resize' }),
       }}
     />
   )
