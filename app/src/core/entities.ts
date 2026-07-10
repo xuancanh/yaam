@@ -97,6 +97,8 @@ export interface ChatComposerState {
   draft: string
   attachments: ChatAttachmentRecord[]
   queue: ChatQueuedMessage[]
+  mode?: 'replace' | 'fork'
+  sourceTurnId?: string
 }
 
 /** Transient per-session runtime state — NOT persisted. Hydration re-derives it

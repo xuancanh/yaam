@@ -11,3 +11,15 @@ export function removeStructuredTurn(agent: Agent, turnId: string): Agent {
     chatTurns: (agent.chatTurns ?? []).filter(t => t.id !== turnId),
   }
 }
+
+export function rewindFromTurn(agent: Agent, turnId: string): Agent {
+  const turns = agent.chatTurns ?? []
+  const index = turns.findIndex(t => t.id === turnId)
+  if (index < 0) return agent
+  const removed = new Set(turns.slice(index).map(t => t.id))
+  return {
+    ...agent,
+    chatLog: (agent.chatLog ?? []).filter(m => !m.turnId || !removed.has(m.turnId)),
+    chatTurns: turns.slice(0, index),
+  }
+}

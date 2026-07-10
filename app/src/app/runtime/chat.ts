@@ -27,6 +27,7 @@ export interface ChatBoot {
   runChatMessage: ChatRuntime['run']
   stopChatMessage: ChatRuntime['stop']
   retryChatMessage: ChatRuntime['retry']
+  replayChatMessage: ChatRuntime['replay']
   resetChatRuntime: ChatRuntime['dispose']
   resolveChatApproval: ChatRuntime['resolveApproval']
   disposeSessionRuntime: (id: string) => void
@@ -71,6 +72,7 @@ export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: S
     connectMcp, refreshSkillCatalog, mcpSessions, skillCatalogs,
     runChatMessage: chat.run, stopChatMessage: chat.stop,
     retryChatMessage: chat.retry, resetChatRuntime: chat.dispose,
+    replayChatMessage: chat.replay,
     resolveChatApproval: chat.resolveApproval,
     disposeSessionRuntime,
     start() {

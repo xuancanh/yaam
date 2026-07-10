@@ -10,7 +10,7 @@ import type { CatalogSkill } from '../../core/skills'
 import { AbortRegistry } from '../../core/abort-registry'
 import { runChatMessageTurn } from './runner'
 import type { ChatAttachment } from './runner'
-import { lastReplayableTurn, removeStructuredTurn } from './turns'
+import { lastReplayableTurn, removeStructuredTurn, rewindFromTurn } from './turns'
 
 export interface ChatPorts {
   stateRef: MutableRefObject<AppState>
@@ -29,6 +29,7 @@ export interface ChatRuntime {
   stop: (agentId: string) => void
   /** re-run the last user message: drop everything after it and send it again */
   retry: (agentId: string) => void
+  replay: (agentId: string, turnId: string, text: string, atts?: ChatAttachment[]) => void
   /** answer a pending ask-mode tool approval (by its chat-message id) */
   resolveApproval: (agentId: string, msgId: string, ok: boolean) => void
   dispose: (id: string) => void
@@ -96,6 +97,18 @@ export function createChatRuntime(ports: ChatPorts): ChatRuntime {
         }
       }
       run(agentId, text)
+    },
+    replay: (agentId, turnId, text, atts) => {
+      if (busy.has(agentId)) return
+      const agent = ports.stateRef.current.agents.find(a => a.id === agentId)
+      const turn = agent?.chatTurns?.find(t => t.id === turnId)
+      if (!agent || !turn) return
+      ports.dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === agentId ? rewindFromTurn(a, turnId) : a),
+      }))
+      histories.delete(agentId)
+      run(agentId, text, atts ?? turn.input.attachments)
     },
     resolveApproval: (agentId, msgId, ok) => {
       const pending = pendingApprovals.get(msgId)

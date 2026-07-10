@@ -61,6 +61,7 @@ function assembleRuntimeDeps(
     launchFromTemplate: (templateId: string, task?: string, isolate?: boolean) => session.launchFromTemplate(templateId, task, undefined, undefined, undefined, undefined, isolate),
     runChatMessage: chat.runChatMessage, stopChatMessage: chat.stopChatMessage,
     retryChatMessage: chat.retryChatMessage, resetChatRuntime: chat.resetChatRuntime,
+    replayChatMessage: chat.replayChatMessage,
     resolveChatApproval: chat.resolveChatApproval,
     installPackage: addon.installPackage, sendAddonChat: addon.sendAddonChat,
     makeAddonApi: addon.makeAddonApi, disposeAddon: addon.disposeAddon,

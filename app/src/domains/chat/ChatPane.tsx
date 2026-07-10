@@ -23,6 +23,8 @@ import type { ChatArtifact } from './artifacts'
 const COPY_IC = ['M9 9h11v11H9z', 'M5 15H4V4h11v1']
 const RETRY_IC = ['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']
 const CLIP_IC = ['M21 11l-8.5 8.5a5 5 0 01-7-7L14 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-3-3L16 6']
+const EDIT_IC = ['M4 20h4l11-11-4-4L4 16v4z', 'M13 7l4 4']
+const FORK_IC = ['M7 4v5a3 3 0 003 3h4', 'M17 4v5a3 3 0 01-3 3', 'M14 12v8']
 
 /** Load one dropped/picked file into an attachment: images stay base64 for
  *  vision; documents go through best-effort text extraction; binaries attach
@@ -120,7 +122,7 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
   )
 }
 
-function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, ok: boolean) => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean }) {
+function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, ok: boolean) => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
   if (m.role === 'thinking') return <ThinkingBubble m={m} live={!!live} />
@@ -153,7 +155,11 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
         onMouseLeave={() => setHover(false)}
         style={{ display: 'flex', flexShrink: 0, alignItems: 'flex-end', gap: 4, justifyContent: 'flex-end', padding: '0 4px' }}
       >
-        {hover && <HoverBtn title={copied ? 'Copied!' : 'Copy message'} paths={COPY_IC} onClick={copy} />}
+        {hover && <div style={{ display: 'flex', gap: 2 }}>
+          {onEdit && <HoverBtn title="Edit and replace from here" paths={EDIT_IC} onClick={onEdit} />}
+          {onFork && <HoverBtn title="Edit in a new conversation fork" paths={FORK_IC} onClick={onFork} />}
+          <HoverBtn title={copied ? 'Copied!' : 'Copy message'} paths={COPY_IC} onClick={copy} />
+        </div>}
         <div style={{
           maxWidth: '78%', minWidth: 0, borderRadius: 14, padding: 'var(--bubble-pad)', fontSize: 'var(--chat-font)', lineHeight: 1.55,
           background: hexToRgba(ACCENT, 0.13),
@@ -344,7 +350,7 @@ function SlashMenu({ items, sel, onPick }: {
 }
 
 export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
-  const { sendChatMessage, stopChat, retryChat, clearChat, chatSkills, approveChatTool, setChatComposer } = useActions()
+  const { sendChatMessage, stopChat, retryChat, editAndResendChat, forkChatTurn, clearChat, chatSkills, approveChatTool, setChatComposer } = useActions()
   const composer = agent.chatComposer ?? { draft: '', attachments: [], queue: [] }
   const draft = composer.draft
   const atts = composer.attachments
@@ -377,6 +383,11 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   const turns = new Map((agent.chatTurns ?? []).map(t => [t.id, t]))
   const lastMessageByTurn = new Map<string, string>()
   for (const message of log) if (message.turnId) lastMessageByTurn.set(message.turnId, message.id)
+  const reviseTurn = (turn: ChatTurn, mode: 'replace' | 'fork') => {
+    if (busy) return
+    setChatComposer(agent.id, { draft: turn.input.text, attachments: turn.input.attachments, mode, sourceTurnId: turn.id })
+    window.setTimeout(() => inputRef.current?.focus(), 0)
+  }
 
   // slash menu: draft is a single line starting with "/" → filter skills + built-ins
   const slashQuery = /^\/([\w.-]*)$/.exec(draft.split('\n')[0]) && !draft.includes('\n') ? draft.slice(1) : null
@@ -500,7 +511,15 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
     if (msg === '/clear') { clearChat(agent.id); setQueue([]); setAtts([]); return }
     if (msg === '/export') { void exportChat().catch(e => flashNote(`export failed: ${e instanceof Error ? e.message : e}`)); return }
     if (busy) {
+      if (composer.sourceTurnId) { flashNote('wait for the current reply before revising history'); return }
       setQueue(q => [...q, { id: `queued-${Date.now()}-${q.length}`, at: Date.now(), text: msg, attachments: attachments ?? [] }])
+      return
+    }
+    if (composer.sourceTurnId && composer.mode) {
+      const sourceTurnId = composer.sourceTurnId
+      setChatComposer(agent.id, { draft: '', attachments: [], mode: undefined, sourceTurnId: undefined })
+      if (composer.mode === 'replace') editAndResendChat(agent.id, sourceTurnId, msg, attachments)
+      else forkChatTurn(agent.id, sourceTurnId, msg, attachments)
       return
     }
     sendChatMessage(agent.id, msg, attachments)
@@ -564,6 +583,8 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                   onApprove={(msgId, ok) => approveChatTool(agent.id, msgId, ok)}
                   onArtifact={setArtifact}
                   collapseTool={!!turn && turn.status !== 'running'}
+                  onEdit={m.role === 'user' && turn && !busy ? () => reviseTurn(turn, 'replace') : undefined}
+                  onFork={m.role === 'user' && turn && !busy ? () => reviseTurn(turn, 'fork') : undefined}
                 />
                 {lastInTurn && <TurnActivity turn={turn} />}
               </Fragment>
@@ -599,6 +620,15 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                 </button>
               </span>
             ))}
+          </div>
+        )}
+        {composer.sourceTurnId && composer.mode && (
+          <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, padding: '5px 8px', borderLeft: '2px solid var(--accent)', color: 'var(--mut)', fontSize: 10.5 }}>
+            <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{composer.mode === 'replace' ? 'REPLACE FROM MESSAGE' : 'FORK FROM MESSAGE'}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{turns.get(composer.sourceTurnId)?.input.text}</span>
+            <button className="icon-btn" title="Cancel revision" onClick={() => setChatComposer(agent.id, { draft: '', attachments: [], mode: undefined, sourceTurnId: undefined })} style={{ width: 18, height: 18, marginLeft: 'auto', flexShrink: 0 }}>
+              <Icon paths={IC.close} size={9} stroke={2} />
+            </button>
           </div>
         )}
         {(atts.length > 0 || loadingAtts > 0) && (
