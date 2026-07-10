@@ -56,6 +56,23 @@ export function describeCron(expr: string): { ok: boolean; text: string } {
   const [min, hour, dom, mon, dow] = f
   const okField = (x: string) => /^(\*|\*\/\d+|\d+(-\d+)?)(,(\d+(-\d+)?|\*\/\d+))*$/.test(x)
   if (![min, hour, dom, mon, dow].every(okField)) return { ok: false, text: 'unrecognized field — use numbers, ranges (1-5), lists (1,3), steps (*/n), or *' }
+  const inBounds = (field: string, low: number, high: number) => field.split(',').every(part => {
+    if (part === '*') return true
+    const step = part.match(/^\*\/(\d+)$/)
+    if (step) return Number(step[1]) > 0
+    const range = part.match(/^(\d+)-(\d+)$/)
+    if (range) {
+      const start = Number(range[1])
+      const end = Number(range[2])
+      return start >= low && end <= high && start <= end
+    }
+    const value = Number(part)
+    return value >= low && value <= high
+  })
+  if (!inBounds(min, 0, 59) || !inBounds(hour, 0, 23) || !inBounds(dom, 1, 31)
+    || !inBounds(mon, 1, 12) || !inBounds(dow, 0, 6)) {
+    return { ok: false, text: 'field is outside its valid range' }
+  }
 
   // time phrase
   const two = (x: string) => x.padStart(2, '0')
@@ -93,8 +110,8 @@ export interface SimpleSchedule {
 /** Compile the simple editor's schedule to a 5-field cron expression. */
 export function buildCron(sp: SimpleSchedule): string {
   const [h, m] = sp.time.split(':').map(x => parseInt(x, 10))
-  const hour = Number.isFinite(h) ? h : 9
-  const min = Number.isFinite(m) ? m : 0
+  const hour = Math.max(0, Math.min(23, Number.isFinite(h) ? h : 9))
+  const min = Math.max(0, Math.min(59, Number.isFinite(m) ? m : 0))
   switch (sp.freq) {
     case 'minutes': return `*/${Math.max(1, Math.min(59, Math.round(sp.every) || 1))} * * * *`
     case 'hourly': return `${min} * * * *`

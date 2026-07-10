@@ -60,6 +60,13 @@ describe('describeCron', () => {
     expect(describeCron('0 9 * *').ok).toBe(false)
     expect(describeCron('a b c d e').ok).toBe(false)
   })
+  it('rejects out-of-range values, reversed ranges, and zero steps', () => {
+    expect(describeCron('60 9 * * *').ok).toBe(false)
+    expect(describeCron('0 24 * * *').ok).toBe(false)
+    expect(describeCron('0 9 0 13 7').ok).toBe(false)
+    expect(describeCron('0 9 * * 5-1').ok).toBe(false)
+    expect(describeCron('*/0 * * * *').ok).toBe(false)
+  })
 })
 
 describe('buildCron', () => {
@@ -73,7 +80,7 @@ describe('buildCron', () => {
   })
   it('clamps junk input instead of emitting a broken expression', () => {
     expect(buildCron({ freq: 'minutes', every: 0, time: 'zz', dow: 9, dom: 40 })).toBe('*/1 * * * *')
-    expect(buildCron({ freq: 'weekly', every: 5, time: '25:99', dow: 9, dom: 40 })).toBe('99 25 * * 6')
+    expect(buildCron({ freq: 'weekly', every: 5, time: '25:99', dow: 9, dom: 40 })).toBe('59 23 * * 6')
     expect(buildCron({ freq: 'monthly', every: 5, time: '09:00', dow: 1, dom: 40 })).toBe('0 9 31 * *')
   })
 })
