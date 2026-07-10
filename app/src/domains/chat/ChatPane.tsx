@@ -4,6 +4,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useActions } from '../../store'
 import { ACCENT, hexToRgba } from '../../core/data'
 import { isTauri, pickFiles, pickSavePath, readFileB64, writeTextFile } from '../../core/native'
+import { listMentionFiles, matchFiles } from './mentions'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import type { CatalogSkill } from '../../core/skills'
 import type { Agent, ChatMsg } from '../../core/types'
@@ -231,6 +232,39 @@ function ArtifactPanel({ artifact, onClose }: { artifact: ChatArtifact; onClose:
   )
 }
 
+/** @-mention autocomplete: files under the chat's working folder */
+function FileMenu({ items, sel, onPick }: { items: string[]; sel: number; onPick: (path: string) => void }) {
+  return (
+    <div style={{
+      position: 'absolute', left: 0, right: 0, bottom: '100%', marginBottom: 6, zIndex: 30,
+      background: 'var(--panel)', border: '1px solid var(--line2)', borderRadius: 10,
+      boxShadow: '0 -6px 24px rgba(0,0,0,.4)', overflow: 'hidden', maxHeight: 260, overflowY: 'auto',
+    }}>
+      {items.map((path, i) => {
+        const cut = path.lastIndexOf('/')
+        return (
+          <button
+            key={path}
+            className="palette-item"
+            onMouseDown={e => { e.preventDefault(); onPick(path) }}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'baseline', gap: 8, border: 'none', textAlign: 'left',
+              padding: '7px 12px', background: i === sel ? 'rgba(245,196,81,.1)' : 'transparent', cursor: 'pointer',
+            }}
+          >
+            <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', flexShrink: 0 }}>{path.slice(cut + 1)}</span>
+            {cut > 0 && (
+              <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {path.slice(0, cut)}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 /** slash-command autocomplete: skills for this chat + built-ins */
 function SlashMenu({ items, sel, onPick }: {
   items: { name: string; description: string; source?: string }[]
@@ -274,6 +308,9 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   const [note, setNote] = useState<string | null>(null)
   const [artifact, setArtifact] = useState<ChatArtifact | null>(null)
   const [menuSel, setMenuSel] = useState(0)
+  const [fileSel, setFileSel] = useState(0)
+  // @-mention corpus: fetched lazily on the first '@' and cached per pane
+  const [mentionFiles, setMentionFiles] = useState<string[] | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const dequeuedRef = useRef(false)
@@ -294,7 +331,30 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   }, [slashQuery, chatSkills, agent.id])
   const menuOpen = menuItems.length > 0
 
+  // @file mention: the draft's trailing token is `@<query>` → file menu
+  const atQuery = agent.cwd ? /(^|\s)@([\w./-]*)$/.exec(draft)?.[2] ?? null : null
+  useEffect(() => {
+    if (atQuery === null || mentionFiles !== null || !agent.cwd) return
+    let live = true
+    void listMentionFiles(agent.cwd).then(files => { if (live) setMentionFiles(files) })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [atQuery !== null, agent.cwd])
+  const fileItems = useMemo(
+    () => (atQuery === null ? [] : matchFiles(mentionFiles ?? [], atQuery)),
+    [atQuery, mentionFiles],
+  )
+  const fileMenuOpen = !menuOpen && fileItems.length > 0
+
+  // attach the picked file and strip the @token from the draft
+  const pickMention = (rel: string) => {
+    setDraft(d => d.replace(/@[\w./-]*$/, ''))
+    void addPaths([`${agent.cwd!.replace(/\/+$/, '')}/${rel}`])
+    inputRef.current?.focus()
+  }
+
   useEffect(() => { setMenuSel(0) }, [slashQuery])
+  useEffect(() => { setFileSel(0) }, [atQuery])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -404,6 +464,12 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
       if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); pickSlash(menuItems[menuSel].name); return }
       if (e.key === 'Escape') { e.preventDefault(); setDraft(''); return }
     }
+    if (fileMenuOpen) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setFileSel(s => (s + 1) % fileItems.length); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setFileSel(s => (s - 1 + fileItems.length) % fileItems.length); return }
+      if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); pickMention(fileItems[fileSel]); return }
+      if (e.key === 'Escape') { e.preventDefault(); setDraft(d => d.replace(/@[\w./-]*$/, '')); return }
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
@@ -496,6 +562,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
             </div>
           )}
           {menuOpen && <SlashMenu items={menuItems} sel={menuSel} onPick={pickSlash} />}
+          {fileMenuOpen && <FileMenu items={fileItems} sel={fileSel} onPick={pickMention} />}
           <textarea
             ref={inputRef}
             value={draft}
@@ -510,7 +577,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span className="mono" style={{ fontSize: 10, color: note ? 'var(--green)' : 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {note ?? `${agent.cwd || 'no working folder'} · ↩ send · / commands · drop files to attach`}
+              {note ?? `${agent.cwd || 'no working folder'} · ↩ send · / commands · @ attach a project file · drop files`}
             </span>
             <button
               className="icon-btn"
