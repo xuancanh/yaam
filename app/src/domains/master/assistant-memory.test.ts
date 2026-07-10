@@ -27,6 +27,12 @@ describe('appendMemory', () => {
     expect(next[0].content.endsWith('- the newest entry')).toBe(true)
     expect(next[0].content).not.toContain('entry number 0 ')
   })
+  it('caps a single oversized entry', () => {
+    const next = appendMemory([], 'notes', 'x'.repeat(20_000))
+    expect(next[0].content.length).toBe(12_000)
+    expect(next[0].content.startsWith('- ')).toBe(true)
+    expect(next[0].content.endsWith('...')).toBe(true)
+  })
 })
 
 describe('searchMemory', () => {

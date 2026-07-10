@@ -21,7 +21,10 @@ const FILE_CAP_CHARS = 12_000
 export function appendMemory(files: MemoryFile[], name: string, entry: string, now = Date.now()): MemoryFile[] {
   const clean = entry.replace(/\s+/g, ' ').trim()
   if (!clean) return files
-  const line = clean.startsWith('- ') ? clean : `- ${clean}`
+  const rawLine = clean.startsWith('- ') ? clean : `- ${clean}`
+  const line = rawLine.length > FILE_CAP_CHARS
+    ? `${rawLine.slice(0, FILE_CAP_CHARS - 3)}...`
+    : rawLine
   const existing = files.find(f => f.name === name)
   if (!existing) {
     return [...files, { id: mkId('mem'), name, content: line, updatedAt: now }]
