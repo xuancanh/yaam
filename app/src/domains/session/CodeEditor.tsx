@@ -36,24 +36,31 @@ export function CodeEditor({ path, initial, onSave, onClose }: {
   const viewRef = useRef<EditorView | null>(null)
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
   const [note, setNote] = useState<string | null>(null)
   const savedRef = useRef(initial)
 
   const save = async () => {
     const view = viewRef.current
-    if (!view || busy) return
+    if (!view || busyRef.current) return
     const text = view.state.doc.toString()
+    busyRef.current = true
     setBusy(true)
     setNote(null)
     try {
       await onSave(text)
-      savedRef.current = text
-      setDirty(false)
-      setNote('saved')
-      window.setTimeout(() => setNote(null), 1800)
+      if (viewRef.current === view) {
+        savedRef.current = text
+        setDirty(view.state.doc.toString() !== text)
+        setNote('saved')
+        window.setTimeout(() => {
+          if (viewRef.current === view) setNote(null)
+        }, 1800)
+      }
     } catch (e) {
-      setNote(e instanceof Error ? e.message : String(e))
+      if (viewRef.current === view) setNote(e instanceof Error ? e.message : String(e))
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
@@ -95,8 +102,10 @@ export function CodeEditor({ path, initial, onSave, onClose }: {
       view.destroy()
       if (viewRef.current === view) viewRef.current = null
     }
-    // a different file (or a fresh load of the same one) rebuilds the editor
-  }, [path, initial])
+    // Same-file prop refreshes can follow a save. Keep the live buffer intact;
+    // opening another path (or remounting this editor) loads a fresh snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path])
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg3)' }}>
