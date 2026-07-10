@@ -137,7 +137,11 @@ export function TaskSpecFields({ v, set, questions, error, autoFocus }: {
   error: string
   autoFocus?: boolean
 }) {
-  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes, templates: x.templates, machines: x.settings.machines ?? [] }), shallowEqual)
+  // select the raw field: `?? []` here would mint a fresh array every
+  // snapshot when machines is unset and loop useSyncExternalStore into a
+  // "maximum update depth" crash — default AFTER selection instead
+  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes, templates: x.templates, machines: x.settings.machines }), shallowEqual)
+  const machines = s.machines ?? []
   const enabledTypes = s.agentTypes.filter(t => t.enabled)
   const templates = s.templates ?? []
 
@@ -181,12 +185,12 @@ export function TaskSpecFields({ v, set, questions, error, autoFocus }: {
           </div>
         </div>
       </div>
-      {s.machines.length > 0 && (
+      {machines.length > 0 && (
         <div>
           <FieldLabel hint={v.machineId ? 'over SSH + tmux — the folder above is on the remote host' : 'this machine'}>Run on</FieldLabel>
           <select value={v.machineId} onChange={e => set({ ...v, machineId: e.target.value })} className="select-field" style={FIELD}>
             <option value="">This machine (local)</option>
-            {s.machines.map(m => {
+            {machines.map(m => {
               const incomplete = !m.host?.trim() || !m.user?.trim()
               return <option key={m.id} value={m.id} disabled={incomplete}>{m.label || 'Unnamed'}{incomplete ? ' · incomplete' : ` · ${m.user}@${m.host}`}</option>
             })}

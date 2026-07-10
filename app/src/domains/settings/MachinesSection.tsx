@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { useActions, useConductorSelector } from '../../store'
 import type { Machine } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { mkId } from '../../shared/id'
@@ -102,7 +102,9 @@ function MachineRow({ m, onChange, onRemove }: { m: Machine; onChange: (patch: P
 
 /** Settings → Machines: manage the SSH hosts agents can run on (over tmux). */
 export function MachinesSection() {
-  const machines = useConductorSelector(x => x.settings.machines ?? [], shallowEqual)
+  // default OUTSIDE the selector — a fresh `[]` per snapshot defeats the
+  // equality cache (see TaskSpecFields) and loops useSyncExternalStore
+  const machines = useConductorSelector(x => x.settings.machines) ?? []
   const { updateSettings } = useActions()
   const setMachines = (next: Machine[]) => updateSettings({ machines: next })
   return (

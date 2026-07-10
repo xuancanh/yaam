@@ -33,7 +33,11 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 /** Full-view editor for one template — opened by create / edit */
 /** Edit every persisted launch option for one agent template. */
 function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => void }) {
-  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes, machines: x.settings.machines ?? [] }), shallowEqual)
+  // `?? []` must stay OUT of the selector: a fresh array per snapshot never
+  // shallow-equals the last one and loops useSyncExternalStore until React's
+  // update-depth crash (only bites when no machines are saved)
+  const s = useConductorSelector(x => ({ agentTypes: x.agentTypes, machines: x.settings.machines }), shallowEqual)
+  const machines = s.machines ?? []
   const { updateTemplate, runTemplate } = useActions()
   const type = s.agentTypes.find(t => t.id === tpl.typeId)
   const preview = buildTemplateCommand(tpl, type, tpl.prompt.includes('{task}') ? '<task>' : undefined)
@@ -116,11 +120,11 @@ function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => v
             />
           </Field>
 
-          {s.machines.length > 0 && (
+          {machines.length > 0 && (
             <Field label="RUN ON" hint={tpl.machineId ? 'over SSH + tmux; the working directory is on the remote host' : 'this machine'}>
               <select value={tpl.machineId ?? ''} onChange={e => upd({ machineId: e.target.value || undefined })} className="select-field" style={FIELD_STYLE}>
                 <option value="">This machine (local)</option>
-                {s.machines.map(m => {
+                {machines.map(m => {
                   const incomplete = !m.host?.trim() || !m.user?.trim()
                   return <option key={m.id} value={m.id} disabled={incomplete}>{m.label || 'Unnamed'}{incomplete ? ' · incomplete' : ` · ${m.user}@${m.host}`}</option>
                 })}
