@@ -267,6 +267,10 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
         .map(aid => st.agents.find(a => a.id === aid)?.worktree)
         .find(Boolean)
       if (wt) {
+        const live = (task.agentIds ?? [])
+          .map(aid => st.agents.find(a => a.id === aid))
+          .find(a => a?.status === 'running' || a?.status === 'needs')
+        if (live) return `stop session “${live.name}” before approving and removing its worktree`
         const results = await worktreeMerge(wt.root, `yaam: ${task.title.slice(0, 60)}`).catch(e => [
           { name: 'worktree', status: 'error', detail: e instanceof Error ? e.message : String(e) },
         ])
@@ -275,11 +279,19 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
           ctx.pushTaskChat(taskId, 'system', `Merge failed; the task stays in review.\n${summary}`)
           return summary
         }
-        await worktreeRemove(wt.root).catch(() => {})
+        try {
+          await worktreeRemove(wt.root)
+        } catch (e) {
+          const detail = `changes merged, but worktree cleanup failed: ${e instanceof Error ? e.message : String(e)}`
+          ctx.pushTaskChat(taskId, 'system', `${detail}. The task stays in review so cleanup can be retried.`)
+          return detail
+        }
         // the mirror is gone — follow-up sessions must not try to re-enter it
         dispatch(s => ({
           ...s,
-          agents: s.agents.map(a => (task.agentIds ?? []).includes(a.id) ? { ...a, worktree: undefined } : a),
+          agents: s.agents.map(a => (task.agentIds ?? []).includes(a.id)
+            ? { ...a, cwd: a.worktree?.base ?? a.cwd, worktree: undefined }
+            : a),
         }))
         ctx.pushTaskChat(taskId, 'system', `Review approved — merged back into the original checkout.\n${summary}`)
       } else {

@@ -55,6 +55,7 @@ describe('mergeSessionWorktree', () => {
     expect(worktreeRemove).toHaveBeenCalledWith('/wt')
     const a = useAppStore.getState().agents.find(x => x.id === 'a1')!
     expect(a.worktree).toBeUndefined()
+    expect(a.cwd).toBe('/repo')
     expect(a.log.some(l => l.t === 'sys' && l.x.includes('merged back'))).toBe(true)
     expect(c.logEvent).toHaveBeenCalledWith('done', 'a1', expect.stringContaining('Iso Worker'))
   })
@@ -74,5 +75,29 @@ describe('mergeSessionWorktree', () => {
     const err = await createSessionActions(ctx()).mergeSessionWorktree('a1')
     expect(err).toContain('no worktree')
     expect(worktreeMerge).not.toHaveBeenCalled()
+  })
+
+  it('keeps the worktree recoverable when cleanup fails after merging', async () => {
+    vi.mocked(worktreeRemove).mockRejectedValueOnce(new Error('directory busy'))
+    const err = await createSessionActions(ctx()).mergeSessionWorktree('a1')
+    expect(err).toContain('cleanup failed')
+    expect(useAppStore.getState().agents.find(x => x.id === 'a1')).toMatchObject({
+      cwd: '/wt/repo', worktree: { root: '/wt' },
+    })
+  })
+
+  it('refuses to remove a worktree while its session is live', async () => {
+    useAppStore.setState({ agents: [agent({ status: 'running' })] } as Partial<AppState> as AppState)
+    const actions = createSessionActions(ctx())
+    await expect(actions.mergeSessionWorktree('a1')).resolves.toContain('stop the session')
+    await expect(actions.discardSessionWorktree('a1')).resolves.toContain('stop the session')
+    expect(worktreeMerge).not.toHaveBeenCalled()
+    expect(worktreeRemove).not.toHaveBeenCalled()
+  })
+
+  it('discard restores the original working folder after cleanup', async () => {
+    const err = await createSessionActions(ctx()).discardSessionWorktree('a1')
+    expect(err).toBe('')
+    expect(useAppStore.getState().agents.find(x => x.id === 'a1')).toMatchObject({ cwd: '/repo', worktree: undefined })
   })
 })

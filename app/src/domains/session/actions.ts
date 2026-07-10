@@ -68,16 +68,21 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
     mergeSessionWorktree: async (id, message) => {
       const agent = ctx.stateRef.current.agents.find(a => a.id === id)
       if (!agent?.worktree) return 'this session has no worktree'
+      if (agent.status === 'running' || agent.status === 'needs') return 'stop the session before merging its worktree'
       const results = await worktreeMerge(agent.worktree.root, message?.trim() || `yaam: ${agent.name.slice(0, 60)}`).catch(e => [
         { name: 'worktree', status: 'error', detail: e instanceof Error ? e.message : String(e) },
       ])
       const summary = results.map(r => `${r.name}: ${r.status}${r.detail ? ` — ${r.detail}` : ''}`).join('\n')
       if (results.some(r => r.status === 'error')) return summary
-      await worktreeRemove(agent.worktree.root).catch(() => {})
+      try {
+        await worktreeRemove(agent.worktree.root)
+      } catch (e) {
+        return `changes merged, but worktree cleanup failed: ${e instanceof Error ? e.message : String(e)}`
+      }
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
-          ? { ...a, worktree: undefined, log: a.log.concat([{ t: 'sys' as const, x: `worktree merged back:\n${summary}` }]) }
+          ? { ...a, cwd: agent.worktree!.base, worktree: undefined, log: a.log.concat([{ t: 'sys' as const, x: `worktree merged back:\n${summary}` }]) }
           : a),
       }))
       ctx.logEvent('done', id, `Merged worktree changes from “${agent.name}”`)
@@ -88,6 +93,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
     discardSessionWorktree: async id => {
       const agent = ctx.stateRef.current.agents.find(a => a.id === id)
       if (!agent?.worktree) return 'this session has no worktree'
+      if (agent.status === 'running' || agent.status === 'needs') return 'stop the session before discarding its worktree'
       try {
         await worktreeRemove(agent.worktree.root)
       } catch (e) {
@@ -96,7 +102,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
-          ? { ...a, worktree: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'worktree discarded — changes were not merged' }]) }
+          ? { ...a, cwd: agent.worktree!.base, worktree: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'worktree discarded — changes were not merged' }]) }
           : a),
       }))
       ctx.logEvent('edit', id, `Discarded worktree of “${agent.name}”`)

@@ -91,7 +91,7 @@ describe('review queue actions', () => {
     expect(worktreeRemove).toHaveBeenCalledWith('/wt')
     expect(getTask('t1')?.col).toBe('done')
     // the removed mirror must not be re-entered by follow-up sessions
-    expect(useAppStore.getState().agents.find(a => a.id === 'a1')?.worktree).toBeUndefined()
+    expect(useAppStore.getState().agents.find(a => a.id === 'a1')).toMatchObject({ cwd: '/repo', worktree: undefined })
     expect(c.pushTaskChat).toHaveBeenCalledWith('t1', 'system', expect.stringContaining('merged back'))
   })
 
@@ -104,6 +104,22 @@ describe('review queue actions', () => {
     const err = await createBoardActions(c).approveTaskReview('t1')
     expect(err).toContain('api: error')
     expect(worktreeRemove).not.toHaveBeenCalled()
+    expect(getTask('t1')?.col).toBe('review')
+  })
+
+  it('keeps the task and worktree recoverable when cleanup fails', async () => {
+    vi.mocked(worktreeRemove).mockRejectedValueOnce(new Error('directory busy'))
+    const err = await createBoardActions(ctx()).approveTaskReview('t1')
+    expect(err).toContain('cleanup failed')
+    expect(getTask('t1')?.col).toBe('review')
+    expect(useAppStore.getState().agents.find(a => a.id === 'a1')).toMatchObject({ cwd: '/wt/repo', worktree: { root: '/wt' } })
+  })
+
+  it('refuses review cleanup while a task session is live', async () => {
+    seed([task()], [agent({ status: 'running' })])
+    const err = await createBoardActions(ctx()).approveTaskReview('t1')
+    expect(err).toContain('stop session')
+    expect(worktreeMerge).not.toHaveBeenCalled()
     expect(getTask('t1')?.col).toBe('review')
   })
 
