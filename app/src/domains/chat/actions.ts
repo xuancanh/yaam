@@ -22,6 +22,7 @@ export interface ChatActionsCtx {
   replayChatMessage: (agentId: string, turnId: string, text: string, atts?: ChatAttachment[]) => void
   resetChatRuntime: (agentId: string) => void
   resolveChatApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
+  compactChatContext: (agentId: string) => Promise<string>
   skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
 }
 
@@ -42,6 +43,8 @@ export interface ChatActions {
   forkChatTurn: (agentId: string, turnId: string, text: string, atts?: ChatAttachment[]) => string | null
   promoteChatTurn: (agentId: string, turnId: string) => string | null
   clearChat: (agentId: string) => void
+  /** distill the API context into a summary (manual /compact) */
+  compactChat: (agentId: string) => Promise<string>
   setChatComposer: (agentId: string, patch: Partial<ChatComposerState>) => void
   setChatPinned: (agentId: string, pinned: boolean) => void
   setChatTags: (agentId: string, tags: string[]) => void
@@ -194,6 +197,8 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
     },
 
     stopChat: agentId => ctx.stopChatMessage(agentId),
+
+    compactChat: agentId => ctx.compactChatContext(agentId),
 
     retryChat: agentId => ctx.retryChatMessage(agentId),
 

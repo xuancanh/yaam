@@ -454,6 +454,12 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     // durable agents: distill enough-new conversation into journal + lessons
     // in the background (threshold lives inside; failures are silent)
     void reflectDurableConversation(ctx, agentId).catch(() => {})
+    // auto-compact: when this turn's input context reached the limit, distill
+    // the API history into a summary in the background (0 disables)
+    const compactAt = ctx.stateRef.current.settings.chatCompactTokens ?? DEFAULT_COMPACT_TOKENS
+    if (usage && compactAt > 0 && usage.inputTokens >= compactAt) {
+      void compactConversation(ctx, agentId).catch(() => {})
+    }
     // auto-title: after a successful turn, chats still carrying the default
     // type name get a short LLM-derived title (a manual rename always wins)
     if (ctx.stateRef.current.agents.find(a => a.id === agentId)?.nameIsDefault) {
@@ -525,4 +531,50 @@ export async function reflectDurableConversation(ctx: ChatCtx, conversationId: s
     agents: s.agents.map(a => (a.id === conversationId ? { ...a, reflectedAt: Date.now() } : a)),
   }))
   return `reflected · journal updated${reflection.lessons.length ? ` · ${reflection.lessons.length} lesson(s) learned` : ''}`
+}
+
+/** Default auto-compact trigger: one turn's input tokens reaching this. */
+export const DEFAULT_COMPACT_TOKENS = 80_000
+
+/** Compact a conversation's API context: distill the transcript into a
+ *  structured summary, reseed the private history with it, and persist it as
+ *  the context summary (so a restart keeps the compacted context too). The
+ *  visible transcript is untouched. Returns a status line. */
+export async function compactConversation(ctx: ChatCtx, agentId: string, force = false): Promise<string> {
+  const st = ctx.stateRef.current
+  const agent = st.agents.find(a => a.id === agentId)
+  if (!agent || agent.kind !== 'chat') return 'not a chat session'
+  if (ctx.busy.has(agentId)) return 'the agent is mid-turn — try again when it finishes'
+  const msgs = (agent.chatLog ?? []).filter(m => m.role === 'user' || m.role === 'assistant')
+  if (msgs.length < (force ? 2 : 8)) return 'nothing to compact yet'
+  const chatType = st.chatAgentTypes.find(t => t.id === agent.chatTypeId) ?? st.chatAgentTypes.find(t => t.enabled)
+  if (!chatType || !chatTypeHasCreds(chatType, st.settings)) return 'no chat credentials available for compaction'
+
+  const transcript = msgs.map(m => `${m.role === 'user' ? 'USER' : 'AGENT'}: ${m.text.slice(0, 1500)}`).join('\n').slice(-28_000)
+  const res = await callApi(
+    buildChatCfg(chatType, st.settings),
+    'You compact a long conversation so the agent can continue with a fraction of the context. Write a dense, structured summary the agent can rely on as its ONLY memory of the conversation: ' +
+    'GOAL (what the user is trying to achieve) · CURRENT STATE (what has been done, key results) · DECISIONS & PREFERENCES (choices made, corrections given) · KEY FACTS (paths, names, commands, values that will be needed again) · OPEN ITEMS (what remains / what was in flight). ' +
+    'Be specific — exact file paths, exact names. No preamble, no meta commentary.',
+    [{ role: 'user', content: `Conversation to compact:\n\n${transcript}` }],
+    [],
+  )
+  const summary = res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
+  if (!summary) return 'compaction produced nothing'
+
+  // reseed the private API history: summary in, old rounds out
+  const history = ctx.histories.get(agentId) ?? []
+  const dropped = history.length
+  history.length = 0
+  history.push({ role: 'user', content: `[The conversation so far was compacted to save context. Structured summary — treat it as your memory of everything above:]\n\n${summary}\n\n[Continue seamlessly; the user still sees the full transcript.]` })
+  history.push({ role: 'assistant', content: 'Understood — continuing from the compacted summary.' })
+  ctx.histories.set(agentId, history)
+
+  // persist: a restart rebuilds context from chatContextSummary
+  ctx.dispatch(s => ({
+    ...s,
+    agents: s.agents.map(a => (a.id === agentId ? { ...a, chatContextSummary: summary.slice(0, 6000) } : a)),
+  }))
+  ctx.pushChatLog(agentId, { role: 'tool', text: `context compacted — ${dropped || msgs.length} entries distilled into a ${summary.length}-char summary` })
+  return `compacted · ${dropped || msgs.length} context entries → ${summary.length}-char summary`
 }

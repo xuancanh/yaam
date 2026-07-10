@@ -298,7 +298,7 @@ export function SettingsView() {
                 {SHELLS.map(sh => <option key={sh} value={sh}>{sh}</option>)}
               </select>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Default working directory</div>
                 <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>Prefilled in the new-session dialog.</div>
@@ -310,6 +310,22 @@ export function SettingsView() {
                 style={{ ...FIELD_STYLE, width: 220 }}
               />
               <button className="open-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={browseDefaultCwd}>Browse…</button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Chat auto-compact</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>When one turn's context reaches this many thousand tokens, the conversation is distilled into a summary (the transcript stays; /compact runs it manually). 0 disables.</div>
+              </div>
+              <DraftInput
+                value={String((s.settings.chatCompactTokens ?? 80_000) / 1000)}
+                onCommit={v => {
+                  const n = Number(v)
+                  if (Number.isFinite(n) && n >= 0) updateSettings({ chatCompactTokens: Math.round(n) * 1000 })
+                }}
+                placeholder="80"
+                style={{ ...FIELD_STYLE, width: 90 }}
+              />
+              <span className="mono" style={{ fontSize: 11, color: 'var(--dim)', flexShrink: 0 }}>k tokens</span>
             </div>
           </div>
 

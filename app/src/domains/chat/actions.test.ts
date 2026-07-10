@@ -21,7 +21,7 @@ describe('chat composer actions', () => {
       dispatch: update => { state = update(state); stateRef.current = state },
       logEvent: vi.fn(), runChatMessage: vi.fn(), stopChatMessage: vi.fn(), retryChatMessage: vi.fn(),
       replayChatMessage: vi.fn(),
-      resetChatRuntime: vi.fn(), resolveChatApproval: vi.fn(), skillCatalogs: { current: new Map() },
+      resetChatRuntime: vi.fn(), resolveChatApproval: vi.fn(), compactChatContext: vi.fn(async () => ''), skillCatalogs: { current: new Map() },
     })
 
     actions.setChatComposer('chat-1', { draft: 'revised' })
@@ -61,7 +61,7 @@ describe('chat composer actions', () => {
       stateRef,
       dispatch: update => { state = update(state); stateRef.current = state },
       logEvent: vi.fn(), runChatMessage: run, stopChatMessage: vi.fn(), retryChatMessage: vi.fn(), replayChatMessage: vi.fn(),
-      resetChatRuntime: vi.fn(), resolveChatApproval: vi.fn(), skillCatalogs: { current: new Map() },
+      resetChatRuntime: vi.fn(), resolveChatApproval: vi.fn(), compactChatContext: vi.fn(async () => ''), skillCatalogs: { current: new Map() },
     })
 
     const id = actions.forkChatTurn('chat-1', 't2', 'revised')

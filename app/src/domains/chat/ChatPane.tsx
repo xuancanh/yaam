@@ -43,6 +43,7 @@ async function loadAttachment(path: string): Promise<ChatAttachment> {
 /** built-in slash commands shown alongside skills */
 const BUILTINS = [
   { name: 'clear', description: 'Clear this conversation (transcript + context)' },
+  { name: 'compact', description: 'Compact the context — distill the conversation into a summary (transcript stays)' },
   { name: 'export', description: 'Export this conversation as markdown' },
 ]
 
@@ -322,7 +323,7 @@ function SlashMenu({ items, sel, onPick }: {
 }
 
 export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
-  const { sendChatMessage, sendQuickReply, stopChat, retryChat, editAndResendChat, forkChatTurn, clearChat, chatSkills, approveChatTool, setChatComposer } = useActions()
+  const { sendChatMessage, sendQuickReply, stopChat, retryChat, editAndResendChat, forkChatTurn, clearChat, compactChat, chatSkills, approveChatTool, setChatComposer } = useActions()
   const composer = agent.chatComposer ?? { draft: '', attachments: [], queue: [] }
   const draft = composer.draft
   const atts = composer.attachments
@@ -479,6 +480,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
     const msg = text.trim()
     if (!msg && !attachments?.length) return
     if (msg === '/clear') { clearChat(agent.id); setQueue([]); setAtts([]); return }
+    if (msg === '/compact') { void compactChat(agent.id).then(flashNote).catch(e => flashNote(`compact failed: ${e instanceof Error ? e.message : e}`)); return }
     if (msg === '/export') { void exportChat().catch(e => flashNote(`export failed: ${e instanceof Error ? e.message : e}`)); return }
     if (busy) {
       if (composer.sourceTurnId) { flashNote('wait for the current reply before revising history'); return }
@@ -504,7 +506,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   }
 
   const pickSlash = (name: string) => {
-    if (name === 'clear' || name === 'export') {
+    if (name === 'clear' || name === 'compact' || name === 'export') {
       submit(`/${name}`)
       setDraft('')
       return

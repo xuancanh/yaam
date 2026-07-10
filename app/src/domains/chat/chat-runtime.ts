@@ -8,7 +8,7 @@ import type { ApiMessage } from '../../master'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import { AbortRegistry } from '../../core/abort-registry'
-import { runChatMessageTurn } from './runner'
+import { compactConversation, runChatMessageTurn } from './runner'
 import type { ChatAttachment } from './runner'
 import { lastReplayableTurn, removeStructuredTurn, rewindFromTurn } from './turns'
 
@@ -32,6 +32,8 @@ export interface ChatRuntime {
   replay: (agentId: string, turnId: string, text: string, atts?: ChatAttachment[]) => void
   /** answer a pending ask-mode tool approval (by its chat-message id) */
   resolveApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
+  /** manually compact the conversation's API context into a summary */
+  compact: (agentId: string) => Promise<string>
   dispose: (id: string) => void
 }
 
@@ -110,6 +112,8 @@ export function createChatRuntime(ports: ChatPorts): ChatRuntime {
       histories.delete(agentId)
       run(agentId, text, atts ?? turn.input.attachments)
     },
+    compact: agentId =>
+      compactConversation({ ...ports, histories, busy, aborts, pendingApprovals }, agentId, true),
     resolveApproval: (agentId, msgId, rawDecision) => {
       const pending = pendingApprovals.get(msgId)
       if (!pending || pending.agentId !== agentId) return

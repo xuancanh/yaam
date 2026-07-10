@@ -623,6 +623,10 @@ export interface OrchestrationSettings {
   chatListWidth?: number
   /** Work view mode: tab groups & split panes, or the runs triage rail */
   workMode?: 'tabs' | 'runs'
+  /** auto-compact a chat once one turn's input reaches this many tokens:
+   *  the API context is distilled into a summary (the visible transcript is
+   *  untouched). undefined = default (80k) · 0 = off */
+  chatCompactTokens?: number
   /** user instructions appended to each assistant role's default system prompt */
   assistantPrompts?: {
     monitor?: string

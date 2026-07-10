@@ -30,6 +30,7 @@ export interface ChatBoot {
   replayChatMessage: ChatRuntime['replay']
   resetChatRuntime: ChatRuntime['dispose']
   resolveChatApproval: ChatRuntime['resolveApproval']
+  compactChatContext: ChatRuntime['compact']
   disposeSessionRuntime: (id: string) => void
   /** start persistence + search indexing + the one-shot hydration boot */
   start: () => void
@@ -74,6 +75,7 @@ export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: S
     retryChatMessage: chat.retry, resetChatRuntime: chat.dispose,
     replayChatMessage: chat.replay,
     resolveChatApproval: chat.resolveApproval,
+    compactChatContext: chat.compact,
     disposeSessionRuntime,
     start() {
       persistence.start()
