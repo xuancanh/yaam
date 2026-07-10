@@ -9,7 +9,7 @@ import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import type { Agent, ChatToolEvent } from '../../core/types'
 import { callApiStream } from '../../llm/client'
-import type { ApiContentBlock, ApiMessage, LlmConfig } from '../../llm/client'
+import type { ApiContentBlock, ApiMessage, ApiUsage, LlmConfig } from '../../llm/client'
 
 export interface ChatTurnEvent {
   /** delta = streamed text chunk · thinking = streamed reasoning chunk ·
@@ -502,7 +502,7 @@ export async function runChatTurn(
   signal?: AbortSignal,
   app?: ChatAppPort,
   memory?: string,
-): Promise<void> {
+): Promise<ApiUsage | undefined> {
   // a stopped/aborted turn can leave the history mid-tool-round (assistant
   // tool_use without its tool_result) — providers reject that; drop the debris.
   // Attachment messages (text+image block arrays) are NOT debris — only
@@ -512,9 +512,10 @@ export async function runChatTurn(
   while (history.length && isDangling(history[history.length - 1])) history.pop()
   history.push({ role: 'user', content: userText })
   const tools = [...builtinTools(skills), ...mcpToolDefs(mcp)]
+  let usage: ApiUsage | undefined
   for (let i = 0; i < 24; i++) {
     const agent = getAgent()
-    if (!agent) return
+    if (!agent) return usage
     const stream = () => callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory), history, tools,
       (d, ch) => onEvent({ kind: ch === 'thinking' ? 'thinking' : 'delta', text: d }), signal)
     let res: Awaited<ReturnType<typeof callApiStream>>
@@ -531,6 +532,10 @@ export async function runChatTurn(
       } else {
         throw e
       }
+    }
+    if (res.usage) usage = {
+      inputTokens: (usage?.inputTokens ?? 0) + res.usage.inputTokens,
+      outputTokens: (usage?.outputTokens ?? 0) + res.usage.outputTokens,
     }
     if (res.stop_reason !== 'tool_use') {
       const text = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
@@ -566,7 +571,13 @@ export async function runChatTurn(
             || (typeof input.path === 'string' && input.path) || ''
           const ok = await app.requestApproval(name, preview.slice(0, 300))
           if (!ok) {
-            return { type: 'tool_result', tool_use_id: b.id, content: 'The user declined this action. Do not retry it as-is — ask them or take another approach.' }
+            content = 'The user declined this action. Do not retry it as-is — ask them or take another approach.'
+            onEvent({
+              kind: 'tool',
+              text: `${name} — denied by user`,
+              tool: { id: b.id ?? `tool-${i}`, at: Date.now(), name, input: JSON.stringify(input).slice(0, 2_000), result: content, status: 'denied' },
+            })
+            return { type: 'tool_result', tool_use_id: b.id, content }
           }
         }
         try {
@@ -604,4 +615,5 @@ export async function runChatTurn(
   // cap the persistent conversation so long chats stay affordable
   while (history.length > 60) history.shift()
   if (history.length && history[0].role !== 'user') history.shift()
+  return usage
 }

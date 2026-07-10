@@ -80,6 +80,10 @@ export interface ChatTurn {
   assistantText?: string
   error?: string
   tools: ChatToolEvent[]
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+  }
 }
 
 export interface ChatQueuedMessage {

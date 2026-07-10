@@ -49,6 +49,30 @@ export interface ApiResponse {
   content: ApiContentBlock[]
   stop_reason: string
   error?: { message: string }
+  usage?: ApiUsage
+}
+
+export interface ApiUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
+export function normalizeApiUsage(raw: unknown): ApiUsage | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const root = raw as Record<string, unknown>
+  const value = root.usage && typeof root.usage === 'object' ? root.usage as Record<string, unknown> : root
+  const input = value.inputTokens ?? value.input_tokens ?? value.prompt_tokens
+  const output = value.outputTokens ?? value.output_tokens ?? value.completion_tokens
+  if (typeof input !== 'number' && typeof output !== 'number') return undefined
+  return {
+    inputTokens: typeof input === 'number' ? input : 0,
+    outputTokens: typeof output === 'number' ? output : 0,
+  }
+}
+
+function withNormalizedUsage(data: ApiResponse): ApiResponse {
+  const usage = normalizeApiUsage(data)
+  return usage ? { ...data, usage } : data
 }
 
 export type ApiMessage = { role: 'user' | 'assistant'; content: unknown }
@@ -135,7 +159,7 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
     // model id goes in the URL on Bedrock; auth is SigV4 in the backend
     const body = JSON.stringify({ anthropic_version: 'bedrock-2023-05-31', max_tokens: 8192, temperature: 0.2, system, messages, tools })
     const raw = await bedrockInvoke(cfg.awsRegion || 'us-east-1', cfg.awsProfile, cfg.awsRefreshCmd, cfg.credCmd, cfg.model, body)
-    return JSON.parse(raw) as ApiResponse
+    return withNormalizedUsage(JSON.parse(raw) as ApiResponse)
   }
   // Build the request with a supplied key so auth failures can refresh and retry once.
   const anthropicBase = (cfg.provider.id === 'anthropic-compat' ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
@@ -157,7 +181,7 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
   }
   const data = await res.json() as ApiResponse
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
-  return data
+  return withNormalizedUsage(data)
 }
 
 interface OaiToolCall {
@@ -236,6 +260,7 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
   }
   const data = await res.json() as {
     choices?: Array<{ message: OaiMessage; finish_reason: string }>
+    usage?: { prompt_tokens?: number; completion_tokens?: number }
     error?: { message: string }
   }
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
@@ -257,7 +282,7 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
     try { input = JSON.parse(tc.function.arguments || '{}') } catch { incompleteArgs = true }
     content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input, incompleteArgs })
   }
-  return { content, stop_reason: msg?.tool_calls?.length ? 'tool_use' : 'end_turn' }
+  return { content, stop_reason: msg?.tool_calls?.length ? 'tool_use' : 'end_turn', usage: normalizeApiUsage(data) }
 }
 
 /** Route a normalized LLM request to the configured wire-protocol adapter. */
@@ -379,10 +404,16 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
   const blocks: (ApiContentBlock & { partialJson?: string })[] = []
   let stopReason = 'end_turn'
   let streamError: string | null = null
+  let usage: ApiUsage | undefined
   await consumeSse(res, data => {
     let ev: Record<string, unknown>
     try { ev = JSON.parse(data) } catch { return }
     const index = Number(ev.index ?? 0)
+    const eventUsage = normalizeApiUsage(ev.type === 'message_start' ? ev.message : ev)
+    if (eventUsage) usage = {
+      inputTokens: Math.max(usage?.inputTokens ?? 0, eventUsage.inputTokens),
+      outputTokens: Math.max(usage?.outputTokens ?? 0, eventUsage.outputTokens),
+    }
     if (ev.type === 'content_block_start') {
       const cb = ev.content_block as { type: string; id?: string; name?: string; text?: string }
       blocks[index] = cb.type === 'tool_use'
@@ -416,7 +447,7 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
     try { input = JSON.parse(b.partialJson || '{}') } catch { incompleteArgs = true }
     return { type: 'tool_use', id: b.id, name: b.name, input, incompleteArgs }
   })
-  return { content, stop_reason: stopReason }
+  return { content, stop_reason: stopReason, usage }
 }
 
 /** Streaming OpenAI chat-completions call: content deltas flow through onDelta. */
@@ -435,6 +466,7 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
       max_tokens: 8192,
       temperature: 0.2,
       stream: true,
+      stream_options: { include_usage: true },
       messages: toOpenAiMessages(system, messages),
       tools: (tools as Array<{ name: string; description: string; input_schema: unknown }>).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
     }),
@@ -458,9 +490,11 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
   const splitter = makeThinkSplitter(route)
   const calls: { id: string; name: string; args: string }[] = []
   let finish = ''
+  let usage: ApiUsage | undefined
   await consumeSse(res, data => {
-    let ev: { choices?: Array<{ delta?: { content?: string; reasoning_content?: string; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string }> }
+    let ev: { choices?: Array<{ delta?: { content?: string; reasoning_content?: string; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string }>; usage?: { prompt_tokens?: number; completion_tokens?: number } }
     try { ev = JSON.parse(data) } catch { return }
+    usage = normalizeApiUsage(ev) ?? usage
     const c = ev.choices?.[0]
     if (!c) return
     if (c.delta?.content) splitter.push(c.delta.content)
@@ -484,7 +518,7 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
     try { input = JSON.parse(tc.args || '{}') } catch { incompleteArgs = true }
     content.push({ type: 'tool_use', id: tc.id, name: tc.name, input, incompleteArgs })
   }
-  return { content, stop_reason: calls.filter(Boolean).length || finish === 'tool_calls' ? 'tool_use' : 'end_turn' }
+  return { content, stop_reason: calls.filter(Boolean).length || finish === 'tool_calls' ? 'tool_use' : 'end_turn', usage }
 }
 
 /** Streaming variant of callApi: text deltas arrive through onDelta as the

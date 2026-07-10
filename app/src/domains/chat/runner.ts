@@ -14,6 +14,7 @@ import { mkId } from '../../shared/id'
 import type { AbortRegistry } from '../../core/abort-registry'
 import { isAbortError } from '../../core/abort-registry'
 import { readFileB64 } from '../../core/native'
+import { ESTIMATED_OUTPUT_COST_PER_KTOK } from '../../core/usage'
 
 export interface ChatCtx {
   stateRef: MutableRefObject<AppState>
@@ -285,7 +286,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       }
       if (finalText !== undefined) updateTurn({ assistantText: finalText })
     }
-    await runChatTurn(
+    const usage = await runChatTurn(
       buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
       () => ctx.stateRef.current.agents.find(a => a.id === agentId),
       skills,
@@ -320,7 +321,9 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
         } else {
           flushNow() // commit buffered deltas before inserting the tool trace
           ctx.pushChatLog(agentId, { role: 'tool', text: e.text, turnId })
-          if (e.tool) addToolEvent(e.tool)
+          addToolEvent(e.tool ?? {
+            id: mkId('tool'), at: Date.now(), name: 'notice', input: '', result: e.text, status: 'completed',
+          })
         }
       },
       persona || undefined,
@@ -329,7 +332,17 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       ctx.stateRef.current.chatMemory?.[agent.workspaceId ?? ctx.stateRef.current.activeWorkspace],
     )
     seal()
-    updateTurn({ status: 'complete', completedAt: Date.now() })
+    updateTurn({ status: 'complete', completedAt: Date.now(), ...(usage ? { usage } : {}) })
+    if (usage) {
+      ctx.dispatch(s2 => ({
+        ...s2,
+        agents: s2.agents.map(a => a.id === agentId ? {
+          ...a,
+          used: a.used + (usage.inputTokens + usage.outputTokens) / 1000,
+          cost: a.cost + usage.outputTokens / 1000 * ESTIMATED_OUTPUT_COST_PER_KTOK,
+        } : a),
+      }))
+    }
     // auto-title: after a successful turn, chats still carrying the default
     // type name get a short LLM-derived title (a manual rename always wins)
     if (ctx.stateRef.current.agents.find(a => a.id === agentId)?.nameIsDefault) {

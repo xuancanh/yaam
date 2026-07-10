@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useActions } from '../../store'
@@ -7,7 +7,7 @@ import { isTauri, pickFiles, pickSavePath, readFileB64, writeTextFile } from '..
 import { listMentionFiles, matchFiles } from './mentions'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import type { CatalogSkill } from '../../core/skills'
-import type { Agent, ChatAttachmentRecord, ChatMsg } from '../../core/types'
+import type { Agent, ChatAttachmentRecord, ChatMsg, ChatTurn } from '../../core/types'
 import type { ChatAttachment } from './runner'
 import { onAttachRequest } from './attach-bus'
 import { IC, Icon } from '../../components/ui'
@@ -120,13 +120,14 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
   )
 }
 
-function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, ok: boolean) => void; onArtifact?: (a: ChatArtifact) => void }) {
+function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, ok: boolean) => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
   if (m.role === 'thinking') return <ThinkingBubble m={m} live={!!live} />
   if (m.role === 'tool' && m.approval) {
     return <ApprovalBubble m={m} busy={!!busy} onDecide={ok => onApprove?.(m.id, ok)} />
   }
+  if (m.role === 'tool' && collapseTool) return null
   if (m.role === 'tool') {
     return (
       <div className="mono" title={m.text} style={{
@@ -196,6 +197,50 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact }: { m
           {canRetry && onRetry && <HoverBtn title="Retry — regenerate from the last message" paths={RETRY_IC} onClick={onRetry} />}
         </div>
       </div>
+    </div>
+  )
+}
+
+function TurnActivity({ turn }: { turn: ChatTurn }) {
+  const [open, setOpen] = useState(false)
+  if (!turn.tools.length && !turn.usage) return null
+  const failed = turn.tools.filter(t => t.status === 'failed' || t.status === 'truncated').length
+  const denied = turn.tools.filter(t => t.status === 'denied').length
+  const duration = turn.completedAt ? Math.max(0, turn.completedAt - turn.startedAt) : Date.now() - turn.startedAt
+  const durationText = duration < 1000 ? `${duration}ms` : `${(duration / 1000).toFixed(duration < 10_000 ? 1 : 0)}s`
+  const totalTokens = turn.usage ? turn.usage.inputTokens + turn.usage.outputTokens : null
+  const statusColor = failed ? 'var(--red-soft)' : denied ? 'var(--amber)' : turn.status === 'running' ? 'var(--accent)' : 'var(--dim)'
+  return (
+    <div style={{ margin: '0 4px', paddingLeft: 10, borderLeft: '2px solid var(--line2)' }}>
+      <button
+        className="mono"
+        onClick={() => setOpen(v => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', padding: '3px 0', border: 'none', background: 'transparent', color: statusColor, cursor: 'pointer', textAlign: 'left', fontSize: 10.5 }}
+      >
+        <span style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▸</span>
+        <span>{turn.status === 'running' ? 'Working' : `Worked through ${turn.tools.length} action${turn.tools.length === 1 ? '' : 's'}`}</span>
+        {failed > 0 && <span>· {failed} failed</span>}
+        {denied > 0 && <span>· {denied} denied</span>}
+        <span style={{ color: 'var(--faint)' }}>· {durationText}{totalTokens !== null ? ` · ${totalTokens.toLocaleString()} tok` : ''}</span>
+      </button>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '6px 0 8px 16px' }}>
+          <div className="mono" style={{ fontSize: 9.5, color: 'var(--faint)' }}>
+            {turn.model}{turn.usage ? ` · ${turn.usage.inputTokens.toLocaleString()} in / ${turn.usage.outputTokens.toLocaleString()} out` : ' · usage unavailable'}
+          </div>
+          {turn.tools.map(tool => (
+            <div key={tool.id} style={{ minWidth: 0 }}>
+              <div className="mono" style={{ display: 'flex', gap: 7, fontSize: 10.5, color: tool.status === 'completed' ? 'var(--mut)' : tool.status === 'denied' ? 'var(--amber)' : 'var(--red-soft)' }}>
+                <strong style={{ color: 'var(--text)' }}>{tool.name}</strong>
+                <span>{tool.status}</span>
+                <span style={{ marginLeft: 'auto', color: 'var(--faint)' }}>{new Date(tool.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+              </div>
+              {tool.input && <pre className="mono" style={{ margin: '4px 0 0', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 5, fontSize: 10, color: 'var(--dim)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 110, overflowY: 'auto' }}>{tool.input}</pre>}
+              {tool.result && <pre className="mono" style={{ margin: '3px 0 0', padding: '6px 8px', fontSize: 10, color: 'var(--mut)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 130, overflowY: 'auto' }}>{tool.result}</pre>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -329,6 +374,9 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   const dequeuedRef = useRef(false)
   const log = agent.chatLog ?? []
   const busy = agent.status === 'running'
+  const turns = new Map((agent.chatTurns ?? []).map(t => [t.id, t]))
+  const lastMessageByTurn = new Map<string, string>()
+  for (const message of log) if (message.turnId) lastMessageByTurn.set(message.turnId, message.id)
 
   // slash menu: draft is a single line starting with "/" → filter skills + built-ins
   const slashQuery = /^\/([\w.-]*)$/.exec(draft.split('\n')[0]) && !draft.includes('\n') ? draft.slice(1) : null
@@ -502,18 +550,25 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
       <div ref={scrollRef} style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '16px 36px' }}>
         {/* ChatGPT-style readable column: content centered at a comfortable width */}
         <div style={{ maxWidth: 860, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--chat-gap)' }}>
-          {log.map((m, i) => (
-            <Bubble
-              key={m.id}
-              m={m}
-              live={busy && i === log.length - 1}
-              canRetry={m.id === lastAssistantId && hasUserMsg}
-              onRetry={() => retryChat(agent.id)}
-              busy={busy}
-              onApprove={(msgId, ok) => approveChatTool(agent.id, msgId, ok)}
-              onArtifact={setArtifact}
-            />
-          ))}
+          {log.map((m, i) => {
+            const turn = m.turnId ? turns.get(m.turnId) : undefined
+            const lastInTurn = !!turn && lastMessageByTurn.get(turn.id) === m.id
+            return (
+              <Fragment key={m.id}>
+                <Bubble
+                  m={m}
+                  live={busy && i === log.length - 1}
+                  canRetry={m.id === lastAssistantId && hasUserMsg}
+                  onRetry={() => retryChat(agent.id)}
+                  busy={busy}
+                  onApprove={(msgId, ok) => approveChatTool(agent.id, msgId, ok)}
+                  onArtifact={setArtifact}
+                  collapseTool={!!turn && turn.status !== 'running'}
+                />
+                {lastInTurn && <TurnActivity turn={turn} />}
+              </Fragment>
+            )
+          })}
           {busy && log[log.length - 1]?.role !== 'assistant' && (
             <div style={{ display: 'flex', flexShrink: 0, alignItems: 'center', gap: 9, padding: '4px 4px' }}>
               <span className="typing-dots"><span /><span /><span /></span>
