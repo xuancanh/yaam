@@ -621,8 +621,8 @@ export interface OrchestrationSettings {
   sidebarHidden?: boolean
   /** Chat view conversation-list width (px, drag-resizable) */
   chatListWidth?: number
-  /** Control Center view: the Runs triage cockpit or the Fleet overview */
-  controlView?: 'runs' | 'fleet'
+  /** Work view mode: tab groups & split panes, or the runs triage rail */
+  workMode?: 'tabs' | 'runs'
   /** user instructions appended to each assistant role's default system prompt */
   assistantPrompts?: {
     monitor?: string

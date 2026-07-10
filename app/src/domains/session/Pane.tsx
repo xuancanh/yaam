@@ -1,14 +1,17 @@
-import { useRef, useState } from 'react'
-import { useActions } from '../../store'
+import { useMemo, useRef, useState } from 'react'
+import { useActions, useConductorSelector } from '../../store'
 import { ACCENT, memTokens } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
 import { ChatPane } from '../chat/ChatPane'
+import { TaskReviewFooter } from '../board/WatcherChat'
 import { FilesPane } from './FilesPane'
-import { GitPopup, GitSidePanel } from './GitPanel'
+import { GitPopup, GitWorkbench } from './GitPanel'
+import { sessionFs } from './remote-native'
 import { SuggestionChips } from './SuggestionChips'
 import { TerminalPane } from './TerminalPane'
+import { WorktreeMergeBar } from './WorktreeMergeBar'
 
 // explorer/changes visibility survives tab switches (panes remount freely)
 const filesOpenCache = new Map<string, boolean>()
@@ -18,12 +21,19 @@ const gitOpenCache = new Map<string, boolean>()
 type GitDock = 'right' | 'bottom'
 const gitDockCache = new Map<string, GitDock>()
 
-/** Render one terminal pane with session controls and optional file explorer. */
-export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
+/** Render one terminal pane with session controls and optional file explorer.
+ *  `standalone` hosts the pane outside the tab-group grid (the Runs rail):
+ *  grid-only controls (minimize / maximize / pane focus) disappear. */
+export function Pane({ agent, index, active, showRing, maximized, standalone }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean; standalone?: boolean }) {
   const { setActivePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession, refreshTerminal, archiveSession } = useActions()
+  // the board task this session is working (drives the review footer in Changes)
+  const task = useConductorSelector(x => x.tasks.find(t => !t.archived && t.agentId === agent.id))
+  const fs = useMemo(() => sessionFs(agent.machine, agent.id), [agent.machine, agent.id])
   const machineLabel = agent.machine ? (agent.machine.label || 'remote') : ''
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
-  const [gitOpen, setGitOpen] = useState(gitOpenCache.get(agent.id) ?? false)
+  // a task waiting on review lands with its changes open (snapshot at mount —
+  // live task updates must not fight the user's toggle)
+  const [gitOpen, setGitOpen] = useState(() => gitOpenCache.get(agent.id) ?? task?.col === 'review')
   const [gitDock, setGitDock] = useState<GitDock>(gitDockCache.get(agent.id) ?? 'right')
   const [gitPopup, setGitPopup] = useState(false)
   const setDock = (d: GitDock) => { gitDockCache.set(agent.id, d); setGitDock(d) }
@@ -54,7 +64,7 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
 
   return (
     <div
-      onClick={() => setActivePane(index)}
+      onClick={() => { if (!standalone) setActivePane(index) }}
       style={{
         flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column',
         background: 'var(--bg2)', boxShadow: showRing && active ? `inset 0 0 0 1.5px ${ACCENT}` : 'none',
@@ -87,8 +97,8 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         {agent.cwd && (
           <button
             className="icon-btn"
-            title={gitOpen ? 'Hide the changes panel' : agent.worktree ? 'Changes — diff, stage, commit & merge the worktree back' : 'Changes — live diff, stage & commit beside the session'}
-            style={{ width: 27, height: 27, borderRadius: 7, color: gitOpen ? 'var(--accent)' : agent.worktree ? 'var(--amber)' : undefined }}
+            title={gitOpen ? 'Hide the changes panel' : task?.col === 'review' ? 'Changes — review the task: diff, approve & merge, or request changes' : agent.worktree ? 'Changes — diff, stage, commit & merge the worktree back' : 'Changes — live diff, stage & commit beside the session'}
+            style={{ width: 27, height: 27, borderRadius: 7, color: gitOpen ? 'var(--accent)' : task?.col === 'review' || agent.worktree ? 'var(--amber)' : undefined }}
             onClick={e => { e.stopPropagation(); setGitOpen(v => { gitOpenCache.set(agent.id, !v); return !v }) }}
           >
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={15} stroke={1.7} />
@@ -151,14 +161,18 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
             <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={13} stroke={1.8} />
           </button>
         )}
-        <button className="icon-btn" title="Minimize to dock" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); minimizePane(index) }}>
-          <Icon paths={['M5 19h14']} size={14} stroke={1.8} />
-        </button>
-        <button className="icon-btn" title={maximized ? 'Restore grid' : 'Maximize pane'} style={{ width: 27, height: 27, borderRadius: 7, color: maximized ? 'var(--accent)' : undefined }} onClick={e => { e.stopPropagation(); toggleMaximize(index) }}>
-          {maximized
-            ? <Icon paths={['M9 4v5H4', 'M15 4v5h5', 'M9 20v-5H4', 'M15 20v-5h5']} size={14} stroke={1.8} />
-            : <Icon paths={['M4 9V4h5', 'M20 9V4h-5', 'M4 15v5h5', 'M20 15v5h-5']} size={14} stroke={1.8} />}
-        </button>
+        {!standalone && (
+          <button className="icon-btn" title="Minimize to dock" style={{ width: 27, height: 27, borderRadius: 7 }} onClick={e => { e.stopPropagation(); minimizePane(index) }}>
+            <Icon paths={['M5 19h14']} size={14} stroke={1.8} />
+          </button>
+        )}
+        {!standalone && (
+          <button className="icon-btn" title={maximized ? 'Restore grid' : 'Maximize pane'} style={{ width: 27, height: 27, borderRadius: 7, color: maximized ? 'var(--accent)' : undefined }} onClick={e => { e.stopPropagation(); toggleMaximize(index) }}>
+            {maximized
+              ? <Icon paths={['M9 4v5H4', 'M15 4v5h5', 'M9 20v-5H4', 'M15 20v-5h5']} size={14} stroke={1.8} />
+              : <Icon paths={['M4 9V4h5', 'M20 9V4h-5', 'M4 15v5h5', 'M20 15v5h-5']} size={14} stroke={1.8} />}
+          </button>
+        )}
         <button
           className="icon-btn danger"
           title="Close session — stops the process and archives it (recoverable from Archived)"
@@ -234,7 +248,19 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
                 <Icon paths={IC.close} size={10} stroke={2} />
               </button>
             </div>
-            <GitSidePanel agent={agent} compact={gitDock === 'right'} />
+            <GitWorkbench
+              cwd={agent.cwd}
+              worktree={agent.worktree}
+              fs={fs}
+              compact={gitDock === 'right'}
+              footer={
+                task && task.col === 'review'
+                  ? <TaskReviewFooter task={task} onClose={() => { gitOpenCache.set(agent.id, false); setGitOpen(false) }} />
+                  : agent.worktree
+                    ? <WorktreeMergeBar agent={agent} />
+                    : undefined
+              }
+            />
           </div>
         )}
       </div>

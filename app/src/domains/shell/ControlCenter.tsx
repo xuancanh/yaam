@@ -2,7 +2,6 @@ import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { formatEstimatedTokens } from '../../core/usage'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from '../../components/ui'
 import { UsageSummary } from './UsageSummary'
-import { RunControl } from '../board/RunControl'
 import { confirmAction } from '../../components/Confirm'
 
 /** Compact inline token/cost readout with a slim budget bar for one agent row. */
@@ -32,42 +31,17 @@ function FleetStat({ label, value, tone }: { label: string; value: string | numb
   )
 }
 
-const CONTROL_VIEWS = [
-  { id: 'runs', label: 'Runs', hint: 'Work: every run in one triage list — terminal, watcher & changes without leaving the view' },
-  { id: 'fleet', label: 'Fleet', hint: 'Overview: session, chat & watched-task cards with usage and the archived shelf' },
-] as const
-
-/** Control Center: everything the agents are doing behind one rail stop —
- *  the Runs triage cockpit and the Fleet ops console. */
+/** Control Center: the fleet ops console — every session, chat & watched
+ *  task at a glance. (Run triage lives in the Work view's Runs mode.) */
 export function ControlCenter() {
-  const mode = useConductorSelector(x => x.settings.controlView ?? 'runs')
-  const { updateSettings } = useActions()
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <ViewHeader title="Control Center">
-        <div style={{ display: 'flex', gap: 2, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2, flexShrink: 0 }}>
-          {CONTROL_VIEWS.map(v => (
-            <button
-              key={v.id}
-              title={v.hint}
-              onClick={() => updateSettings({ controlView: v.id })}
-              style={{
-                border: 'none', borderRadius: 7, padding: '4px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
-                background: mode === v.id ? 'var(--panel2)' : 'transparent',
-                color: mode === v.id ? 'var(--accent)' : 'var(--mut)',
-              }}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
         <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>
-          {mode === 'runs'
-            ? 'Triage every run in one place — ⌘1–9 jumps between them'
-            : 'Every session, chat & watched task at a glance'}
+          Every session, chat & watched task at a glance — triage runs in Work → Runs
         </span>
       </ViewHeader>
-      {mode === 'runs' ? <RunControl /> : <FleetView />}
+      <FleetView />
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR } from '../../core/data'
 import type { Agent, TabGroup } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
+import { RunControl } from '../board/RunControl'
 import { NewSessionDialog } from './NewSessionDialog'
 import { Divider } from './Divider'
 import { Pane } from './Pane'
@@ -183,10 +184,12 @@ function EmptySlot({ index }: { index: number }) {
   )
 }
 
-/** Compose group/loose tabs, the active group's split grid, and the dock. */
+/** Compose the mode toggle, group/loose tabs, the active group's split grid,
+ *  and the dock — or, in Runs mode, the triage rail + session pane. */
 export function Workspace() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen }), shallowEqual)
-  const { focusTab, activateGroup, closeGroup, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit } = useActions()
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen, workMode: x.settings.workMode ?? 'tabs' }), shallowEqual)
+  const { focusTab, activateGroup, closeGroup, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit, updateSettings } = useActions()
+  const runsMode = s.workMode === 'runs'
   const byId = new Map(s.agents.map(a => [a.id, a]))
   const ag = s.groups.find(g => g.id === s.activeGroup)
   const slots: (string | null)[] = ag?.slots ?? [null]
@@ -244,7 +247,24 @@ export function Workspace() {
         height: 46, flexShrink: 0, background: 'var(--panel)', borderBottom: '1px solid var(--line)',
         display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px',
       }}>
+        <div style={{ display: 'flex', gap: 2, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2, flexShrink: 0, marginRight: 4 }}>
+          {([['tabs', 'Tabs'], ['runs', 'Runs']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              title={id === 'tabs' ? 'Tab groups & split panes' : 'Every run in one triage list — tasks and sessions, urgent first (⌘1–9 jumps)'}
+              onClick={() => updateSettings({ workMode: id })}
+              style={{
+                border: 'none', borderRadius: 7, padding: '4px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+                background: s.workMode === id ? 'var(--panel2)' : 'transparent',
+                color: s.workMode === id ? 'var(--accent)' : 'var(--mut)',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto' }}>
+          {!runsMode && <>
           {s.groups.map(g => {
             const members = g.slots
               .map((id, slot) => ({ agent: id ? byId.get(id) : undefined, slot }))
@@ -328,13 +348,15 @@ export function Workspace() {
               <span className="mono" style={repoStyle}>{a.repo}</span>
             </button>
           ))}
+          </>}
         </div>
-        <LayoutMenu group={ag} />
+        {!runsMode && <LayoutMenu group={ag} />}
         <button className="icon-btn" title="New agent session" onClick={openNewSession} style={{ width: 30, height: 30, flexShrink: 0, color: 'var(--mut2)' }}>
           <Icon paths={IC.plus} size={17} stroke={1.8} />
         </button>
       </div>
 
+      {runsMode ? <RunControl /> : (
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--line)' }}>
         {wsAgents.length === 0 && s.groups.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: 'var(--bg2)' }}>
@@ -387,7 +409,8 @@ export function Workspace() {
           ))
         )}
       </div>
-      {minimized.length > 0 && (
+      )}
+      {!runsMode && minimized.length > 0 && (
         <div style={{
           flexShrink: 0, background: 'var(--panel)', borderTop: '1px solid var(--line)',
           display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', overflowX: 'auto',
