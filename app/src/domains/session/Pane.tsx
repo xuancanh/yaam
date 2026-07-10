@@ -17,13 +17,13 @@ import { WorktreeMergeBar } from './WorktreeMergeBar'
 // explorer/changes visibility survives tab switches (panes remount freely)
 const filesOpenCache = new Map<string, boolean>()
 const gitOpenCache = new Map<string, boolean>()
-// where each panel docks — right (beside) or bottom (below, full width for
-// split layouts where a side dock is too cramped)
-type PanelDock = 'right' | 'bottom'
+// where each panel docks — left/right (beside) or bottom (below, full width
+// for split layouts where a side dock is too cramped)
+type PanelDock = 'left' | 'right' | 'bottom'
 const gitDockCache = new Map<string, PanelDock>()
 const filesDockCache = new Map<string, PanelDock>()
-// drag-resizable split ratios: the CENTER's share of the row/column
-const splitCache = new Map<string, { right: number; bottom: number }>()
+// drag-resizable split ratios: each dock area's share of the pane
+const splitCache = new Map<string, { left: number; right: number; bottom: number }>()
 
 /** Slim docked-panel header: label + dock switches + host extras + close,
  *  shared by the Files and Changes panels so they behave identically. */
@@ -38,6 +38,14 @@ function DockStrip({ label, dock, onDock, onPopup, onClose }: {
     <div style={{ height: 28, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, padding: '0 8px', borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
       <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: 'var(--dim)' }}>{label}</span>
       <div style={{ flex: 1 }} />
+      <button
+        className="icon-btn"
+        title="Dock to the left of the session"
+        style={{ width: 22, height: 22, borderRadius: 6, color: dock === 'left' ? 'var(--accent)' : undefined }}
+        onClick={e => { e.stopPropagation(); onDock('left') }}
+      >
+        <Icon paths={['M4 5h16v14H4z', 'M10 5v14']} size={12} stroke={1.7} />
+      </button>
       <button
         className="icon-btn"
         title="Dock to the right of the session"
@@ -94,9 +102,9 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
   const [gitPopup, setGitPopup] = useState(false)
   const setDock = (d: PanelDock) => { gitDockCache.set(agent.id, d); setGitDock(d) }
   const setFDock = (d: PanelDock) => { filesDockCache.set(agent.id, d); setFilesDock(d) }
-  // drag-resizable panel splits: the center's share of the width/height
-  const [split, setSplitState] = useState(() => splitCache.get(agent.id) ?? { right: 0.55, bottom: 0.58 })
-  const setSplit = (patch: Partial<{ right: number; bottom: number }>) =>
+  // drag-resizable panel splits: each dock area's share of the pane
+  const [split, setSplitState] = useState(() => splitCache.get(agent.id) ?? { left: 0.42, right: 0.45, bottom: 0.42 })
+  const setSplit = (patch: Partial<{ left: number; right: number; bottom: number }>) =>
     setSplitState(cur => {
       const next = { ...cur, ...patch }
       splitCache.set(agent.id, next)
@@ -288,50 +296,52 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             />
           </>
         )
-        const rightPanels = [
-          ...(filesPanel && filesDock === 'right' ? [filesPanel] : []),
-          ...(gitPanel && gitDock === 'right' ? [gitPanel] : []),
+        const sidePanels = (side: PanelDock) => [
+          ...(filesPanel && filesDock === side ? [filesPanel] : []),
+          ...(gitPanel && gitDock === side ? [gitPanel] : []),
         ]
-        const bottomPanels = [
-          ...(filesPanel && filesDock === 'bottom' ? [filesPanel] : []),
-          ...(gitPanel && gitDock === 'bottom' ? [gitPanel] : []),
-        ]
+        const leftPanels = sidePanels('left')
+        const rightPanels = sidePanels('right')
+        const bottomPanels = sidePanels('bottom')
+        // one dock area: panels stack (vertically beside, side-by-side below)
+        const dockArea = (panels: React.ReactNode[], dir: 'column' | 'row', size: number) => (
+          <div style={{
+            flexBasis: `${size * 100}%`, flexGrow: 0, flexShrink: 1,
+            minWidth: 0, minHeight: 0, display: 'flex', flexDirection: dir,
+          }}>
+            {panels.map((p, i) => (
+              <div key={i} style={{
+                flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--panel)',
+                ...(i > 0 ? (dir === 'column' ? { borderTop: '1px solid var(--line)' } : { borderLeft: '1px solid var(--line)' }) : {}),
+              }}>
+                {p}
+              </div>
+            ))}
+          </div>
+        )
         return (
           <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            <div style={{
-              flexBasis: bottomPanels.length ? `${split.bottom * 100}%` : undefined,
-              flexGrow: bottomPanels.length ? 0 : 1, flexShrink: 1,
-              minWidth: 0, minHeight: 0, display: 'flex',
-            }}>
-              <div style={{
-                flexBasis: rightPanels.length ? `${split.right * 100}%` : undefined,
-                flexGrow: rightPanels.length ? 0 : 1, flexShrink: 1,
-                minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
-              }}>
+            <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
+              {leftPanels.length > 0 && <>
+                {dockArea(leftPanels, 'column', split.left)}
+                <Divider dir="col" onRatio={r => setSplit({ left: r })} />
+                <div style={{ width: 1, flexShrink: 0, background: 'var(--line)' }} />
+              </>}
+              <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 {agent.kind === 'chat'
                   ? <ChatPane agent={agent} active={active} />
                   : <TerminalPane agent={agent} active={active} />}
               </div>
               {rightPanels.length > 0 && <>
-                <Divider dir="col" onRatio={r => setSplit({ right: r })} />
-                <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--line)' }}>
-                  {rightPanels.map((p, i) => (
-                    <div key={i} style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--panel)', borderTop: i > 0 ? '1px solid var(--line)' : undefined }}>
-                      {p}
-                    </div>
-                  ))}
-                </div>
+                <div style={{ width: 1, flexShrink: 0, background: 'var(--line)' }} />
+                <Divider dir="col" onRatio={r => setSplit({ right: 1 - r })} />
+                {dockArea(rightPanels, 'column', split.right)}
               </>}
             </div>
             {bottomPanels.length > 0 && <>
-              <Divider dir="row" onRatio={r => setSplit({ bottom: r })} />
-              <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', borderTop: '1px solid var(--line)' }}>
-                {bottomPanels.map((p, i) => (
-                  <div key={i} style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--panel)', borderLeft: i > 0 ? '1px solid var(--line)' : undefined }}>
-                    {p}
-                  </div>
-                ))}
-              </div>
+              <Divider dir="row" onRatio={r => setSplit({ bottom: 1 - r })} />
+              <div style={{ height: 1, flexShrink: 0, background: 'var(--line)' }} />
+              {dockArea(bottomPanels, 'row', split.bottom)}
             </>}
           </div>
         )
