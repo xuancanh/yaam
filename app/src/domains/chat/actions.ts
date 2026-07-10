@@ -9,6 +9,7 @@ import type { CatalogSkill } from '../../core/skills'
 import type { ChatAttachment } from './runner'
 import { mkId } from '../../shared/id'
 import { defaultDetail, mkMemory, mkTools } from '../../core/data'
+import { buildContextSummary } from './turns'
 
 export interface ChatActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -31,6 +32,7 @@ export interface ChatActions {
   retryChat: (agentId: string) => void
   editAndResendChat: (agentId: string, turnId: string, text: string, atts?: ChatAttachment[]) => void
   forkChatTurn: (agentId: string, turnId: string, text: string, atts?: ChatAttachment[]) => string | null
+  promoteChatTurn: (agentId: string, turnId: string) => string | null
   clearChat: (agentId: string) => void
   setChatComposer: (agentId: string, patch: Partial<ChatComposerState>) => void
   /** answer a pending ask-mode tool approval */
@@ -81,6 +83,34 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
       return id
     },
 
+    promoteChatTurn: (agentId, turnId) => {
+      const source = stateRef.current.agents.find(a => a.id === agentId)
+      const turn = source?.chatTurns?.find(t => t.id === turnId)
+      if (!source || !turn) return null
+      if (turn.promotedTaskId) return turn.promotedTaskId
+      const id = mkId('t')
+      const files = turn.input.attachments.map(a => a.path ?? a.name)
+      const toolNames = [...new Set(turn.tools.map(t => t.name))]
+      const description = [
+        `Source chat: ${source.name}`,
+        `Request:\n${turn.input.text}`,
+        turn.assistantText ? `Outcome:\n${turn.assistantText}` : '',
+        files.length ? `Attached files:\n${files.map(f => `- ${f}`).join('\n')}` : '',
+        toolNames.length ? `Activity: ${toolNames.join(', ')}` : '',
+      ].filter(Boolean).join('\n\n')
+      const title = turn.input.text.replace(/\s+/g, ' ').trim().slice(0, 72) || `${source.name} follow-up`
+      dispatch(s => ({
+        ...s,
+        tasks: [...s.tasks, { id, title, col: 'backlog', agentId: null, description, criteria: [], cwd: source.cwd }],
+        agents: s.agents.map(a => a.id === agentId ? {
+          ...a,
+          chatTurns: (a.chatTurns ?? []).map(t => t.id === turnId ? { ...t, promotedTaskId: id } : t),
+        } : a),
+      }))
+      ctx.logEvent('route', agentId, `Promoted a chat turn to board task “${title}”`)
+      return id
+    },
+
     openChat: id => dispatch(s => ({ ...s, activeChatId: id, ...(id ? { view: 'chat' as const } : {}) })),
 
     sendChatMessage: (agentId, text, atts) => {
@@ -115,6 +145,7 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
         chatTurns: keptTurns,
         chatLog: (source.chatLog ?? []).filter(m => !m.turnId || keptIds.has(m.turnId)),
         chatComposer: { draft: '', attachments: [], queue: [] },
+        chatContextSummary: buildContextSummary(keptTurns),
       }
       dispatch(s => ({ ...s, agents: [...s.agents, fork], activeChatId: id, view: 'chat' }))
       ctx.logEvent('route', id, `Forked chat “${source.name}”`)
@@ -127,7 +158,7 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === agentId
-          ? { ...a, chatLog: [], chatTurns: [], chatComposer: { draft: '', attachments: [], queue: [] }, status: 'idle' as const }
+          ? { ...a, chatLog: [], chatTurns: [], chatComposer: { draft: '', attachments: [], queue: [] }, chatContextSummary: undefined, status: 'idle' as const }
           : a),
       }))
     },

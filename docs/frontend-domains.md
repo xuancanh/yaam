@@ -365,8 +365,9 @@ Provide in-app LLM agents that operate on files and applications without a PTY.
 
 ### Implementation
 
-- `actions.ts` creates/selects chats, sends/stops/retries/clears, resolves inline
-  approvals, changes Ask/Auto mode, and returns available skills.
+- `actions.ts` creates/selects chats, sends/stops/retries/clears, edits/forks
+  turns, promotes outcomes to board tasks, resolves inline approvals, changes
+  Ask/Auto mode, and returns available skills.
 - `chat-runtime.ts` owns private API histories, busy state, abort controllers,
   and pending approval promises.
 - `runner.ts` resolves provider credentials, reconstructs history, attaches MCP
@@ -376,6 +377,8 @@ Provide in-app LLM agents that operate on files and applications without a PTY.
   24-round streaming loop.
 - `log.ts` appends bounded visible transcript entries and updates streaming
   messages.
+- `turns.ts` manages structured replay/rewind records and builds bounded
+  extractive context for older turns.
 - `search-indexer.ts` subscribes only to transcript-reference changes and
   debounces Tantivy reindexing.
 - `ChatView.tsx` provides chat selection and full-text search.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent, ChatTurn } from '../../core/types'
-import { lastReplayableTurn, removeStructuredTurn, rewindFromTurn } from './turns'
+import { buildContextSummary, lastReplayableTurn, removeStructuredTurn, rewindFromTurn } from './turns'
 
 const turn = (id: string, status: ChatTurn['status']): ChatTurn => ({
   id, status, at: 1, startedAt: 1, model: 'test', input: { text: id, attachments: [] }, tools: [],
@@ -40,5 +40,16 @@ describe('structured chat turns', () => {
     const next = rewindFromTurn(source, 'two')
     expect(next.chatTurns?.map(t => t.id)).toEqual(['one'])
     expect(next.chatLog?.map(m => m.id)).toEqual(['intro', 'one'])
+  })
+
+  it('summarizes only turns older than the recent context window', () => {
+    const many = Array.from({ length: 15 }, (_, i) => ({
+      ...turn(`turn-${i}`, 'complete'), at: Date.UTC(2026, 0, i + 1),
+      input: { text: `request ${i}`, attachments: [] }, assistantText: `answer ${i}`,
+    }))
+    const summary = buildContextSummary(many, 12)
+    expect(summary).toContain('request 0')
+    expect(summary).toContain('request 2')
+    expect(summary).not.toContain('request 3')
   })
 })

@@ -336,6 +336,11 @@ Visible transcripts are persisted. Tool and thinking messages are excluded
 when reconstructing provider history after restart. Chat transcript changes
 debounce a full rebuild of the in-memory Tantivy search index.
 
+New turns also persist a structured work record: original text and attachment
+descriptors, model, tool inputs/results, status, provider token usage, and any
+board-task handoff. Turns older than the recent provider window feed a bounded
+extractive context summary, preserving continuity without another LLM call.
+
 ## Board and schedule flow
 
 Board tasks carry a specification, acceptance criteria, column, optional

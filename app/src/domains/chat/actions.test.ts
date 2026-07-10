@@ -44,7 +44,7 @@ describe('chat composer actions', () => {
       ],
     } as unknown as Agent
     let state = {
-      agents: [chat], skills: [], skillRegistries: [], chatAgentTypes: [], settings: {}, activeWorkspace: 'ws',
+      agents: [chat], tasks: [], skills: [], skillRegistries: [], chatAgentTypes: [], settings: {}, activeWorkspace: 'ws',
     } as unknown as AppState
     const stateRef = { current: state }
     const run = vi.fn()
@@ -62,5 +62,9 @@ describe('chat composer actions', () => {
     expect(fork?.chatLog?.map(m => m.id)).toEqual(['intro', 'm1'])
     expect({ used: fork?.used, cost: fork?.cost }).toEqual({ used: 0, cost: 0 })
     expect(run).toHaveBeenCalledWith(id, 'revised', [])
+
+    const taskId = actions.promoteChatTurn('chat-1', 't2')
+    expect(state.tasks.find(t => t.id === taskId)).toMatchObject({ title: 'two', col: 'backlog', agentId: null })
+    expect(state.agents[0].chatTurns?.find(t => t.id === 't2')?.promotedTaskId).toBe(taskId)
   })
 })

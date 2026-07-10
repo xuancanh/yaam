@@ -15,6 +15,7 @@ import type { AbortRegistry } from '../../core/abort-registry'
 import { isAbortError } from '../../core/abort-registry'
 import { readFileB64 } from '../../core/native'
 import { ESTIMATED_OUTPUT_COST_PER_KTOK } from '../../core/usage'
+import { buildContextSummary } from './turns'
 
 export interface ChatCtx {
   stateRef: MutableRefObject<AppState>
@@ -333,6 +334,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       ctx.aborts.signal(agentId),
       makeAppPort(ctx, agentId, turnId),
       ctx.stateRef.current.chatMemory?.[agent.workspaceId ?? ctx.stateRef.current.activeWorkspace],
+      agent.chatContextSummary,
     )
     seal()
     updateTurn({ status: 'complete', completedAt: Date.now(), ...(usage ? { usage } : {}) })
@@ -346,6 +348,11 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
         } : a),
       }))
     }
+    const currentTurns = ctx.stateRef.current.agents.find(a => a.id === agentId)?.chatTurns ?? []
+    ctx.dispatch(s2 => ({
+      ...s2,
+      agents: s2.agents.map(a => a.id === agentId ? { ...a, chatContextSummary: buildContextSummary(currentTurns) } : a),
+    }))
     // auto-title: after a successful turn, chats still carrying the default
     // type name get a short LLM-derived title (a manual rename always wins)
     if (ctx.stateRef.current.agents.find(a => a.id === agentId)?.nameIsDefault) {

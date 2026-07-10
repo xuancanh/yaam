@@ -455,7 +455,7 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
   }
 }
 
-function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], persona?: string, memory?: string): string {
+function chatSystem(agent: Agent, skills: CatalogSkill[], mcp: McpSession[], persona?: string, memory?: string, contextSummary?: string): string {
   return `You are a chat agent inside YAAM (an agent-orchestration desktop app) — the user's hands-on assistant in this workspace, like a desktop Claude. You live in a pane named "${agent.name}".
 
 WORKING FOLDER: ${agent.cwd || '(none set — you cannot write files until the user sets one)'}
@@ -470,6 +470,10 @@ ${memory.trim()}
 ` : `
 MEMORY: empty. When you learn a stable fact worth keeping across conversations (a preference, a project convention, a decision), save it with the remember tool.
 `}
+${contextSummary ? `
+EARLIER CONVERSATION CONTEXT (extractive summary of turns outside the recent message window; verify before acting)
+${contextSummary}
+` : ''}
 
 RULES
 - Ground every claim in tool results; read before you edit; verify after you change (re-read or run the relevant check).
@@ -519,6 +523,7 @@ export async function runChatTurn(
   signal?: AbortSignal,
   app?: ChatAppPort,
   memory?: string,
+  contextSummary?: string,
 ): Promise<ApiUsage | undefined> {
   // a stopped/aborted turn can leave the history mid-tool-round (assistant
   // tool_use without its tool_result) — providers reject that; drop the debris.
@@ -527,13 +532,15 @@ export async function runChatTurn(
   const isDangling = (m: ApiMessage) => Array.isArray(m.content)
     && (m.content as ApiContentBlock[]).some(b => b.type === 'tool_use' || b.type === 'tool_result')
   while (history.length && isDangling(history[history.length - 1])) history.pop()
+  while (history.length > 58) history.shift()
+  while (history.length && history[0].role !== 'user') history.shift()
   history.push({ role: 'user', content: userText })
   const tools = [...builtinTools(skills), ...mcpToolDefs(mcp)]
   let usage: ApiUsage | undefined
   for (let i = 0; i < 24; i++) {
     const agent = getAgent()
     if (!agent) return usage
-    const stream = () => callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory), history, tools,
+    const stream = () => callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory, contextSummary), history, tools,
       (d, ch) => onEvent({ kind: ch === 'thinking' ? 'thinking' : 'delta', text: d }), signal)
     let res: Awaited<ReturnType<typeof callApiStream>>
     try {

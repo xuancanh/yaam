@@ -84,6 +84,7 @@ export interface ChatTurn {
     inputTokens: number
     outputTokens: number
   }
+  promotedTaskId?: string
 }
 
 export interface ChatQueuedMessage {
@@ -172,6 +173,8 @@ export interface SessionRecord {
   chatTurns?: ChatTurn[]
   /** durable unsent work so navigation and restarts do not discard it */
   chatComposer?: ChatComposerState
+  /** bounded extractive context for turns older than the provider history window */
+  chatContextSummary?: string
   /** name was never chosen by the user — safe to auto-title from the conversation */
   nameIsDefault?: boolean
   /** which ChatAgentType powers this chat session */
