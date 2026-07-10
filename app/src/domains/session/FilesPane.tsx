@@ -617,7 +617,7 @@ export function FilesPane({ agent, active, showSession = true }: { agent: Agent;
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{
-        width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0,
+        width: showSession ? 220 : 180, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0,
         background: 'var(--bg2)', borderRight: '1px solid var(--line)',
       }}>
         <div style={{

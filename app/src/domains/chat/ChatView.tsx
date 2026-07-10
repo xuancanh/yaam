@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { chatSearch, isTauri, pickFolder } from '../../core/native'
@@ -216,6 +216,16 @@ export function ChatView() {
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [tagsOpen, setTagsOpen] = useState(false)
   const [budgetOpen, setBudgetOpen] = useState(false)
+  const workbenchRef = useRef<HTMLDivElement>(null)
+  const [workbenchWidth, setWorkbenchWidth] = useState(0)
+  useEffect(() => {
+    const el = workbenchRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(entries => setWorkbenchWidth(entries[0]?.contentRect.width ?? 0))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  const compactWorkbench = workbenchWidth > 0 && workbenchWidth < 600
 
   // chats are workspace-specific (each carries the workspace it was created in)
   const inWorkspace = (a: Agent) => a.kind === 'chat'
@@ -359,8 +369,8 @@ export function ChatView() {
               background: 'var(--panel)', borderBottom: '1px solid var(--line)',
             }}>
               <EditableName name={selected.name} onRename={name => renameSession(selected.id, name)} fontSize={13.5} />
-              <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{selected.model}</span>
-              {selected.cwd && <span className="mono" style={{ fontSize: 10.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selected.cwd}</span>}
+              {!compactWorkbench && <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>{selected.model}</span>}
+              {!compactWorkbench && selected.cwd && <span className="mono" style={{ fontSize: 10.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selected.cwd}</span>}
               <div style={{ flex: 1 }} />
               <button className="mono" title="Set token budget" onClick={() => setBudgetOpen(true)} style={{ padding: '3px 8px', borderRadius: 6, border: '1px solid var(--line2)', background: 'transparent', color: selected.chatTokenBudget && selected.used * 1000 >= selected.chatTokenBudget ? 'var(--red-soft)' : 'var(--dim)', fontSize: 9.5, cursor: 'pointer' }}>
                 {compactTokens(selected.used * 1000)} / {selected.chatTokenBudget === 0 ? '∞' : compactTokens(selected.chatTokenBudget ?? 200_000)} tok
@@ -409,10 +419,15 @@ export function ChatView() {
                 <Icon paths={['M3 7a2 2 0 012-2h4l2 2h9a1 1 0 011 1v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z']} size={14} stroke={1.7} />
               </button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+            <div ref={workbenchRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', position: 'relative', overflow: 'hidden' }}>
               <ChatPane agent={selected} active />
               {filesOpen[selected.id] && (
-                <div style={{ width: '48%', minWidth: 360, maxWidth: 760, flexShrink: 0, display: 'flex', borderLeft: '1px solid var(--line)' }}>
+                <div style={compactWorkbench ? {
+                  position: 'absolute', inset: 0, zIndex: 12, display: 'flex', minWidth: 0,
+                  background: 'var(--bg2)',
+                } : {
+                  width: '48%', minWidth: 360, maxWidth: 760, flexShrink: 0, display: 'flex', borderLeft: '1px solid var(--line)',
+                }}>
                   <FilesPane agent={selected} active showSession={false} />
                 </div>
               )}
