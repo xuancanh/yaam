@@ -97,7 +97,7 @@ function HoverBtn({ title, paths, onClick }: { title: string; paths: string[]; o
 }
 
 /** Ask-mode approval prompt: Allow / Deny while the turn is paused on it. */
-function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDecide: (ok: boolean) => void }) {
+function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDecide: (decision: 'once' | 'always' | 'deny') => void }) {
   const pending = m.approval === 'pending'
   const verdict = m.approval === 'approved' ? '✓ allowed' : m.approval === 'denied' ? '✕ denied' : busy ? null : 'expired'
   return (
@@ -110,8 +110,9 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
         {verdict && <span className="mono" style={{ fontSize: 10.5, color: m.approval === 'approved' ? 'var(--green)' : 'var(--dim)', marginLeft: 'auto' }}>{verdict}</span>}
         {pending && busy && (
           <span style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-            <button className="approve-btn" style={{ padding: '3px 14px', fontSize: 11.5 }} onClick={() => onDecide(true)}>Allow</button>
-            <button className="open-btn" style={{ padding: '3px 14px', fontSize: 11.5 }} onClick={() => onDecide(false)}>Deny</button>
+            <button className="approve-btn" style={{ padding: '3px 12px', fontSize: 11 }} onClick={() => onDecide('once')}>Allow once</button>
+            <button className="open-btn" style={{ padding: '3px 12px', fontSize: 11 }} onClick={() => onDecide('always')}>Always allow</button>
+            <button className="open-btn" style={{ padding: '3px 12px', fontSize: 11 }} onClick={() => onDecide('deny')}>Deny</button>
           </span>
         )}
       </div>
@@ -122,7 +123,7 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
   )
 }
 
-function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, ok: boolean) => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void }) {
+function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
   if (m.role === 'thinking') return <ThinkingBubble m={m} live={!!live} />

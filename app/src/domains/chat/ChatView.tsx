@@ -312,7 +312,7 @@ export function ChatView() {
               <button
                 className="mono"
                 title={(selected.permMode ?? 'ask') === 'ask'
-                  ? 'Ask mode: shell commands, AppleScript, and deletions pause for your approval — click for auto'
+                  ? 'Ask mode: reads run automatically; mutations and external actions need approval — click for auto'
                   : 'Auto mode: risky tools run without asking — click to require approval'}
                 onClick={() => setChatPermMode(selected.id, (selected.permMode ?? 'ask') === 'ask' ? 'auto' : 'ask')}
                 style={{

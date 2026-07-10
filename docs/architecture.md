@@ -325,8 +325,9 @@ Chat sessions do not use PTYs. A provider-neutral streaming LLM loop combines:
 The loop supports 24 tool rounds, streams answer and thinking channels
 separately, refuses truncated tool arguments, and caps private history. Chat
 runtime state is keyed by chat id and cancellable through `AbortRegistry`.
-Risky built-ins (`run_command`, `run_applescript`, `delete_path`) pause for an
-inline approval in the default Ask mode; Auto mode bypasses that prompt.
+The default Ask mode runs read-only tools automatically and pauses mutations,
+process execution, raw HTTP, and MCP calls for inline approval. Users can allow
+once or remember the exact tool+preview for that chat; Auto bypasses prompts.
 Replies containing substantial HTML or SVG surface an artifact chip that opens
 the content in a sandboxed, network-denied side panel (the same iframe
 hardening the addon sandbox uses).

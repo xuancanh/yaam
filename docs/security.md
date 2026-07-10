@@ -108,16 +108,13 @@ an action without an action tool call.
 
 ### Chat agents
 
-Chat sessions default to Ask mode. The following built-ins create an inline
-approval bubble before execution:
-
-- `run_command`;
-- `run_applescript`;
-- `delete_path`.
-
-Approval promises are resolved by the user and cancelled if the chat is stopped
-or deleted. Auto mode deliberately bypasses these prompts. Truncated streaming
-tool arguments are never executed.
+Chat sessions default to Ask mode. Read-only file/navigation, web fetch, and
+list tools run automatically. File mutations, process/AppleScript execution,
+raw HTTP, MCP tools, and mutations to board, schedule, memory, or skills create
+an inline approval bubble before execution. Users can allow once, deny, or
+remember the exact tool+preview for that chat. Approval promises are cancelled
+if the chat is stopped or deleted. Auto mode deliberately bypasses prompts.
+Truncated streaming tool arguments are never executed.
 
 ### Monitors, watchers, and addon agents
 

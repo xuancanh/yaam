@@ -389,10 +389,11 @@ creation/edit/move/copy/delete, shell and AppleScript execution, web search,
 page fetch, raw HTTP, board/schedule operations, skill save/load, and connected
 MCP tools.
 
-`run_command`, `run_applescript`, and `delete_path` require inline approval in
-Ask mode. Write/edit paths are checked lexically in the frontend and
-canonically against the chat root by Rust. Tool arguments marked incomplete by
-the streaming parser are refused.
+Ask mode permits read-only tools and requires inline approval for mutations,
+process execution, raw HTTP, and MCP calls. Approvals can be one-shot or
+remembered for the exact action in that chat. Write/edit paths are checked
+lexically in the frontend and canonically against the chat root by Rust. Tool
+arguments marked incomplete by the streaming parser are refused.
 
 ### Attachments and history
 

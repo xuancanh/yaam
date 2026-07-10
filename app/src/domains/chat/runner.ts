@@ -30,7 +30,7 @@ export interface ChatCtx {
   flash: (t: string) => void
   refreshSkillCatalog: (id: string) => Promise<string>
   /** ask-mode gate: pending tool approvals by chat-message id */
-  pendingApprovals: Map<string, { agentId: string; resolve: (ok: boolean) => void }>
+  pendingApprovals: Map<string, { agentId: string; key: string; resolve: (decision: 'once' | 'always' | 'deny') => void }>
 }
 
 /** One file attached to an outgoing chat message. Text-ish files (and
@@ -54,12 +54,15 @@ function attachmentRecord(a: ChatAttachment): ChatAttachmentRecord {
 function makeAppPort(ctx: ChatCtx, agentId: string, turnId: string): ChatAppPort {
   return {
     requestApproval: (tool, preview) => {
+      const key = `${tool}\u0000${preview}`
+      const agent = ctx.stateRef.current.agents.find(a => a.id === agentId)
+      if (agent?.approvedToolCalls?.includes(key)) return Promise.resolve('always')
       const msgId = ctx.pushChatLog(agentId, { role: 'tool', text: `${tool} → ${preview}`, approval: 'pending', turnId })
-      return new Promise<boolean>(resolve => {
-        ctx.pendingApprovals.set(msgId, { agentId, resolve })
+      return new Promise<'once' | 'always' | 'deny'>(resolve => {
+        ctx.pendingApprovals.set(msgId, { agentId, key, resolve })
         // an aborted/stopped turn must not leave the promise hanging
         ctx.aborts.signal(agentId).addEventListener('abort', () => {
-          if (ctx.pendingApprovals.delete(msgId)) resolve(false)
+          if (ctx.pendingApprovals.delete(msgId)) resolve('deny')
         }, { once: true })
       })
     },

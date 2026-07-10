@@ -182,9 +182,11 @@ export interface SessionRecord {
   personaId?: string
   /** skill sources for this chat: 'local' and/or SkillRegistry ids */
   skillSourceIds?: string[]
-  /** chat tool safety: 'ask' (default) pauses shell/AppleScript/delete tool
-   *  calls for inline approval; 'auto' runs them without asking */
+  /** chat tool safety: 'ask' permits reads and pauses mutations/external actions;
+   *  'auto' runs every enabled tool without prompting */
   permMode?: 'ask' | 'auto'
+  /** exact tool+preview approvals remembered for this chat */
+  approvedToolCalls?: string[]
   /** git-worktree isolation this session runs in (cwd === workdir) */
   worktree?: { root: string; base: string; workdir: string }
   /** the PTY lives in a detached host process that outlives the app; the

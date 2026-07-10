@@ -30,7 +30,7 @@ const ident = (x: string) => x.replace(/[^a-zA-Z0-9_]/g, '_')
  *  runner against the store. Every method returns a human-readable result. */
 export interface ChatAppPort {
   /** ask-mode gate: render an inline approval prompt; resolves with the verdict */
-  requestApproval: (tool: string, preview: string) => Promise<boolean>
+  requestApproval: (tool: string, preview: string) => Promise<'once' | 'always' | 'deny'>
   listBoardTasks: () => string
   addBoardTask: (title: string, description?: string, criteria?: string[]) => string
   listSchedules: () => string
@@ -40,6 +40,23 @@ export interface ChatAppPort {
   saveSkill: (name: string, description: string, body: string) => string
   /** append one distilled fact to the workspace's durable memory */
   remember: (fact: string) => string
+}
+
+const READ_ONLY_TOOLS = new Set([
+  'list_dir', 'read_file', 'glob_files', 'grep_files', 'web_search', 'fetch_url',
+  'list_board_tasks', 'list_schedules', 'load_skill',
+])
+
+export function toolNeedsApproval(name: string): boolean {
+  return name.startsWith(MCP_PREFIX) || !READ_ONLY_TOOLS.has(name)
+}
+
+function approvalPreview(name: string, input: Record<string, unknown>): string {
+  const value = name === 'run_command' ? input.command
+    : name === 'run_applescript' ? input.script
+      : name === 'move_path' || name === 'copy_path' ? `${String(input.from ?? '')} → ${String(input.to ?? '')}`
+        : input.path ?? input.title ?? input.name ?? input.url
+  return (typeof value === 'string' && value ? value : JSON.stringify(input)).slice(0, 500)
 }
 
 /** single-quote a string for POSIX shells */
@@ -562,15 +579,11 @@ export async function runChatTurn(
           })
           return { type: 'tool_result', tool_use_id: b.id, content }
         }
-        // ask mode (the default): shell, AppleScript, and deletions pause for
-        // an inline user approval before running
-        const gated = name === 'run_command' || name === 'run_applescript' || name === 'delete_path'
+        // Ask mode permits reads but pauses every mutating/external capability.
+        const gated = toolNeedsApproval(name)
         if (gated && app && (getAgent()?.permMode ?? 'ask') !== 'auto') {
-          const preview = (typeof input.command === 'string' && input.command)
-            || (typeof input.script === 'string' && input.script)
-            || (typeof input.path === 'string' && input.path) || ''
-          const ok = await app.requestApproval(name, preview.slice(0, 300))
-          if (!ok) {
+          const decision = await app.requestApproval(name, approvalPreview(name, input))
+          if (decision === 'deny') {
             content = 'The user declined this action. Do not retry it as-is — ask them or take another approach.'
             onEvent({
               kind: 'tool',

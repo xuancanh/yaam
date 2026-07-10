@@ -31,7 +31,7 @@ export interface ChatRuntime {
   retry: (agentId: string) => void
   replay: (agentId: string, turnId: string, text: string, atts?: ChatAttachment[]) => void
   /** answer a pending ask-mode tool approval (by its chat-message id) */
-  resolveApproval: (agentId: string, msgId: string, ok: boolean) => void
+  resolveApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
   dispose: (id: string) => void
 }
 
@@ -39,7 +39,7 @@ export function createChatRuntime(ports: ChatPorts): ChatRuntime {
   const histories = new Map<string, ApiMessage[]>()
   const busy = new Set<string>()
   const aborts = new AbortRegistry()
-  const pendingApprovals = new Map<string, { agentId: string; resolve: (ok: boolean) => void }>()
+  const pendingApprovals = new Map<string, { agentId: string; key: string; resolve: (decision: 'once' | 'always' | 'deny') => void }>()
   const markApproval = (agentId: string, msgId: string, state: 'approved' | 'denied') => {
     ports.dispatch(s => ({
       ...s,
@@ -110,17 +110,26 @@ export function createChatRuntime(ports: ChatPorts): ChatRuntime {
       histories.delete(agentId)
       run(agentId, text, atts ?? turn.input.attachments)
     },
-    resolveApproval: (agentId, msgId, ok) => {
+    resolveApproval: (agentId, msgId, rawDecision) => {
       const pending = pendingApprovals.get(msgId)
       if (!pending || pending.agentId !== agentId) return
       pendingApprovals.delete(msgId)
-      markApproval(agentId, msgId, ok ? 'approved' : 'denied')
-      pending.resolve(ok)
+      const decision = typeof rawDecision === 'boolean' ? (rawDecision ? 'once' : 'deny') : rawDecision
+      markApproval(agentId, msgId, decision === 'deny' ? 'denied' : 'approved')
+      if (decision === 'always') {
+        ports.dispatch(s => ({
+          ...s,
+          agents: s.agents.map(a => a.id === agentId && !(a.approvedToolCalls ?? []).includes(pending.key)
+            ? { ...a, approvedToolCalls: [...(a.approvedToolCalls ?? []), pending.key].slice(-100) }
+            : a),
+        }))
+      }
+      pending.resolve(decision)
     },
     dispose: (id) => {
       aborts.abort(id) // cancel any in-flight chat reply for this session
       for (const [msgId, p] of pendingApprovals) {
-        if (p.agentId === id) { pendingApprovals.delete(msgId); p.resolve(false) }
+        if (p.agentId === id) { pendingApprovals.delete(msgId); p.resolve('deny') }
       }
       histories.delete(id)
       busy.delete(id)
