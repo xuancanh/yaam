@@ -5,7 +5,7 @@
 import type { Addon } from '../../core/types'
 import type { AddonApi } from '../../core/addons'
 import type { ApiMessage, LlmConfig } from '../../llm/client'
-import { runToolLoop } from '../../llm/tool-loop'
+import { runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
 
 // The API surface projected as LLM tools. Each entry maps a tool call onto
 // the (permission-enforced) AddonApi — denied scopes surface as tool errors.
@@ -183,6 +183,9 @@ export async function runAddonAgentTurn(
   api: AddonApi,
   signal?: AbortSignal,
 ): Promise<string> {
+  // a previous failed/aborted turn can leave dangling tool rounds — providers
+  // reject those, which would silence this agent on every later turn
+  sanitizeToolHistory(history)
   history.push({ role: 'user', content: note })
   const defs = AGENT_TOOLS.map(({ name, description, input_schema }) => ({ name, description, input_schema }))
   const { text: reply } = await runToolLoop({
@@ -195,7 +198,9 @@ export async function runAddonAgentTurn(
       return typeof out === 'string' ? out : JSON.stringify(out ?? 'ok')
     },
   })
+  // cap, then re-establish the invariants — a blind shift() can split a
+  // tool_use/tool_result pair or leave an orphaned tool_result at the head
   while (history.length > 24) history.shift()
-  if (history.length && history[0].role !== 'user') history.shift()
+  sanitizeToolHistory(history)
   return reply
 }

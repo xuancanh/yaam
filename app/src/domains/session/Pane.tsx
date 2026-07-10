@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useActions, useConductorSelector } from '../../store'
-import { ACCENT, memTokens } from '../../core/data'
+import { ACCENT } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
@@ -131,10 +131,6 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
       return !v
     })
   }
-  const memOn = agent.memory.filter(m => m.on)
-  const memTotal = memOn.reduce((n, m) => n + memTokens(agent, m.id), 0)
-  const toolCount = agent.tools.filter(t => t.on).length
-
   return (
     <div
       onClick={() => { if (!standalone) setActivePane(index) }}
@@ -348,20 +344,6 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
       })()}
 
       {gitPopup && agent.cwd && <GitPopup agent={agent} onClose={() => setGitPopup(false)} />}
-
-      <div className="mono" style={{
-        height: 26, flexShrink: 0, background: 'var(--panel)', borderTop: '1px solid var(--line)',
-        display: 'flex', alignItems: 'center', gap: 14, padding: '0 12px', fontSize: 10.5, color: 'var(--dim)',
-      }}>
-        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{agent.model}</span>
-        <span style={{ flexShrink: 0 }}>{memOn.length} memories · {memTotal.toFixed(1)}k</span>
-        <span style={{ flexShrink: 0 }}>{toolCount} tools</span>
-        {agent.cliSessionId && (
-          <span title={`CLI session ${agent.cliSessionId} — used for resume`} style={{ marginLeft: 'auto', color: 'var(--faint)' }}>
-            ⧉ {agent.cliSessionId.slice(0, 8)}
-          </span>
-        )}
-      </div>
     </div>
   )
 }

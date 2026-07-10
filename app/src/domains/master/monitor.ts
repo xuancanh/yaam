@@ -5,7 +5,7 @@
 // terminal output from the watchers.
 import type { Agent } from '../../core/types'
 import type { ApiMessage, LlmConfig } from '../../llm/client'
-import { runToolLoop } from '../../llm/tool-loop'
+import { runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
 
 export interface MonitorExec {
   updateStatus: (task?: string, summary?: string, actionNeeded?: string) => string
@@ -162,14 +162,21 @@ export async function runMonitorTurn(
   exec: MonitorExec,
   signal?: AbortSignal,
   extras?: PromptExtras,
+  callApi?: Parameters<typeof runToolLoop>[0]['callApi'],
 ): Promise<void> {
+  // a previous failed/aborted turn can leave dangling tool rounds — providers
+  // reject those, which would silence this monitor on every later turn
+  sanitizeToolHistory(history)
   history.push({ role: 'user', content: note })
   await runToolLoop({
-    cfg, system: monitorSystem(agent, extras), history, tools: MONITOR_TOOLS, maxRounds: 3, signal,
+    cfg, system: monitorSystem(agent, extras), history, tools: MONITOR_TOOLS, maxRounds: 3, signal, callApi,
     terminalAssistant: 'text', sequential: true,
     execute: async (name, input) => runMonitorTool(name, input, exec),
   })
-  // cap the private history so long-running sessions stay cheap
+  // cap the private history so long-running sessions stay cheap — then
+  // re-establish the invariants, because a blind shift() can split a
+  // tool_use/tool_result pair or leave an orphaned tool_result at the head
+  // (the exact corruption that froze status cards and muted suggestions)
   while (history.length > 16) history.shift()
-  if (history.length && history[0].role !== 'user') history.shift()
+  sanitizeToolHistory(history)
 }
