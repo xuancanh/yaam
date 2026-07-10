@@ -36,8 +36,12 @@ export interface SessionActionsCtx {
 
 export interface SessionActions {
   /** merge a worktree-isolated session's changes back into the original
-   *  checkout and drop the mirror. '' on success, else a failure summary. */
-  mergeSessionWorktree: (id: string) => Promise<string>
+   *  checkout and drop the mirror. '' on success, else a failure summary.
+   *  `message` overrides the default `yaam: <session name>` commit message. */
+  mergeSessionWorktree: (id: string, message?: string) => Promise<string>
+  /** drop a session's worktree WITHOUT merging — the changes are discarded and
+   *  the session returns to the original checkout. '' on success. */
+  discardSessionWorktree: (id: string) => Promise<string>
   archiveSession: (id: string) => void
   unarchiveSession: (id: string) => void
   deleteSession: (id: string) => void
@@ -61,10 +65,10 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
   const { stateRef, flash, logEvent, markUserStopped, disposeSessionRuntime, launchSession, probeCliSession, armResponseWatch, appendTail, clearNeeds, bumpSettle } = ctx
   const port = ctx.port ?? realSessionProcessPort
   return {
-    mergeSessionWorktree: async id => {
+    mergeSessionWorktree: async (id, message) => {
       const agent = ctx.stateRef.current.agents.find(a => a.id === id)
       if (!agent?.worktree) return 'this session has no worktree'
-      const results = await worktreeMerge(agent.worktree.root, `yaam: ${agent.name.slice(0, 60)}`).catch(e => [
+      const results = await worktreeMerge(agent.worktree.root, message?.trim() || `yaam: ${agent.name.slice(0, 60)}`).catch(e => [
         { name: 'worktree', status: 'error', detail: e instanceof Error ? e.message : String(e) },
       ])
       const summary = results.map(r => `${r.name}: ${r.status}${r.detail ? ` — ${r.detail}` : ''}`).join('\n')
@@ -78,6 +82,25 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       }))
       ctx.logEvent('done', id, `Merged worktree changes from “${agent.name}”`)
       ctx.flash('Worktree merged back')
+      return ''
+    },
+
+    discardSessionWorktree: async id => {
+      const agent = ctx.stateRef.current.agents.find(a => a.id === id)
+      if (!agent?.worktree) return 'this session has no worktree'
+      try {
+        await worktreeRemove(agent.worktree.root)
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e)
+      }
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === id
+          ? { ...a, worktree: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'worktree discarded — changes were not merged' }]) }
+          : a),
+      }))
+      ctx.logEvent('edit', id, `Discarded worktree of “${agent.name}”`)
+      ctx.flash('Worktree discarded')
       return ''
     },
 

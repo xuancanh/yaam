@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { useActions, useConductorSelector } from '../../store'
+import { useConductorSelector } from '../../store'
 import { worktreeDiff } from '../../core/native'
 import type { GitStatusResult } from '../../core/native'
 import { buildCfg, callApi, hasCreds } from '../../llm/client'
 import type { Agent } from '../../core/types'
-import { IC, Icon } from '../../components/ui'
+import { Icon } from '../../components/ui'
+import { WorktreeMergeBar } from './WorktreeMergeBar'
 import { FolderExplorer } from './FilesPane'
 import { sessionFs } from './remote-native'
 import type { SessionFs } from './remote-native'
@@ -185,13 +186,15 @@ interface DiffSection {
 /** The shared git body: toolbar (repo picker, view toggle, refresh), the
  *  staged/unstaged tree + commit box on the left, diffs on the right, and an
  *  optional host-supplied footer (the review drawer's merge/approve row). */
-export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, '') }: {
+export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, ''), compact }: {
   cwd?: string
   /** worktree info when the work happens in an isolated mirror */
   worktree?: { root: string; base: string; workdir: string }
   footer?: ReactNode
   /** local or remote (ssh) git adapter for the reviewed session */
   fs?: SessionFs
+  /** narrow host (inline pane side panel): slimmer file column */
+  compact?: boolean
 }) {
   const settings = useConductorSelector(x => x.settings)
   const [repos, setRepos] = useState<string[]>([])
@@ -403,7 +406,7 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <div style={{ width: 280, flexShrink: 0, borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg2)' }}>
+        <div style={{ width: compact ? 200 : 280, flexShrink: 0, borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg2)' }}>
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 6 }}>
             {error
               ? <div style={{ padding: 14, fontSize: 12, color: 'var(--red-soft)' }}>{error}</div>
@@ -513,10 +516,26 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
   )
 }
 
-/** The pane-header popup: a modal shell around the shared workbench. */
-export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void }) {
-  const { openDiff } = useActions()
+/** Inline changes panel for one session (docked right or bottom of the pane):
+ *  the shared workbench through the session's fs adapter, closing with a
+ *  worktree merge bar when the session is isolated. `compact` slims the file
+ *  column for narrow right-docked hosts. */
+export function GitSidePanel({ agent, compact }: { agent: Agent; compact?: boolean }) {
   const fs = useMemo(() => sessionFs(agent.machine, agent.id), [agent.machine, agent.id])
+  return (
+    <GitWorkbench
+      cwd={agent.cwd}
+      worktree={agent.worktree}
+      fs={fs}
+      compact={compact}
+      footer={agent.worktree ? <WorktreeMergeBar agent={agent} /> : undefined}
+    />
+  )
+}
+
+/** Full-size popup fallback for split layouts where the docked panel is too
+ *  cramped: a modal shell around the same panel. */
+export function GitPopup({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.6)', zIndex: 48, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '4vh 3vw' }}>
       <div onClick={e => e.stopPropagation()} style={{
@@ -526,23 +545,13 @@ export function GitPanel({ agent, onClose }: { agent: Agent; onClose: () => void
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 15px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
           <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={16} stroke={1.7} />
           <div className="grotesk" style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            Git · {agent.name}
+            Changes · {agent.name}
           </div>
-          {agent.worktree && (
-            <button
-              className="open-btn"
-              title="Open the review drawer to merge this worktree back into the original checkout"
-              onClick={() => { onClose(); openDiff(agent.id) }}
-              style={{ flex: 'none', padding: '5px 12px', fontSize: 11.5, color: 'var(--amber)' }}
-            >
-              Review &amp; merge…
-            </button>
-          )}
           <button className="icon-btn" title="Close" onClick={onClose} style={{ width: 26, height: 26, borderRadius: 7 }}>
-            <Icon paths={IC.close} size={12} stroke={2} />
+            <Icon paths={['M6 6l12 12', 'M18 6L6 18']} size={12} stroke={2} />
           </button>
         </div>
-        <GitWorkbench cwd={agent.cwd} worktree={agent.worktree} fs={fs} />
+        <GitSidePanel agent={agent} />
       </div>
     </div>
   )

@@ -6,18 +6,26 @@ import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../component
 import { confirmAction } from '../../components/Confirm'
 import { ChatPane } from '../chat/ChatPane'
 import { FilesPane } from './FilesPane'
-import { GitPanel } from './GitPanel'
+import { GitPopup, GitSidePanel } from './GitPanel'
 import { TerminalPane } from './TerminalPane'
 
-// explorer visibility survives tab switches (panes remount freely)
+// explorer/changes visibility survives tab switches (panes remount freely)
 const filesOpenCache = new Map<string, boolean>()
+const gitOpenCache = new Map<string, boolean>()
+// where the changes panel docks — right (beside) or bottom (below, full width
+// for split layouts where a side dock is too cramped)
+type GitDock = 'right' | 'bottom'
+const gitDockCache = new Map<string, GitDock>()
 
 /** Render one terminal pane with session controls and optional file explorer. */
 export function Pane({ agent, index, active, showRing, maximized }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean }) {
   const { setActivePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession, refreshTerminal, archiveSession } = useActions()
   const machineLabel = agent.machine ? (agent.machine.label || 'remote') : ''
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
-  const [gitOpen, setGitOpen] = useState(false)
+  const [gitOpen, setGitOpen] = useState(gitOpenCache.get(agent.id) ?? false)
+  const [gitDock, setGitDock] = useState<GitDock>(gitDockCache.get(agent.id) ?? 'right')
+  const [gitPopup, setGitPopup] = useState(false)
+  const setDock = (d: GitDock) => { gitDockCache.set(agent.id, d); setGitDock(d) }
   const [settingsOpen, setSettingsOpen] = useState(false)
   // open the settings menu upward when a bottom-row pane lacks room below, so it
   // never renders off the bottom edge of the window
@@ -75,12 +83,12 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         >
           <Icon paths={['M3 7a2 2 0 012-2h4l2 2h9a1 1 0 011 1v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z']} size={15} stroke={1.6} />
         </button>
-        {agent.kind !== 'chat' && agent.cwd && (
+        {agent.cwd && (
           <button
             className="icon-btn"
-            title={agent.worktree ? 'Git — stage, commit, review & merge the worktree' : 'Git — stage, commit, review changes'}
-            style={{ width: 27, height: 27, borderRadius: 7, color: agent.worktree ? 'var(--amber)' : undefined }}
-            onClick={e => { e.stopPropagation(); setGitOpen(true) }}
+            title={gitOpen ? 'Hide the changes panel' : agent.worktree ? 'Changes — diff, stage, commit & merge the worktree back' : 'Changes — live diff, stage & commit beside the session'}
+            style={{ width: 27, height: 27, borderRadius: 7, color: gitOpen ? 'var(--accent)' : agent.worktree ? 'var(--amber)' : undefined }}
+            onClick={e => { e.stopPropagation(); setGitOpen(v => { gitOpenCache.set(agent.id, !v); return !v }) }}
           >
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={15} stroke={1.7} />
           </button>
@@ -171,13 +179,64 @@ export function Pane({ agent, index, active, showRing, maximized }: { agent: Age
         </button>
       </div>
 
-      {filesOpen
-        ? <FilesPane agent={agent} active={active} />
-        : agent.kind === 'chat'
-          ? <ChatPane agent={agent} active={active} />
-          : <TerminalPane agent={agent} active={active} />}
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: gitDock === 'bottom' ? 'column' : 'row' }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {filesOpen
+            ? <FilesPane agent={agent} active={active} />
+            : agent.kind === 'chat'
+              ? <ChatPane agent={agent} active={active} />
+              : <TerminalPane agent={agent} active={active} />}
+        </div>
+        {gitOpen && agent.cwd && (
+          <div style={{
+            ...(gitDock === 'bottom'
+              ? { height: 'clamp(220px, 42%, 460px)', borderTop: '1px solid var(--line)' }
+              : { width: 'clamp(360px, 46%, 720px)', borderLeft: '1px solid var(--line)' }),
+            flexShrink: 0, minHeight: 0, minWidth: 0,
+            display: 'flex', flexDirection: 'column', background: 'var(--panel)',
+          }}>
+            <div style={{ height: 28, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, padding: '0 8px', borderBottom: '1px solid var(--line)' }}>
+              <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: 'var(--dim)' }}>CHANGES</span>
+              <div style={{ flex: 1 }} />
+              <button
+                className="icon-btn"
+                title="Dock to the right of the session"
+                style={{ width: 22, height: 22, borderRadius: 6, color: gitDock === 'right' ? 'var(--accent)' : undefined }}
+                onClick={e => { e.stopPropagation(); setDock('right') }}
+              >
+                <Icon paths={['M4 5h16v14H4z', 'M14 5v14']} size={12} stroke={1.7} />
+              </button>
+              <button
+                className="icon-btn"
+                title="Dock below the session (full width — better for split tabs)"
+                style={{ width: 22, height: 22, borderRadius: 6, color: gitDock === 'bottom' ? 'var(--accent)' : undefined }}
+                onClick={e => { e.stopPropagation(); setDock('bottom') }}
+              >
+                <Icon paths={['M4 5h16v14H4z', 'M4 13h16']} size={12} stroke={1.7} />
+              </button>
+              <button
+                className="icon-btn"
+                title="Open as a full-size popup"
+                style={{ width: 22, height: 22, borderRadius: 6 }}
+                onClick={e => { e.stopPropagation(); setGitPopup(true) }}
+              >
+                <Icon paths={['M14 4h6v6', 'M20 4L11 13', 'M10 5H5a1 1 0 00-1 1v13a1 1 0 001 1h13a1 1 0 001-1v-5']} size={12} stroke={1.7} />
+              </button>
+              <button
+                className="icon-btn"
+                title="Close the changes panel"
+                style={{ width: 22, height: 22, borderRadius: 6 }}
+                onClick={e => { e.stopPropagation(); gitOpenCache.set(agent.id, false); setGitOpen(false) }}
+              >
+                <Icon paths={IC.close} size={10} stroke={2} />
+              </button>
+            </div>
+            <GitSidePanel agent={agent} compact={gitDock === 'right'} />
+          </div>
+        )}
+      </div>
 
-      {gitOpen && <GitPanel agent={agent} onClose={() => setGitOpen(false)} />}
+      {gitPopup && agent.cwd && <GitPopup agent={agent} onClose={() => setGitPopup(false)} />}
 
       <div className="mono" style={{
         height: 26, flexShrink: 0, background: 'var(--panel)', borderTop: '1px solid var(--line)',
