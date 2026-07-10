@@ -114,7 +114,14 @@ export function remoteFs(machine: Machine, id: string): SessionFs {
       if (contents.length > 200_000) throw new Error('file too large to save over SSH (200 KB limit)')
       let bin = ''
       for (const b of new TextEncoder().encode(contents)) bin += String.fromCharCode(b)
-      ok(await run(`printf %s ${btoa(bin)} | base64 -d > ${shq(path)}`))
+      const target = shq(path)
+      // Decode beside the destination, then rename. A failed transfer/decode
+      // leaves the original intact; copying first preserves an existing mode.
+      ok(await run(
+        `tmp=${target}.yaam-tmp-$$; trap 'rm -f -- "$tmp"' EXIT HUP INT TERM; `
+        + `if [ -e ${target} ]; then cp -p -- ${target} "$tmp"; else : > "$tmp"; fi; `
+        + `printf %s ${btoa(bin)} | base64 -d > "$tmp" && mv -- "$tmp" ${target}`,
+      ))
     },
     async readFileB64(path) {
       // execCommand caps its output (~40 KB) and base64 inflates ~4/3, so a big

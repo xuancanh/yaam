@@ -73,6 +73,22 @@ describe('remoteFs.readFileB64', () => {
   })
 })
 
+describe('remoteFs.writeTextFile', () => {
+  it('decodes to a temporary sibling and atomically replaces the destination', async () => {
+    okOut('')
+    await remoteFs(m, 'a1').writeTextFile('/srv/app/file.txt', 'hello')
+    const command = exec.mock.calls[0][0]
+    expect(command).toContain('.yaam-tmp-$$')
+    expect(command).toContain('base64 -d > "$tmp"')
+    expect(command).toContain('mv -- "$tmp"')
+    expect(command.indexOf('base64 -d > "$tmp"')).toBeLessThan(command.indexOf('mv -- "$tmp"'))
+  })
+  it('does not execute an oversized write', async () => {
+    await expect(remoteFs(m, 'a1').writeTextFile('/srv/app/file.txt', 'x'.repeat(200_001))).rejects.toThrow(/too large/)
+    expect(exec).not.toHaveBeenCalled()
+  })
+})
+
 describe('remoteFs.detectRepos', () => {
   it('returns [cwd] when the folder itself is a repo', async () => {
     okOut('/srv\nmain\n') // gitStatus(cwd) succeeds
