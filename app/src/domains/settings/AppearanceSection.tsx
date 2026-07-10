@@ -1,13 +1,9 @@
 import type { ReactNode } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { APPEARANCE_DEFAULTS } from '../../app/appearance'
+import { APPEARANCE_DEFAULTS, SCALE_MAX, SCALE_MIN, SCALE_STEP } from '../../app/appearance'
 import type { AppearanceSettings } from '../../core/types'
 import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
-
-const SCALE_MIN = 80
-const SCALE_MAX = 140
-const SCALE_STEP = 5
 
 /** −/＋ stepper for the interface scale — more reliable than a drag slider for
  *  landing on an exact 5% increment. */

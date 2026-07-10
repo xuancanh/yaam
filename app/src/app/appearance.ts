@@ -15,6 +15,19 @@ export const FONT_STACKS = {
   },
 } as const
 
+/** UI-scale bounds shared by the settings stepper and the ⌘+/⌘− shortcuts. */
+export const SCALE_MIN = 80
+export const SCALE_MAX = 140
+export const SCALE_STEP = 5
+
+/** One zoom step from `current` (percent): dir −1/+1 steps and clamps on the
+ *  shared 5% grid; dir 0 resets to 100. */
+export function steppedUiScale(current: number | undefined, dir: -1 | 0 | 1): number {
+  if (dir === 0) return 100
+  const cur = current ?? 100
+  return Math.max(SCALE_MIN, Math.min(SCALE_MAX, Math.round(cur / SCALE_STEP) * SCALE_STEP + dir * SCALE_STEP))
+}
+
 export const APPEARANCE_DEFAULTS: Required<AppearanceSettings> = {
   theme: 'dark',
   uiScale: 100,

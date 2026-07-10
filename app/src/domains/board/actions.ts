@@ -35,6 +35,9 @@ export interface BoardActionsCtx {
 }
 
 export interface BoardActions {
+  /** open the New-task dialog from anywhere (jumps to the board) */
+  openNewTask: () => void
+  closeNewTask: () => void
   startCardDrag: (id: string) => void
   enterCol: (col: BoardCol) => void
   dropTo: (col: BoardCol) => void
@@ -70,6 +73,8 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
   const { dispatch, stateRef, dragId, later } = ctx
   const port = ctx.port ?? realSessionProcessPort
   return {
+    openNewTask: () => dispatch(s => ({ ...s, view: 'board', newTaskOpen: true })),
+    closeNewTask: () => dispatch(s => (s.newTaskOpen ? { ...s, newTaskOpen: false } : s)),
     startCardDrag: id => { dragId.current = id },
     enterCol: col => dispatch(s => (s.dragOverCol === col ? s : { ...s, dragOverCol: col })),
     dropTo: col => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { applyAppearance, resolveTheme } from './appearance'
+import { applyAppearance, resolveTheme, steppedUiScale } from './appearance'
 import { termThemeFor } from '../core/terminals'
 
 describe('applyAppearance', () => {
@@ -36,5 +36,20 @@ describe('applyAppearance', () => {
   it('resolves the system theme from the OS scheme', () => {
     expect(['light', 'dark']).toContain(resolveTheme('system'))
     expect(resolveTheme('midnight')).toBe('midnight')
+  })
+})
+
+describe('steppedUiScale', () => {
+  it('steps on the 5% grid and clamps at the bounds', () => {
+    expect(steppedUiScale(100, 1)).toBe(105)
+    expect(steppedUiScale(100, -1)).toBe(95)
+    expect(steppedUiScale(undefined, 1)).toBe(105)
+    expect(steppedUiScale(138, 1)).toBe(140)
+    expect(steppedUiScale(140, 1)).toBe(140)
+    expect(steppedUiScale(80, -1)).toBe(80)
+  })
+  it('snaps off-grid values and resets to 100', () => {
+    expect(steppedUiScale(103, 1)).toBe(110)
+    expect(steppedUiScale(97, 0)).toBe(100)
   })
 })

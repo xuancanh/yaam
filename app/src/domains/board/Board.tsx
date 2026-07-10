@@ -476,8 +476,8 @@ const COLS: Array<{ id: BoardCol; label: string; dot: string }> = [
 
 /** Render the active workspace's draggable watcher-driven kanban board. */
 export function Board() {
-  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, dragOverCol: x.dragOverCol, boardMode: x.settings.boardMode ?? 'kanban' }), shallowEqual)
-  const { enterCol, dropTo, updateSettings } = useActions()
+  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, dragOverCol: x.dragOverCol, boardMode: x.settings.boardMode ?? 'kanban', newTaskOpen: x.newTaskOpen }), shallowEqual)
+  const { enterCol, dropTo, updateSettings, closeNewTask } = useActions()
   const [creating, setCreating] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [reviewTaskId, setReviewTaskId] = useState<string | null>(null)
@@ -565,7 +565,7 @@ export function Board() {
         })}
       </div>
       )}
-      {creating && <NewTaskDialog onClose={() => setCreating(false)} />}
+      {(creating || s.newTaskOpen) && <NewTaskDialog onClose={() => { setCreating(false); closeNewTask() }} />}
       {archivedOpen && <ArchivedTasks onClose={() => setArchivedOpen(false)} />}
       {(() => {
         const reviewTask = reviewTaskId ? s.tasks.find(t => t.id === reviewTaskId) : undefined

@@ -20,6 +20,27 @@ export function activeGroupOf(s: Pick<AppState, 'groups' | 'activeGroup'>): TabG
   return s.groups.find(g => g.id === s.activeGroup)
 }
 
+/** Workspace tab-bar order: group members (slot order) then loose sessions —
+ *  exactly the order the tab bar renders. Feeds ⌘1–9 / tab-cycling shortcuts. */
+export function workspaceTabOrder(s: Pick<AppState, 'agents' | 'groups' | 'activeWorkspace'>): string[] {
+  const live = (id: string | null): id is string => {
+    const a = id ? s.agents.find(x => x.id === id) : undefined
+    return !!a && !a.archived && a.kind !== 'chat'
+  }
+  const grouped = s.groups.flatMap(g => g.slots).filter(live)
+  const inGroup = new Set(grouped)
+  const loose = s.agents
+    .filter(a => live(a.id) && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace && !inGroup.has(a.id))
+    .map(a => a.id)
+  return [...grouped, ...loose]
+}
+
+/** The focused session in the workspace (active group's active pane). */
+export function activeSessionId(s: Pick<AppState, 'groups' | 'activeGroup'>): string | null {
+  const g = activeGroupOf(s)
+  return g?.slots[g.activePane] ?? null
+}
+
 /** Migrate legacy flat pane state (focusedIds/soloId/…) into tab groups. */
 export function groupsFromLegacy(d: {
   focusedIds?: (string | null)[]

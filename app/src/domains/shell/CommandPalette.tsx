@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { steppedUiScale } from '../../app/appearance'
 import type { View } from '../../core/types'
 import { Icon } from '../../components/ui'
 
@@ -14,15 +15,16 @@ const ICONS: Record<string, string[]> = {
   go: ['M5 12h14', 'M13 6l6 6-6 6'],
 }
 
-const NAV_COMMANDS: Array<[View, string]> = [
+const NAV_COMMANDS: Array<[View, string, string?]> = [
   ['workspace', 'Go to Workspace'],
   ['chat', 'Go to Chat'],
   ['overview', 'Go to Agents'],
   ['board', 'Go to Board'],
   ['timeline', 'Go to Activity'],
   ['crons', 'Go to Schedules'],
+  ['templates', 'Go to Templates'],
   ['addons', 'Go to Addons'],
-  ['settings', 'Go to Settings'],
+  ['settings', 'Go to Settings', '⌘,'],
 ]
 
 interface Command {
@@ -35,31 +37,38 @@ interface Command {
 
 /** Filter keyboard actions and dispatch the selected command or session focus. */
 export function CommandPalette() {
-  const s = useConductorSelector(x => ({ agents: x.agents, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery, settings: x.settings }), shallowEqual)
   const a = useActions()
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Rebuild static actions plus current idle-session targets for the query.
   const commands = useMemo<Command[]>(() => {
+    const zoom = (dir: -1 | 0 | 1) =>
+      a.updateSettings({ appearance: { ...s.settings.appearance, uiScale: steppedUiScale(s.settings.appearance?.uiScale, dir) } })
     const cmds: Command[] = [
       { id: 'route', label: 'Route a task…', hint: 'compose', icon: 'route', run: a.focusComposer },
-      { id: 'new', label: 'New agent session', hint: 'spawn', icon: 'plus', run: a.openNewSession },
+      { id: 'new', label: 'New agent session', hint: '⌘T', icon: 'plus', run: a.openNewSession },
+      { id: 'newtask', label: 'New board task', hint: '⌘N', icon: 'plus', run: a.openNewTask },
       { id: 'layout-1', label: 'Layout: single pane', hint: 'layout', icon: 'split', run: () => a.setPaneLayout(1) },
       { id: 'layout-2', label: 'Layout: split vertical', hint: 'layout', icon: 'split', run: () => a.setPaneLayout(2) },
       { id: 'layout-2h', label: 'Layout: split horizontal', hint: 'layout', icon: 'split', run: () => a.setPaneLayout(2, true) },
       { id: 'layout-3', label: 'Layout: 3 panes', hint: 'layout', icon: 'split', run: () => a.setPaneLayout(3) },
       { id: 'layout-4', label: 'Layout: 2×2 grid', hint: 'layout', icon: 'split', run: () => a.setPaneLayout(4) },
+      { id: 'zoom-in', label: 'Zoom in', hint: '⌘+', icon: 'go', run: () => zoom(1) },
+      { id: 'zoom-out', label: 'Zoom out', hint: '⌘−', icon: 'go', run: () => zoom(-1) },
+      { id: 'zoom-reset', label: 'Reset zoom', hint: '⌘0', icon: 'go', run: () => zoom(0) },
+      { id: 'master', label: `${s.settings.sidebarHidden ? 'Show' : 'Hide'} Master panel`, hint: '⌘B', icon: 'split', run: () => a.updateSettings({ sidebarHidden: !s.settings.sidebarHidden }) },
       { id: 'build', label: 'Build a tool or panel', hint: 'compose', icon: 'build', run: a.focusComposer },
     ]
     s.agents.filter(x => x.status === 'idle').forEach(x =>
       cmds.push({ id: `res-${x.id}`, label: `Resume ${x.name}`, hint: x.repo, icon: 'play', run: () => a.resume(x.id) }))
     s.agents.filter(x => x.status === 'needs' || x.status === 'running').forEach(x =>
       cmds.push({ id: `rev-${x.id}`, label: `Review changes · ${x.name}`, hint: x.repo, icon: 'diff', run: () => a.openDiff(x.id) }))
-    NAV_COMMANDS.forEach(([v, label]) =>
-      cmds.push({ id: `nav-${v}`, label, hint: 'navigate', icon: 'go', run: () => a.setView(v) }))
+    NAV_COMMANDS.forEach(([v, label, kbd]) =>
+      cmds.push({ id: `nav-${v}`, label, hint: kbd ?? 'navigate', icon: 'go', run: () => a.setView(v) }))
     const q = s.paletteQuery.toLowerCase().trim()
     return q ? cmds.filter(c => c.label.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q)) : cmds
-  }, [a, s.agents, s.paletteQuery])
+  }, [a, s.agents, s.settings.appearance, s.settings.sidebarHidden, s.paletteQuery])
 
   useEffect(() => {
     if (s.paletteOpen) inputRef.current?.focus()

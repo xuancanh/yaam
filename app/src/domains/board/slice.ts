@@ -5,9 +5,11 @@ import type { BoardTask, BoardCol } from '../../core/entities'
 export interface BoardSlice {
   tasks: BoardTask[]
   dragOverCol: BoardCol | null
+  /** the New-task dialog, openable from anywhere (⌘N, command palette) */
+  newTaskOpen: boolean
 }
 
 /** Initial board slice for a fresh app state. */
 export function freshBoardSlice(): BoardSlice {
-  return { tasks: [], dragOverCol: null }
+  return { tasks: [], dragOverCol: null, newTaskOpen: false }
 }
