@@ -106,8 +106,10 @@ export function createChatSearchIndexer(
 
   return {
     start() {
+      if (unsub) return
       active = true
-      unsub ??= state.subscribe((s, prev) => { if (chatTranscriptsChanged(s, prev)) arm() })
+      unsub = state.subscribe((s, prev) => { if (chatTranscriptsChanged(s, prev)) arm() })
+      arm()
     },
     dispose() {
       active = false

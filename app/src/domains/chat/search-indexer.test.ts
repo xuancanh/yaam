@@ -23,6 +23,16 @@ const flush = async () => {
 }
 
 describe('createChatSearchIndexer', () => {
+  it('reconciles the persisted transcript after startup without waiting for a mutation', () => {
+    const port = createFakeStatePort(state([chat('c1', [{ id: 'm1', role: 'user', text: 'restored' }])]))
+    const clock = new FakeClock()
+    const ops = spyOps()
+    createChatSearchIndexer(port, clock, ops).start()
+    expect(ops.reindex).not.toHaveBeenCalled()
+    clock.advance(1500)
+    expect(ops.reindex).toHaveBeenCalledWith([expect.objectContaining({ msgId: 'm1' })])
+  })
+
   it('does a full reindex on the first sync, user/assistant messages only', () => {
     const port = createFakeStatePort(state([chat('c1', [
       { id: 'm1', role: 'user', text: 'hello' },
@@ -111,6 +121,9 @@ describe('createChatSearchIndexer', () => {
     const clock = new FakeClock()
     const ops = spyOps()
     createChatSearchIndexer(port, clock, ops).start()
+    clock.advance(1500)
+    expect(ops.reindex).toHaveBeenCalledOnce()
+    ops.reindex.mockClear()
     port.set({ ...port.get(), agents: [{ ...port.get().agents[0] }] }) // same transcript
     clock.advance(5000)
     expect(ops.reindex).not.toHaveBeenCalled()
