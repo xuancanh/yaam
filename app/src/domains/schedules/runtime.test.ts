@@ -17,7 +17,7 @@ function harness(state: AppState, over: Partial<SchedulerDeps> = {}) {
     state: port, clock,
     logEvent: vi.fn(), notify: vi.fn(),
     launchSession: vi.fn(() => 'sid'), spawnTaskSession: vi.fn(() => 'sid'), sendAgentChat: vi.fn(() => null),
-    fireAddonHook: vi.fn(), canLaunch: true,
+    fireAddonHook: vi.fn(), wakeAddonAgent: vi.fn(), canLaunch: true,
     ...over,
   }
   return { rt: createSchedulerRuntime(deps), clock, port, deps }
@@ -54,7 +54,7 @@ describe('createSchedulerRuntime', () => {
     const port = createFakeStatePort(baseState({ crons: [atCron] }))
     const deps: SchedulerDeps = {
       state: port, clock: at, logEvent: vi.fn(), notify: vi.fn(),
-      launchSession: vi.fn(() => 'sid'), spawnTaskSession: vi.fn(() => null), sendAgentChat: vi.fn(() => null), fireAddonHook: vi.fn(), canLaunch: true,
+      launchSession: vi.fn(() => 'sid'), spawnTaskSession: vi.fn(() => null), sendAgentChat: vi.fn(() => null), fireAddonHook: vi.fn(), wakeAddonAgent: vi.fn(), canLaunch: true,
     }
     createSchedulerRuntime(deps).start()
     at.advance(15000)
@@ -79,6 +79,27 @@ describe('createSchedulerRuntime', () => {
     h.clock.advance(15000)
     expect(h.deps.spawnTaskSession).not.toHaveBeenCalled()
     expect(h.port.get().tasks[0].scheduleAt).toBeUndefined()
+  })
+
+  it('wakes an enabled addon agent on its every-cron, once per minute', () => {
+    const addon = { id: 'ad1', enabled: true, agent: { system: 'watch', every: '* * * * *' } }
+    const h = harness(baseState({ addons: [addon] } as unknown as Partial<AppState>))
+    h.rt.start()
+    h.clock.advance(15000)
+    expect(h.deps.wakeAddonAgent).toHaveBeenCalledWith('ad1', expect.stringContaining('scheduled wake'))
+    h.clock.advance(15000) // same minute (fake clock stays inside it) — no second wake
+    expect(h.deps.wakeAddonAgent).toHaveBeenCalledOnce()
+  })
+
+  it('does not wake disabled addons or ones without an every-cron', () => {
+    const addons = [
+      { id: 'off', enabled: false, agent: { system: 'x', every: '* * * * *' } },
+      { id: 'noevery', enabled: true, agent: { system: 'x' } },
+    ]
+    const h = harness(baseState({ addons } as unknown as Partial<AppState>))
+    h.rt.start()
+    h.clock.advance(15000)
+    expect(h.deps.wakeAddonAgent).not.toHaveBeenCalled()
   })
 
   it('dispose() stops the interval', () => {

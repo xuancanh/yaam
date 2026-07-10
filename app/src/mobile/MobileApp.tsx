@@ -315,6 +315,7 @@ function ChatDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
           </div>
         )}
         <Messages msgs={c.msgs} echoes={echoes} botWho={c.name} />
+        {c.busy && <div className="sysline">· thinking… ·</div>}
         {pending && (
           <div className="btnrow">
             <button className="btn ghost" onClick={() => void sendCommand({ kind: 'approve_chat', id: pending.id, agent_id: c.id, ok: false })}>Deny</button>
@@ -654,7 +655,14 @@ function StopButton({ onStop }: { onStop: () => void }) {
 
 const COL_ORDER = ['progress', 'review', 'backlog', 'done', 'failed']
 
-function Lists({ tab, snap, open, selected }: { tab: Tab; snap: RemoteSnapshot; open: (d: Detail) => void; selected?: string }) {
+function Lists({ tab, snap, open, selected, onNewChat }: {
+  tab: Tab
+  snap: RemoteSnapshot
+  open: (d: Detail) => void
+  selected?: string
+  /** start a fresh conversation with a durable agent */
+  onNewChat?: (durableAgentId: string) => void
+}) {
   const cardCls = (id: string, attn = false) => `card${selected === id ? ' sel' : ''}${attn ? ' attn' : ''}`
   // design pickups: status filter chips on Agents, live search on Chat
   const [filter, setFilter] = useState<'all' | 'running' | 'needs' | 'idle'>('all')
@@ -683,27 +691,69 @@ function Lists({ tab, snap, open, selected }: { tab: Tab; snap: RemoteSnapshot; 
   }
   if (tab === 'chats') {
     const q = query.trim().toLowerCase()
-    const chats = q
-      ? snap.chats.filter(c => (c.name + ' ' + (c.msgs[c.msgs.length - 1]?.text ?? '')).toLowerCase().includes(q))
-      : snap.chats
+    const chatRow = (c: RemoteSnapshot['chats'][number]) => (
+      <button key={c.id} className={cardCls(c.id)} onClick={() => open({ kind: 'chat', id: c.id })}>
+        <div className="row">
+          <Avatar name={c.name} size={34} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="name">
+              {c.pinned && <span style={{ color: 'var(--accent)', fontSize: 10, marginRight: 5 }}>◆</span>}
+              {c.name}
+            </div>
+            {c.busy
+              ? <div className="meta" style={{ color: 'var(--accent)' }}>thinking…</div>
+              : c.msgs.length > 0 && <div className="meta">{c.msgs[c.msgs.length - 1].text.slice(0, 80)}</div>}
+          </div>
+          <span className="pill">{c.model}</span>
+        </div>
+      </button>
+    )
+    if (q) {
+      const chats = snap.chats.filter(c => (c.name + ' ' + (c.msgs[c.msgs.length - 1]?.text ?? '')).toLowerCase().includes(q))
+      return (
+        <div className="body">
+          <div className="composer" style={{ borderRadius: 12, marginBottom: 12, padding: '2px 6px 2px 12px' }}>
+            <textarea rows={1} value={query} placeholder="Search chats" onChange={e => setQuery(e.target.value.replace(/\n/g, ''))} style={{ maxHeight: 24 }} />
+          </div>
+          {chats.length === 0 && <div className="empty">No chats match.</div>}
+          {chats.map(chatRow)}
+        </div>
+      )
+    }
+    // conversations grouped under their durable agents, mirroring the desktop
+    // chat sidebar: pinned first, then most recent activity
+    const byRecency = (a: RemoteSnapshot['chats'][number], b: RemoteSnapshot['chats'][number]) =>
+      Number(b.pinned) - Number(a.pinned) || b.lastAt - a.lastAt
+    const durables = snap.durables ?? []
+    const groups = durables.map(d => ({ d, items: snap.chats.filter(c => c.durableAgentId === d.id).sort(byRecency) }))
+    // snapshots from an older desktop have no durables — flat recency list
+    const orphans = snap.chats.filter(c => !durables.some(d => d.id === c.durableAgentId)).sort(byRecency)
     return (
       <div className="body">
         <div className="composer" style={{ borderRadius: 12, marginBottom: 12, padding: '2px 6px 2px 12px' }}>
           <textarea rows={1} value={query} placeholder="Search chats" onChange={e => setQuery(e.target.value.replace(/\n/g, ''))} style={{ maxHeight: 24 }} />
         </div>
-        {chats.length === 0 && <div className="empty">{q ? 'No chats match.' : 'No chat conversations.'}</div>}
-        {chats.map(c => (
-          <button key={c.id} className={cardCls(c.id)} onClick={() => open({ kind: 'chat', id: c.id })}>
-            <div className="row">
-              <Avatar name={c.name} size={34} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="name">{c.name}</div>
-                {c.msgs.length > 0 && <div className="meta">{c.msgs[c.msgs.length - 1].text.slice(0, 80)}</div>}
-              </div>
-              <span className="pill">{c.model}</span>
+        {groups.length === 0 && orphans.length === 0 && <div className="empty">No chat conversations.</div>}
+        {groups.map(({ d, items }) => (
+          <div key={d.id}>
+            <div className="section" style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 14 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 3, background: d.color, flexShrink: 0 }} />
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name.toUpperCase()}</span>
+              {d.role && <span style={{ fontWeight: 400, color: 'var(--faint)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: 0 }}>{d.role}</span>}
+              <button
+                title={`New conversation with ${d.name}`}
+                onClick={() => onNewChat?.(d.id)}
+                style={{ marginLeft: 'auto', flexShrink: 0, width: 24, height: 24, borderRadius: 7, border: '1px solid var(--line)', background: 'var(--panel2)', color: 'var(--mut2)', fontSize: 14, lineHeight: 1 }}
+              >
+                ＋
+              </button>
             </div>
-          </button>
+            {items.length
+              ? items.map(chatRow)
+              : <div style={{ fontSize: 12, color: 'var(--faint)', padding: '2px 4px 6px' }}>no conversations yet</div>}
+          </div>
         ))}
+        {orphans.map(chatRow)}
       </div>
     )
   }
@@ -711,6 +761,13 @@ function Lists({ tab, snap, open, selected }: { tab: Tab; snap: RemoteSnapshot; 
     const sessions = filter === 'all' ? snap.sessions
       : filter === 'idle' ? snap.sessions.filter(s => s.status !== 'running' && s.status !== 'needs')
       : snap.sessions.filter(s => s.status === filter)
+    // triage grouping mirrors the desktop Runs rail: anything waiting on the
+    // user first, live work second, everything else after
+    const triageOf = (s: RemoteSnapshot['sessions'][number]) =>
+      (s.status === 'needs' || s.attention || s.actionNeeded ? 'needs' : s.status === 'running' ? 'running' : 'idle')
+    const triage = ([
+      ['needs', 'NEEDS YOU'], ['running', 'RUNNING'], ['idle', 'IDLE'],
+    ] as const).map(([id, label]) => ({ id, label, items: sessions.filter(s => triageOf(s) === id) }))
     return (
       <div className="body">
         <div className="chips" style={{ margin: '0 0 12px' }}>
@@ -719,26 +776,33 @@ function Lists({ tab, snap, open, selected }: { tab: Tab; snap: RemoteSnapshot; 
           ))}
         </div>
         {sessions.length === 0 && <div className="empty">No sessions{filter !== 'all' ? ' in this state' : ''}.</div>}
-        {sessions.map(s => (
-          <button key={s.id} className={cardCls(s.id, !!s.actionNeeded)} onClick={() => open({ kind: 'session', id: s.id })}>
-            <div className="row">
-              <Avatar name={s.name} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="name">{s.name}</div>
-                <div className="meta">{s.repo}{s.task ? ` · ${s.task}` : ''}</div>
-              </div>
-              <StatusPill status={s.status} />
+        {triage.filter(g => g.items.length > 0).map(g => (
+          <div key={g.id}>
+            <div className="section" style={{ marginTop: 14, ...(g.id === 'needs' ? { color: 'var(--amber)' } : {}) }}>
+              {g.label} <span style={{ color: 'var(--faint)' }}>{g.items.length}</span>
             </div>
-            {(s.summary || s.actionNeeded) && (
-              <div className="lastline" style={s.actionNeeded ? { color: 'var(--amber)' } : undefined}>
-                {s.actionNeeded ? `⚠ ${s.actionNeeded}` : s.summary}
-              </div>
-            )}
-            <div className="cardmeta">
-              <span>${s.cost.toFixed(2)}</span>
-              <span style={{ marginLeft: 'auto', color: 'var(--faint)' }}>{s.kind}</span>
-            </div>
-          </button>
+            {g.items.map(s => (
+              <button key={s.id} className={cardCls(s.id, !!s.actionNeeded || s.attention)} onClick={() => open({ kind: 'session', id: s.id })}>
+                <div className="row">
+                  <Avatar name={s.name} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="name">{s.name}</div>
+                    <div className="meta">{s.repo}{s.task ? ` · ${s.task}` : ''}</div>
+                  </div>
+                  <StatusPill status={s.status} />
+                </div>
+                {(s.summary || s.actionNeeded) && (
+                  <div className="lastline" style={s.actionNeeded ? { color: 'var(--amber)' } : undefined}>
+                    {s.actionNeeded ? `⚠ ${s.actionNeeded}` : s.summary}
+                  </div>
+                )}
+                <div className="cardmeta">
+                  <span>${s.cost.toFixed(2)}</span>
+                  <span style={{ marginLeft: 'auto', color: 'var(--faint)' }}>{s.kind}</span>
+                </div>
+              </button>
+            ))}
+          </div>
         ))}
       </div>
     )
@@ -814,6 +878,24 @@ export function MobileApp() {
     setDetail(d)
   }
   const closeDetail = () => history.back()
+
+  // "new conversation" is fire-and-forget over the command queue — remember
+  // the chats we already know for that agent and open the one that appears
+  const pendingNew = useRef<{ agentId: string; known: Set<string> } | null>(null)
+  const newChat = (durableAgentId: string) => {
+    pendingNew.current = { agentId: durableAgentId, known: new Set(snap?.chats.map(c => c.id) ?? []) }
+    void sendCommand({ kind: 'chat_new', id: durableAgentId })
+  }
+  useEffect(() => {
+    const p = pendingNew.current
+    if (!p || !snap) return
+    const fresh = snap.chats.find(c => c.durableAgentId === p.agentId && !p.known.has(c.id))
+    if (fresh) {
+      pendingNew.current = null
+      openDetail({ kind: 'chat', id: fresh.id })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap])
 
   useEffect(() => {
     void (async () => {
@@ -928,7 +1010,7 @@ export function MobileApp() {
           <div className="listcol">
             {!snap ? <div className="pairwrap"><div className="spinner" /></div>
               : tab === 'master' ? <div className="placeholder">Master orchestrates the whole fleet</div>
-              : <Lists tab={tab} snap={snap} open={openDetail} selected={detail?.id} />}
+              : <Lists tab={tab} snap={snap} open={openDetail} selected={detail?.id} onNewChat={newChat} />}
           </div>
           <div className="detailcol">
             {snap && tab === 'master' ? <MasterView snap={snap} />
@@ -967,7 +1049,7 @@ export function MobileApp() {
       ) : tab === 'master' && !detail ? (
         <MasterView snap={snap} />
       ) : (
-        detailView ?? <Lists tab={tab} snap={snap} open={openDetail} />
+        detailView ?? <Lists tab={tab} snap={snap} open={openDetail} onNewChat={newChat} />
       )}
       {!detail && <div className="tabs">{navButtons}</div>}
     </div>

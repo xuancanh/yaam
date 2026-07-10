@@ -57,11 +57,13 @@ function fakeApi(granted: AddonPermission[]): { api: AddonApi; flash: ReturnType
     sendToSession: vi.fn(), launchSession: vi.fn(() => 'new-id'), focusSession: vi.fn(),
     flash, logEvent: vi.fn(), notify: vi.fn(),
     sessions: { readOutput: vi.fn(() => 'out'), stop: vi.fn() },
-    tasks: { add: vi.fn(() => 't1'), update: vi.fn(), rename: vi.fn(), move: vi.fn(), remove: vi.fn(), start: vi.fn(), restart: vi.fn(), chat: vi.fn() },
+    tasks: { add: vi.fn(() => 't1'), update: vi.fn(), rename: vi.fn(), move: vi.fn(), remove: vi.fn(), start: vi.fn(), restart: vi.fn(), chat: vi.fn(), get: vi.fn(() => null), approve: vi.fn(async () => 'ok'), reject: vi.fn() },
     templates: { list: vi.fn(() => []), run: vi.fn(() => null) },
     schedules: { add: vi.fn(() => 'c1'), toggle: vi.fn(), remove: vi.fn() },
     agent: { wake: vi.fn(async () => 'reply') },
-    storage: { get: vi.fn(), set: vi.fn() },
+    storage: { get: vi.fn(), set: vi.fn(), list: vi.fn(() => []), remove: vi.fn() },
+    http: { request: vi.fn(async () => ({ status: 200, contentType: 'text/plain', text: 'ok' })) },
+    secrets: { list: vi.fn(async () => []) },
   } as unknown as AddonApi
   return { api: enforcePermissions(raw, granted), flash }
 }

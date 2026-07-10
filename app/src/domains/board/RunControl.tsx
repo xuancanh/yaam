@@ -91,6 +91,18 @@ function RunRow({ run, stats, selected, shortcut, onSelect }: {
           </span>
         )}
       </div>
+      {/* Master-maintained context: the specific action the user must take,
+          else what the session is currently working on (skip when it would
+          just repeat the task title) */}
+      {agent?.actionNeeded ? (
+        <div title={agent.actionNeeded} style={{ width: '100%', fontSize: 10, color: 'var(--amber)', paddingLeft: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          ⚠ {agent.actionNeeded}
+        </div>
+      ) : agent?.task && agent.task !== runTitle(run) ? (
+        <div title={agent.task} style={{ width: '100%', fontSize: 10, color: 'var(--mut)', paddingLeft: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          ◇ {agent.task}
+        </div>
+      ) : null}
     </button>
   )
 }

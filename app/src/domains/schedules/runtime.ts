@@ -12,6 +12,7 @@ import * as native from '../../core/native'
 import { mkId } from '../../shared/id'
 import { updateLocatedTask } from '../board/task-state'
 import { collectDueSchedules, collectDueTasks } from './due'
+import { cronMatches } from './cron'
 
 export interface SchedulerDeps {
   state: StatePort
@@ -24,6 +25,8 @@ export interface SchedulerDeps {
    *  returns the conversation id, or null when the agent/brain is unavailable */
   sendAgentChat: (durableAgentId: string, prompt: string, scheduleName: string) => string | null
   fireAddonHook: (hook: 'onCronFired', event: Record<string, unknown>) => void
+  /** wake an addon's own agent (its `agent.every` cron loop) */
+  wakeAddonAgent: (addonId: string, note: string) => void
   /** whether raw-command / one-shot launches are possible (false in a browser build) */
   canLaunch: boolean
 }
@@ -36,7 +39,9 @@ export interface SchedulerRuntime {
 const TICK_MS = 15000
 
 export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
-  const { state, clock, logEvent, notify, launchSession, spawnTaskSession, fireAddonHook, canLaunch } = deps
+  const { state, clock, logEvent, notify, launchSession, spawnTaskSession, fireAddonHook, wakeAddonAgent, canLaunch } = deps
+  // addonId -> last minute its agent.every fired (once-per-minute guard)
+  const agentWakes = new Map<string, string>()
 
   const tick = () => {
     const st = state.get()
@@ -156,6 +161,15 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
       }
     }
 
+    // addons with an `agent.every` cron: wake their agent on matching minutes —
+    // the addon's own periodic monitor loop (addons are global, not per pool)
+    for (const a of st.addons ?? []) {
+      if (!a.enabled || !a.agent?.every) continue
+      if (!cronMatches(a.agent.every, now) || agentWakes.get(a.id) === minuteKey) continue
+      agentWakes.set(a.id, minuteKey)
+      wakeAddonAgent(a.id, `[scheduled wake · ${timeLabel}] Run your periodic check now; do nothing if there is nothing to act on.`)
+    }
+
     // scheduled tasks: spawn a session when their time arrives, in whatever
     // workspace the task lives in. Both active and background go through the
     // one canonical launch path (spawnTaskSession) — no duplicated logic.
@@ -191,6 +205,7 @@ export interface SchedulerCtx {
   spawnTaskSession: SchedulerDeps['spawnTaskSession']
   sendAgentChat: SchedulerDeps['sendAgentChat']
   fireAddonHook: SchedulerDeps['fireAddonHook']
+  wakeAddonAgent: SchedulerDeps['wakeAddonAgent']
 }
 
 export function useSchedulerRuntime(ctx: SchedulerCtx): void {
@@ -199,6 +214,7 @@ export function useSchedulerRuntime(ctx: SchedulerCtx): void {
     const rt = createSchedulerRuntime({
       state, clock: browserClock, logEvent: ctx.logEvent, notify: ctx.notify,
       launchSession: ctx.launchSession, spawnTaskSession: ctx.spawnTaskSession, sendAgentChat: ctx.sendAgentChat, fireAddonHook: ctx.fireAddonHook,
+      wakeAddonAgent: ctx.wakeAddonAgent,
       canLaunch: native.isTauri,
     })
     rt.start()

@@ -4,7 +4,7 @@
 // the result with enforcePermissions for the addon's granted scopes.
 import type { MutableRefObject } from 'react'
 import type { AddonApi } from '../../core/addons'
-import { addonSnapshot } from '../../core/addons'
+import { addonSnapshot, hostAllowed, resolveSecretRefs, SECRET_REF } from '../../core/addons'
 import type { AppState, BoardCol, TaskChatMsg } from '../../core/types'
 import { mkId } from '../../shared/id'
 import { focusSessionIn } from '../session/layout-state'
@@ -33,6 +33,14 @@ export interface AddonApiCtx {
   fireAddonHook: (hook: 'onTaskMoved', event: Record<string, unknown>) => void
   runWatcher: (taskId: string, note: string) => void
   wakeAgent: (addonId: string, note: string) => Promise<string>
+  /** approve / send back a task in review (worktree merge included) */
+  approveTask: (taskId: string) => Promise<string>
+  rejectTask: (taskId: string, comment: string) => void
+  /** raw HTTP transport (already CORS-free on desktop); the api layer applies
+   *  the host allowlist + secret templating before calling this */
+  httpRequest: (method: string, url: string, headers: Record<string, string>, body?: string) => Promise<{ status: number; text: string; contentType: string }>
+  /** OS-keychain read for {{secret:NAME}} resolution; null when unset */
+  secretGet: (account: string) => Promise<string | null>
 }
 
 /** Build the raw (un-permission-checked) AddonApi bound to one addon id. */
@@ -86,6 +94,10 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
           cwd: typeof sp.cwd === 'string' ? sp.cwd : undefined,
           typeId: typeof sp.typeId === 'string' ? sp.typeId : undefined,
           templateId: typeof sp.templateId === 'string' ? sp.templateId : undefined,
+          machineId: typeof sp.machineId === 'string' ? sp.machineId : undefined,
+          isolate: sp.isolate === true ? true : undefined,
+          sessionMode: sp.sessionMode === 'interactive' ? 'interactive' as const : undefined,
+          scheduleAt: typeof sp.scheduleAt === 'number' && sp.scheduleAt > Date.now() ? sp.scheduleAt : undefined,
         }
         // shared command (caller-minted id lets us return it over the void seam);
         // enforcePermissions already gated `tasks`. Fall back to a direct dispatch.
@@ -94,6 +106,8 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
           id, title: input.title, col: column, agentId: null,
           description: input.description, criteria: input.criteria, cwd: input.cwd,
           typeId: input.typeId, templateId: input.templateId,
+          machineId: input.machineId, isolate: input.isolate,
+          sessionMode: input.sessionMode, scheduleAt: input.scheduleAt,
           chat: [{ id: mkId('tc'), role: 'system', text: 'Task created by an addon', at: Date.now() }],
         }]) }))
         return id
@@ -111,6 +125,10 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
             cwd: typeof p.cwd === 'string' ? p.cwd : t.cwd,
             typeId: typeof p.typeId === 'string' ? p.typeId : t.typeId,
             templateId: typeof p.templateId === 'string' ? p.templateId : t.templateId,
+            machineId: typeof p.machineId === 'string' ? p.machineId : t.machineId,
+            isolate: typeof p.isolate === 'boolean' ? p.isolate : t.isolate,
+            sessionMode: p.sessionMode === 'interactive' || p.sessionMode === 'oneshot' ? p.sessionMode : t.sessionMode,
+            scheduleAt: typeof p.scheduleAt === 'number' && p.scheduleAt > Date.now() ? p.scheduleAt : t.scheduleAt,
           } : t)),
         }))
       },
@@ -153,6 +171,27 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
         dispatch(s2 => ({ ...s2, tasks: s2.tasks.map(t => (t.id === id ? { ...t, awaitingUser: false } : t)) }))
         ctx.runWatcher(String(id), `[message from an addon on the user's behalf] ${msg}`)
       },
+      get: id => {
+        const t = stateRef.current.tasks.find(x => x.id === id)
+        if (!t) return null
+        return {
+          id: t.id, title: t.title, col: t.col, agentId: t.agentId, agentIds: t.agentIds ?? [],
+          description: t.description ?? null, criteria: t.criteria ?? [],
+          watcherNote: t.watcherNote ?? null, awaitingUser: !!t.awaitingUser,
+          cwd: t.cwd ?? null, templateId: t.templateId ?? null, typeId: t.typeId ?? null,
+          machineId: t.machineId ?? null, isolate: !!t.isolate,
+          sessionMode: t.sessionMode ?? 'oneshot', scheduleAt: t.scheduleAt ?? null,
+          chat: (t.chat ?? []).slice(-20).map(m => ({ role: m.role, text: m.text.slice(0, 500), at: m.at })),
+        }
+      },
+      approve: async id => {
+        if (!stateRef.current.tasks.some(t => t.id === id)) return 'task not found'
+        return await ctx.approveTask(String(id))
+      },
+      reject: (id, feedback) => {
+        if (!stateRef.current.tasks.some(t => t.id === id)) return
+        ctx.rejectTask(String(id), String(feedback ?? '').slice(0, 2000))
+      },
     },
     templates: {
       list: () => (stateRef.current.templates ?? []).map(t => ({ id: t.id, name: t.name, mode: t.mode, typeId: t.typeId })),
@@ -178,6 +217,9 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
               templateId: typeof bt.templateId === 'string' ? bt.templateId : undefined,
               typeId: typeof bt.typeId === 'string' ? bt.typeId : undefined,
               cwd: typeof bt.cwd === 'string' ? bt.cwd : undefined,
+              machineId: typeof bt.machineId === 'string' ? bt.machineId : undefined,
+              isolate: bt.isolate === true ? true : undefined,
+              sessionMode: bt.sessionMode === 'interactive' ? 'interactive' as const : undefined,
               startNow: bt.startNow !== false,
             }
           : undefined
@@ -224,6 +266,58 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
             [addonId]: { ...(s2.addonStorage[addonId] ?? {}), [String(key)]: value },
           },
         }))
+      },
+      list: () => Object.keys(stateRef.current.addonStorage[addonId] ?? {}),
+      remove: key => dispatch(s2 => {
+        const mine = { ...(s2.addonStorage[addonId] ?? {}) }
+        delete mine[String(key)]
+        return { ...s2, addonStorage: { ...s2.addonStorage, [addonId]: mine } }
+      }),
+    },
+    http: {
+      request: async (method, url, opts) => {
+        const addon = stateRef.current.addons.find(a => a.id === addonId)
+        const m = String(method).toUpperCase()
+        if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(m)) {
+          throw new Error(`http.request: method ${m} is not allowed`)
+        }
+        const u = String(url)
+        if (!hostAllowed(addon?.hosts, u)) {
+          throw new Error(`http.request: host not allowed — the manifest declares hosts: [${(addon?.hosts ?? []).join(', ') || 'none'}] (https only)`)
+        }
+        // secrets travel in headers/body only — never in the URL, where they
+        // would leak into logs and query strings
+        if ([...u.matchAll(SECRET_REF)].length) {
+          throw new Error('http.request: {{secret:…}} is not allowed in the URL — put it in a header or the body')
+        }
+        const getSecret = async (name: string) => {
+          if (!(addon?.secrets ?? []).some(sd => sd.name === name)) {
+            throw new Error(`secret "${name}" is not declared in this addon's manifest`)
+          }
+          if (!addon?.granted.includes('secrets')) {
+            throw new Error('permission "secrets" not granted to this addon (Settings → Addons)')
+          }
+          return await ctx.secretGet(`addon:${addonId}:${name}`)
+        }
+        const headers: Record<string, string> = {}
+        for (const [k, v] of Object.entries(opts?.headers ?? {})) {
+          headers[String(k)] = await resolveSecretRefs(String(v), getSecret)
+        }
+        const body = opts?.body !== undefined ? await resolveSecretRefs(String(opts.body), getSecret) : undefined
+        const res = await ctx.httpRequest(m, u, headers, body)
+        // keep responses under the sandbox RPC result cap
+        return { status: res.status, contentType: res.contentType, text: res.text.slice(0, 200_000) }
+      },
+    },
+    secrets: {
+      list: async () => {
+        const addon = stateRef.current.addons.find(a => a.id === addonId)
+        const out: { name: string; label?: string; set: boolean }[] = []
+        for (const sd of addon?.secrets ?? []) {
+          const v = await ctx.secretGet(`addon:${addonId}:${sd.name}`)
+          out.push({ name: sd.name, label: sd.label, set: !!v })
+        }
+        return out
       },
     },
   }

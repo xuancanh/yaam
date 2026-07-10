@@ -1,0 +1,23 @@
+# Workflows — DAG pipelines over board tasks.
+# Chain tasks with dependencies, drag nodes around, trigger runs by cron,
+# and keep a run history. Pack for distribution with:
+#   node scripts/pack-addon.mjs registry/packages/workflows
+manifest: 3
+name: Workflows
+version: 1.0.0
+icon: ⛓
+description: Task pipelines as a DAG — draw nodes (task specs) and dependency edges, run the graph on demand or on a cron, and watch each run advance as the board tasks it spawned reach done. Full run history included.
+author: yaam
+
+permissions:
+  - state:read
+  - tasks
+  - schedules
+  - storage
+  - ui
+
+view: view.html
+
+hooks:
+  onTaskMoved: hooks/onTaskMoved.js
+  onCronFired: hooks/onCronFired.js

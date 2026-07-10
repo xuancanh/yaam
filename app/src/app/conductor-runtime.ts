@@ -148,6 +148,8 @@ export function createAppRuntime(): AppRuntime {
     ...assembleRuntimeDeps(refs, session, addon, chat, master),
     execCommand: registry.execute,
   })
+  // close the cycle: addons (built earlier) reach the board review verbs here
+  refs.taskReviewRef.current = { approve: actions.approveTaskReview, reject: actions.rejectTaskReview }
 
   return {
     actions,

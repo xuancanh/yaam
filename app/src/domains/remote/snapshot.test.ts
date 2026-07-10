@@ -30,9 +30,14 @@ describe('buildRemoteSnapshot', () => {
     ]
     const taskChat: TaskChatMsg[] = [{ id: 'tc1', role: 'watcher', text: 'tests green', at: 3 }]
     const s = state({
+      durableAgents: [
+        { id: 'agent-default', name: 'Assistant', color: '#7FD1FF', charter: '', builtin: true, createdAt: 0 },
+        { id: 'da1', name: 'Researcher', color: '#B692F6', role: 'digs things up', charter: '', createdAt: 1 },
+        { id: 'da2', name: 'Gone', color: '#fff', charter: '', archived: true, createdAt: 2 },
+      ],
       agents: [
-        agent({ id: 'a1', task: 'auth refactor', summary: 'tests green', actionNeeded: 'review PR' }),
-        agent({ id: 'a2', name: 'helper', kind: 'chat', chatLog, chatModel: 'sonnet-4' }),
+        agent({ id: 'a1', task: 'auth refactor', summary: 'tests green', actionNeeded: 'review PR', attention: true }),
+        agent({ id: 'a2', name: 'helper', kind: 'chat', chatLog, chatModel: 'sonnet-4', durableAgentId: 'da1', chatPinned: true }),
         agent({ id: 'a3', archived: true }),
         agent({ id: 'a4', name: 'elsewhere', workspaceId: 'w2' }),
       ],
@@ -48,13 +53,18 @@ describe('buildRemoteSnapshot', () => {
     expect(snap.workspace).toBe('acme')
     // sessions: real agents only, with their terminal tail; archived excluded
     expect(snap.sessions.map(x => x.id)).toEqual(['a1']) // archived + other-workspace excluded
-    expect(snap.sessions[0]).toMatchObject({ task: 'auth refactor', cost: 1.25, cols: 190 })
+    expect(snap.sessions[0]).toMatchObject({ task: 'auth refactor', cost: 1.25, cols: 190, attention: true })
     expect(snap.sessions[0].term).toContain('npm test') // serialized ANSI, colors kept
 
-    // chats carry recent messages, thinking excluded
+    // chats carry recent messages, thinking excluded; durable grouping metadata
     expect(snap.chats.map(c => c.id)).toEqual(['a2'])
     expect(snap.chats[0].model).toBe('sonnet-4')
     expect(snap.chats[0].msgs.map(m => m.id)).toEqual(['m1', 'm2'])
+    expect(snap.chats[0]).toMatchObject({ durableAgentId: 'da1', pinned: true, busy: true, lastAt: 2 })
+
+    // archived durable agents are excluded
+    expect(snap.durables.map(d => d.id)).toEqual(['agent-default', 'da1'])
+    expect(snap.durables[1]).toMatchObject({ name: 'Researcher', role: 'digs things up', builtin: false })
 
     // the WHOLE board (backlog too), minus archived, with watcher chat attached
     expect(snap.tasks.map(t => t.id)).toEqual(['t1', 't2'])
@@ -72,6 +82,7 @@ describe('buildRemoteSnapshot', () => {
     expect(snap.sessions).toEqual([])
     expect(snap.tasks).toEqual([])
     expect(snap.chats).toEqual([])
+    expect(snap.durables).toEqual([])
     expect(snap.approvals).toEqual([])
     expect(snap.master).toEqual({ busy: false, brain: false, msgs: [] })
     expect(typeof snap.ts).toBe('number')
@@ -106,5 +117,7 @@ describe('buildRemoteSnapshot', () => {
     const snap = buildRemoteSnapshot(s, () => ({ data: '', cols: 80 }))
     expect(snap.chats[0].msgs.length).toBe(30)
     expect(snap.chats[0].msgs[0].text.length).toBeLessThanOrEqual(4001)
+    // an unclaimed chat falls to the built-in generic agent
+    expect(snap.chats[0].durableAgentId).toBe('agent-default')
   })
 })

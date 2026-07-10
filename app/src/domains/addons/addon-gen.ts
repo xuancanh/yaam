@@ -31,25 +31,30 @@ PACKAGE SHAPE (single-file, manifest 2)
   "html": "<!DOCTYPE html>…",          // optional view (tab)
   "tools": [{ "name", "description", "input_schema", "handler" }],   // optional Master tools
   "hooks": { ... },                    // optional lifecycle hooks
-  "agent": { "system": "...", "on": ["onSessionExit"] }              // optional: the addon's own LLM agent
+  "agent": { "system": "...", "on": ["onSessionExit"], "every": "*/30 * * * *" },  // optional: the addon's own LLM agent; "every" = cron that wakes it periodically
+  "hosts": ["api.github.com", "*.example.com"],   // http.request allowlist (https only); omit if no network
+  "secrets": [{ "name": "API_TOKEN", "label": "what to paste" }]     // keychain slots the user fills in the Addons view
 }
 A package must contain at least one of html / tools / hooks / agent.
 
 PERMISSION SCOPES (request only what the code calls)
-- state:read     → getState(), sessions.readOutput(id, lines), templates.list()
+- state:read     → getState(), sessions.readOutput(id, lines), templates.list(), tasks.get(id) (full detail: spec, watcherNote, chat, sessions)
 - sessions:send  → sendToSession(id, text), sessions.stop(id)
 - sessions:launch→ launchSession(cmd, cwd?, name?), templates.run(idOrName, task?)
-- tasks          → tasks.add(title, col?, {description, criteria[], cwd, typeId, templateId}) → id · tasks.update(id, patch) · tasks.rename(id, title) · tasks.move(id, col) · tasks.remove(id) · tasks.start(id) · tasks.restart(id) · tasks.chat(id, text)
-                   (cols: backlog|progress|review|done|failed; started tasks get a watcher-driven ONE-SHOT session with the spec+criteria as a goal; tasks.chat posts into the task's watcher chat and the watcher reacts)
-- schedules      → schedules.add({name, schedule: '5-field cron' | at: epochMs, cmd?, cwd?, task?: {title, description, criteria, cwd, startNow}}) · schedules.toggle(name, on?) · schedules.remove(name)
+- tasks          → tasks.add(title, col?, {description, criteria[], cwd, typeId, templateId, machineId, isolate, sessionMode: 'oneshot'|'interactive', scheduleAt: epochMs}) → id · tasks.update(id, patch) · tasks.rename(id, title) · tasks.move(id, col) · tasks.remove(id) · tasks.start(id) · tasks.restart(id) · tasks.chat(id, text) · tasks.approve(id) (review → done, merges isolated worktree) · tasks.reject(id, feedback)
+                   (cols: backlog|progress|review|done|failed; started tasks get a watcher-driven session — one-shot by default — with the spec+criteria as a goal; isolate=true runs it in a git worktree reviewed via the queue; machineId runs it on a saved remote machine; scheduleAt defers the start)
+- schedules      → schedules.add({name, schedule: '5-field cron' | at: epochMs, cmd?, cwd?, task?: {title, description, criteria, cwd, machineId, isolate, sessionMode, startNow}}) · schedules.toggle(name, on?) · schedules.remove(name)
 - agent          → agent.wake(note) → Promise<reply string> (the addon's own agent; costs API tokens)
 - ui             → flash(text), notify(title, detail), logEvent(text), focusSession(id)
-- storage        → storage.get(key), storage.set(key, value)   (persistent, namespaced per addon)
+- storage        → storage.get(key), storage.set(key, value), storage.list(), storage.remove(key)   (persistent, namespaced per addon, 256KB/value)
+- http           → http.request(method, url, {headers?, body?}) → Promise<{status, contentType, text}> — url host MUST be in the manifest "hosts" (https only); header/body values may embed {{secret:NAME}}
+- secrets        → secrets.list() → [{name, label, set}] — names only; VALUES stay in the OS keychain and are only injected into http.request templating, never readable by code
 
 STATE SNAPSHOT (getState() and the view's state push)
-{ workspace, sessions: [{id, name, status: running|idle|needs|error, ephemeral, repo, task, summary, actionNeeded, cwd, cost, used}],
-  tasks: [{id, title, col, agentId, description, criteria, watcherNote, awaitingUser, cwd, templateId, typeId, chatTail}],
-  templates: [{id, name, mode, typeId}], crons: [{name, schedule, at, on, last, action}],
+{ workspace, sessions: [{id, name, status: running|idle|needs|error, ephemeral, repo, task, summary, actionNeeded, cwd, cost, used, machineId, isolated}],
+  tasks: [{id, title, col, agentId, description, criteria, watcherNote, awaitingUser, cwd, templateId, typeId, machineId, isolate, sessionMode, scheduleAt, chatTail}],
+  templates: [{id, name, mode, typeId}], machines: [{id, label}],
+  crons: [{name, schedule, at, on, last, action, runs: [{at, note, ok, taskId, agentId}]}],
   events: [{time, type, text}], totals: {cost, used, running} }
 
 VIEW (the "html" field)
@@ -73,8 +78,8 @@ HOOKS (async JS function bodies, (input, api) => Promise<void>; await api calls)
 - onCronFired    input={name, kind: task|command|log}
 - masterPromptAppend: plain TEXT appended to Master's system prompt (not JS).
 
-AGENT (optional — the addon's own mini-Master)
-"agent": {"system": persona/duties text, "on": [hook names that wake it]}. Its tools are the addon's permission-scoped API (get_state, read_output, launch_session, add_task, move_task, task_chat, run_template, add_schedule, storage, notify_user, send_to_session, stop_session). Views chat with it via the 'agent.wake' RPC. Requires the "agent" permission.
+AGENT (optional — the addon's own mini-Master / customizable monitor)
+"agent": {"system": persona/duties text, "on": [hook names that wake it], "every": "5-field cron that wakes it periodically"}. Its tools are the addon's permission-scoped API (get_state, read_output, launch_session, add_task, get_task, move_task, restart_task, approve_task, reject_task, task_chat, run_template, add_schedule, storage, http_request, notify_user, send_to_session, stop_session). Views chat with it via the 'agent.wake' RPC. Requires the "agent" permission. The user can refine its "system" instructions later via the addon's Customize chat — write it as a clear default policy.
 
 RULES
 - Launching CLI agents: one-shot = claude -p '<prompt>' (silent until done) or codex exec --skip-git-repo-check. Shell-quote prompts with single quotes, escaping embedded ones as '\\''.

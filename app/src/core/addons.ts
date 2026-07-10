@@ -11,6 +11,14 @@ export interface AddonTaskSpec {
   cwd?: string
   typeId?: string
   templateId?: string
+  /** run the task's sessions on a saved remote machine (id from getState().machines) */
+  machineId?: string
+  /** run in an isolated git worktree (reviewed + merged via the review queue) */
+  isolate?: boolean
+  /** one-shot (default) or interactive session */
+  sessionMode?: 'oneshot' | 'interactive'
+  /** epoch ms — the scheduler starts the task at this time */
+  scheduleAt?: number
 }
 
 export interface AddonApi {
@@ -51,6 +59,12 @@ export interface AddonApi {
     restart: (id: string) => void
     /** post a message into the task's watcher chat (the watcher replies there) */
     chat: (id: string, text: string) => void
+    /** full detail of one task (spec, watcher note, chat tail, sessions) */
+    get: (id: string) => Record<string, unknown> | null
+    /** approve a task sitting in review (merges its worktree if isolated) */
+    approve: (id: string) => Promise<string>
+    /** send a review back with feedback (the watcher relaunches with it) */
+    reject: (id: string, feedback: string) => void
   }
   /** agent templates (reusable launch configs) */
   templates: {
@@ -73,6 +87,19 @@ export interface AddonApi {
   storage: {
     get: (key: string) => unknown
     set: (key: string, value: unknown) => void
+    list: () => string[]
+    remove: (key: string) => void
+  }
+  /** outbound HTTP, restricted to the manifest's `hosts` allowlist. Header and
+   *  body values may reference {{secret:NAME}} — resolved host-side from the OS
+   *  keychain, so addon code never sees the secret value. */
+  http: {
+    request: (method: string, url: string, opts?: { headers?: Record<string, string>; body?: string }) => Promise<{ status: number; contentType: string; text: string }>
+  }
+  /** the addon's declared secret slots — names and whether a value is stored;
+   *  values are keychain-only and can only be USED via http.request templating */
+  secrets: {
+    list: () => Promise<{ name: string; label?: string; set: boolean }[]>
   }
 }
 
@@ -86,13 +113,15 @@ export const ALL_PERMISSIONS: { id: AddonPermission; label: string }[] = [
   { id: 'master:prompt', label: "append directives to Master's system prompt" },
   { id: 'ui', label: 'notifications, toasts, focus, activity log' },
   { id: 'storage', label: 'private key-value storage' },
+  { id: 'http', label: 'call HTTP APIs on the hosts the package declares' },
+  { id: 'secrets', label: 'use its keychain secrets in those HTTP calls' },
   { id: 'exec', label: 'run shell commands on this machine (plugin hooks)' },
 ]
 
 /** Scopes that can act on the machine or steer LLMs — never auto-granted on
  *  install; the user turns them on per-addon in Settings. */
 export const DANGEROUS_PERMISSIONS: AddonPermission[] = [
-  'sessions:send', 'sessions:launch', 'tasks', 'schedules', 'agent', 'master:prompt', 'exec',
+  'sessions:send', 'sessions:launch', 'tasks', 'schedules', 'agent', 'master:prompt', 'http', 'secrets', 'exec',
 ]
 
 /** Which permission each API method requires. */
@@ -107,10 +136,13 @@ export const METHOD_PERMISSION: Record<string, AddonPermission> = {
   'sessions.readOutput': 'state:read', 'sessions.stop': 'sessions:send',
   'tasks.add': 'tasks', 'tasks.update': 'tasks', 'tasks.rename': 'tasks', 'tasks.move': 'tasks',
   'tasks.remove': 'tasks', 'tasks.start': 'tasks', 'tasks.restart': 'tasks', 'tasks.chat': 'tasks',
+  'tasks.get': 'state:read', 'tasks.approve': 'tasks', 'tasks.reject': 'tasks',
   'templates.list': 'state:read', 'templates.run': 'sessions:launch',
   'schedules.add': 'schedules', 'schedules.toggle': 'schedules', 'schedules.remove': 'schedules',
   'agent.wake': 'agent',
-  'storage.get': 'storage', 'storage.set': 'storage',
+  'storage.get': 'storage', 'storage.set': 'storage', 'storage.list': 'storage', 'storage.remove': 'storage',
+  'http.request': 'http',
+  'secrets.list': 'secrets',
   exec: 'exec',
 }
 
@@ -147,6 +179,9 @@ export function enforcePermissions(api: AddonApi, granted: AddonPermission[]): A
       start: guard('tasks.start', api.tasks.start),
       restart: guard('tasks.restart', api.tasks.restart),
       chat: guard('tasks.chat', api.tasks.chat),
+      get: guard('tasks.get', api.tasks.get),
+      approve: guard('tasks.approve', api.tasks.approve),
+      reject: guard('tasks.reject', api.tasks.reject),
     },
     templates: {
       list: guard('templates.list', api.templates.list),
@@ -163,6 +198,14 @@ export function enforcePermissions(api: AddonApi, granted: AddonPermission[]): A
     storage: {
       get: guard('storage.get', api.storage.get),
       set: guard('storage.set', api.storage.set),
+      list: guard('storage.list', api.storage.list),
+      remove: guard('storage.remove', api.storage.remove),
+    },
+    http: {
+      request: guard('http.request', api.http.request),
+    },
+    secrets: {
+      list: guard('secrets.list', api.secrets.list),
     },
   }
 }
@@ -172,10 +215,13 @@ export const ADDON_RPC_METHODS = [
   'getState', 'sendToSession', 'launchSession', 'focusSession', 'flash', 'logEvent', 'notify',
   'sessions.readOutput', 'sessions.stop',
   'tasks.add', 'tasks.update', 'tasks.rename', 'tasks.move', 'tasks.remove', 'tasks.start', 'tasks.restart', 'tasks.chat',
+  'tasks.get', 'tasks.approve', 'tasks.reject',
   'templates.list', 'templates.run',
   'schedules.add', 'schedules.toggle', 'schedules.remove',
   'agent.wake',
-  'storage.get', 'storage.set',
+  'storage.get', 'storage.set', 'storage.list', 'storage.remove',
+  'http.request',
+  'secrets.list',
 ] as const
 
 /** Validate and invoke one whitelisted dotted addon RPC method. */
@@ -196,6 +242,7 @@ export function addonSnapshot(s: AppState): Record<string, unknown> {
       id: a.id, name: a.name, status: a.status, ephemeral: !!a.ephemeral, repo: a.repo,
       task: a.task ?? null, summary: a.summary ?? null, actionNeeded: a.actionNeeded ?? null,
       cwd: a.cwd ?? null, cost: Number(a.cost.toFixed(3)), used: Number(a.used.toFixed(2)),
+      machineId: a.machineId ?? null, isolated: !!a.worktree,
     })),
     workspace: s.workspaces.find(w => w.id === s.activeWorkspace)?.name ?? 'Default',
     tasks: s.tasks.map(t => ({
@@ -203,12 +250,16 @@ export function addonSnapshot(s: AppState): Record<string, unknown> {
       description: t.description ?? null, criteria: t.criteria ?? [],
       watcherNote: t.watcherNote ?? null, awaitingUser: !!t.awaitingUser,
       cwd: t.cwd ?? null, templateId: t.templateId ?? null, typeId: t.typeId ?? null,
+      machineId: t.machineId ?? null, isolate: !!t.isolate,
+      sessionMode: t.sessionMode ?? 'oneshot', scheduleAt: t.scheduleAt ?? null,
       chatTail: (t.chat ?? []).slice(-5).map(m => ({ role: m.role, text: m.text.slice(0, 300) })),
     })),
     templates: (s.templates ?? []).map(t => ({ id: t.id, name: t.name, mode: t.mode, typeId: t.typeId })),
+    machines: (s.settings.machines ?? []).map(m => ({ id: m.id, label: m.label })),
     crons: s.crons.map(c => ({
       name: c.name, schedule: c.schedule, at: c.at ?? null, on: c.on, last: c.last,
       action: c.boardTask ? 'task' : c.templateId ? 'template' : c.cmd ? 'command' : 'log',
+      runs: (c.runs ?? []).slice(0, 5).map(r => ({ at: r.at, note: r.note, ok: r.ok, taskId: r.taskId ?? null, agentId: r.agentId ?? null })),
     })),
     events: s.events.slice(0, 10).map(e => ({ time: e.time, type: e.type, text: e.text })),
     totals: {
@@ -217,6 +268,43 @@ export function addonSnapshot(s: AppState): Record<string, unknown> {
       running: s.agents.filter(a => a.status === 'running').length,
     },
   }
+}
+
+// ---------- addon HTTP: host allowlist + secret templating ----------
+
+/** Is this URL reachable for an addon with the given `hosts` allowlist?
+ *  https only (plain http allowed just for localhost); hosts match exactly or
+ *  via a leading `*.` wildcard (`*.example.com` also matches example.com). */
+export function hostAllowed(hosts: string[] | undefined, url: string): boolean {
+  let u: URL
+  try { u = new URL(url) } catch { return false }
+  const h = u.hostname.toLowerCase()
+  const isLocal = h === 'localhost' || h === '127.0.0.1'
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && isLocal)) return false
+  return (hosts ?? []).some(pat => {
+    const p = pat.trim().toLowerCase()
+    if (!p) return false
+    if (p.startsWith('*.')) return h === p.slice(2) || h.endsWith(p.slice(1))
+    return h === p
+  })
+}
+
+/** {{secret:NAME}} — the only way addon code can USE a secret (headers/body of
+ *  http.request); the value is substituted host-side and never returned. */
+export const SECRET_REF = /\{\{\s*secret:([A-Za-z0-9_]+)\s*\}\}/g
+
+/** Substitute every {{secret:NAME}} in `text` via `get` (keychain lookup).
+ *  A referenced-but-unset secret throws so the addon gets a clear error. */
+export async function resolveSecretRefs(text: string, get: (name: string) => Promise<string | null>): Promise<string> {
+  const names = [...new Set([...text.matchAll(SECRET_REF)].map(m => m[1]))]
+  if (!names.length) return text
+  const values = new Map<string, string>()
+  for (const name of names) {
+    const v = await get(name)
+    if (v === null || v === '') throw new Error(`secret "${name}" is not set (Addons → this addon → Secrets)`)
+    values.set(name, v)
+  }
+  return text.replace(SECRET_REF, (_, name: string) => values.get(name) ?? '')
 }
 
 // ---------- folder / YAML package format ----------
@@ -404,7 +492,26 @@ export function parseAddonPackage(json: string): Omit<Addon, 'id' | 'enabled' | 
         on: Array.isArray(agentRaw.on)
           ? (agentRaw.on as unknown[]).filter((x): x is import('./types').AddonHookName => HOOK_NAMES.includes(x as string))
           : undefined,
+        every: typeof agentRaw.every === 'string' && agentRaw.every.trim().split(/\s+/).length === 5
+          ? agentRaw.every.trim()
+          : undefined,
       }
+    : undefined
+  if (agentRaw && typeof agentRaw.every === 'string' && agentRaw.every.trim() && !agent?.every) {
+    throw new Error('agent.every must be a 5-field cron expression')
+  }
+  const hosts = Array.isArray(raw.hosts)
+    ? (raw.hosts as unknown[]).filter((x): x is string => typeof x === 'string' && /^(\*\.)?[a-z0-9.-]+$/i.test(x.trim())).map(x => x.trim())
+    : undefined
+  const secrets = Array.isArray(raw.secrets)
+    ? (raw.secrets as unknown[]).flatMap(x => {
+        if (typeof x === 'string' && /^[A-Za-z0-9_]+$/.test(x)) return [{ name: x }]
+        const o = x as Record<string, unknown>
+        if (typeof o?.name === 'string' && /^[A-Za-z0-9_]+$/.test(o.name)) {
+          return [{ name: o.name, label: typeof o.label === 'string' ? o.label : undefined }]
+        }
+        return []
+      })
     : undefined
   const hasHooks = Object.values(hooks).some(Boolean)
   if (!html && !tools.length && !hasHooks && !agent) {
@@ -418,6 +525,8 @@ export function parseAddonPackage(json: string): Omit<Addon, 'id' | 'enabled' | 
     name, version, icon, html, tools: tools.length ? tools : undefined,
     hooks: hasHooks ? hooks : undefined,
     agent,
+    hosts: hosts?.length ? hosts : undefined,
+    secrets: secrets?.length ? secrets : undefined,
     desc: typeof raw.description === 'string' ? raw.description : undefined,
     author: typeof raw.author === 'string' ? raw.author : undefined,
     permissions,
@@ -437,6 +546,8 @@ export function exportAddonPackage(a: Addon): string {
     tools: a.tools,
     hooks: a.hooks,
     agent: a.agent,
+    hosts: a.hosts,
+    secrets: a.secrets,
     permissions: a.permissions,
   }, null, 2)
 }

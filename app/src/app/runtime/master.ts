@@ -58,6 +58,7 @@ export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, ses
     launchSession: session.launchSession, spawnTaskSession: session.spawnTaskSession,
     sendAgentChat,
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
+    wakeAddonAgent: (addonId, note) => { void refs.runAddonAgentRef.current(addonId, note) },
     canLaunch: native.isTauri,
   })
 

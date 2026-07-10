@@ -42,12 +42,14 @@ const AGENT_TOOLS: { name: string; description: string; input_schema: Record<str
   },
   {
     name: 'add_task',
-    description: 'Create a board task (title + description + criteria); its watcher drives a one-shot session once started.',
+    description: 'Create a board task (title + description + criteria); its watcher drives its session once started. Supports isolate (git worktree), session_mode, machine_id, schedule_at (epoch ms).',
     input_schema: {
       type: 'object',
       properties: {
         title: { type: 'string' }, col: { type: 'string' }, description: { type: 'string' },
         criteria: { type: 'array', items: { type: 'string' } }, cwd: { type: 'string' }, start: { type: 'boolean' },
+        isolate: { type: 'boolean' }, session_mode: { type: 'string', enum: ['oneshot', 'interactive'] },
+        machine_id: { type: 'string' }, schedule_at: { type: 'number' },
       },
       required: ['title'],
     },
@@ -56,9 +58,58 @@ const AGENT_TOOLS: { name: string; description: string; input_schema: Record<str
         description: i.description ? String(i.description) : undefined,
         criteria: Array.isArray(i.criteria) ? i.criteria.map(String) : undefined,
         cwd: i.cwd ? String(i.cwd) : undefined,
+        isolate: i.isolate === true ? true : undefined,
+        sessionMode: i.session_mode === 'interactive' ? 'interactive' : undefined,
+        machineId: i.machine_id ? String(i.machine_id) : undefined,
+        scheduleAt: typeof i.schedule_at === 'number' ? i.schedule_at : undefined,
       })
       if (i.start === true) api.tasks.start(id)
       return `task ${id} created${i.start === true ? ' and started' : ''}`
+    },
+  },
+  {
+    name: 'get_task',
+    description: 'Full detail of one board task: spec, watcher note, chat history, sessions, isolation/schedule.',
+    input_schema: { type: 'object', properties: { task_id: { type: 'string' } }, required: ['task_id'] },
+    run: (api, i) => api.tasks.get(String(i.task_id)) ?? 'task not found',
+  },
+  {
+    name: 'restart_task',
+    description: 'Stop the task\'s dead/stuck session and spawn a fresh one for it.',
+    input_schema: { type: 'object', properties: { task_id: { type: 'string' } }, required: ['task_id'] },
+    run: (api, i) => { api.tasks.restart(String(i.task_id)); return 'restarting' },
+  },
+  {
+    name: 'approve_task',
+    description: 'Approve a task sitting in review (merges its isolated worktree if any) and move it to done.',
+    input_schema: { type: 'object', properties: { task_id: { type: 'string' } }, required: ['task_id'] },
+    run: (api, i) => api.tasks.approve(String(i.task_id)),
+  },
+  {
+    name: 'reject_task',
+    description: 'Send a review task back with feedback; the watcher relaunches the work with it.',
+    input_schema: { type: 'object', properties: { task_id: { type: 'string' }, feedback: { type: 'string' } }, required: ['task_id', 'feedback'] },
+    run: (api, i) => { api.tasks.reject(String(i.task_id), String(i.feedback)); return 'sent back with feedback' },
+  },
+  {
+    name: 'http_request',
+    description: "HTTP call to one of the hosts declared in this addon's manifest. Header/body values may use {{secret:NAME}} — resolved from the keychain, never shown to you.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] },
+        url: { type: 'string' },
+        headers: { type: 'object', description: 'string values; {{secret:NAME}} allowed' },
+        body: { type: 'string' },
+      },
+      required: ['method', 'url'],
+    },
+    run: async (api, i) => {
+      const res = await api.http.request(String(i.method), String(i.url), {
+        headers: (i.headers && typeof i.headers === 'object' ? i.headers : undefined) as Record<string, string> | undefined,
+        body: typeof i.body === 'string' ? i.body : undefined,
+      })
+      return `HTTP ${res.status} (${res.contentType})\n${res.text.slice(0, 20_000)}`
     },
   },
   {
@@ -94,9 +145,14 @@ const AGENT_TOOLS: { name: string; description: string; input_schema: Record<str
   },
   {
     name: 'storage',
-    description: "This addon's persistent key-value storage: op=get|set.",
-    input_schema: { type: 'object', properties: { op: { type: 'string', enum: ['get', 'set'] }, key: { type: 'string' }, value: {} }, required: ['op', 'key'] },
-    run: (api, i) => (i.op === 'set' ? (api.storage.set(String(i.key), i.value), 'saved') : JSON.stringify(api.storage.get(String(i.key)) ?? null)),
+    description: "This addon's persistent key-value storage: op=get|set|list|remove.",
+    input_schema: { type: 'object', properties: { op: { type: 'string', enum: ['get', 'set', 'list', 'remove'] }, key: { type: 'string' }, value: {} }, required: ['op'] },
+    run: (api, i) => {
+      if (i.op === 'list') return JSON.stringify(api.storage.list())
+      if (i.op === 'set') { api.storage.set(String(i.key), i.value); return 'saved' }
+      if (i.op === 'remove') { api.storage.remove(String(i.key)); return 'removed' }
+      return JSON.stringify(api.storage.get(String(i.key)) ?? null)
+    },
   },
   {
     name: 'notify_user',

@@ -200,6 +200,9 @@ export function RemoteCompanion() {
       switch (c.kind) {
         case 'master_send': return a.sendMessage(c.text)
         case 'chat_send': return a.sendChatMessage(c.id, c.text)
+        // start a fresh conversation with a durable agent (c.id = agent id);
+        // the phone spots the new chat in the next snapshot and opens it
+        case 'chat_new': return void a.newChatSession(undefined, undefined, undefined, undefined, undefined, undefined, c.id || undefined)
         case 'task_chat': return a.sendTaskChat(c.id, c.text)
         case 'task_start': return a.startTask(c.id)
         case 'session_input': return a.sendInput(c.id, c.text)

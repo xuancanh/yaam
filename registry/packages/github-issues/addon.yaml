@@ -1,0 +1,38 @@
+# GitHub Issues — sync a repo's open issues into a task queue.
+# A cron fetches new issues over the addon HTTP API (token in the OS keychain),
+# queues them for review in the tab, or hands them to the addon's own triage
+# agent in auto mode. Pack with:
+#   node scripts/pack-addon.mjs registry/packages/github-issues
+manifest: 3
+name: GitHub Issues
+version: 1.0.0
+icon: 🐙
+description: Pulls open issues from a GitHub repo on a schedule into a review queue — add them to the board yourself, or let the addon's customizable triage agent decide which become tasks. Uses a keychain-stored token for private repos.
+author: yaam
+
+hosts:
+  - api.github.com
+
+secrets:
+  - name: GITHUB_TOKEN
+    label: GitHub personal access token (repo read scope; optional for public repos)
+
+permissions:
+  - state:read
+  - tasks
+  - schedules
+  - storage
+  - ui
+  - http
+  - secrets
+  - agent
+
+view: view.html
+
+hooks:
+  onCronFired: hooks/onCronFired.js
+
+# the triage agent — auto mode hands new issues to it; refine its policy in
+# the addon's Customize chat (e.g. "only bugs", "skip anything labelled docs")
+agent:
+  system: prompts/agent.md

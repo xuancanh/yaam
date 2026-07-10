@@ -1,0 +1,293 @@
+<!DOCTYPE html><html><head><style>
+body{margin:0;background:#0A0B0F;color:#E7E9F0;font-family:'IBM Plex Sans',system-ui,sans-serif;display:flex;height:100vh;overflow:hidden}
+#side{width:240px;border-right:1px solid #1a1e26;padding:16px;display:flex;flex-direction:column;gap:6px;overflow-y:auto}
+h1{font-size:14px;margin:0 0 2px;display:flex;gap:8px;align-items:center}
+small{color:#8B93A1;font-size:11px}
+h2{font-size:10.5px;letter-spacing:.5px;color:#8B93A1;margin:14px 0 4px;text-transform:uppercase}
+.wf{background:#12151C;border:1px solid #1a1e26;border-radius:8px;padding:8px 10px;font-size:12.5px;cursor:pointer;display:flex;gap:8px;align-items:center}
+.wf.sel{border-color:rgba(245,196,81,.5)}
+.wf b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+button{background:transparent;border:1px solid #2a2f3a;border-radius:7px;color:#E7E9F0;font-size:11px;padding:4px 10px;cursor:pointer}
+button:hover{border-color:#F5C451;color:#F5C451}
+button.primary{border-color:rgba(61,220,151,.5);color:#3DDC97}
+button.danger:hover{border-color:#FF5C5C;color:#FF5C5C}
+input,textarea{background:#0A0B0F;border:1px solid #2a2f3a;border-radius:7px;color:#E7E9F0;font-size:11.5px;padding:5px 8px;outline:none;font-family:inherit;width:100%;box-sizing:border-box}
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#bar{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid #1a1e26;flex-wrap:wrap}
+#canvasWrap{flex:1;position:relative;overflow:auto}
+svg{display:block}
+.node rect{fill:#12151C;stroke:#2a2f3a;rx:9}
+.node.sel rect{stroke:#F5C451}
+.node text{fill:#E7E9F0;font-size:12px;font-weight:600;pointer-events:none}
+.node .sub{fill:#8B93A1;font-size:9.5px;font-weight:400}
+.edge{stroke:#3a4150;stroke-width:1.6;fill:none;marker-end:url(#arr);cursor:pointer}
+.edge:hover{stroke:#FF5C5C}
+#editor{position:absolute;right:12px;top:12px;width:250px;background:#12151C;border:1px solid #2a2f3a;border-radius:10px;padding:12px;display:none;flex-direction:column;gap:6px;box-shadow:0 12px 30px rgba(0,0,0,.5)}
+#editor label{font-size:10px;color:#8B93A1;letter-spacing:.4px;text-transform:uppercase}
+#hist{max-height:200px;overflow-y:auto;border-top:1px solid #1a1e26;padding:10px 14px}
+.run{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#8B93A1;padding:4px 0;display:flex;gap:10px;align-items:center}
+.run .st-done{color:#3DDC97}.run .st-failed{color:#FF5C5C}.run .st-running{color:#F5C451}
+.dot{width:6px;height:6px;border-radius:50%;background:#3a4150;display:inline-block;margin-right:2px}
+.dot.done{background:#3DDC97}.dot.failed{background:#FF5C5C}.dot.running{background:#F5C451}
+#hint{font-size:10.5px;color:#5a6170;padding:4px 14px}
+.chk{display:flex;gap:6px;align-items:center;font-size:11px;color:#8B93A1}
+.chk input{width:auto}
+</style></head><body>
+<div id="side">
+  <h1>⛓ Workflows</h1>
+  <small>DAG pipelines over board tasks</small>
+  <h2>Pipelines</h2>
+  <div id="wfList"></div>
+  <button onclick="addWorkflow()">+ New workflow</button>
+</div>
+<div id="main">
+  <div id="bar">
+    <b id="wfName" style="font-size:13px"></b>
+    <button class="primary" onclick="runNow()">▶ Run now</button>
+    <button onclick="addNode()">+ Node</button>
+    <span style="flex:1"></span>
+    <input id="cron" placeholder="0 6 * * *" style="width:110px;font-family:'JetBrains Mono',monospace">
+    <button id="cronBtn" onclick="toggleCron()">Enable cron</button>
+    <button class="danger" onclick="removeWorkflow()">Delete</button>
+  </div>
+  <div id="hint">drag nodes to arrange · “link →” then click a target to draw a dependency · click an edge to remove it</div>
+  <div id="canvasWrap"><svg id="svg" width="1600" height="900">
+    <defs><marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3a4150"/></marker></defs>
+    <g id="edges"></g><g id="nodes"></g>
+  </svg></div>
+  <div id="editor">
+    <label>Title</label><input id="eTitle">
+    <label>Description (what the agent should do)</label><textarea id="eDesc" rows="4"></textarea>
+    <label>Acceptance criteria — one per line</label><textarea id="eCrit" rows="3"></textarea>
+    <label>Working directory</label><input id="eCwd" placeholder="(workspace default)">
+    <div class="chk"><input type="checkbox" id="eIso"><span>isolate in a git worktree</span></div>
+    <div style="display:flex;gap:6px;margin-top:4px">
+      <button class="primary" style="flex:1" onclick="saveNode()">Save</button>
+      <button onclick="linkFrom()">link →</button>
+      <button class="danger" onclick="deleteNode()">✕</button>
+    </div>
+  </div>
+  <div id="hist"><h2 style="margin-top:0">Run history</h2><div id="runList"></div></div>
+</div>
+<script>
+'use strict'
+let seq = 0
+const pending = {}
+function call(method, ...args){
+  return new Promise((resolve, reject) => {
+    const callId = 'c' + (++seq)
+    pending[callId] = { resolve, reject }
+    parent.postMessage({ type: 'yaam:call', callId, method, args }, '*')
+  })
+}
+window.addEventListener('message', e => {
+  const d = e.data
+  if (d && d.type === 'yaam:result' && pending[d.callId]) {
+    d.error ? pending[d.callId].reject(new Error(d.error)) : pending[d.callId].resolve(d.result)
+    delete pending[d.callId]
+  }
+  if (d && d.type === 'yaam:state') refreshRuns() // state push ≈ every 3s — reuse as our poll tick
+})
+
+let workflows = [], runs = [], selWf = null, selNode = null, linkSrc = null
+
+const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
+const wf = () => workflows.find(w => w.id === selWf)
+
+async function load(){
+  workflows = (await call('storage.get', 'workflows')) || []
+  if (!selWf && workflows.length) selWf = workflows[0].id
+  render()
+  refreshRuns()
+}
+const save = () => call('storage.set', 'workflows', workflows)
+
+function render(){
+  const list = document.getElementById('wfList')
+  list.innerHTML = ''
+  for (const w of workflows) {
+    const el = document.createElement('div')
+    el.className = 'wf' + (w.id === selWf ? ' sel' : '')
+    el.innerHTML = `<b>${esc(w.name)}</b><small>${w.nodes.length}</small>`
+    el.onclick = () => { selWf = w.id; selNode = null; render() }
+    list.appendChild(el)
+  }
+  const w = wf()
+  document.getElementById('wfName').textContent = w ? w.name : '—'
+  document.getElementById('cron').value = w && w.cron ? w.cron : ''
+  document.getElementById('cronBtn').textContent = w && w.cronOn ? 'Disable cron' : 'Enable cron'
+  drawGraph()
+  drawEditor()
+}
+
+function drawGraph(){
+  const w = wf()
+  const gN = document.getElementById('nodes'), gE = document.getElementById('edges')
+  gN.innerHTML = ''; gE.innerHTML = ''
+  if (!w) return
+  const byId = {}
+  for (const n of w.nodes) byId[n.id] = n
+  for (const n of w.nodes) for (const d of (n.deps || [])) {
+    const s = byId[d]; if (!s) continue
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    const x1 = s.x + 150, y1 = s.y + 24, x2 = n.x, y2 = n.y + 24
+    p.setAttribute('d', `M${x1},${y1} C${x1 + 50},${y1} ${x2 - 50},${y2} ${x2},${y2}`)
+    p.setAttribute('class', 'edge')
+    p.onclick = () => { n.deps = n.deps.filter(x => x !== d); save(); render() }
+    gE.appendChild(p)
+  }
+  for (const n of w.nodes) {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+    g.setAttribute('class', 'node' + (n.id === selNode ? ' sel' : ''))
+    g.setAttribute('transform', `translate(${n.x},${n.y})`)
+    const crit = (n.criteria || []).length
+    g.innerHTML = `<rect width="150" height="48" rx="9"/><text x="10" y="20">${esc(n.title.slice(0, 18))}</text><text x="10" y="36" class="sub">${(n.deps || []).length ? '⤝ ' + (n.deps || []).length + ' dep(s) · ' : ''}${crit ? crit + ' criteria' : 'no criteria'}${n.isolate ? ' · ⑂' : ''}</text>`
+    g.onmousedown = ev => startDrag(ev, n)
+    g.onclick = ev => { ev.stopPropagation(); clickNode(n) }
+    gN.appendChild(g)
+  }
+}
+
+let drag = null
+function startDrag(ev, n){ drag = { n, dx: ev.clientX - n.x, dy: ev.clientY - n.y, moved: false } }
+window.addEventListener('mousemove', ev => {
+  if (!drag) return
+  drag.moved = true
+  drag.n.x = Math.max(0, ev.clientX - drag.dx)
+  drag.n.y = Math.max(0, ev.clientY - drag.dy)
+  drawGraph()
+})
+window.addEventListener('mouseup', () => { if (drag && drag.moved) save(); drag = null })
+
+function clickNode(n){
+  if (linkSrc && linkSrc !== n.id) {
+    // an edge means "n depends on linkSrc" — reject cycles with a reach check
+    if (reaches(n.id, linkSrc)) { linkSrc = null; return }
+    n.deps = [...new Set([...(n.deps || []), linkSrc])]
+    linkSrc = null
+    save(); render()
+    return
+  }
+  selNode = n.id
+  render()
+}
+function reaches(from, to){
+  const w = wf(); const byId = {}
+  for (const x of w.nodes) byId[x.id] = x
+  const stack = [from], seen = new Set()
+  while (stack.length) {
+    const cur = stack.pop()
+    if (cur === to) return true
+    if (seen.has(cur)) continue
+    seen.add(cur)
+    for (const d of (byId[cur] && byId[cur].deps) || []) stack.push(d)
+  }
+  return false
+}
+
+function drawEditor(){
+  const w = wf()
+  const n = w && w.nodes.find(x => x.id === selNode)
+  const ed = document.getElementById('editor')
+  ed.style.display = n ? 'flex' : 'none'
+  if (!n) return
+  document.getElementById('eTitle').value = n.title
+  document.getElementById('eDesc').value = n.description || ''
+  document.getElementById('eCrit').value = (n.criteria || []).join('\n')
+  document.getElementById('eCwd').value = n.cwd || ''
+  document.getElementById('eIso').checked = !!n.isolate
+}
+function saveNode(){
+  const n = wf().nodes.find(x => x.id === selNode); if (!n) return
+  n.title = document.getElementById('eTitle').value.trim() || n.title
+  n.description = document.getElementById('eDesc').value
+  n.criteria = document.getElementById('eCrit').value.split('\n').map(x => x.trim()).filter(Boolean)
+  n.cwd = document.getElementById('eCwd').value.trim()
+  n.isolate = document.getElementById('eIso').checked
+  save(); render()
+}
+function deleteNode(){
+  const w = wf()
+  w.nodes = w.nodes.filter(x => x.id !== selNode)
+  for (const n of w.nodes) n.deps = (n.deps || []).filter(d => d !== selNode)
+  selNode = null
+  save(); render()
+}
+function linkFrom(){ linkSrc = selNode }
+
+function addWorkflow(){
+  const id = 'w' + Date.now().toString(36)
+  workflows.push({ id, name: 'workflow ' + (workflows.length + 1), cron: '', cronOn: false, nodes: [] })
+  selWf = id
+  save(); render()
+}
+async function removeWorkflow(){
+  const w = wf(); if (!w) return
+  if (w.cronOn) await call('schedules.remove', 'wf-' + w.id)
+  workflows = workflows.filter(x => x.id !== w.id)
+  selWf = workflows.length ? workflows[0].id : null
+  save(); render()
+}
+function addNode(){
+  const w = wf(); if (!w) return
+  const id = 'n' + Date.now().toString(36)
+  w.nodes.push({ id, title: 'step ' + (w.nodes.length + 1), description: '', criteria: [], deps: [], x: 40 + (w.nodes.length % 5) * 180, y: 40 + Math.floor(w.nodes.length / 5) * 90 })
+  selNode = id
+  save(); render()
+}
+
+async function runNow(){
+  const w = wf()
+  if (!w || !w.nodes.length) return
+  const allRuns = (await call('storage.get', 'runs')) || []
+  if (allRuns.some(r => r.wfId === w.id && r.status === 'running')) { await call('flash', 'a run of this workflow is already going'); return }
+  const run = { id: 'run' + Date.now().toString(36), wfId: w.id, wfName: w.name, startedAt: Date.now(), status: 'running', trigger: 'manual', nodes: {} }
+  for (const n of w.nodes) run.nodes[n.id] = { taskId: null, status: 'pending' }
+  for (const n of w.nodes) {
+    if ((n.deps || []).length) continue
+    const taskId = await call('tasks.add', n.title, 'backlog', {
+      description: ['[workflow "' + w.name + '" · run ' + run.id + ' · node ' + n.id + ']', n.description || ''].filter(Boolean).join('\n\n'),
+      criteria: n.criteria || [], cwd: n.cwd || undefined, isolate: n.isolate === true ? true : undefined,
+    })
+    await call('tasks.start', taskId)
+    run.nodes[n.id] = { taskId, status: 'running' }
+  }
+  await call('storage.set', 'runs', [run, ...allRuns].slice(0, 30))
+  await call('flash', 'workflow started — root tasks launched')
+  refreshRuns()
+}
+
+async function toggleCron(){
+  const w = wf(); if (!w) return
+  if (w.cronOn) {
+    await call('schedules.remove', 'wf-' + w.id)
+    w.cronOn = false
+  } else {
+    const cron = document.getElementById('cron').value.trim()
+    if (cron.split(/\s+/).length !== 5) { await call('flash', 'cron needs 5 fields, e.g. 0 6 * * *'); return }
+    const res = await call('schedules.add', { name: 'wf-' + w.id, schedule: cron })
+    if (typeof res === 'string' && res.indexOf('created') === -1) { await call('flash', res); return }
+    w.cron = cron
+    w.cronOn = true
+  }
+  save(); render()
+}
+
+async function refreshRuns(){
+  runs = (await call('storage.get', 'runs')) || []
+  const el = document.getElementById('runList')
+  el.innerHTML = ''
+  for (const r of runs.filter(x => !selWf || x.wfId === selWf).slice(0, 12)) {
+    const dots = Object.values(r.nodes).map(n => `<span class="dot ${n.status}"></span>`).join('')
+    const row = document.createElement('div')
+    row.className = 'run'
+    row.innerHTML = `<span class="st-${r.status}">${r.status}</span><span>${esc(r.wfName)}</span><span>${dots}</span><span>${new Date(r.startedAt).toLocaleString()}</span><span>${r.trigger || ''}</span>`
+    el.appendChild(row)
+  }
+  if (!el.children.length) el.innerHTML = '<div class="run">no runs yet</div>'
+}
+
+document.getElementById('svg').onclick = () => { selNode = null; linkSrc = null; render() }
+load()
+parent.postMessage({ type: 'yaam:getState' }, '*')
+</script></body></html>

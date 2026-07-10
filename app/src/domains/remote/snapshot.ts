@@ -41,6 +41,8 @@ export interface RemoteSnapshot {
     task: string
     summary: string
     actionNeeded: string
+    /** unseen finished/needs-action event — groups with "needs you" in triage */
+    attention: boolean
     cost: number
     kind: string
     repo: string
@@ -62,10 +64,25 @@ export interface RemoteSnapshot {
     criteria: string[]
     chat: RemoteMsg[]
   }[]
+  /** durable chat identities (non-archived) — conversations group under them */
+  durables: {
+    id: string
+    name: string
+    color: string
+    role: string
+    builtin: boolean
+  }[]
   chats: {
     id: string
     name: string
     model: string
+    /** owning durable agent (unclaimed/legacy chats fall to the built-in one) */
+    durableAgentId: string
+    pinned: boolean
+    /** a turn is streaming right now */
+    busy: boolean
+    /** last user/assistant message time, for recency sorting */
+    lastAt: number
     msgs: RemoteMsg[]
   }[]
   /** the Master orchestrator conversation for the active workspace — the mobile
@@ -128,6 +145,17 @@ export function buildRemoteSnapshot(
       }
     }
   }
+  // conversations hang off durable agents; unclaimed ones (legacy chats,
+  // archived agents' conversations) fall to the built-in generic agent —
+  // the same grouping rule the desktop chat sidebar uses
+  const durables = (s.durableAgents ?? []).filter(d => !d.archived)
+  const fallbackDurable = durables.find(d => d.builtin)?.id ?? 'agent-default'
+  const durableOf = (a: (typeof live)[number]) =>
+    (durables.some(d => d.id === a.durableAgentId) ? a.durableAgentId! : fallbackDurable)
+  const lastChatAt = (a: (typeof live)[number]) => {
+    const msgs = (a.chatLog ?? []).filter(m => m.role === 'user' || m.role === 'assistant')
+    return msgs[msgs.length - 1]?.at ?? 0
+  }
   return {
     ts: Date.now(),
     workspace: s.workspaces.find(w => w.id === s.activeWorkspace)?.name ?? 'yaam',
@@ -140,6 +168,7 @@ export function buildRemoteSnapshot(
         task: a.task ?? '',
         summary: a.summary ?? '',
         actionNeeded: a.actionNeeded ?? '',
+        attention: Boolean(a.attention),
         cost: a.cost,
         kind: a.kind ?? 'real',
         repo: a.repo,
@@ -159,12 +188,23 @@ export function buildRemoteSnapshot(
         criteria: t.criteria ?? [],
         chat: (t.chat ?? []).slice(-MSG_CAP).map(m => ({ id: m.id, role: m.role, text: clip(m.text), at: m.at })),
       })),
+    durables: durables.map(d => ({
+      id: d.id,
+      name: d.name,
+      color: d.color,
+      role: d.role ?? '',
+      builtin: Boolean(d.builtin),
+    })),
     chats: live
       .filter(a => a.kind === 'chat')
       .map(a => ({
         id: a.id,
         name: a.name,
         model: a.chatModel ?? a.model,
+        durableAgentId: durableOf(a),
+        pinned: Boolean(a.chatPinned),
+        busy: a.status === 'running',
+        lastAt: lastChatAt(a),
         msgs: (a.chatLog ?? [])
           .filter(m => m.role !== 'thinking')
           .slice(-MSG_CAP)

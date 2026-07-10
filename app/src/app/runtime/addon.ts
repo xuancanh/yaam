@@ -9,6 +9,7 @@ import type { ApiMessage } from '../../master'
 import type { AddonApi } from '../../core/addons'
 import { enforcePermissions, execAddonHook } from '../../core/addons'
 import { dispatch } from '../../core/store'
+import * as native from '../../core/native'
 import { createAddonApi } from '../../domains/addons/addon-api'
 import { createAddonAgentRuntime } from '../../domains/addons/agent-runtime'
 import { createAddonRuntime } from '../../domains/addons/runtime'
@@ -28,7 +29,7 @@ export type AddonExecCommand = (name: string, input: unknown, addonId: string) =
 
 export function createAddonSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, execCommand?: AddonExecCommand): AddonSubsystem {
   const { stateRef, flash, logEvent, later, notify } = k
-  const { fireAddonHookRef, runAddonAgentRef, userStoppedRef, runWatcherRef } = refs
+  const { fireAddonHookRef, runAddonAgentRef, userStoppedRef, runWatcherRef, taskReviewRef } = refs
 
   const makeAddonApiRaw = (addonId: string): AddonApi => createAddonApi({
     stateRef, dispatch, execCommand,
@@ -43,6 +44,10 @@ export function createAddonSubsystem(k: ConductorKernel, refs: RuntimeRefs, sess
     fireAddonHook: (hook, event) => fireAddonHookRef.current(hook, event),
     runWatcher: (taskId, note) => runWatcherRef.current(taskId, note),
     wakeAgent: (aid, note) => runAddonAgentRef.current(aid, note),
+    approveTask: taskId => taskReviewRef.current.approve(taskId),
+    rejectTask: (taskId, comment) => taskReviewRef.current.reject(taskId, comment),
+    httpRequest: (method, url, headers, body) => native.httpRequest(method, url, headers, body),
+    secretGet: account => native.secretGet(account),
   }, addonId)
 
   const makeAddonApi = (addonId: string): AddonApi => {
@@ -57,6 +62,10 @@ export function createAddonSubsystem(k: ConductorKernel, refs: RuntimeRefs, sess
   const disposeAddon = (id: string) => {
     agent.dispose(id)
     editorHistories.current.delete(id)
+    // runs before removal dispatches, so declared secrets are still readable —
+    // delete their keychain entries so uninstall leaves nothing behind
+    const removed = stateRef.current.addons.find(a => a.id === id)
+    for (const sd of removed?.secrets ?? []) void native.secretDelete(`addon:${id}:${sd.name}`).catch(() => {})
   }
 
   const addonRuntime = createAddonRuntime({ stateRef, flash, logEvent, editorHistories })

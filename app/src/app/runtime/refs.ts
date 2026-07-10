@@ -10,6 +10,9 @@ export interface RuntimeRefs {
   fireAddonHookRef: MutableRefObject<(hook: import('../../core/types').AddonHookName, event: Record<string, unknown>) => void>
   runAddonAgentRef: MutableRefObject<(addonId: string, note: string) => Promise<string>>
   runWatcherRef: MutableRefObject<(taskId: string, note: string) => void>
+  /** board review verbs (approve merges worktrees) — set once the board
+   *  actions exist; addons and addon agents call through this ref */
+  taskReviewRef: MutableRefObject<{ approve: (taskId: string) => Promise<string>; reject: (taskId: string, comment: string) => void }>
   spawnTaskSessionRef: MutableRefObject<(taskId: string, extraInstructions?: string) => string | null>
   startIntegrationsRef: MutableRefObject<() => void>
   /** sessions the user stopped via ■ — their exit is a STOP, not a completion */
@@ -29,6 +32,7 @@ export function createRuntimeRefs(): RuntimeRefs {
     fireAddonHookRef: { current: () => {} },
     runAddonAgentRef: { current: async () => 'agent not ready' },
     runWatcherRef: { current: () => {} },
+    taskReviewRef: { current: { approve: async () => 'board actions not ready', reject: () => {} } },
     spawnTaskSessionRef: { current: () => null },
     startIntegrationsRef: { current: () => {} },
     userStoppedRef: { current: new Set() },

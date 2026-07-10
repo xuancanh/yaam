@@ -4,30 +4,51 @@
     {
       "name": "qa-gate",
       "version": "1.0.0",
-      "icon": "\u2705",
+      "icon": "✅",
       "description": "Independent QA audits: tasks reaching review get a one-shot auditor that re-verifies the criteria; failures bounce back with findings. Ships its own QA-officer agent you can chat with.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/qa-gate.yaam.json"
     },
     {
       "name": "session-bell",
       "version": "1.0.0",
-      "icon": "\ud83d\udd14",
+      "icon": "🔔",
       "description": "Notifications when any session finishes or asks for input; adds a ping_all_sessions tool for Master.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/session-bell.yaam.json"
     },
     {
       "name": "cost-pulse",
       "version": "1.0.0",
-      "icon": "\ud83d\udca0",
+      "icon": "💠",
       "description": "Live per-session spend bar chart as a tab.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/cost-pulse.yaam.json"
     },
     {
       "name": "kanban-lite",
       "version": "1.0.0",
-      "icon": "\ud83d\uddc2",
+      "icon": "🗂",
       "description": "The built-in kanban board as a pure addon (proof of the addon platform).",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/kanban-lite.yaam.json"
+    },
+    {
+      "name": "workflows",
+      "version": "1.0.0",
+      "icon": "⛓",
+      "description": "Task pipelines as a DAG — draw nodes and dependency edges, run the graph on demand or on a cron, and watch runs advance as their board tasks finish. Drag-and-drop editor + run history.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/workflows.yaam.json"
+    },
+    {
+      "name": "github-issues",
+      "version": "1.0.0",
+      "icon": "🐙",
+      "description": "Pulls open GitHub issues on a schedule into a review queue; add them to the board yourself or let the addon's customizable triage agent file the tasks. Token stays in the OS keychain.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/github-issues.yaam.json"
+    },
+    {
+      "name": "usage-limit-rescheduler",
+      "version": "1.0.0",
+      "icon": "⏳",
+      "description": "Tasks that failed on an API usage/rate limit get automatically rescheduled for right after the limit resets — detected from session output or the Anthropic usage API.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/usage-limit-rescheduler.yaam.json"
     }
   ]
 }

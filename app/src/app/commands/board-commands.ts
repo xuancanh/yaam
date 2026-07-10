@@ -23,6 +23,8 @@ export interface AddTaskInput {
   machineId?: string
   isolate?: boolean
   sessionMode?: 'oneshot' | 'interactive'
+  /** epoch ms — the scheduler spawns the task's session at this time */
+  scheduleAt?: number
 }
 
 export interface RemoveTaskInput { id: string }
@@ -57,6 +59,7 @@ export function registerBoardCommands(
           machineId: i.machineId || undefined,
           isolate: i.isolate || undefined,
           sessionMode: i.sessionMode === 'interactive' ? 'interactive' : undefined,
+          scheduleAt: typeof i.scheduleAt === 'number' && i.scheduleAt > Date.now() ? i.scheduleAt : undefined,
           chat: [{ id: mkId('tc'), role: 'system', text: i.note || 'Task created', at: Date.now() }],
         }]),
       }))

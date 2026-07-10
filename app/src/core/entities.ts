@@ -766,9 +766,22 @@ export interface AddonAgent {
   system: string
   /** hook events that wake the agent with the event as its note */
   on?: AddonHookName[]
+  /** 5-field cron: the scheduler wakes the agent on matching minutes — the
+   *  addon's own periodic "mini monitor" loop (requires the agent scope) */
+  every?: string
 }
 
-export type AddonPermission = 'state:read' | 'sessions:send' | 'sessions:launch' | 'tasks' | 'schedules' | 'agent' | 'master:prompt' | 'ui' | 'storage' | 'exec'
+/** A named secret slot an addon declares. The VALUE lives only in the OS
+ *  keychain (set by the user in the Addons view) and is never exposed to addon
+ *  code — it is injected host-side into http.request via {{secret:NAME}}. */
+export interface AddonSecretDecl {
+  /** UPPER_SNAKE name referenced as {{secret:NAME}} */
+  name: string
+  /** what to put in it, shown next to the input */
+  label?: string
+}
+
+export type AddonPermission = 'state:read' | 'sessions:send' | 'sessions:launch' | 'tasks' | 'schedules' | 'agent' | 'master:prompt' | 'ui' | 'storage' | 'http' | 'secrets' | 'exec'
 
 export interface Addon {
   id: string
@@ -784,6 +797,10 @@ export interface Addon {
   hooks?: AddonHooks
   /** optional dedicated LLM harness for this addon */
   agent?: AddonAgent
+  /** exact hosts (or *.suffix wildcards) http.request may reach; no list = no network */
+  hosts?: string[]
+  /** secret slots the addon uses; values live in the OS keychain, never in state */
+  secrets?: AddonSecretDecl[]
   /** capability scopes the package requests */
   permissions: AddonPermission[]
   /** scopes the user has granted (enforced at the API boundary) */
