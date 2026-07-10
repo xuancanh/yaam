@@ -67,8 +67,9 @@ export function groupRuns(tasks: BoardTask[], agents: Agent[], filter: RunFilter
     ? agents.filter(a => (a.workspaceId ?? workspaceId) === workspaceId)
     : agents
   const byId = new Map(scopedAgents.map(a => [a.id, a]))
-  // every agent any live task points at (current or historical one-shots)
-  const taskAgentIds = new Set(liveTasks.flatMap(t => [t.agentId, ...(t.agentIds ?? [])]).filter(Boolean))
+  // The current task session is represented by its task run. Additional
+  // parallel/historical sessions remain standalone runs so they do not vanish.
+  const representedTaskAgentIds = new Set(liveTasks.map(t => t.agentId).filter(Boolean))
 
   const runs: RunRef[] = [
     ...liveTasks.map((t): RunRef => ({
@@ -76,7 +77,7 @@ export function groupRuns(tasks: BoardTask[], agents: Agent[], filter: RunFilter
       agent: t.agentId ? byId.get(t.agentId) : undefined,
     })),
     ...scopedAgents
-      .filter(a => !a.archived && a.kind !== 'chat' && !taskAgentIds.has(a.id))
+      .filter(a => !a.archived && a.kind !== 'chat' && !representedTaskAgentIds.has(a.id))
       .map((a): RunRef => ({ kind: 'session', key: `sess:${a.id}`, agent: a })),
   ]
 

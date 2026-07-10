@@ -59,6 +59,15 @@ describe('groupRuns', () => {
     const run = groups[0].runs[0]
     expect(run.kind === 'task' && run.agent?.id).toBe('a1')
   })
+  it('keeps additional task sessions visible after the primary session changes', () => {
+    const primary = agent({ id: 'primary', status: 'running' })
+    const earlier = agent({ id: 'earlier', status: 'idle' })
+    const t1 = task({ id: 't1', agentId: 'primary', agentIds: ['earlier', 'primary'] })
+
+    const keys = groupRuns([t1], [primary, earlier]).flatMap(g => g.runs.map(r => r.key))
+
+    expect(keys).toEqual(['task:t1', 'sess:earlier'])
+  })
   it('drops empty groups and orders needs → running → idle → done', () => {
     const groups = groupRuns(
       [task({ id: 'td', col: 'done' }), task({ id: 'tr', col: 'review' })],
