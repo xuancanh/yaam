@@ -5,7 +5,7 @@
 // explicit start/dispose lifecycle (testable with a fake clock, no React).
 import { useEffect } from 'react'
 import type { MutableRefObject } from 'react'
-import type { AppState, BoardTask, EventType, NotifKind } from '../../core/types'
+import type { AppState, BoardTask, Cron, CronRun, EventType, NotifKind } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { browserClock, type ClockPort, type Disposable, type StatePort } from '../../core/ports'
 import * as native from '../../core/native'
@@ -62,6 +62,16 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
         if (!d) return s
         return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, crons: mark(d.crons) } } }
       })
+      // append one history entry (newest first, capped) to the fired schedule
+      const recordRun = (cronId: string, run: CronRun) => state.update(s => {
+        const upd = (crons: Cron[]) => crons.map(x => x.id === cronId
+          ? { ...x, runs: [run, ...(x.runs ?? [])].slice(0, 20) }
+          : x)
+        if (pool.wid === s.activeWorkspace) return { ...s, crons: upd(s.crons) }
+        const d = s.workspaceData[pool.wid]
+        if (!d) return s
+        return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, crons: upd(d.crons) } } }
+      })
       for (const c of due) {
         fireAddonHook('onCronFired', {
           name: c.name,
@@ -79,6 +89,9 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
             templateId: bt.templateId,
             typeId: bt.typeId,
             cwd: bt.cwd,
+            machineId: bt.machineId,
+            isolate: bt.isolate,
+            sessionMode: bt.sessionMode,
             scheduleAt: bt.startNow ? now.getTime() : undefined,
             chat: [{ id: mkId('tc'), role: 'system', text: `Added by schedule “${c.name}”`, at: now.getTime() }],
           }
@@ -88,6 +101,7 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
             if (!d) return s
             return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, tasks: d.tasks.concat([newTask]) } } }
           })
+          recordRun(c.id, { at: now.getTime(), note: `added task “${bt.title.slice(0, 48)}”${bt.startNow ? ' · starting' : ' · to backlog'}`, ok: true, taskId: newTask.id })
           logEvent('cron', null, `${c.name} fired · added board task “${bt.title.slice(0, 48)}”`)
           notify('cron', `${c.name} fired`, `added task: ${bt.title.slice(0, 60)}`, null)
           continue
@@ -107,6 +121,7 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
             if (!d) return s
             return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, tasks: d.tasks.concat([newTask]) } } }
           })
+          recordRun(c.id, { at: now.getTime(), note: `queued task for template “${tpl.name}”`, ok: true, taskId: newTask.id })
           logEvent('cron', null, `${c.name} fired · queued board task for template “${tpl.name}”`)
           notify('cron', `${c.name} fired`, `board task queued · template ${tpl.name}`, null)
           continue
@@ -114,6 +129,12 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
         const launchedId = !canLaunch ? null
           : c.cmd ? launchSession(c.cmd, c.cwd || '', c.name, undefined, pool.wid)
           : null
+        recordRun(c.id, {
+          at: now.getTime(),
+          note: c.cmd ? (launchedId ? `launched: ${c.cmd.slice(0, 60)}` : `could not launch: ${c.cmd.slice(0, 60)}`) : 'fired (no command — logged only)',
+          ok: !c.cmd || !!launchedId,
+          agentId: launchedId ?? undefined,
+        })
         logEvent('cron', launchedId, `${c.name} fired${c.cmd ? ` · launching ${c.cmd}` : ''}`)
         notify('cron', `${c.name} fired`, c.cmd ? `launched: ${c.cmd}` : 'schedule ran', launchedId)
       }
