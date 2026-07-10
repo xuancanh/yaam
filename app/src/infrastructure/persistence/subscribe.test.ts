@@ -32,6 +32,7 @@ describe('mainPartitionChanged', () => {
     expect(mainPartitionChanged(a, { ...a, workspaceData: { ws: {} } as unknown as AppState['workspaceData'] } as AppState)).toBe(true)
     expect(mainPartitionChanged(a, { ...a, activeWorkspace: 'ws-b' } as AppState)).toBe(true)
     expect(mainPartitionChanged(a, { ...a, chatMemory: { 'ws-a': 'remember this' } } as AppState)).toBe(true)
+    expect(mainPartitionChanged(a, { ...a, durableAgents: [] } as AppState)).toBe(true)
     expect(mainPartitionChanged(a, { ...a, assistantMemory: { 'ws-a': [] } } as AppState)).toBe(true)
     expect(mainPartitionChanged(a, { ...a, harnessLog: [] } as AppState)).toBe(true)
   })
