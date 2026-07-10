@@ -63,9 +63,11 @@ It's tunnel-friendly by design: each network interface gets its own connect link
 The **Chat** rail is a home for **chat agents**: in-app LLM assistants (no PTY) that act on your machine.
 
 - **Hands-on tools** — browse/search folders (glob + grep), read/write/surgically-edit files, manage files, run shell commands and scripts, research the web (search + fetch + raw HTTP), control macOS apps via AppleScript, drive the kanban board and schedules, save new skills, and call tools on your **MCP servers**. Built-in write/edit operations are canonically scoped to the chat's working folder; Ask mode runs reads automatically and pauses mutations or external actions for Allow once / Always allow / Deny. Tool calls render as live traces.
-- **Slash commands** — `/` opens a fuzzy menu of every skill from the chat's sources (plus `/clear`, `/export`); picking one injects the skill deterministically.
+- **Slash commands** — `/` opens a fuzzy menu of every skill from the chat's sources (plus `/clear`, `/compact`, `/export`); picking one injects the skill deterministically.
 - **File import** — drag & drop or attach files: text inlines, PDFs and office documents (docx/xlsx/pptx) are text-extracted, images go to vision-capable models; a Files toggle mounts the same explorer/rich viewer terminal sessions use (real system file icons, images, PDFs, office previews) — every file row has a one-click ＋ attach, and the viewer offers "Add to chat".
 - **Durable workspace memory** — agents read shared memory each turn and append facts via a `remember` tool; a Memory editor lets you prune what they've learned.
+- **Durable agents** — hire a project manager, researcher, cooking helper, tutor, editor, or blank identity with a stable charter, optional home folder, `LESSONS.md`, `JOURNAL.md`, ranked home-folder retrieval, and scheduled loops. Reflections distill conversations into the file brain; Git-backed brains get scoped history commits. `AGENT.json` makes an agent folder importable/exportable.
+- **Long-context compaction** — provider history can be distilled automatically at a configurable token threshold or manually with `/compact`; the full visible transcript remains while the durable summary survives restarts.
 - **Streaming replies** — token-by-token, with reasoning models' thinking shown in a collapsible block; stop, retry, copy, and a send queue while the agent is busy.
 - **Usage and budgets** — provider-reported input/output tokens are recorded per turn; each chat has an editable token ceiling that pauses new turns when reached.
 - **Artifacts pane** — when a reply contains substantial HTML or SVG, an artifact chip opens it rendered live in a sandboxed (no-network) side panel.
@@ -113,7 +115,7 @@ Work is organized into **workspaces** (switcher in the title bar): each has its 
 
 ## More
 
-- **Schedules** — a 5-field cron scheduler plus one-time runs; can launch sessions or seed board tasks, from the UI or Master.
+- **Schedules** — a validated 5-field cron scheduler plus one-time runs; can launch sessions, seed board tasks, or prompt a durable agent, from the UI or Master.
 - **Templates** — preconfigured launches, one-shot (run a task and exit) or interactive, that feed quick launches, schedules, and tasks; any of them can target a saved remote machine.
 - **MCP everywhere** — streamable-HTTP *and* local stdio servers, a curated one-click marketplace, import from Claude Desktop / Claude Code / Cursor / Codex / Windsurf configs, and `.mcpb`/`.dxt` Claude Desktop extension bundles.
 - **Claude plugin marketplaces** — browse repos like `anthropics/claude-plugins-official` and install plugins for chat: skills and commands become slash-invocable skill registries, agents become personas, `.mcp.json` servers register directly, and plugin `hooks/` configs are translated into addon hooks (Stop/SessionEnd → session-exit, Notification → needs-input; runs gated behind the never-auto-granted `exec` permission).

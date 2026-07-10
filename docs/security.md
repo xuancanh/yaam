@@ -116,6 +116,16 @@ remember the exact tool+preview for that chat. Approval promises are cancelled
 if the chat is stopped or deleted. Auto mode deliberately bypasses prompts.
 Truncated streaming tool arguments are never executed.
 
+Durable-agent home folders are explicit user-selected trust roots. Ranked
+`knowledge_search` is read-only but shells out to a timeout/output-bounded grep
+over that root. `learn_lesson` and automatic reflection append to bounded
+`LESSONS.md`/`JOURNAL.md` files without an inline Ask prompt; when the root is a
+Git repository, those brain paths may also be committed automatically. This is
+the intentional self-learning path. Other home-folder edits, including edits
+requested by scheduled maintenance loops, still follow the conversation's
+Ask/Auto tool policy. Imported `AGENT.json` profiles bound text fields, sanitize
+colors, validate cron loops, and never execute package code.
+
 ### Monitors, watchers, and addon agents
 
 Monitor tools are limited to status, input escalation, and Master reporting.

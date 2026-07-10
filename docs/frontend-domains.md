@@ -372,9 +372,14 @@ Provide in-app LLM agents that operate on files and applications without a PTY.
   and pending approval promises.
 - `runner.ts` resolves provider credentials, reconstructs history, attaches MCP
   and skills, handles slash invocation and attachments, streams visible logs,
-  and auto-titles a first conversation.
+  compacts long context, reflects durable-agent conversations, and auto-titles
+  a first conversation.
 - `agent.ts` defines built-in/MCP tools, system prompt, tool execution, and the
   24-round streaming loop.
+- `durable-brain.ts` loads, searches, serializes, bounds, reflects, and optionally
+  Git-versions each durable agent's transparent file brain.
+- `agent-templates.ts`, `HireAgentDialog.tsx`, and `DurableAgentDialog.tsx` own
+  role scaffolds, defensive `AGENT.json` sharing, profiles, stats, and loops.
 - `log.ts` appends bounded visible transcript entries and updates streaming
   messages.
 - `turns.ts` manages structured replay/rewind records and builds bounded
@@ -405,7 +410,9 @@ Text and extracted office/PDF content enter the user prompt; images become
 base64 vision blocks. Original paths are included so tools can access the file.
 Visible logs are persisted, while private provider history is memory-only and
 reconstructed from user/assistant messages after restart. Thinking and tool
-traces are excluded from reconstructed history.
+traces are excluded from reconstructed history. A compacted conversation
+persists its summary and cutoff, then reconstructs from that summary plus only
+newer visible messages.
 
 ## Schedule domain
 
@@ -416,14 +423,15 @@ workspaces.
 
 ### Implementation
 
-- `cron.ts` parses five cron fields and produces human-readable labels.
+- `cron.ts` validates and matches bounded five-field cron expressions and
+  produces human-readable labels.
 - `due.ts` purely selects schedules/tasks due at a given clock value.
 - `template-command.ts` creates shell-quoted Claude/Codex commands for mode,
   model, prompt, system prompt, approval, and extra arguments.
 - `actions.ts` manages template and schedule records.
 - `runtime.ts` owns the 15-second clock, boot gate, minute deduplication,
   one-time disarming, task creation, task starts, raw session launch, hooks,
-  activity, and notification.
+  durable-agent prompting, activity, and notification.
 - `Schedules.tsx` and `TemplatesView.tsx` provide management UI.
 
 ### Tests

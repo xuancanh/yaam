@@ -344,6 +344,23 @@ Provider-reported input/output usage accumulates on the turn and session. Each
 chat has a token ceiling (200k by default, zero for unlimited); a turn is refused
 before its API call when the ceiling has already been reached.
 
+At a configurable provider-input threshold, or on `/compact`, the chat runtime
+uses an LLM to replace private provider history with a structured summary. The
+agent record persists both that summary and a visible-message cutoff. After a
+restart, provider history is rebuilt from the summary plus only messages newer
+than the cutoff; transcript display remains unchanged. Compaction and normal
+turns share the per-chat busy lock so neither can rewrite history concurrently.
+
+Durable agents add a persistent identity above chat sessions. Each profile owns
+a charter, provider/model defaults, optional home folder, and scheduled prompts.
+The home folder is a transparent file brain: `LESSONS.md`, `JOURNAL.md`, and
+user/agent-maintained files under `knowledge/`. Conversations load bounded tails
+of the brain into the system prompt, expose ranked home-folder search, and can
+distill completed work into serialized, size-bounded brain appends. Git-backed
+brains auto-commit only the brain paths. `AGENT.json` exports/imports the profile
+and validated loops; built-in role templates scaffold casual and professional
+agents without changing the underlying runtime.
+
 ## Board and schedule flow
 
 Board tasks carry a specification, acceptance criteria, column, optional
@@ -360,6 +377,7 @@ The scheduler ticks every 15 seconds after boot and handles:
 - schedules that add board tasks;
 - template schedules that queue immediate board tasks;
 - raw command schedules;
+- durable-agent prompts that create a chat conversation;
 - board tasks with `scheduleAt`.
 
 One-time entries are disarmed and recurring entries deduplicate by minute.
