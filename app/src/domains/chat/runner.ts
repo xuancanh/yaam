@@ -255,6 +255,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       ? { ...a, status: 'running' as const, chatTurns: [...(a.chatTurns ?? []), turn].slice(-200) }
       : a),
   }))
+  let autoCompact = false
   try {
     let history = ctx.histories.get(agentId)
     if (!history) {
@@ -464,7 +465,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     // the API history into a summary in the background (0 disables)
     const compactAt = ctx.stateRef.current.settings.chatCompactTokens ?? DEFAULT_COMPACT_TOKENS
     if (usage && compactAt > 0 && usage.inputTokens >= compactAt) {
-      void compactConversation(ctx, agentId).catch(() => {})
+      autoCompact = true
     }
     // auto-title: after a successful turn, chats still carrying the default
     // type name get a short LLM-derived title (a manual rename always wins)
@@ -508,6 +509,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     ctx.aborts.clear(agentId)
     ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
   }
+  if (autoCompact) void compactConversation(ctx, agentId).catch(() => {})
 }
 
 /** Distill a durable-agent conversation's new messages into its journal and
@@ -557,31 +559,44 @@ export async function compactConversation(ctx: ChatCtx, agentId: string, force =
   const chatType = st.chatAgentTypes.find(t => t.id === agent.chatTypeId) ?? st.chatAgentTypes.find(t => t.enabled)
   if (!chatType || !chatTypeHasCreds(chatType, st.settings)) return 'no chat credentials available for compaction'
 
-  const transcript = msgs.map(m => `${m.role === 'user' ? 'USER' : 'AGENT'}: ${m.text.slice(0, 1500)}`).join('\n').slice(-28_000)
-  const res = await callApi(
-    buildChatCfg(chatType, st.settings),
-    'You compact a long conversation so the agent can continue with a fraction of the context. Write a dense, structured summary the agent can rely on as its ONLY memory of the conversation: ' +
-    'GOAL (what the user is trying to achieve) · CURRENT STATE (what has been done, key results) · DECISIONS & PREFERENCES (choices made, corrections given) · KEY FACTS (paths, names, commands, values that will be needed again) · OPEN ITEMS (what remains / what was in flight). ' +
-    'Be specific — exact file paths, exact names. No preamble, no meta commentary.',
-    [{ role: 'user', content: `Conversation to compact:\n\n${transcript}` }],
-    [],
-  )
-  const summary = res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
-  if (!summary) return 'compaction produced nothing'
-
-  // reseed the private API history: summary in, old rounds out
-  const history = ctx.histories.get(agentId) ?? []
-  const dropped = history.length
-  history.length = 0
-  history.push({ role: 'user', content: `[The conversation so far was compacted to save context. Structured summary — treat it as your memory of everything above:]\n\n${summary}\n\n[Continue seamlessly; the user still sees the full transcript.]` })
-  history.push({ role: 'assistant', content: 'Understood — continuing from the compacted summary.' })
-  ctx.histories.set(agentId, history)
-
-  // persist: a restart rebuilds context from chatContextSummary
+  ctx.busy.add(agentId)
   ctx.dispatch(s => ({
     ...s,
-    agents: s.agents.map(a => (a.id === agentId ? { ...a, chatContextSummary: summary.slice(0, 6000) } : a)),
+    agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'running' as const, attention: false } : a)),
   }))
-  ctx.pushChatLog(agentId, { role: 'tool', text: `context compacted — ${dropped || msgs.length} entries distilled into a ${summary.length}-char summary` })
-  return `compacted · ${dropped || msgs.length} context entries → ${summary.length}-char summary`
+  try {
+    const transcript = msgs.map(m => `${m.role === 'user' ? 'USER' : 'AGENT'}: ${m.text.slice(0, 1500)}`).join('\n').slice(-28_000)
+    const res = await callApi(
+      buildChatCfg(chatType, st.settings),
+      'You compact a long conversation so the agent can continue with a fraction of the context. Write a dense, structured summary the agent can rely on as its ONLY memory of the conversation: ' +
+      'GOAL (what the user is trying to achieve) · CURRENT STATE (what has been done, key results) · DECISIONS & PREFERENCES (choices made, corrections given) · KEY FACTS (paths, names, commands, values that will be needed again) · OPEN ITEMS (what remains / what was in flight). ' +
+      'Be specific — exact file paths, exact names. No preamble, no meta commentary.',
+      [{ role: 'user', content: `Conversation to compact:\n\n${transcript}` }],
+      [],
+    )
+    const summary = res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
+    if (!summary) return 'compaction produced nothing'
+
+    // reseed the private API history: summary in, old rounds out
+    const history = ctx.histories.get(agentId) ?? []
+    const dropped = history.length
+    history.length = 0
+    history.push({ role: 'user', content: `[The conversation so far was compacted to save context. Structured summary — treat it as your memory of everything above:]\n\n${summary}\n\n[Continue seamlessly; the user still sees the full transcript.]` })
+    history.push({ role: 'assistant', content: 'Understood — continuing from the compacted summary.' })
+    ctx.histories.set(agentId, history)
+
+    // persist: a restart rebuilds context from chatContextSummary
+    ctx.dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => (a.id === agentId ? { ...a, chatContextSummary: summary.slice(0, 6000) } : a)),
+    }))
+    ctx.pushChatLog(agentId, { role: 'tool', text: `context compacted — ${dropped || msgs.length} entries distilled into a ${summary.length}-char summary` })
+    return `compacted · ${dropped || msgs.length} context entries → ${summary.length}-char summary`
+  } finally {
+    ctx.busy.delete(agentId)
+    ctx.dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const } : a)),
+    }))
+  }
 }
