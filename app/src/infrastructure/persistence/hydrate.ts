@@ -3,7 +3,7 @@
 // No dispatch, no terminals, no native calls — so migrations are unit-testable.
 // The provider effect applies `next` and reattaches terminals for `restoredAgents`.
 import type { AppState, Agent, Addon, BoardTask, PersistedState } from '../../core/types'
-import { ALL_PERMISSIONS } from '../../core/addons'
+import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS } from '../../core/addons'
 import { mkMemory, mkTools } from '../../core/data'
 import { estimateLogUsage } from '../../core/usage'
 import { mkId } from '../../shared/id'
@@ -137,7 +137,9 @@ export function buildHydration(p: Partial<PersistedState>, seed: AppState): Hydr
         enabled: partial.enabled ?? true,
         source: partial.source ?? 'master' as const,
         permissions,
-        granted: partial.granted ?? permissions,
+        // Snapshots predating explicit grants must not acquire newly added
+        // machine/network authority merely by upgrading the application.
+        granted: partial.granted ?? permissions.filter(p => !DANGEROUS_PERMISSIONS.includes(p)),
       }
     }),
     messages: p.messages?.length ? p.messages : seed.messages,

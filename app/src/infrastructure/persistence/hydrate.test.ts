@@ -77,4 +77,19 @@ describe('buildHydration', () => {
     expect(next.groups[0].slots).toEqual(['a1', null])
     expect(next.groups[0].activePane).toBe(1) // clamped to slots.length - 1
   })
+
+  it('does not auto-grant dangerous scopes to legacy addons', () => {
+    const legacy = {
+      id: 'addon', name: 'Legacy', enabled: true, source: 'file', createdAt: 'then',
+    }
+    const explicit = {
+      ...legacy, id: 'explicit', permissions: ['state:read', 'http'], granted: ['http'],
+    }
+    const p = { addons: [legacy, explicit] } as unknown as Partial<PersistedState>
+
+    const addons = buildHydration(p, seed()).next.addons
+
+    expect(addons.find(a => a.id === 'addon')?.granted).toEqual(['state:read', 'ui', 'storage'])
+    expect(addons.find(a => a.id === 'explicit')?.granted).toEqual(['http'])
+  })
 })
