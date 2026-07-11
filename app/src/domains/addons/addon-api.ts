@@ -10,6 +10,7 @@ import { mkId } from '../../shared/id'
 import { focusSessionIn } from '../session/layout-state'
 import { sendLineToSession } from '../session/command'
 import { humanizeCron } from '../schedules/cron'
+import { cronValidationError } from '../../shared/cron-validation'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { ACCENT } from '../../core/data'
 import { execCommand as runShellCommand } from '../../core/native'
@@ -207,7 +208,7 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
         if (!name) return 'schedule needs a name'
         const schedule = typeof sp.schedule === 'string' ? sp.schedule.trim() : ''
         const at = typeof sp.at === 'number' && sp.at > Date.now() ? sp.at : undefined
-        if (!at && schedule.split(/\s+/).length !== 5) return 'needs a 5-field cron "schedule" or a future epoch-ms "at"'
+        if (!at && cronValidationError(schedule)) return 'needs a valid 5-field cron "schedule" or a future epoch-ms "at"'
         const bt = sp.task as (Record<string, unknown> | undefined)
         const boardTask = bt && typeof bt.title === 'string' && bt.title.trim()
           ? {

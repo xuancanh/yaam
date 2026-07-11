@@ -92,5 +92,7 @@ describe('parseAddonPackage — hosts / secrets / agent.every', () => {
     expect(ok.agent?.every).toBe('*/30 * * * *')
     expect(() => parseAddonPackage(JSON.stringify({ ...base, agent: { system: 'watch', every: 'hourly' } })))
       .toThrow(/agent\.every/)
+    expect(() => parseAddonPackage(JSON.stringify({ ...base, agent: { system: 'watch', every: '99 25 * * *' } })))
+      .toThrow(/agent\.every/)
   })
 })

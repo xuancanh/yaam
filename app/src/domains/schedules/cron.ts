@@ -1,4 +1,5 @@
 // Cron expression matching and display (5-field expressions).
+import { cronValidationError } from '../../shared/cron-validation'
 
 // Matches one field of a five-field cron expression: *, */n, a, a-b, and comma lists.
 /** Match one cron field, supporting wildcards, steps, lists, and ranges. */
@@ -52,27 +53,11 @@ function fieldWords(field: string, names?: string[]): string {
  *  invalid state — the live hint under the schedule editor. */
 export function describeCron(expr: string): { ok: boolean; text: string } {
   const f = expr.trim().split(/\s+/)
-  if (f.length !== 5) return { ok: false, text: 'needs 5 fields: minute · hour · day-of-month · month · weekday' }
+  const error = cronValidationError(expr)
+  if (error === 'count') return { ok: false, text: 'needs 5 fields: minute · hour · day-of-month · month · weekday' }
+  if (error === 'syntax') return { ok: false, text: 'unrecognized field — use numbers, ranges (1-5), lists (1,3), steps (*/n), or *' }
+  if (error === 'range') return { ok: false, text: 'field is outside its valid range' }
   const [min, hour, dom, mon, dow] = f
-  const okField = (x: string) => /^(\*|\*\/\d+|\d+(-\d+)?)(,(\d+(-\d+)?|\*\/\d+))*$/.test(x)
-  if (![min, hour, dom, mon, dow].every(okField)) return { ok: false, text: 'unrecognized field — use numbers, ranges (1-5), lists (1,3), steps (*/n), or *' }
-  const inBounds = (field: string, low: number, high: number) => field.split(',').every(part => {
-    if (part === '*') return true
-    const step = part.match(/^\*\/(\d+)$/)
-    if (step) return Number(step[1]) > 0
-    const range = part.match(/^(\d+)-(\d+)$/)
-    if (range) {
-      const start = Number(range[1])
-      const end = Number(range[2])
-      return start >= low && end <= high && start <= end
-    }
-    const value = Number(part)
-    return value >= low && value <= high
-  })
-  if (!inBounds(min, 0, 59) || !inBounds(hour, 0, 23) || !inBounds(dom, 1, 31)
-    || !inBounds(mon, 1, 12) || !inBounds(dow, 0, 6)) {
-    return { ok: false, text: 'field is outside its valid range' }
-  }
 
   // time phrase
   const two = (x: string) => x.padStart(2, '0')

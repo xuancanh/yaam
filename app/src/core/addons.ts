@@ -3,6 +3,7 @@
 // views render in a sandboxed iframe; tool handlers and hooks are JS run in
 // the app context against this curated API, so only install trusted packages.
 import type { Addon, AddonHookName, AddonPermission, AddonTool, AppState } from './types'
+import { cronValidationError } from '../shared/cron-validation'
 
 /** full task spec accepted by tasks.add / tasks.update */
 export interface AddonTaskSpec {
@@ -510,13 +511,13 @@ export function parseAddonPackage(json: string): Omit<Addon, 'id' | 'enabled' | 
         on: Array.isArray(agentRaw.on)
           ? (agentRaw.on as unknown[]).filter((x): x is import('./types').AddonHookName => HOOK_NAMES.includes(x as string))
           : undefined,
-        every: typeof agentRaw.every === 'string' && agentRaw.every.trim().split(/\s+/).length === 5
+        every: typeof agentRaw.every === 'string' && !cronValidationError(agentRaw.every)
           ? agentRaw.every.trim()
           : undefined,
       }
     : undefined
   if (agentRaw && typeof agentRaw.every === 'string' && agentRaw.every.trim() && !agent?.every) {
-    throw new Error('agent.every must be a 5-field cron expression')
+    throw new Error('agent.every must be a valid 5-field cron expression')
   }
   const hosts = Array.isArray(raw.hosts)
     ? (raw.hosts as unknown[]).filter((x): x is string => typeof x === 'string' && /^(\*\.)?[a-z0-9.-]+$/i.test(x.trim())).map(x => x.trim())
