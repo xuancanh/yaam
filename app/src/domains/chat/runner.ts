@@ -61,6 +61,8 @@ export interface ChatCtx {
   pushChatLog: (id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => string
   updateChatLog: (agentId: string, msgId: string, text: string) => void
   flash: (t: string) => void
+  /** surface an event in the notification tray (and the OS when unfocused) */
+  notify: (kind: 'escalate' | 'done' | 'cron', title: string, detail: string, agentId: string | null) => void
   refreshSkillCatalog: (id: string) => Promise<string>
   /** ask-mode gate: pending tool approvals by chat-message id */
   pendingApprovals: Map<string, { agentId: string; key: string; resolve: (decision: 'once' | 'always' | 'deny') => void }>
@@ -98,6 +100,25 @@ function makeAppPort(ctx: ChatCtx, agentId: string, turnId: string): ChatAppPort
           if (ctx.pendingApprovals.delete(msgId)) resolve('deny')
         }, { once: true })
       })
+    },
+    requestCapability: (capability, reason) => {
+      const st = ctx.stateRef.current
+      const conv = st.agents.find(a => a.id === agentId)
+      const durable = conv?.durableAgentId ? (st.durableAgents ?? []).find(d => d.id === conv.durableAgentId) : undefined
+      const who = durable?.name ?? conv?.name ?? 'a chat agent'
+      const id = mkId('t')
+      const description = [
+        `Capability request from “${who}”${conv && conv.name !== who ? ` (conversation: ${conv.name})` : ''}.`,
+        `Requested: ${capability}`,
+        `Why: ${reason}`,
+        'Grant it in Settings (MCP servers / skill registries / agent types) or the agent profile, then tell the agent it is available.',
+      ].join('\n\n')
+      ctx.dispatch(s => ({
+        ...s,
+        tasks: s.tasks.concat([{ id, title: `Grant ${who}: ${capability}`.slice(0, 72), col: 'backlog', agentId: null, description, criteria: [] }]),
+      }))
+      ctx.notify('escalate', `${who} requests a capability`, capability.slice(0, 140), agentId)
+      return `Request filed for the user to review (board task ${id}). It is NOT granted yet — continue with what you can do meanwhile.`
     },
     listBoardTasks: () => {
       const tasks = ctx.stateRef.current.tasks

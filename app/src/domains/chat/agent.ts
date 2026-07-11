@@ -44,6 +44,9 @@ export interface ChatAppPort {
   memoryLookup: (query: string) => string
   /** propose one-click quick replies shown under the final answer */
   suggestReplies: (replies: string[]) => string
+  /** file a user-reviewable request for a capability the agent lacks
+   *  (MCP server, skill source, access, credential, schedule) */
+  requestCapability: (capability: string, reason: string) => string
   /** durable agents: record one lesson in the agent's LESSONS.md (or the
    *  shared memory when the agent has no home folder) */
   learnLesson: (lesson: string) => Promise<string>
@@ -63,6 +66,9 @@ const READ_ONLY_TOOLS = new Set([
   'list_dir', 'read_file', 'glob_files', 'grep_files', 'web_search', 'fetch_url',
   'list_board_tasks', 'list_schedules', 'load_skill', 'memory_lookup', 'suggest_replies',
   'learn_lesson', 'knowledge_search',
+  // grants nothing — only files a request the user reviews; gating the act of
+  // asking behind an approval would defeat the escalation path
+  'request_capability',
 ])
 
 export function toolNeedsApproval(name: string): boolean {
@@ -247,6 +253,18 @@ function builtinTools(skills: CatalogSkill[]) {
       name: 'remember',
       description: 'Save one durable fact to this workspace\'s memory (shown to every chat agent here, across restarts). Use for stable facts worth keeping: preferences, project conventions, decisions, key paths — not transient task state.',
       input_schema: { type: 'object', properties: { fact: { type: 'string', description: 'one concise sentence' } }, required: ['fact'] },
+    },
+    {
+      name: 'request_capability',
+      description: 'Ask the user for a capability you lack but need to do your job well — an MCP server or integration, a skill source, file/system access, an API credential, a recurring schedule. Files a request the user reviews (board task + notification); it grants NOTHING by itself. Name the capability precisely and say what it unblocks. Prefer this over silently working around a missing tool.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          capability: { type: 'string', description: 'what you need, precisely (e.g. "GitHub MCP server", "read access to ~/ledgers")' },
+          reason: { type: 'string', description: '1-2 sentences: what it unblocks' },
+        },
+        required: ['capability', 'reason'],
+      },
     },
     {
       name: 'memory_lookup',
@@ -506,6 +524,10 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
       if (!app) return 'memory is unavailable in this context'
       if (!str('fact').trim()) throw new ToolError('remember: "fact" is required')
       return app.remember(str('fact').trim())
+    case 'request_capability':
+      if (!app) return 'capability requests are unavailable in this context'
+      if (!str('capability').trim() || !str('reason').trim()) throw new ToolError('request_capability: "capability" and "reason" are required')
+      return app.requestCapability(str('capability').trim(), str('reason').trim())
     case 'memory_lookup':
       if (!app) return 'memory is unavailable in this context'
       return app.memoryLookup(str('query'))
@@ -614,7 +636,8 @@ RULES
 - Destructive or hard-to-undo actions (deleting files, git push, package publish, rm -rf) need the user's explicit go-ahead first.
 - Some tool calls (shell commands, AppleScript, deletions) may pause for the user's inline approval. A denial is guidance, not an error — adjust course instead of retrying.
 - Keep replies concise markdown. Reference files as \`path:line\`. When a skill is relevant to the request, load it before answering.
-- When your answer ends on an enumerable choice, call suggest_replies so the user can answer with one click.${persona?.trim() ? `\n\nPERSONA (set by the user for this agent type)\n${persona.trim()}` : ''}${custom?.trim() ? `\n\nUSER'S CUSTOM INSTRUCTIONS FOR CHAT AGENTS (follow on top of the rules above)\n${custom.trim()}` : ''}`
+- When your answer ends on an enumerable choice, call suggest_replies so the user can answer with one click.
+- When a tool, integration, or access you genuinely need is missing, file it with request_capability instead of silently working around it.${persona?.trim() ? `\n\nPERSONA (set by the user for this agent type)\n${persona.trim()}` : ''}${custom?.trim() ? `\n\nUSER'S CUSTOM INSTRUCTIONS FOR CHAT AGENTS (follow on top of the rules above)\n${custom.trim()}` : ''}`
 }
 
 /** Re-establish the provider invariants on a chat history: no dangling tool

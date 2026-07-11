@@ -8,6 +8,10 @@ describe('chat tool approval policy', () => {
     }
   })
 
+  it('lets agents ASK for capabilities without an approval gate — the request itself is the review artifact', () => {
+    expect(toolNeedsApproval('request_capability')).toBe(false)
+  })
+
   it('gates mutations, process execution, raw HTTP, and MCP tools', () => {
     for (const name of ['write_file', 'edit_file', 'run_command', 'http_request', 'add_board_task', 'save_skill', 'mcp__github__create_issue']) {
       expect(toolNeedsApproval(name), name).toBe(true)

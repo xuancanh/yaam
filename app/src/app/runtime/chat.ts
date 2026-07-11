@@ -39,7 +39,7 @@ export interface ChatBoot {
 }
 
 export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime): ChatBoot {
-  const { stateRef, flash } = k
+  const { stateRef, flash, notify } = k
   const { startIntegrationsRef, taskSessionsRef } = refs
   const state: StatePort = { get: () => stateRef.current, update: dispatch, subscribe: l => useAppStore.subscribe(l) }
 
@@ -52,7 +52,7 @@ export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: S
   const searchIndexer = createChatSearchIndexer(state)
 
   const chat = createChatRuntime({
-    stateRef, dispatch, mcpSessions, skillCatalogs, pushChatLog, updateChatLog, flash, refreshSkillCatalog,
+    stateRef, dispatch, mcpSessions, skillCatalogs, pushChatLog, updateChatLog, flash, notify, refreshSkillCatalog,
   })
 
   const disposeSessionRuntime = (id: string) => {

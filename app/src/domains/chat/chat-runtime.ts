@@ -20,6 +20,8 @@ export interface ChatPorts {
   pushChatLog: (id: string, msg: Omit<ChatMsg, 'id' | 'at'>) => string
   updateChatLog: (agentId: string, msgId: string, text: string) => void
   flash: (t: string) => void
+  /** surface an event in the notification tray (and the OS when unfocused) */
+  notify: (kind: 'escalate' | 'done' | 'cron', title: string, detail: string, agentId: string | null) => void
   refreshSkillCatalog: (id: string) => Promise<string>
 }
 
