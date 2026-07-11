@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { extractFileText } from './filetext'
+import { renderWorkbook } from './office-render'
+import { listZipEntries } from './zip'
 
 /** Build a minimal ZIP (stored entries, no compression) for extractor tests. */
 function makeStoredZip(entries: { name: string; text: string }[]): Uint8Array {
@@ -49,6 +51,29 @@ describe('extractFileText', () => {
     expect(res.kind).toBe('text')
     expect(res.text).toContain('Name\t42')
     expect(res.text).toContain('Ada')
+  })
+
+  it('renders workbook sheets in workbook order and escapes cell HTML', async () => {
+    const zip = makeStoredZip([
+      { name: 'xl/workbook.xml', text: '<workbook><sheets><sheet name="Summary &amp; notes" r:id="r2"/><sheet name="Raw" r:id="r1"/></sheets></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', text: '<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/><Relationship Id="r2" Target="worksheets/sheet2.xml"/></Relationships>' },
+      { name: 'xl/sharedStrings.xml', text: '<sst><si><t>&lt;script&gt;alert(1)&lt;/script&gt;</t></si></sst>' },
+      { name: 'xl/worksheets/sheet1.xml', text: '<worksheet><sheetData><row><c><v>7</v></c></row></sheetData></worksheet>' },
+      { name: 'xl/worksheets/sheet2.xml', text: '<worksheet><sheetData><row><c t="s"><v>0</v></c></row></sheetData></worksheet>' },
+    ])
+    const rendered = await renderWorkbook(zip)
+    expect(rendered.sheets?.map(s => s.name)).toEqual(['Summary & notes', 'Raw'])
+    expect(rendered.sheets?.[0].html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+    expect(rendered.sheets?.[0].html).not.toContain('<script>')
+    expect(rendered.sheets?.[1].html).toContain('<td>7</td>')
+  })
+
+  it('rejects zip entries whose declared expansion exceeds the safety limit', () => {
+    const zip = makeStoredZip([{ name: 'tiny.txt', text: 'x' }])
+    const central = zip.findIndex((_, i) => i + 3 < zip.length
+      && zip[i] === 0x50 && zip[i + 1] === 0x4b && zip[i + 2] === 0x01 && zip[i + 3] === 0x02)
+    new DataView(zip.buffer).setUint32(central + 24, 64 * 1024 * 1024 + 1, true)
+    expect(() => listZipEntries(zip)).toThrow(/64 MB safety limit/)
   })
 
   it('routes images to vision and binaries to a fallback', async () => {
