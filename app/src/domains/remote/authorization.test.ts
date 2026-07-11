@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AppState } from '../../core/types'
-import { authorizedRemoteRoot, remoteFileRoots } from './authorization'
+import { authorizedRemoteRoot, remoteCommandAllowed, remoteFileRoots } from './authorization'
 
 const state = {
   activeWorkspace: 'active',
@@ -23,5 +23,39 @@ describe('remote file authorization', () => {
     expect(authorizedRemoteRoot(state, '/secret/background/file')).toBeUndefined()
     expect(authorizedRemoteRoot(state, '/secret/archived/file')).toBeUndefined()
     expect(authorizedRemoteRoot(state, 'relative/file')).toBeUndefined()
+  })
+})
+
+describe('remote command authorization', () => {
+  const command = (kind: string, id: string, agentId = '') => ({ kind, id, agent_id: agentId, text: '', ok: false })
+  const scoped = {
+    ...state,
+    agents: [
+      { id: 'session', kind: 'real', workspaceId: 'active' },
+      { id: 'chat', kind: 'chat', workspaceId: 'active', chatLog: [{ id: 'approval', approval: 'pending' }] },
+      { id: 'background', kind: 'real', workspaceId: 'background' },
+      { id: 'archived', kind: 'real', workspaceId: 'active', archived: true },
+    ],
+    tasks: [{ id: 'task', archived: false }, { id: 'old-task', archived: true }],
+    durableAgents: [{ id: 'durable' }, { id: 'old-durable', archived: true }],
+    pendingToolApprovals: [{ id: 'master-approval' }],
+  } as AppState
+
+  it('allows visible targets and matching pending approvals', () => {
+    expect(remoteCommandAllowed(scoped, command('session_input', 'session'))).toBe(true)
+    expect(remoteCommandAllowed(scoped, command('chat_send', 'chat'))).toBe(true)
+    expect(remoteCommandAllowed(scoped, command('task_start', 'task'))).toBe(true)
+    expect(remoteCommandAllowed(scoped, command('chat_new', 'durable'))).toBe(true)
+    expect(remoteCommandAllowed(scoped, command('approve_master', 'master-approval'))).toBe(true)
+    expect(remoteCommandAllowed(scoped, command('approve_chat', 'approval', 'chat'))).toBe(true)
+  })
+
+  it('rejects background, archived, mismatched, and unknown targets', () => {
+    expect(remoteCommandAllowed(scoped, command('session_stop', 'background'))).toBe(false)
+    expect(remoteCommandAllowed(scoped, command('session_resume', 'archived'))).toBe(false)
+    expect(remoteCommandAllowed(scoped, command('task_start', 'old-task'))).toBe(false)
+    expect(remoteCommandAllowed(scoped, command('chat_new', 'old-durable'))).toBe(false)
+    expect(remoteCommandAllowed(scoped, command('approve_chat', 'approval', 'session'))).toBe(false)
+    expect(remoteCommandAllowed(scoped, command('unknown', 'session'))).toBe(false)
   })
 })

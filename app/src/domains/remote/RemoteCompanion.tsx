@@ -16,7 +16,7 @@ import { fitTerminal, remoteResize, serializeScreen, terminalSize } from '../../
 import { confirmAction } from '../../components/Confirm'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import { buildRemoteSnapshot } from './snapshot'
-import { authorizedRemoteRoot, remoteFileRoots } from './authorization'
+import { authorizedRemoteRoot, remoteCommandAllowed, remoteFileRoots } from './authorization'
 
 // short debounce: chat deltas land in the store per animation frame, and the
 // SSE stream pushes every publish — this is the streaming granularity remotes see
@@ -190,6 +190,10 @@ export function RemoteCompanion() {
     })
 
     const applyCommand = (c: RemoteCommand) => {
+      if (!remoteCommandAllowed(useAppStore.getState(), c)) {
+        console.warn('[yaam] rejected out-of-scope remote command:', c.kind)
+        return
+      }
       if (c.kind.startsWith('rpc_')) { void answerRpc(c.kind, c.id, c.text); return }
       const a = actionsRef.current
       switch (c.kind) {
