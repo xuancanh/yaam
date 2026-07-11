@@ -26,7 +26,7 @@ use tokio_stream::StreamExt;
 pub struct RemoteCommand {
     /// master_send · chat_send · task_chat · task_move · task_start ·
     /// session_input · session_key · prompt_answer · prompt_approve · prompt_deny ·
-    /// session_stop · session_resume · approve_master · approve_chat
+    /// session_stop · session_resume · approve_master · approve_chat · workspace_switch
     pub kind: String,
     pub id: String,
     #[serde(default)]
@@ -67,7 +67,7 @@ fn valid_command(cmd: &RemoteCommand) -> bool {
         "master_send", "chat_send", "chat_new", "task_chat", "task_start",
         "session_input", "session_key", "session_focus", "session_blur",
         "prompt_answer", "prompt_approve", "prompt_deny", "session_stop",
-        "session_resume", "approve_master", "approve_chat", "rpc_fs_list",
+        "session_resume", "approve_master", "approve_chat", "workspace_switch", "rpc_fs_list",
         "rpc_fs_read", "rpc_fs_b64", "rpc_git_status", "rpc_git_diff",
     ];
     KINDS.contains(&cmd.kind.as_str())
@@ -645,6 +645,9 @@ mod tests {
 
         let (code, _) = command(State(s.clone()), auth(), Json(make("unknown", String::new()))).await;
         assert_eq!(code, StatusCode::BAD_REQUEST);
+        let (code, _) = command(State(s.clone()), auth(), Json(make("workspace_switch", String::new()))).await;
+        assert_eq!(code, StatusCode::OK);
+        s.commands.lock().unwrap().clear();
         let (code, _) = command(
             State(s.clone()), auth(),
             Json(make("master_send", "x".repeat(MAX_COMMAND_TEXT_BYTES + 1))),
