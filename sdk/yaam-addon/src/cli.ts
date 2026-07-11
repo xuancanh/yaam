@@ -61,6 +61,27 @@ export async function main(argv: string[]): Promise<number> {
     return failed ? 1 : 0
   }
 
+  if (cmd === 'publish') {
+    const registry = flag(args, '--registry')
+    const urlBase = flag(args, '--url-base')
+    const dir = resolve(args[0] ?? 'dist')
+    if (!registry) {
+      console.error('usage: yaam-addon publish [builtDir] --registry <registry-checkout-dir> [--url-base <raw-url-prefix>]')
+      return 1
+    }
+    const { publishAddon } = await import('./publish.js')
+    const s = await publishAddon(dir, resolve(registry), { urlBase })
+    console.log(`${s.name} ${s.prevVersion ? `${s.prevVersion} → ` : ''}${s.version}`)
+    console.log(`  packed  ${s.packedFile}`)
+    console.log(`  indexed ${resolve(registry, 'index.json')}`)
+    if (s.securityDiff.length) {
+      console.log('\nsecurity-relevant changes (put these in the PR description):')
+      for (const l of s.securityDiff) console.log(`  ${l}`)
+    }
+    console.log('\nnow commit the registry changes and open a PR for review.')
+    return 0
+  }
+
   if (cmd === 'dev') {
     const dir = resolve(args[0] ?? '.')
     const cfg = await loadConfig(resolve(dir, 'addon.config.ts'))

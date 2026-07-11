@@ -1,0 +1,27 @@
+name: registry
+on:
+  pull_request:
+    paths:
+      - 'registry/**'
+  push:
+    branches: [main]
+    paths:
+      - 'registry/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate registry (integrity, versions, security diff)
+        run: |
+          BASE=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="--base origin/${{ github.base_ref }}"
+          fi
+          node scripts/validate-registry.mjs $BASE | tee -a "$GITHUB_STEP_SUMMARY"
