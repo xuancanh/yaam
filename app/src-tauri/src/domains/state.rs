@@ -3,6 +3,9 @@
 //! session. All paths live under Tauri's application-data directory.
 use tauri::{AppHandle, Manager};
 
+const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_SESSION_BYTES: usize = 16 * 1024 * 1024;
+
 /// Restrict a partition / session name to a safe file stem (no separators or
 /// traversal).
 fn safe_stem(name: &str) -> Result<String, String> {
@@ -22,6 +25,10 @@ fn safe_stem(name: &str) -> Result<String, String> {
 /// concurrent writers from sharing one scratch path.
 fn atomic_write(path: &std::path::Path, json: &str) -> Result<(), String> {
     use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
+    static WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let _guard = WRITE_LOCK.get_or_init(|| Mutex::new(())).lock().map_err(|e| e.to_string())?;
     let parent = path.parent().ok_or("path has no parent directory")?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let name = path
@@ -32,9 +39,17 @@ fn atomic_write(path: &std::path::Path, json: &str) -> Result<(), String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let tmp = parent.join(format!("{name}.{nonce}.tmp"));
+    let seq = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = parent.join(format!("{name}.{nonce}-{seq}.tmp"));
     {
-        let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        let mut options = std::fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut f = options.open(&tmp).map_err(|e| e.to_string())?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -45,14 +60,34 @@ fn atomic_write(path: &std::path::Path, json: &str) -> Result<(), String> {
     }
     let bak = parent.join(format!("{name}.bak"));
     if path.exists() {
-        let _ = std::fs::rename(path, &bak);
+        match std::fs::remove_file(&bak) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => { let _ = std::fs::remove_file(&tmp); return Err(e.to_string()); }
+        }
+        if let Err(e) = std::fs::rename(path, &bak) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.to_string());
+        }
     }
-    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    std::fs::File::open(parent)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Read a file, optionally falling back to its sibling `.bak`.
 fn read_with_backup(path: &std::path::Path, with_backup: bool) -> Result<Option<String>, String> {
-    match std::fs::read_to_string(path) {
+    let read_bounded = |candidate: &std::path::Path| -> Result<String, std::io::Error> {
+        let meta = std::fs::metadata(candidate)?;
+        if meta.len() > MAX_STATE_BYTES as u64 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "state file exceeds 64 MB"));
+        }
+        std::fs::read_to_string(candidate)
+    };
+    match read_bounded(path) {
         Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if with_backup {
@@ -61,7 +96,7 @@ fn read_with_backup(path: &std::path::Path, with_backup: bool) -> Result<Option<
                     .and_then(|n| n.to_str())
                     .unwrap_or_default();
                 let bak = path.with_file_name(format!("{name}.bak"));
-                match std::fs::read_to_string(bak) {
+                match read_bounded(&bak) {
                     Ok(s) => Ok(Some(s)),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
                     Err(e) => Err(e.to_string()),
@@ -84,6 +119,7 @@ fn sessions_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 
 /// Persist the main state partition (`conductor-state.json`).
 pub fn save_main(app: &AppHandle, json: &str) -> Result<(), String> {
+    if json.len() > MAX_STATE_BYTES { return Err("main state exceeds 64 MB".to_string()); }
     atomic_write(&data_dir(app)?.join("conductor-state.json"), json)
 }
 
@@ -100,6 +136,7 @@ pub fn load_main_backup(app: &AppHandle) -> Result<Option<String>, String> {
 
 /// Persist a named partition (e.g. the legacy `sessions`) as `<name>.json`.
 fn save_partition_impl(app: &AppHandle, name: &str, json: &str) -> Result<(), String> {
+    if json.len() > MAX_STATE_BYTES { return Err("state partition exceeds 64 MB".to_string()); }
     atomic_write(&data_dir(app)?.join(safe_stem(name)?), json)
 }
 
@@ -110,6 +147,7 @@ fn load_partition_impl(app: &AppHandle, name: &str) -> Result<Option<String>, St
 
 /// Persist one session (agent) to its own file, `sessions/<id>.json`.
 fn save_session_impl(app: &AppHandle, id: &str, json: &str) -> Result<(), String> {
+    if json.len() > MAX_SESSION_BYTES { return Err("session state exceeds 16 MB".to_string()); }
     atomic_write(&sessions_dir(app)?.join(safe_stem(id)?), json)
 }
 
@@ -117,8 +155,13 @@ fn save_session_impl(app: &AppHandle, id: &str, json: &str) -> Result<(), String
 fn remove_session_impl(app: &AppHandle, id: &str) -> Result<(), String> {
     let file = safe_stem(id)?;
     let dir = sessions_dir(app)?;
-    let _ = std::fs::remove_file(dir.join(&file));
-    let _ = std::fs::remove_file(dir.join(format!("{file}.bak")));
+    for path in [dir.join(&file), dir.join(format!("{file}.bak"))] {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
     Ok(())
 }
 
@@ -211,7 +254,7 @@ pub fn load_sessions(app: AppHandle) -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{atomic_write, load_session_files, read_with_backup, safe_stem};
+    use super::{atomic_write, load_session_files, read_with_backup, safe_stem, MAX_STATE_BYTES};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -262,11 +305,12 @@ mod tests {
 
         atomic_write(&path, r#"{"version":1}"#).unwrap();
         atomic_write(&path, r#"{"version":2}"#).unwrap();
+        atomic_write(&path, r#"{"version":3}"#).unwrap();
 
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"version":2}"#);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"version":3}"#);
         assert_eq!(
             std::fs::read_to_string(dir.path().join("state.json.bak")).unwrap(),
-            r#"{"version":1}"#
+            r#"{"version":2}"#
         );
         assert!(!std::fs::read_dir(dir.path())
             .unwrap()
@@ -300,6 +344,15 @@ mod tests {
             Some("backup")
         );
         assert_eq!(read_with_backup(&path, false).unwrap(), None);
+    }
+
+    #[test]
+    fn state_reads_reject_oversized_files_before_allocating_them() {
+        let dir = TestDir::new("oversized-read");
+        let path = dir.path().join("state.json");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(MAX_STATE_BYTES as u64 + 1).unwrap();
+        assert!(read_with_backup(&path, false).unwrap_err().contains("exceeds 64 MB"));
     }
 
     #[test]

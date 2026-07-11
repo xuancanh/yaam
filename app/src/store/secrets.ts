@@ -18,7 +18,11 @@ export function secretEntries(s: AppState): SecretEntry[] {
   const out: SecretEntry[] = [
     { account: 'master.apiKey', value: s.settings.apiKey ?? '' },
     { account: 'github.token', value: s.settings.githubToken ?? '' },
+    { account: 'remote.urlToken', value: s.settings.remoteToken ?? '' },
   ]
+  for (const d of s.settings.remoteDevices ?? []) {
+    out.push({ account: `remote.device.${d.id}.token`, value: d.token ?? '' })
+  }
   for (const t of s.chatAgentTypes ?? []) out.push({ account: `chat.${t.id}.apiKey`, value: t.apiKey ?? '' })
   for (const m of s.mcpServers ?? []) out.push({ account: `mcp.${m.id}.headers`, value: m.headers ?? '' })
   for (const p of s.settings.brainProfiles ?? []) out.push({ account: `brain.${p.id}.apiKey`, value: p.apiKey ?? '' })
@@ -34,6 +38,16 @@ export function redactSecrets(main: MainPartition, keychainReady: Set<string>): 
   }
   if (keychainReady.has('github.token') && red.settings) {
     red.settings = { ...red.settings, githubToken: '' }
+  }
+  if (keychainReady.has('remote.urlToken') && red.settings) {
+    red.settings = { ...red.settings, remoteToken: '' }
+  }
+  if (red.settings?.remoteDevices?.length) {
+    red.settings = {
+      ...red.settings,
+      remoteDevices: red.settings.remoteDevices.map(d =>
+        keychainReady.has(`remote.device.${d.id}.token`) ? { ...d, token: '' } : d),
+    }
   }
   if (red.chatAgentTypes) {
     red.chatAgentTypes = red.chatAgentTypes.map(t =>
@@ -61,6 +75,17 @@ export function applyResolvedSecrets(s: AppState, resolved: Record<string, strin
   if (master && !next.settings.apiKey) next.settings = { ...next.settings, apiKey: master }
   const gh = resolved['github.token']
   if (gh && !next.settings.githubToken) next.settings = { ...next.settings, githubToken: gh }
+  const remote = resolved['remote.urlToken']
+  if (remote && !next.settings.remoteToken) next.settings = { ...next.settings, remoteToken: remote }
+  if (next.settings.remoteDevices?.length) {
+    next.settings = {
+      ...next.settings,
+      remoteDevices: next.settings.remoteDevices.map(d => {
+        const value = resolved[`remote.device.${d.id}.token`]
+        return value && !d.token ? { ...d, token: value } : d
+      }),
+    }
+  }
   next.chatAgentTypes = (next.chatAgentTypes ?? []).map(t => {
     const v = resolved[`chat.${t.id}.apiKey`]
     return v && !t.apiKey ? { ...t, apiKey: v } : t

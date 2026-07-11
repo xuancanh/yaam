@@ -134,22 +134,7 @@ fn parse_aws_creds(raw: &str) -> Result<Credentials, String> {
 
 /// Run a credential or refresh command in a login shell without blocking async tasks.
 async fn run_shell(cmd: String) -> Result<String, String> {
-    let out = tauri::async_runtime::spawn_blocking(move || {
-        std::process::Command::new("/bin/sh")
-            .args(["-lc", &cmd])
-            .output()
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| format!("command failed to run: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "command exited with {}: {}",
-            out.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    crate::domains::fs::run_credential_command_impl(cmd).await
 }
 
 /// Build a Bedrock client from exported credentials or the standard AWS chain.
@@ -187,6 +172,9 @@ async fn invoke(client: &Client, model: &str, body: &str) -> Result<String, Stri
         .send()
         .await
         .map_err(|e| format!("{}", DisplayErrorContext(&e)))?;
+    if res.body().as_ref().len() > 4 * 1024 * 1024 {
+        return Err("Bedrock response exceeds 4 MB".to_string());
+    }
     Ok(String::from_utf8_lossy(res.body().as_ref()).to_string())
 }
 
@@ -271,6 +259,13 @@ pub async fn bedrock_invoke(
     model: String,
     body: String,
 ) -> Result<String, String> {
+    if region.is_empty() || region.len() > 128
+        || profile.len() > 256 || model.is_empty() || model.len() > 512
+        || refresh_cmd.len() > 16 * 1024 || cred_cmd.len() > 16 * 1024
+        || body.len() > 32 * 1024 * 1024
+    {
+        return Err("Bedrock request contains empty or oversized configuration/body".to_string());
+    }
     invoke_model(&state, region, profile, refresh_cmd, cred_cmd, model, body).await
 }
 

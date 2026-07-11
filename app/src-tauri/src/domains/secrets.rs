@@ -5,10 +5,12 @@
 use keyring::Entry;
 
 const SERVICE: &str = "dev.yaam.conductor";
+const MAX_ACCOUNT_BYTES: usize = 512;
+const MAX_SECRET_BYTES: usize = 1024 * 1024;
 
 fn entry(account: &str) -> Result<Entry, String> {
-    if account.is_empty() {
-        return Err("empty secret key".into());
+    if account.is_empty() || account.len() > MAX_ACCOUNT_BYTES || account.chars().any(char::is_control) {
+        return Err("secret key is empty, oversized, or contains control characters".into());
     }
     Entry::new(SERVICE, account).map_err(|e| e.to_string())
 }
@@ -16,6 +18,7 @@ fn entry(account: &str) -> Result<Entry, String> {
 /// Store (or replace) a secret. An empty value deletes the entry.
 #[tauri::command]
 pub fn secret_set(account: String, value: String) -> Result<(), String> {
+    if value.len() > MAX_SECRET_BYTES { return Err("secret value exceeds 1 MB".to_string()); }
     let e = entry(&account)?;
     if value.is_empty() {
         return match e.delete_credential() {
@@ -44,5 +47,18 @@ pub fn secret_delete(account: String) -> Result<(), String> {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::entry;
+
+    #[test]
+    fn validates_keychain_account_names_before_os_access() {
+        assert!(entry("").is_err());
+        assert!(entry("line\nbreak").is_err());
+        assert!(entry(&"x".repeat(513)).is_err());
+        assert!(entry("remote.device.phone-1.token").is_ok());
     }
 }

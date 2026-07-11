@@ -16,6 +16,7 @@ describe('secretEntries', () => {
     expect(secretEntries(mkState())).toEqual([
       { account: 'master.apiKey', value: 'sk-master' },
       { account: 'github.token', value: '' },
+      { account: 'remote.urlToken', value: '' },
       { account: 'chat.ct1.apiKey', value: 'sk-chat' },
       { account: 'chat.ct2.apiKey', value: '' },
       { account: 'mcp.m1.headers', value: 'Authorization: Bearer tok' },
@@ -67,5 +68,31 @@ describe('applyResolvedSecrets', () => {
     const next = applyResolvedSecrets(s, { 'brain.bp1.apiKey': 'sk-restored', 'brain.bp2.apiKey': 'ignored' })
     expect(next.settings.brainProfiles![0].apiKey).toBe('sk-restored')
     expect(next.settings.brainProfiles![1].apiKey).toBe('sk-kept')
+  })
+
+  it('redacts and restores remote bearer credentials', () => {
+    const state = mkState({
+      settings: {
+        apiKey: 'sk-master', remoteToken: 'remote-url-token',
+        remoteDevices: [{ id: 'phone-1', name: 'Phone', token: 'device-token', at: 1 }],
+      } as AppState['settings'],
+    })
+    expect(secretEntries(state)).toEqual(expect.arrayContaining([
+      { account: 'remote.urlToken', value: 'remote-url-token' },
+      { account: 'remote.device.phone-1.token', value: 'device-token' },
+    ]))
+
+    const redacted = redactSecrets(state as unknown as MainPartition, new Set([
+      'remote.urlToken', 'remote.device.phone-1.token',
+    ]))
+    expect(redacted.settings?.remoteToken).toBe('')
+    expect(redacted.settings?.remoteDevices?.[0].token).toBe('')
+
+    const restored = applyResolvedSecrets(redacted as AppState, {
+      'remote.urlToken': 'restored-url-token',
+      'remote.device.phone-1.token': 'restored-device-token',
+    })
+    expect(restored.settings.remoteToken).toBe('restored-url-token')
+    expect(restored.settings.remoteDevices?.[0].token).toBe('restored-device-token')
   })
 })
