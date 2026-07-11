@@ -56,6 +56,10 @@ export function makeStreamingCall(ctx: Pick<WatcherCtx, 'dispatch'>, taskId: str
     })
   const flush = () => { lastPush = Date.now(); set(buf) }
   const call = (cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], signal?: AbortSignal): Promise<ApiResponse> => {
+    if (trailer) {
+      clearTimeout(trailer)
+      trailer = null
+    }
     buf = '' // each round streams a fresh assistant turn
     return callApiStream(cfg, system, messages, tools, (text, channel) => {
       if (channel === 'thinking') return
@@ -64,7 +68,7 @@ export function makeStreamingCall(ctx: Pick<WatcherCtx, 'dispatch'>, taskId: str
       else if (!trailer) trailer = setTimeout(() => { trailer = null; flush() }, 90)
     }, signal)
   }
-  return { call, clear: () => { if (trailer) clearTimeout(trailer); set(null) } }
+  return { call, clear: () => { if (trailer) clearTimeout(trailer); trailer = null; set(null) } }
 }
 
 /** Serialize watcher turns per task; each turn re-reads task/session state. */
