@@ -38,7 +38,13 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
     let roRaf = 0
     const ro = new ResizeObserver(() => {
       if (roRaf) return
-      roRaf = requestAnimationFrame(() => { roRaf = 0; fitTerminal(agent.id) })
+      roRaf = requestAnimationFrame(() => {
+        roRaf = 0
+        // self-heal: if another (since unmounted) host detached the singleton
+        // xterm element, re-adopt it — but never steal it from a live host
+        if (term.element && !term.element.parentElement) el.appendChild(term.element)
+        fitTerminal(agent.id)
+      })
     })
     ro.observe(el)
     return () => {

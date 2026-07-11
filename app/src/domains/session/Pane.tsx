@@ -271,7 +271,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         const filesPanel = filesOpen && (
           <>
             <DockStrip label="FILES" dock={filesDock} onDock={setFDock} onClose={closeFiles} />
-            <FilesPane agent={agent} active={active} />
+            <FilesPane agent={agent} />
           </>
         )
         const gitPanel = gitOpen && agent.cwd && (

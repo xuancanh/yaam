@@ -1,8 +1,9 @@
-// VS Code-style file explorer + viewer for one agent session. The tree roots
-// at the session's cwd; clicking a file opens a read-only viewer that either
-// splits with the terminal or replaces it (toggleable). Git-aware: changed
-// files are tinted in the tree and the viewer's gutter can switch from line
-// numbers to change markers (green = new, amber = modified, red = deletion).
+// VS Code-style file explorer + viewer for one agent session, hosted as a
+// docked panel beside the session (the terminal/chat itself is rendered by the
+// host pane — never here, since a session's xterm element is a singleton).
+// Git-aware: changed files are tinted in the tree and the viewer's gutter can
+// switch from line numbers to change markers (green = new, amber = modified,
+// red = deletion).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { highlight, langForFile } from '../../core/highlight'
 import { isTauri, onFsChange, unwatchDir, watchDir } from '../../core/native'
@@ -19,18 +20,13 @@ import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { FileIcon } from '../../components/FileIcon'
 import { Markdown } from '../../components/Markdown'
-import { ChatPane } from '../chat/ChatPane'
 import { artifactSrcDoc } from '../chat/artifacts'
 import { requestAttach } from '../chat/attach-bus'
 import { Divider } from './Divider'
-import { TerminalPane } from './TerminalPane'
-
-export type FilesMode = 'split' | 'replace'
 
 // UI state survives tab switches / pane moves (components remount freely)
 interface FilesState {
   file: string | null
-  mode: FilesMode
   gutter: 'numbers' | 'git'
   expanded: string[]
 }
@@ -43,7 +39,7 @@ const explorerSplitCache = new Map<string, number>()
 function cached(id: string): FilesState {
   let st = stateCache.get(id)
   if (!st) {
-    st = { file: null, mode: 'split', gutter: 'git', expanded: [] }
+    st = { file: null, gutter: 'git', expanded: [] }
     stateCache.set(id, st)
   }
   return st
@@ -165,13 +161,10 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
 // ---------------------------------------------------------------- viewer
 
 /** Load and display one file with syntax highlighting and optional diff gutter. */
-function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose, git, onAttachFile, fs }: {
+function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, fs }: {
   path: string
   gutter: 'numbers' | 'git'
   onToggleGutter: () => void
-  /** omit both to hide the split-with-terminal toggle (standalone explorer) */
-  mode?: FilesMode
-  onToggleMode?: () => void
   onClose: () => void
   git: GitInfo | null
   onAttachFile?: (path: string) => void
@@ -393,18 +386,6 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
             ? <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M6 21v0']} size={14} stroke={1.7} />
             : <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>#</span>}
         </button>
-        {onToggleMode && (
-          <button
-            className="icon-btn"
-            title={mode === 'split' ? 'Split with terminal — click to fill the pane' : 'Replacing terminal — click to split'}
-            onClick={onToggleMode}
-            style={{ width: 26, height: 26, borderRadius: 6, color: mode === 'replace' ? 'var(--accent)' : undefined }}
-          >
-            {mode === 'split'
-              ? <Icon paths={['M4 5h16v14H4z', 'M4 12h16']} size={14} stroke={1.7} />
-              : <Icon paths={['M4 5h16v14H4z']} size={14} stroke={1.7} />}
-          </button>
-        )}
         <button className="icon-btn" title="Close file" onClick={onClose} style={{ width: 26, height: 26, borderRadius: 6 }}>
           <Icon paths={IC.close} size={13} stroke={1.8} />
         </button>
@@ -555,10 +536,9 @@ function FileViewer({ path, gutter, onToggleGutter, mode, onToggleMode, onClose,
 // ---------------------------------------------------------------- pane
 
 /** Manage a session-scoped filesystem tree, selected file, and git metadata. */
-export function FilesPane({ agent, active, showSession = true }: { agent: Agent; active: boolean; showSession?: boolean }) {
+export function FilesPane({ agent }: { agent: Agent }) {
   const init = cached(agent.id)
   const [file, setFile] = useState<string | null>(init.file)
-  const [mode, setMode] = useState<FilesMode>(init.mode)
   const [gutter, setGutter] = useState<'numbers' | 'git'>(init.gutter)
   const [expanded, setExpanded] = useState<Set<string>>(new Set(init.expanded))
   const [git, setGit] = useState<GitInfo | null>(null)
@@ -575,8 +555,8 @@ export function FilesPane({ agent, active, showSession = true }: { agent: Agent;
 
   // persist UI state across remounts
   useEffect(() => {
-    stateCache.set(agent.id, { file, mode, gutter, expanded: [...expanded] })
-  }, [agent.id, file, mode, gutter, expanded])
+    stateCache.set(agent.id, { file, gutter, expanded: [...expanded] })
+  }, [agent.id, file, gutter, expanded])
 
   // Refresh repository status and rebuild the path-to-status lookup.
   const refreshGit = useCallback(() => {
@@ -629,7 +609,7 @@ export function FilesPane({ agent, active, showSession = true }: { agent: Agent;
       <div style={{
         ...(treeShare != null
           ? { flexBasis: `${treeShare * 100}%`, flexGrow: 0, flexShrink: 1 }
-          : { width: showSession ? 220 : 180, flexShrink: 0 }),
+          : { width: 180, flexShrink: 0 }),
         display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: treeShare != null ? 120 : 0,
         background: 'var(--bg2)', borderRight: '1px solid var(--line)',
       }}>
@@ -668,32 +648,19 @@ export function FilesPane({ agent, active, showSession = true }: { agent: Agent;
       <Divider dir="col" onRatio={r => { explorerSplitCache.set(agent.id, r); setTreeShare(r) }} />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        {file && (
+        {file ? (
           <FileViewer
             path={file}
             gutter={gutter}
             onToggleGutter={() => setGutter(g => (g === 'numbers' ? 'git' : 'numbers'))}
-            mode={showSession ? mode : undefined}
-            onToggleMode={showSession ? () => setMode(m => (m === 'split' ? 'replace' : 'split')) : undefined}
             onClose={() => setFile(null)}
             git={git}
             onAttachFile={attachToChat}
             fs={fs}
           />
-        )}
-        {!file && !showSession && (
+        ) : (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--dim)' }}>
             Pick a file to preview
-          </div>
-        )}
-        {showSession && (!file || mode === 'split') && (
-          <div style={{
-            flex: file ? '0 0 40%' : 1, minHeight: 0, display: 'flex', flexDirection: 'column',
-            borderTop: file ? '1px solid var(--line)' : 'none',
-          }}>
-            {agent.kind === 'chat'
-              ? <ChatPane agent={agent} active={active && !file} />
-              : <TerminalPane agent={agent} active={active && !file} />}
           </div>
         )}
       </div>
@@ -716,7 +683,7 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
   const [treeShare, setTreeShare] = useState<number | null>(explorerSplitCache.get(`folder:${root}`) ?? null)
 
   useEffect(() => {
-    stateCache.set(`folder:${root}`, { file, mode: 'replace', gutter, expanded: [...expanded] })
+    stateCache.set(`folder:${root}`, { file, gutter, expanded: [...expanded] })
   }, [root, file, gutter, expanded])
 
   const toggleDir = (path: string) => {

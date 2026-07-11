@@ -430,7 +430,7 @@ export function ChatView() {
                 } : {
                   width: '48%', minWidth: 360, maxWidth: 760, flexShrink: 0, display: 'flex', borderLeft: '1px solid var(--line)',
                 }}>
-                  <FilesPane agent={selected} active showSession={false} />
+                  <FilesPane agent={selected} />
                 </div>
               )}
             </div>
