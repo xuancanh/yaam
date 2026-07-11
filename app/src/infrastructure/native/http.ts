@@ -43,11 +43,18 @@ export async function httpPostText(url: string, body: string, headers: Record<st
 
 /** Generic HTTP request through Tauri's plugin (CORS-free on desktop); returns
  *  status + body so tool callers can surface API errors to the model. */
-export async function httpRequest(method: string, url: string, headers: Record<string, string>, body?: string): Promise<{ status: number; text: string; contentType: string }> {
+export async function httpRequest(
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  body?: string,
+  redirect: RequestRedirect = 'follow',
+): Promise<{ status: number; text: string; contentType: string }> {
   const m = method.toUpperCase()
   const res = await (isTauri ? tauriFetch : fetch)(url, {
     method: m,
     headers: { ...UA_HEADER, ...headers },
+    redirect,
     ...(body !== undefined && m !== 'GET' && m !== 'HEAD' ? { body } : {}),
   })
   const text = await res.text()

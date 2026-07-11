@@ -46,7 +46,9 @@ export function createAddonSubsystem(k: ConductorKernel, refs: RuntimeRefs, sess
     wakeAgent: (aid, note) => runAddonAgentRef.current(aid, note),
     approveTask: taskId => taskReviewRef.current.approve(taskId),
     rejectTask: (taskId, comment) => taskReviewRef.current.reject(taskId, comment),
-    httpRequest: (method, url, headers, body) => native.httpRequest(method, url, headers, body),
+    // Do not follow redirects past the host allowlist check performed by the
+    // addon API. The addon can explicitly request another declared URL.
+    httpRequest: (method, url, headers, body) => native.httpRequest(method, url, headers, body, 'manual'),
     secretGet: account => native.secretGet(account),
   }, addonId)
 
