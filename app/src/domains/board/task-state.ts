@@ -15,11 +15,11 @@ export function findTaskInState(s: AppState, taskId: string, workspaceHint?: str
     if (task) return { task, workspaceId: s.activeWorkspace }
   }
   if (workspaceHint && workspaceHint !== s.activeWorkspace) {
-    const task = s.workspaceData[workspaceHint]?.tasks.find(t => t.id === taskId)
+    const task = s.workspaceData?.[workspaceHint]?.tasks?.find(t => t.id === taskId)
     if (task) return { task, workspaceId: workspaceHint }
   }
-  for (const [workspaceId, data] of Object.entries(s.workspaceData)) {
-    const task = data.tasks.find(t => t.id === taskId)
+  for (const [workspaceId, data] of Object.entries(s.workspaceData ?? {})) {
+    const task = (data.tasks ?? []).find(t => t.id === taskId)
     if (task) return { task, workspaceId }
   }
   return undefined
@@ -27,10 +27,11 @@ export function findTaskInState(s: AppState, taskId: string, workspaceHint?: str
 
 /** Find the board task currently bound to a session in any workspace. */
 export function findTaskForAgentInState(s: AppState, agentId: string): LocatedTask | undefined {
-  const active = s.tasks.find(t => t.agentId === agentId)
+  const ownsAgent = (task: BoardTask) => task.agentId === agentId || (task.agentIds ?? []).includes(agentId)
+  const active = (s.tasks ?? []).find(ownsAgent)
   if (active) return { task: active, workspaceId: s.activeWorkspace }
-  for (const [workspaceId, data] of Object.entries(s.workspaceData)) {
-    const task = data.tasks.find(t => t.agentId === agentId)
+  for (const [workspaceId, data] of Object.entries(s.workspaceData ?? {})) {
+    const task = (data.tasks ?? []).find(ownsAgent)
     if (task) return { task, workspaceId }
   }
   return undefined

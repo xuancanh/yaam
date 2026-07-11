@@ -110,4 +110,13 @@ describe('createSchedulerRuntime', () => {
     expect(h.deps.launchSession).not.toHaveBeenCalled()
     expect(h.clock.pending).toBe(0)
   })
+
+  it('start() is idempotent and cannot double-fire schedules', () => {
+    const h = harness(baseState({ crons: [dueCron()] }))
+    h.rt.start(); h.rt.start()
+    h.clock.advance(15000)
+    expect(h.deps.launchSession).toHaveBeenCalledOnce()
+    h.rt.dispose()
+    expect(h.clock.pending).toBe(0)
+  })
 })

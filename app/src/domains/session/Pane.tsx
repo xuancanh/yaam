@@ -90,7 +90,8 @@ function DockStrip({ label, dock, onDock, onPopup, onClose }: {
 export function Pane({ agent, index, active, showRing, maximized, standalone }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean; standalone?: boolean }) {
   const { setActivePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession, refreshTerminal, archiveSession } = useActions()
   // the board task this session is working (drives the review footer in Changes)
-  const task = useConductorSelector(x => x.tasks.find(t => !t.archived && t.agentId === agent.id))
+  const task = useConductorSelector(x => x.tasks.find(t =>
+    !t.archived && (t.agentId === agent.id || (t.agentIds ?? []).includes(agent.id))))
   const fs = useMemo(() => sessionFs(agent.machine, agent.id), [agent.machine, agent.id])
   const machineLabel = agent.machine ? (agent.machine.label || 'remote') : ''
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)

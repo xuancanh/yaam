@@ -55,7 +55,7 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
     // schedules fire in every workspace, active or not
     const pools: Array<{ wid: string; crons: typeof st.crons }> = [
       { wid: st.activeWorkspace, crons: st.crons },
-      ...Object.entries(st.workspaceData).map(([wid, d]) => ({ wid, crons: d.crons })),
+      ...Object.entries(st.workspaceData ?? {}).map(([wid, d]) => ({ wid, crons: d.crons ?? [] })),
     ]
     for (const pool of pools) {
       const due = collectDueSchedules(pool.crons, now)
@@ -175,7 +175,7 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
     // one canonical launch path (spawnTaskSession) — no duplicated logic.
     const taskPools: Array<{ wid: string; tasks: typeof st.tasks }> = [
       { wid: st.activeWorkspace, tasks: st.tasks },
-      ...Object.entries(st.workspaceData).map(([wid, d]) => ({ wid, tasks: d.tasks })),
+      ...Object.entries(st.workspaceData ?? {}).map(([wid, d]) => ({ wid, tasks: d.tasks ?? [] })),
     ]
     for (const pool of taskPools) {
       for (const t of collectDueTasks(pool.tasks, now)) {
@@ -190,7 +190,7 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
 
   let timer: Disposable | undefined
   return {
-    start() { timer = clock.setInterval(tick, TICK_MS) },
+    start() { timer ??= clock.setInterval(tick, TICK_MS) },
     dispose() { timer?.dispose(); timer = undefined },
   }
 }

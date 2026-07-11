@@ -38,6 +38,13 @@ describe('findTaskForAgentInState', () => {
   it('finds by agent in a background slice', () => {
     expect(findTaskForAgentInState(mkState(), 'ag3')).toEqual({ task: expect.objectContaining({ id: 't3' }), workspaceId: 'ws-b' })
   })
+  it('finds parallel and historical workers recorded in agentIds', () => {
+    const s = mkState()
+    s.tasks[0].agentIds = ['ag-old', 'ag1']
+    s.workspaceData['ws-b'].tasks[0].agentIds = ['ag-bg-old', 'ag3']
+    expect(findTaskForAgentInState(s, 'ag-old')?.task.id).toBe('t1')
+    expect(findTaskForAgentInState(s, 'ag-bg-old')?.task.id).toBe('t3')
+  })
   it('returns undefined when no task owns the agent', () => {
     expect(findTaskForAgentInState(mkState(), 'ghost')).toBeUndefined()
   })
