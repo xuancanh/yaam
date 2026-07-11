@@ -41,7 +41,7 @@ import { BrainProfilesBar } from './BrainProfiles'
 import { PluginsSection } from './PluginsSection'
 import { AppearanceSection } from './AppearanceSection'
 import { AssistantsSection } from './AssistantsSection'
-import { SkillsSection, PersonasSection, SkillRegistriesSection, ChatTypesSection, AddChatTypeButton } from './ChatAgentSections'
+import { SkillsSection, SkillRegistriesSection, ChatTypesSection, AddChatTypeButton } from './ChatAgentSections'
 
 const ORCHESTRATION: Array<{ id: 'autoRoute' | 'approveDestructive' | 'followMode'; label: string; detail: string }> = [
   { id: 'autoRoute', label: 'Auto-route requests', detail: 'Master assigns tasks to the right agent without asking first.' },
@@ -68,7 +68,7 @@ export function SettingsView() {
   const s = useConductorSelector(x => ({ settings: x.settings, remoteInfo: x.remoteInfo }), shallowEqual)
   const { toggleSetting, updateSettings } = useActions()
   const [tab, setTab] = useState<SettingsTab>('general')
-  const [chatTab, setChatTab] = useState<'agents' | 'personas' | 'skills'>('agents')
+  const [chatTab, setChatTab] = useState<'agents' | 'skills'>('agents')
   const [openChatTypeId, setOpenChatTypeId] = useState<string | null>(null)
 
   // Fill the default working directory from the native folder picker.
@@ -374,7 +374,7 @@ export function SettingsView() {
           {tab === 'chatagents' && <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
             <div style={{ display: 'flex', gap: 4, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 9, padding: 3 }}>
-              {([['agents', 'Agents'], ['personas', 'Personas'], ['skills', 'Skills']] as const).map(([id, label]) => (
+              {([['agents', 'Agents'], ['skills', 'Skills']] as const).map(([id, label]) => (
                 <button
                   key={id}
                   onClick={() => setChatTab(id)}
@@ -393,11 +393,10 @@ export function SettingsView() {
           </div>
           {chatTab === 'agents' && <>
             <div style={{ fontSize: 11.5, color: 'var(--dim)', marginBottom: 12, lineHeight: 1.5 }}>
-              Each chat agent picks a provider, a model list (pickable per chat), credentials, and an optional base persona. Empty API key = share the Master Brain credentials when the provider matches. Click an agent to configure it.
+              Each chat agent picks a provider, a model list (pickable per chat), credentials, and optional base instructions. Empty API key = share the Master Brain credentials when the provider matches. Click an agent to configure it.
             </div>
             <ChatTypesSection openId={openChatTypeId} setOpenId={setOpenChatTypeId} />
           </>}
-          {chatTab === 'personas' && <PersonasSection />}
           {chatTab === 'skills' && <>
             <PluginsSection />
             <SkillRegistriesSection />

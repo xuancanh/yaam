@@ -23,8 +23,9 @@ const FIELD = {
 
 const AGENT_COLORS = ['#7FD1FF', '#B78AF7', '#3DDC97', '#FFB020', '#FF8FA3', '#F5C451', '#6FA8FF', '#E5636F']
 
-/** One agent's recurring loops: prompt + cadence over the shared cron system. */
-function AgentSchedules({ agentId }: { agentId: string }) {
+/** One agent's recurring loops: prompt + cadence over the shared cron system.
+ *  Also rendered on the agent home page. */
+export function AgentSchedules({ agentId }: { agentId: string }) {
   const crons = useConductorSelector(x => x.crons)
   const { addCron, toggleCron, deleteCron } = useActions()
   const mine = crons.filter(c => c.durableAgentId === agentId)

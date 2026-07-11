@@ -53,7 +53,8 @@ export const DURABLE_AGENT_TEMPLATES: DurableAgentTemplate[] = [
   },
 ]
 
-/** The portable profile written to / read from `<homeDir>/AGENT.json`. */
+/** The portable profile written to / read from `<homeDir>/AGENT.json` — also
+ *  the format agent marketplaces serve. */
 export interface AgentExport {
   yaamAgent: 1
   name: string
@@ -61,6 +62,10 @@ export interface AgentExport {
   color: string
   charter: string
   loops?: Array<{ name: string; schedule: string; prompt: string }>
+  /** the agent-maintained home-page dashboard (markdown) */
+  dashboard?: string
+  /** self-built mini apps (self-contained HTML, rendered sandboxed) */
+  apps?: Array<{ name: string; description?: string; html: string }>
 }
 
 export function exportRecord(agent: DurableAgent, loops: Array<{ name: string; schedule: string; prompt: string }>): AgentExport {
@@ -71,6 +76,8 @@ export function exportRecord(agent: DurableAgent, loops: Array<{ name: string; s
     color: agent.color,
     charter: agent.charter,
     ...(loops.length ? { loops } : {}),
+    ...(agent.dashboard?.trim() ? { dashboard: agent.dashboard } : {}),
+    ...(agent.apps?.length ? { apps: agent.apps.map(a => ({ name: a.name, description: a.description, html: a.html })) } : {}),
   }
 }
 
@@ -95,6 +102,20 @@ export function parseAgentExport(text: string): AgentExport | null {
               && !!((l as Record<string, unknown>).prompt as string).trim())
             .map(l => ({ name: String(l.name ?? 'loop').slice(0, 40), schedule: l.schedule, prompt: l.prompt.slice(0, 600) }))
             .slice(0, 6)
+        : undefined,
+      dashboard: typeof raw.dashboard === 'string' && raw.dashboard.trim() ? raw.dashboard.slice(0, 24_000) : undefined,
+      apps: Array.isArray(raw.apps)
+        ? raw.apps
+            .map(a => a as Record<string, unknown>)
+            .filter(a => !!a && typeof a === 'object'
+              && typeof a.name === 'string' && !!a.name.trim()
+              && typeof a.html === 'string' && !!a.html.trim())
+            .map(a => ({
+              name: (a.name as string).trim().slice(0, 60),
+              description: typeof a.description === 'string' ? a.description.slice(0, 200) : undefined,
+              html: (a.html as string).slice(0, 300_000),
+            }))
+            .slice(0, 12)
         : undefined,
     }
   } catch {

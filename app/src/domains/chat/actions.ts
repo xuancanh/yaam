@@ -27,7 +27,7 @@ export interface ChatActionsCtx {
 }
 
 export interface ChatActions {
-  newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string, personaId?: string, skillSourceIds?: string[], durableAgentId?: string) => string
+  newChatSession: (name?: string, cwd?: string, chatTypeId?: string, model?: string, skillSourceIds?: string[], durableAgentId?: string) => string
   /** durable agents: create/update/archive, and manually reflect the latest conversation */
   addDurableAgent: (patch: Partial<DurableAgent> & { name: string }) => string
   updateDurableAgent: (id: string, patch: Partial<DurableAgent>) => void
@@ -74,7 +74,6 @@ export function buildChatSession(st: AppState, opts: {
   cwd?: string
   chatTypeId?: string
   model?: string
-  personaId?: string
   skillSourceIds?: string[]
   durableAgentId?: string
   tags?: string[]
@@ -93,7 +92,6 @@ export function buildChatSession(st: AppState, opts: {
     chatTypeId: chatType?.id,
     chatModel: effModel || chatType?.model,
     nameIsDefault: !opts.name?.trim(),
-    personaId: opts.personaId ?? durable?.personaId,
     skillSourceIds: opts.skillSourceIds ?? durable?.skillSourceIds,
     durableAgentId: durable?.id,
     chatTags: opts.tags,
@@ -132,8 +130,8 @@ function seedConsolidationLoop(dispatch: ChatActionsCtx['dispatch'], durableAgen
 export function createChatActions(ctx: ChatActionsCtx): ChatActions {
   const { dispatch, stateRef } = ctx
   return {
-    newChatSession: (name, cwd, chatTypeId, model, personaId, skillSourceIds, durableAgentId) => {
-      const agent = buildChatSession(stateRef.current, { name, cwd, chatTypeId, model, personaId, skillSourceIds, durableAgentId })
+    newChatSession: (name, cwd, chatTypeId, model, skillSourceIds, durableAgentId) => {
+      const agent = buildChatSession(stateRef.current, { name, cwd, chatTypeId, model, skillSourceIds, durableAgentId })
       dispatch(s => ({ ...s, agents: s.agents.concat([agent]), activeChatId: agent.id, view: 'chat' }))
       ctx.logEvent('route', agent.id, `Started chat agent “${agent.name}”`)
       return agent.id

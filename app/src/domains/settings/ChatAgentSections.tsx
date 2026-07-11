@@ -10,10 +10,9 @@ import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
 import { confirmAction } from '../../components/Confirm'
 
-/** Shared spacious popup for the name + description + instructions entities
- *  (skills and personas): both are instruction packs with the same shape. */
+/** Spacious popup for name + description + instructions entities (skills). */
 function InstructionPackDialog({ noun, value, hints, onPatch, onDelete, onClose }: {
-  noun: 'skill' | 'persona'
+  noun: 'skill'
   value: { name: string; description: string; body: string }
   hints: { name: string; description: string; body: string; deleteDetail: string }
   onPatch: (patch: Partial<{ name: string; description: string; body: string }>) => void
@@ -50,7 +49,7 @@ function InstructionPackDialog({ noun, value, hints, onPatch, onDelete, onClose 
           <DraftTextarea
             value={value.body}
             onCommit={v => onPatch({ body: v })}
-            placeholder={noun === 'skill' ? 'the instructions injected when a chat agent loads this skill' : "the persona instructions appended to the chat agent's system prompt"}
+            placeholder="the instructions injected when a chat agent loads this skill"
             rows={12}
             style={{ ...FIELD_STYLE, width: '100%', resize: 'vertical', fontFamily: 'var(--font-sans)', fontSize: 12.5, lineHeight: 1.55 }}
           />
@@ -72,7 +71,7 @@ function InstructionPackDialog({ noun, value, hints, onPatch, onDelete, onClose 
   )
 }
 
-/** One compact skill/persona row; click for the full editor popup. */
+/** One compact skill row; click for the full editor popup. */
 function InstructionPackRow({ name, description, extra, onOpen }: {
   name: string
   description: string
@@ -131,55 +130,6 @@ export function SkillsSection() {
           }}
           onPatch={patch => updateSkill(open.id, patch)}
           onDelete={() => removeSkill(open.id)}
-          onClose={() => setOpenId(null)}
-        />
-      )}
-    </>
-  )
-}
-
-/** Personas: named voices/roles a chat adopts (picked per chat).
- *  Compact rows; click one for the full editor popup. */
-export function PersonasSection() {
-  const s = useConductorSelector(x => ({ personas: x.personas }), shallowEqual)
-  const { addPersona, updatePersona, removePersona } = useActions()
-  const [openId, setOpenId] = useState<string | null>(null)
-  const open = openId ? s.personas.find(pe => pe.id === openId) : undefined
-
-  return (
-    <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
-        <SectionLabel>PERSONAS — pick one when starting a chat; appended to the agent's instructions · click one to edit</SectionLabel>
-        <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5, marginBottom: 11 }} onClick={() => setOpenId(addPersona())}>
-          + New persona
-        </button>
-      </div>
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
-        {s.personas.length === 0 && (
-          <div style={{ padding: '14px 0', fontSize: 12, color: 'var(--dim)' }}>No personas yet.</div>
-        )}
-        {s.personas.map(pe => (
-          <InstructionPackRow
-            key={pe.id}
-            name={pe.name}
-            description={pe.description}
-            extra={pe.body.trim() ? `${pe.body.trim().split(/\s+/).length} words` : 'empty'}
-            onOpen={() => setOpenId(pe.id)}
-          />
-        ))}
-      </div>
-      {open && (
-        <InstructionPackDialog
-          noun="persona"
-          value={open}
-          hints={{
-            name: 'shown in the per-chat picker',
-            description: 'shown in the picker',
-            body: "appended to the chat agent's system prompt",
-            deleteDetail: 'Chats using it keep running without a persona. This cannot be undone.',
-          }}
-          onPatch={patch => updatePersona(open.id, patch)}
-          onDelete={() => removePersona(open.id)}
           onClose={() => setOpenId(null)}
         />
       )}

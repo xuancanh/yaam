@@ -75,6 +75,11 @@ export function durablePromptSection(agent: DurableAgent, brain: AgentBrain): st
       : 'You have no home folder; persist learnings with learn_lesson (they land in the shared workspace memory).'),
     `YOUR CHARTER (your job description):\n${agent.charter.trim() || '(none yet — propose one with update_my_profile once you understand your job)'}`,
   ]
+  parts.push(`YOUR HOME PAGE — the user's default view of you: a dashboard you maintain (update_dashboard, markdown) plus your mini apps (save_app — one self-contained HTML document each, rendered sandboxed with no network). `
+    + (agent.dashboard?.trim()
+      ? `Your dashboard was last updated ${agent.dashboardAt ? new Date(agent.dashboardAt).toISOString().slice(0, 10) : 'earlier'} — refresh it when your state meaningfully changes.`
+      : 'Your dashboard is EMPTY — once you understand your job, publish a first dashboard with update_dashboard.')
+    + ((agent.apps?.length ?? 0) > 0 ? ` Your mini apps: ${agent.apps!.map(a => a.name).join(', ')}.` : ' You can also grow reusable skills with save_skill.'))
   if (brain.lessons.trim()) parts.push(`YOUR LESSONS (you wrote these from past corrections — apply them):\n${tail(brain.lessons.trim(), LESSONS_PROMPT_CHARS)}`)
   if (brain.journal.trim()) parts.push(`YOUR RECENT JOURNAL (what you did before this conversation):\n${tail(brain.journal.trim(), JOURNAL_PROMPT_CHARS)}`)
   parts.push('RULES: (1) when the user corrects you or a job outcome teaches you something durable, record it with learn_lesson BEFORE moving on. (2) when lessons accumulate into a better way of working — or the user asks you to change how you operate — evolve your own charter/settings with update_my_profile, carrying forward everything still true; never silently discard the user\'s intent. That is how you improve over time.')

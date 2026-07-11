@@ -35,8 +35,8 @@ export interface PluginInstall {
   skillRegistries: { name: string; url: string }[]
   /** MCP servers declared by the plugin's .mcp.json */
   mcpServers: McpCandidate[]
-  /** plugin agents/*.md translated into chat personas (system prompts) */
-  personas: { name: string; description: string; body: string }[]
+  /** plugin agents/*.md translated into durable agents (charter = the prompt) */
+  agents: { name: string; description: string; body: string }[]
   /** plugin hooks/ translated into a YAAM addon package (JSON) whose hooks
    *  run the plugin's commands via the permission-gated exec scope */
   hookAddonJson?: string
@@ -162,7 +162,7 @@ export async function resolvePluginInstall(plugin: PluginEntry): Promise<PluginI
   if (!Array.isArray(listing)) throw new Error('unexpected GitHub API response for the plugin folder')
   const has = (name: string, type: string) => listing.some(e => e.name === name && e.type === type)
 
-  const out: PluginInstall = { skillRegistries: [], mcpServers: [], personas: [], skipped: [] }
+  const out: PluginInstall = { skillRegistries: [], mcpServers: [], agents: [], skipped: [] }
   if (has('skills', 'dir')) out.skillRegistries.push({ name: plugin.name, url: treeUrl(l, 'skills') })
   if (has('commands', 'dir')) out.skillRegistries.push({ name: `${plugin.name}-commands`, url: treeUrl(l, 'commands') })
   if (has('.mcp.json', 'file')) {
@@ -175,7 +175,7 @@ export async function resolvePluginInstall(plugin: PluginEntry): Promise<PluginI
   }
   if (has('agents', 'dir')) {
     // Claude Code agents are markdown system prompts with name/description
-    // frontmatter — exactly YAAM's persona shape, so translate them
+    // frontmatter — hire them as durable agents (the prompt becomes the charter)
     try {
       const agents = JSON.parse(await httpGetText(
         `https://api.github.com/repos/${l.owner}/${l.repo}/contents/${[l.path, 'agents'].filter(Boolean).join('/')}?ref=${l.ref}`,
@@ -184,7 +184,7 @@ export async function resolvePluginInstall(plugin: PluginEntry): Promise<PluginI
         try {
           const parsed = parseSkillMd(await httpGetText(rawUrl(l, `agents/${a.name}`)), a.name.replace(/\.md$/i, ''))
           if (parsed.body.trim()) {
-            out.personas.push({
+            out.agents.push({
               name: `${plugin.name}:${parsed.name}`,
               description: parsed.description || `agent from the ${plugin.name} plugin`,
               body: parsed.body,
@@ -192,7 +192,7 @@ export async function resolvePluginInstall(plugin: PluginEntry): Promise<PluginI
           }
         } catch { /* unreadable agent file — skip it, keep the rest */ }
       }
-      if (!out.personas.length) out.skipped.push('agents (none parseable)')
+      if (!out.agents.length) out.skipped.push('agents (none parseable)')
     } catch {
       out.skipped.push('agents (listing failed)')
     }
@@ -209,7 +209,7 @@ export async function resolvePluginInstall(plugin: PluginEntry): Promise<PluginI
       out.skipped.push('hooks (config unreadable)')
     }
   }
-  if (!out.skillRegistries.length && !out.mcpServers.length && !out.personas.length) {
+  if (!out.skillRegistries.length && !out.mcpServers.length && !out.agents.length) {
     throw new Error('nothing chat-compatible found (no skills/, commands/, agents/, or .mcp.json)')
   }
   return out

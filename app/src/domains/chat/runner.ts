@@ -201,6 +201,51 @@ function makeAppPort(ctx: ChatCtx, agentId: string, turnId: string): ChatAppPort
         ? `profile updated (${applied.join(', ')}) — the new charter/settings apply from your next turn`
         : 'nothing to change'
     },
+    updateDashboard: markdown => {
+      const durable = durableAgentOf(ctx, agentId)
+      if (!durable) return 'this conversation has no durable agent — only durable agents have a home page'
+      ctx.dispatch(s => ({
+        ...s,
+        durableAgents: (s.durableAgents ?? []).map(d => d.id === durable.id
+          ? { ...d, dashboard: markdown.trim().slice(0, 24_000), dashboardAt: Date.now() }
+          : d),
+      }))
+      return 'dashboard updated — the user sees it on your agent home page'
+    },
+    saveApp: (name, description, html) => {
+      const durable = durableAgentOf(ctx, agentId)
+      if (!durable) return 'this conversation has no durable agent — only durable agents have mini apps'
+      const slug = name.slice(0, 60)
+      const existing = (durable.apps ?? []).find(a => a.name.toLowerCase() === slug.toLowerCase())
+      if (!existing && (durable.apps ?? []).length >= 12) return 'error: app limit reached (12) — delete_app one first'
+      const app = {
+        id: existing?.id ?? mkId('app'),
+        name: slug,
+        description: description.slice(0, 200) || undefined,
+        html: html.slice(0, 300_000),
+        updatedAt: Date.now(),
+      }
+      ctx.dispatch(s => ({
+        ...s,
+        durableAgents: (s.durableAgents ?? []).map(d => d.id === durable.id
+          ? { ...d, apps: existing ? (d.apps ?? []).map(a => (a.id === existing.id ? app : a)) : [...(d.apps ?? []), app] }
+          : d),
+      }))
+      return `${existing ? 'updated' : 'created'} mini app “${slug}” — it renders sandboxed on your home page (no network; inline everything)`
+    },
+    deleteApp: name => {
+      const durable = durableAgentOf(ctx, agentId)
+      if (!durable) return 'this conversation has no durable agent'
+      const target = (durable.apps ?? []).find(a => a.name.toLowerCase() === name.toLowerCase())
+      if (!target) return `no mini app named “${name}” — you have: ${(durable.apps ?? []).map(a => a.name).join(', ') || '(none)'}`
+      ctx.dispatch(s => ({
+        ...s,
+        durableAgents: (s.durableAgents ?? []).map(d => d.id === durable.id
+          ? { ...d, apps: (d.apps ?? []).filter(a => a.id !== target.id) }
+          : d),
+      }))
+      return `deleted mini app “${target.name}”`
+    },
     saveSkill: (name, description, body) => {
       const slug = name.trim()
       const existing = ctx.stateRef.current.skills.find(k => k.name.toLowerCase() === slug.toLowerCase())
@@ -334,8 +379,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
           ]
         : full
     }
-    const personaBody = ctx.stateRef.current.personas.find(pp => pp.id === agent.personaId)?.body
-    const persona = [chatType.systemPrompt, personaBody].filter(Boolean).join('\n\n')
+    const persona = chatType.systemPrompt ?? ''
     // streaming: deltas grow one live assistant bubble; a tool round seals
     // the current bubble; the final text replaces (or creates) it
     let streamId: string | null = null

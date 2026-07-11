@@ -200,8 +200,6 @@ export interface SessionRecord {
   reflectedAt?: number
   /** model chosen for this session (from the type's models list) */
   chatModel?: string
-  /** persona adopted by this chat session */
-  personaId?: string
   /** skill sources for this chat: 'local' and/or SkillRegistry ids */
   skillSourceIds?: string[]
   /** chat tool safety: 'ask' permits reads and pauses mutations/external actions;
@@ -481,21 +479,28 @@ export interface DurableAgent {
   /** defaults for new conversations */
   chatTypeId?: string
   model?: string
-  personaId?: string
   skillSourceIds?: string[]
   /** the seeded generic assistant — not deletable, homeDir optional */
   builtin?: boolean
   archived?: boolean
   createdAt: number
+  /** the agent-maintained home-page dashboard (markdown, update_dashboard tool) */
+  dashboard?: string
+  /** epoch ms of the last dashboard update */
+  dashboardAt?: number
+  /** self-built mini apps (save_app tool), rendered sandboxed on the home page */
+  apps?: AgentApp[]
 }
 
-/** a named persona chat agents can adopt (picked per chat) */
-export interface Persona {
+/** A mini app a durable agent built for its own home page: one self-contained
+ *  HTML document, rendered in a sandboxed iframe (same trust model as chat
+ *  artifacts — opaque origin, no network). */
+export interface AgentApp {
   id: string
   name: string
-  description: string
-  /** appended to the chat agent's system prompt */
-  body: string
+  description?: string
+  html: string
+  updatedAt: number
 }
 
 /** a remote or local source of skills (e.g. Anthropic's github skills repo) */
@@ -876,7 +881,6 @@ export interface PersistedState {
   templates?: AgentTemplate[]
   mcpServers?: McpServer[]
   skills?: Skill[]
-  personas?: Persona[]
   skillRegistries?: SkillRegistry[]
   chatAgentTypes?: ChatAgentType[]
   workspaces?: Workspace[]

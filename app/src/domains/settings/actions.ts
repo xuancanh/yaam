@@ -1,10 +1,10 @@
-// Settings-domain actions: CRUD for agent types, MCP servers, skills, personas,
+// Settings-domain actions: CRUD for agent types, MCP servers, skills,
 // skill registries, chat-agent types, the tools registry, and the settings
 // object. Pure-ish reducers over the shared store, plus MCP/skill reconnect
 // side effects. Composed into the provider's action surface.
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
-import type { AppState, ChatAgentType, McpServer, Persona, Skill, SkillRegistry } from '../../core/types'
+import type { AppState, ChatAgentType, McpServer, Skill, SkillRegistry } from '../../core/types'
 import { mcpDisconnect } from '../../core/mcp'
 import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
@@ -29,9 +29,6 @@ export interface SettingsActions {
   addSkill: () => string
   updateSkill: (id: string, patch: Partial<Pick<Skill, 'name' | 'description' | 'body'>>) => void
   removeSkill: (id: string) => void
-  addPersona: () => string
-  updatePersona: (id: string, patch: Partial<Pick<Persona, 'name' | 'description' | 'body'>>) => void
-  removePersona: (id: string) => void
   addSkillRegistry: (name: string, url: string) => void
   updateSkillRegistry: (id: string, patch: Partial<Pick<SkillRegistry, 'name' | 'url' | 'enabled'>>) => void
   removeSkillRegistry: (id: string) => void
@@ -114,22 +111,6 @@ export function createSettingsActions(ctx: SettingsActionsCtx): SettingsActions 
     })),
 
     removeSkill: id => dispatch(s => ({ ...s, skills: s.skills.filter(x => x.id !== id) })),
-
-    addPersona: () => {
-      const id = mkId('pe')
-      dispatch(s => ({
-        ...s,
-        personas: s.personas.concat([{ id, name: `persona-${s.personas.length + 1}`, description: '', body: '' }]),
-      }))
-      return id
-    },
-
-    updatePersona: (id, patch) => dispatch(s => ({
-      ...s,
-      personas: s.personas.map(x => (x.id === id ? { ...x, ...patch } : x)),
-    })),
-
-    removePersona: id => dispatch(s => ({ ...s, personas: s.personas.filter(x => x.id !== id) })),
 
     addSkillRegistry: (name, url) => {
       const id = mkId('sr')

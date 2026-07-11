@@ -1,22 +1,21 @@
 // Settings domain AppState slice. Imports only entity types (never core/types).
 import type {
-  OrchestrationSettings, AgentType, ChatAgentType, McpServer, Skill, Persona, SkillRegistry, CatalogTool,
+  OrchestrationSettings, AgentType, ChatAgentType, McpServer, Skill, SkillRegistry, CatalogTool,
 } from '../../core/entities'
 
-/** Configuration: orchestration policy, agent/chat types, MCP, skills, personas, tools. */
+/** Configuration: orchestration policy, agent/chat types, MCP, skills, tools. */
 export interface SettingsSlice {
   settings: OrchestrationSettings
   agentTypes: AgentType[]
   chatAgentTypes: ChatAgentType[]
   mcpServers: McpServer[]
   skills: Skill[]
-  personas: Persona[]
   skillRegistries: SkillRegistry[]
   toolsCatalog: CatalogTool[]
 }
 
 /** Initial settings slice: default providers, agent/chat types, starter skills,
- *  a persona, the anthropic skill registry, and Master's tool catalog. */
+ *  the anthropic skill registry, and Master's tool catalog. */
 export function freshSettingsSlice(): SettingsSlice {
   return {
     agentTypes: [
@@ -27,14 +26,6 @@ export function freshSettingsSlice(): SettingsSlice {
       { id: 'cursor', name: 'Cursor Agent', color: 'var(--mut2)', model: 'cursor-agent', tools: 4, desc: 'Background agent — repo-wide autonomous tasks.', enabled: false },
     ],
     mcpServers: [],
-    personas: [
-      {
-        id: 'persona-terse-engineer',
-        name: 'terse-engineer',
-        description: 'Senior engineer voice: short, direct, evidence-first.',
-        body: 'Speak like a senior engineer in a hurry: lead with the answer, cite file:line for claims about code, prefer diffs over descriptions, flag risks in one line each, no pleasantries.',
-      },
-    ],
     skillRegistries: [
       { id: 'sr-anthropic', name: 'anthropic', url: 'https://github.com/anthropics/skills/tree/main/skills', enabled: true },
     ],

@@ -57,5 +57,21 @@
       "description": "Developer reference — exercises every addon capability (state, sessions, tasks with review verbs, templates, schedules, storage, allowlisted HTTP, keychain secrets, the addon agent, UI calls, all hooks, a Master tool). Built on the toolkit.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/dev-kitchen-sink.yaam.json"
     }
+  ],
+  "agents": [
+    {
+      "name": "Release Captain",
+      "role": "keeps releases shippable",
+      "icon": "🚢",
+      "description": "Owns the path from merged work to a shippable release: living release notes, a gate checklist mini app, weekly readiness sweeps, and a dashboard showing blockers at a glance.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/agents/release-captain.agent.json"
+    },
+    {
+      "name": "News Briefer",
+      "role": "your daily research brief",
+      "icon": "📰",
+      "description": "Researches your topics every weekday morning, cross-checks sources, files the digest under knowledge/, and keeps the headlines on its dashboard.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/agents/news-briefer.agent.json"
+    }
   ]
 }

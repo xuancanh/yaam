@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT, hexToRgba } from '../../core/data'
 import type { Cron } from '../../core/types'
 import { IC, Icon, Switch, ViewHeader } from '../../components/ui'
 import { SpecVerifyDialog, TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } from '../board/TaskSpecForm'
 import type { TaskSpecPatch, VerifyOutcome } from '../board/TaskSpecForm'
-import { buildCron, cronFiresOnDay, cronTimeLabel, describeCron } from './cron'
+import { buildCron, cronFireMinutesOnDay, cronFiresOnDay, cronTimeLabel, describeCron } from './cron'
 import type { SimpleSchedule } from './cron'
 import { confirmAction } from '../../components/Confirm'
 
@@ -350,57 +351,249 @@ function CalendarDay({ day, inMonth, crons }: { day: Date; inMonth: boolean; cro
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-/** Month calendar of schedule firings: recurring crons projected onto their
- *  matching days, one-time runs on their date, and recorded runs as ✓/✕. */
-function ScheduleCalendar({ crons }: { crons: Cron[] }) {
-  const now = new Date()
-  const [cursor, setCursor] = useState({ y: now.getFullYear(), m: now.getMonth() })
-  const first = new Date(cursor.y, cursor.m, 1)
-  const start = new Date(cursor.y, cursor.m, 1 - first.getDay())
-  const weeks: Date[][] = []
-  for (let w = 0; w < 6; w++) {
-    const week = Array.from({ length: 7 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * 7 + i))
-    if (w > 0 && week[0].getMonth() !== cursor.m) break // trim weeks fully past the month
-    weeks.push(week)
+// time-grid geometry (week/day views): pixels per hour and per chip
+const HOUR_H = 44
+const CHIP_H = 18
+
+interface DayFire {
+  cron: Cron
+  /** minute-of-day */
+  minute: number
+  done?: boolean
+}
+
+/** Everything a schedule contributes to one day. Dense recurring schedules
+ *  (> 24 firings, e.g. "every 10 min") collapse into an all-day banner instead
+ *  of wallpapering the column with chips. */
+function firesForDay(crons: Cron[], day: Date): { timed: DayFire[]; allDay: Cron[] } {
+  const timed: DayFire[] = []
+  const allDay: Cron[] = []
+  for (const c of crons) {
+    if (c.at) {
+      if (sameDay(c.at, day)) {
+        const d = new Date(c.at)
+        timed.push({ cron: c, minute: d.getHours() * 60 + d.getMinutes(), done: !c.on })
+      }
+      continue
+    }
+    if (!c.on) continue
+    const minutes = cronFireMinutesOnDay(c.schedule, day, 25)
+    if (minutes.length > 24) allDay.push(c)
+    else timed.push(...minutes.map(minute => ({ cron: c, minute })))
   }
-  const step = (d: number) => setCursor(c => {
-    const next = new Date(c.y, c.m + d, 1)
-    return { y: next.getFullYear(), m: next.getMonth() }
-  })
+  timed.sort((a, b) => a.minute - b.minute)
+  return { timed, allDay }
+}
+
+/** ✓/✕ tally of runs recorded on one day (shared by all calendar views). */
+function RunTally({ crons, day }: { crons: Cron[]; day: Date }) {
+  const runs = crons.flatMap(c => (c.runs ?? []).filter(r => sameDay(r.at, day)))
+  const ok = runs.filter(r => r.ok).length
+  const failed = runs.length - ok
+  if (!runs.length) return null
+  return (
+    <span className="mono" style={{ fontSize: 9.5, flexShrink: 0 }} title={`${runs.length} recorded run${runs.length === 1 ? '' : 's'} on this day`}>
+      {ok > 0 && <span style={{ color: 'var(--green)' }}>✓{ok}</span>}
+      {failed > 0 && <span style={{ color: 'var(--red-soft)', marginLeft: 4 }}>✕{failed}</span>}
+    </span>
+  )
+}
+
+/** Outlook-style time grid for one or more days: hour rows, chips positioned
+ *  at their firing minute, all-day banners on top, and a live now-line. */
+function TimeGrid({ days, crons }: { days: Date[]; crons: Cron[] }) {
+  // the now-line tracks the clock while the view is open
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  useEffect(() => {
+    const iv = window.setInterval(() => setNowTick(Date.now()), 30_000)
+    return () => window.clearInterval(iv)
+  }, [])
+  const now = new Date(nowTick)
+  const nowMinute = now.getHours() * 60 + now.getMinutes()
+  const perDay = days.map(day => ({ day, ...firesForDay(crons, day) }))
+  const anyAllDay = perDay.some(d => d.allDay.length > 0)
+
+  const chip = (c: Cron, key: string, label: string, extra?: CSSProperties, done?: boolean) => (
+    <div
+      key={key}
+      className="mono"
+      title={`${c.name} · ${c.at ? `one-time${done ? ' · done' : ''} · ${new Date(c.at).toLocaleString()}` : describeCron(c.schedule).text}`}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 5, fontSize: 9.5, padding: '0 6px', borderRadius: 5,
+        background: 'var(--panel2)', border: '1px solid var(--line-soft)', minWidth: 0, height: CHIP_H,
+        opacity: done ? 0.5 : 1, overflow: 'hidden', ...extra,
+      }}
+    >
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: c.color, flexShrink: 0 }} />
+      <span style={{ color: 'var(--dim)', flexShrink: 0 }}>{label}</span>
+      <span style={{ color: 'var(--text2)', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</span>
+    </div>
+  )
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <button className="icon-btn" title="Previous month" style={{ width: 26, height: 26, borderRadius: 7 }} onClick={() => step(-1)}>
+    <div style={{ border: '1px solid var(--line)', borderRadius: 13, overflow: 'hidden', background: 'var(--panel)', display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
+      {/* day headers (+ all-day banner lane) */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+        <div style={{ width: 52, flexShrink: 0 }} />
+        {perDay.map(({ day, allDay }) => {
+          const today = sameDay(nowTick, day)
+          return (
+            <div key={day.toISOString()} style={{ flex: 1, minWidth: 0, padding: '7px 8px 6px', borderLeft: '1px solid var(--line-soft)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: today ? 'var(--accent)' : 'var(--dim)' }}>
+                  {WEEKDAYS[day.getDay()].toUpperCase()}
+                </span>
+                <span className="mono" style={{
+                  fontSize: 11.5, fontWeight: today ? 700 : 500, minWidth: 20, height: 20, padding: '0 3px', borderRadius: 10,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  color: today ? 'var(--bg)' : 'var(--text2)', background: today ? 'var(--accent)' : 'transparent',
+                }}>
+                  {day.getDate()}
+                </span>
+                <div style={{ flex: 1 }} />
+                <RunTally crons={crons} day={day} />
+              </div>
+              {anyAllDay && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 5, minHeight: CHIP_H }}>
+                  {allDay.map(c => chip(c, c.id, cronTimeLabel(c.schedule)))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {/* scrollable hour grid */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', height: 24 * HOUR_H, position: 'relative' }}>
+          <div style={{ width: 52, flexShrink: 0, position: 'relative' }}>
+            {Array.from({ length: 23 }, (_, i) => (
+              <span key={i} className="mono" style={{ position: 'absolute', top: (i + 1) * HOUR_H - 7, right: 8, fontSize: 9.5, color: 'var(--faint)' }}>
+                {String(i + 1).padStart(2, '0')}:00
+              </span>
+            ))}
+          </div>
+          {perDay.map(({ day, timed }) => {
+            const today = sameDay(nowTick, day)
+            // same-minute firings share the row side by side
+            const byMinute = new Map<number, DayFire[]>()
+            for (const f of timed) byMinute.set(f.minute, [...(byMinute.get(f.minute) ?? []), f])
+            return (
+              <div key={day.toISOString()} style={{ flex: 1, minWidth: 0, position: 'relative', borderLeft: '1px solid var(--line-soft)', background: today ? 'rgba(245,196,81,.025)' : 'transparent' }}>
+                {Array.from({ length: 23 }, (_, i) => (
+                  <div key={i} style={{ position: 'absolute', top: (i + 1) * HOUR_H, left: 0, right: 0, borderTop: '1px solid var(--line-soft)' }} />
+                ))}
+                {[...byMinute.entries()].map(([minute, group]) => (
+                  <div key={minute} style={{ position: 'absolute', top: (minute / 60) * HOUR_H, left: 2, right: 3, display: 'flex', gap: 2, zIndex: 1 }}>
+                    {group.map((f, i) => chip(
+                      f.cron, `${f.cron.id}-${minute}-${i}`,
+                      `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`,
+                      { flex: 1, minWidth: 0 }, f.done,
+                    ))}
+                  </div>
+                ))}
+                {today && (
+                  <div style={{ position: 'absolute', top: (nowMinute / 60) * HOUR_H, left: 0, right: 0, zIndex: 2, pointerEvents: 'none' }}>
+                    <div style={{ borderTop: '1.5px solid var(--red-soft)' }} />
+                    <span style={{ position: 'absolute', left: -3, top: -3, width: 6, height: 6, borderRadius: '50%', background: 'var(--red-soft)' }} />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type CalRange = 'month' | 'week' | 'day'
+
+/** Calendar of schedule firings — Outlook-style Month / Week / Day views:
+ *  recurring crons projected onto their firing days and times, one-time runs
+ *  on their date, and recorded runs as ✓/✕. */
+function ScheduleCalendar({ crons }: { crons: Cron[] }) {
+  const now = new Date()
+  const [range, setRange] = useState<CalRange>('month')
+  // anchor date: any day inside the shown month/week, or the shown day
+  const [anchor, setAnchor] = useState(() => new Date(now.getFullYear(), now.getMonth(), now.getDate()))
+  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
+  const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1 - first.getDay())
+  const weeks: Date[][] = []
+  for (let w = 0; w < 6; w++) {
+    const week = Array.from({ length: 7 }, (_, i) => new Date(monthStart.getFullYear(), monthStart.getMonth(), monthStart.getDate() + w * 7 + i))
+    if (w > 0 && week[0].getMonth() !== anchor.getMonth()) break // trim weeks fully past the month
+    weeks.push(week)
+  }
+  const weekDays = Array.from({ length: 7 }, (_, i) => new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - anchor.getDay() + i))
+
+  const step = (dir: number) => setAnchor(a => range === 'month'
+    ? new Date(a.getFullYear(), a.getMonth() + dir, 1)
+    : new Date(a.getFullYear(), a.getMonth(), a.getDate() + dir * (range === 'week' ? 7 : 1)))
+  const isCurrent = range === 'month'
+    ? anchor.getFullYear() === now.getFullYear() && anchor.getMonth() === now.getMonth()
+    : range === 'week'
+      ? weekDays.some(d => sameDay(Date.now(), d))
+      : sameDay(Date.now(), anchor)
+  const title = range === 'month'
+    ? first.toLocaleDateString([], { month: 'long', year: 'numeric' })
+    : range === 'week'
+      ? `${weekDays[0].toLocaleDateString([], { month: 'short', day: 'numeric' })} – ${weekDays[6].toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}`
+      : anchor.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexShrink: 0 }}>
+        <button className="icon-btn" title={`Previous ${range}`} style={{ width: 26, height: 26, borderRadius: 7 }} onClick={() => step(-1)}>
           <Icon paths={['M15 6l-6 6 6 6']} size={13} stroke={1.8} />
         </button>
-        <button className="icon-btn" title="Next month" style={{ width: 26, height: 26, borderRadius: 7 }} onClick={() => step(1)}>
+        <button className="icon-btn" title={`Next ${range}`} style={{ width: 26, height: 26, borderRadius: 7 }} onClick={() => step(1)}>
           <Icon paths={['M9 6l6 6-6 6']} size={13} stroke={1.8} />
         </button>
-        <span className="grotesk" style={{ fontSize: 14.5, fontWeight: 600, marginLeft: 4 }}>
-          {first.toLocaleDateString([], { month: 'long', year: 'numeric' })}
-        </span>
-        {(cursor.y !== now.getFullYear() || cursor.m !== now.getMonth()) && (
-          <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5 }} onClick={() => setCursor({ y: now.getFullYear(), m: now.getMonth() })}>
+        <span className="grotesk" style={{ fontSize: 14.5, fontWeight: 600, marginLeft: 4 }}>{title}</span>
+        {!isCurrent && (
+          <button className="open-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 11.5 }} onClick={() => setAnchor(new Date(now.getFullYear(), now.getMonth(), now.getDate()))}>
             Today
           </button>
         )}
-        <span style={{ fontSize: 11, color: 'var(--dim)', marginLeft: 'auto' }}>
-          recurring schedules appear on every day they fire · ✓/✕ = recorded runs
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: 'var(--dim)' }}>
+          recurring schedules appear at every firing · ✓/✕ = recorded runs
         </span>
-      </div>
-      <div style={{ border: '1px solid var(--line)', borderRadius: 13, overflow: 'hidden', background: 'var(--panel)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
-          {WEEKDAYS.map(d => (
-            <div key={d} className="mono" style={{ padding: '7px 0', textAlign: 'center', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: 'var(--dim)', borderBottom: '1px solid var(--line)' }}>
-              {d.toUpperCase()}
-            </div>
-          ))}
-          {weeks.flat().map(day => (
-            <CalendarDay key={day.toISOString()} day={day} inMonth={day.getMonth() === cursor.m} crons={crons} />
+        <div style={{ display: 'flex', gap: 2, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2, flexShrink: 0 }}>
+          {(['month', 'week', 'day'] as const).map(r => (
+            <button
+              key={r}
+              onClick={() => setRange(r)}
+              style={{
+                border: 'none', borderRadius: 7, padding: '3px 11px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                background: range === r ? 'var(--panel2)' : 'transparent',
+                color: range === r ? 'var(--accent)' : 'var(--mut)',
+                textTransform: 'capitalize',
+              }}
+            >
+              {r}
+            </button>
           ))}
         </div>
       </div>
+      {range === 'month' ? (
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <div style={{ border: '1px solid var(--line)', borderRadius: 13, overflow: 'hidden', background: 'var(--panel)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+              {WEEKDAYS.map(d => (
+                <div key={d} className="mono" style={{ padding: '7px 0', textAlign: 'center', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: 'var(--dim)', borderBottom: '1px solid var(--line)' }}>
+                  {d.toUpperCase()}
+                </div>
+              ))}
+              {weeks.flat().map(day => (
+                <CalendarDay key={day.toISOString()} day={day} inMonth={day.getMonth() === anchor.getMonth()} crons={crons} />
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <TimeGrid days={range === 'week' ? weekDays : [anchor]} crons={crons} />
+      )}
     </div>
   )
 }
@@ -420,7 +613,7 @@ export function Schedules() {
           {([['list', 'List'], ['calendar', 'Calendar']] as const).map(([id, label]) => (
             <button
               key={id}
-              title={id === 'list' ? 'Manage schedules & their run history' : 'See when everything fires on a month grid'}
+              title={id === 'list' ? 'Manage schedules & their run history' : 'See when everything fires — month, week, or day'}
               onClick={() => setMode(id)}
               style={{
                 border: 'none', borderRadius: 7, padding: '4px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
@@ -433,7 +626,7 @@ export function Schedules() {
           ))}
         </div>
         <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>
-          {mode === 'calendar' ? 'Every firing on a month grid — one-time and recurring' : 'One-time or recurring runs — expand a schedule for its run history'}
+          {mode === 'calendar' ? 'Every firing on a month, week, or day grid — one-time and recurring' : 'One-time or recurring runs — expand a schedule for its run history'}
         </span>
         <div style={{ flex: 1 }} />
         <button className="open-btn" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px' }} onClick={() => setDialogOpen(true)}>

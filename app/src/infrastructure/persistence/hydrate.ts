@@ -110,7 +110,6 @@ export function buildHydration(p: Partial<PersistedState>, seed: AppState): Hydr
     templates: p.templates ?? seed.templates ?? [],
     mcpServers: p.mcpServers ?? seed.mcpServers,
     skills: p.skills ?? seed.skills,
-    personas: p.personas ?? seed.personas,
     skillRegistries: p.skillRegistries ?? seed.skillRegistries,
     chatAgentTypes: p.chatAgentTypes ?? seed.chatAgentTypes,
     agents: restoredAgents.length ? restoredAgents : seed.agents,

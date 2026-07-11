@@ -20,7 +20,7 @@ function baseState(over: Partial<AppState> = {}): AppState {
   return {
     schemaVersion: 1,
     tasks: [], crons: [], settings: { apiKey: '' }, toolsCatalog: [], agentTypes: [], templates: [],
-    mcpServers: [], skills: [], personas: [], skillRegistries: [], chatAgentTypes: [],
+    mcpServers: [], skills: [], skillRegistries: [], chatAgentTypes: [],
     workspaces: [], activeWorkspace: 'ws-a', workspaceData: {},
     agents: [], groups: [], activeGroup: null, minimizedIds: [], addons: [], addonStorage: {},
     messages: [], events: [], notifications: [], pendingMasterNotes: [], toast: '', composer: '',

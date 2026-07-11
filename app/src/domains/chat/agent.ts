@@ -51,6 +51,12 @@ export interface ChatAppPort {
   knowledgeSearch: (query: string) => Promise<string>
   /** durable agents: self-update the agent's own charter / role / settings */
   updateSelf: (patch: { name?: string; role?: string; charter?: string; model?: string; homeDir?: string }) => string
+  /** durable agents: replace the markdown dashboard on the agent's home page */
+  updateDashboard: (markdown: string) => string
+  /** durable agents: create/update a self-contained HTML mini app by name */
+  saveApp: (name: string, description: string, html: string) => string
+  /** durable agents: remove one of the agent's mini apps by name */
+  deleteApp: (name: string) => string
 }
 
 const READ_ONLY_TOOLS = new Set([
@@ -259,6 +265,29 @@ function builtinTools(skills: CatalogSkill[]) {
           home_dir: { type: 'string' },
         },
       },
+    },
+    {
+      name: 'update_dashboard',
+      description: 'Replace YOUR home-page dashboard (markdown). The user sees it when they open your agent page — keep it a live, at-a-glance status board of your domain: current focus, key facts, links to knowledge files, upcoming loop work. Update it whenever your state meaningfully changes; it fully replaces the previous dashboard.',
+      input_schema: { type: 'object', properties: { markdown: { type: 'string', description: 'the full replacement dashboard (markdown)' } }, required: ['markdown'] },
+    },
+    {
+      name: 'save_app',
+      description: 'Create or update one of YOUR mini apps by name — a single self-contained HTML document shown on your home page in a sandboxed iframe (no network, no external resources; inline CSS/JS only). Build small interactive tools for your domain: a tracker, calculator, checklist, visualization. Same name = replace.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'short app name (shown on the card)' },
+          description: { type: 'string', description: 'one line: what it does' },
+          html: { type: 'string', description: 'the complete HTML document' },
+        },
+        required: ['name', 'html'],
+      },
+    },
+    {
+      name: 'delete_app',
+      description: 'Delete one of YOUR mini apps by name.',
+      input_schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
     },
     {
       name: 'suggest_replies',
@@ -489,6 +518,18 @@ async function runBuiltin(name: string, input: Record<string, unknown>, agent: A
       if (!Object.values(patch).some(Boolean)) throw new ToolError('update_my_profile: pass at least one field to change')
       return app.updateSelf(patch)
     }
+    case 'update_dashboard':
+      if (!app) return 'dashboard updates are unavailable in this context'
+      if (!str('markdown').trim()) throw new ToolError('update_dashboard: "markdown" is required')
+      return app.updateDashboard(str('markdown'))
+    case 'save_app':
+      if (!app) return 'mini apps are unavailable in this context'
+      if (!str('name').trim() || !str('html').trim()) throw new ToolError('save_app: "name" and "html" are required')
+      return app.saveApp(str('name').trim(), str('description').trim(), str('html'))
+    case 'delete_app':
+      if (!app) return 'mini apps are unavailable in this context'
+      if (!str('name').trim()) throw new ToolError('delete_app: "name" is required')
+      return app.deleteApp(str('name').trim())
     case 'suggest_replies': {
       if (!app) return 'suggestions are unavailable in this context'
       const replies = Array.isArray(input.replies)

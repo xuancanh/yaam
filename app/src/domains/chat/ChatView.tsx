@@ -5,6 +5,7 @@ import { chatSearch } from '../../core/native'
 import type { ChatSearchHit } from '../../core/native'
 import type { Agent } from '../../core/types'
 import { EditableName, IC, Icon } from '../../components/ui'
+import { AgentHome } from './AgentHome'
 import { ChatPane } from './ChatPane'
 import { DurableAgentDialog } from './DurableAgentDialog'
 import { HireAgentDialog } from './HireAgentDialog'
@@ -167,6 +168,9 @@ export function ChatView() {
   // archived agents' conversations) shows under the built-in generic agent
   const durables = (s.durableAgents ?? []).filter(d => !d.archived)
   const [agentDialogId, setAgentDialogId] = useState<string | null>(null)
+  // which agent's home page fills the main area when no conversation is open;
+  // null falls back to the built-in agent — an agent home IS the default view
+  const [homeAgentId, setHomeAgentId] = useState<string | null>(null)
   const [hiring, setHiring] = useState(false)
   // per-agent folding: groups collapse entirely, and expanded groups show only
   // the 3 most recent conversations until "show more"
@@ -321,8 +325,8 @@ export function ChatView() {
                     <span style={{ width: 9, height: 9, borderRadius: 3, background: d.color, flexShrink: 0 }} />
                     <button
                       className="mono"
-                      title={`${d.role ? `${d.role} · ` : ''}open agent profile (charter, brain, loops)`}
-                      onClick={() => setAgentDialogId(d.id)}
+                      title={`${d.role ? `${d.role} · ` : ''}open the agent's home page (dashboard, mini apps, loops)`}
+                      onClick={() => { setHomeAgentId(d.id); openChat(null) }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, color: 'var(--mut)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                     >
                       {d.name.toUpperCase()}
@@ -334,7 +338,7 @@ export function ChatView() {
                     <button
                       className="icon-btn"
                       title={`New conversation with ${d.name}`}
-                      onClick={() => openChat(newChatSession(undefined, undefined, undefined, undefined, undefined, undefined, d.id))}
+                      onClick={() => openChat(newChatSession(undefined, undefined, undefined, undefined, undefined, d.id))}
                       style={{ width: 20, height: 20, borderRadius: 5, flexShrink: 0 }}
                     >
                       <Icon paths={IC.plus} size={11} stroke={2} />
@@ -435,19 +439,33 @@ export function ChatView() {
               )}
             </div>
           </>
-        ) : (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-            <div style={{ fontSize: 30, opacity: 0.5 }}>💬</div>
-            <div className="grotesk" style={{ fontSize: 16, fontWeight: 600, color: 'var(--mut)' }}>Pick a chat — or start one</div>
-            <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 380, textAlign: 'center', lineHeight: 1.6 }}>
-              Chat agents work like a desktop Claude: they browse and edit files, run commands and scripts, load your skills,
-              and call your MCP servers — streaming replies as they think.
+        ) : (() => {
+          // no conversation open: the agent home page is the default view
+          const homeAgent = durables.find(d => d.id === homeAgentId) ?? durables.find(d => d.builtin) ?? durables[0]
+          if (homeAgent) {
+            return (
+              <AgentHome
+                agent={homeAgent}
+                onEditProfile={() => setAgentDialogId(homeAgent.id)}
+                onNewConversation={() => openChat(newChatSession(undefined, undefined, undefined, undefined, undefined, homeAgent.id))}
+                onOpenChat={id => openChat(id)}
+              />
+            )
+          }
+          return (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+              <div style={{ fontSize: 30, opacity: 0.5 }}>💬</div>
+              <div className="grotesk" style={{ fontSize: 16, fontWeight: 600, color: 'var(--mut)' }}>Pick a chat — or start one</div>
+              <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 380, textAlign: 'center', lineHeight: 1.6 }}>
+                Chat agents work like a desktop Claude: they browse and edit files, run commands and scripts, load your skills,
+                and call your MCP servers — streaming replies as they think.
+              </div>
+              <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={() => openChat(newChatSession())}>
+                New chat
+              </button>
             </div>
-            <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={() => openChat(newChatSession())}>
-              New chat
-            </button>
-          </div>
-        )}
+          )
+        })()}
       </div>
       {memoryOpen && <MemoryEditor workspaceId={s.activeWorkspace} onClose={() => setMemoryOpen(false)} />}
       {tagsOpen && selected && <TagsEditor agent={selected} onClose={() => setTagsOpen(false)} />}

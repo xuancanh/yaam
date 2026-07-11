@@ -119,6 +119,24 @@ export function cronFiresOnDay(expr: string, d: Date): boolean {
     : fieldMatches(dom, d.getDate()) && fieldMatches(dow, d.getDay())
 }
 
+/** Every minute-of-day (0–1439) at which this cron fires on the given day,
+ *  ascending. Empty when it does not fire that day. `cap` bounds the result
+ *  for dense expressions (e.g. "* * * * *"), keeping the earliest firings. */
+export function cronFireMinutesOnDay(expr: string, d: Date, cap = 60): number[] {
+  const fields = expr.trim().split(/\s+/)
+  if (fields.length !== 5) return []
+  if (!cronFiresOnDay(expr, d)) return []
+  const [min, hour] = fields
+  const out: number[] = []
+  for (let h = 0; h < 24 && out.length < cap; h++) {
+    if (!fieldMatches(hour, h)) continue
+    for (let m = 0; m < 60 && out.length < cap; m++) {
+      if (fieldMatches(min, m)) out.push(h * 60 + m)
+    }
+  }
+  return out
+}
+
 /** Short time-of-day label for a calendar chip: "09:00", ":15 hourly",
  *  "every 10 min", or a raw fallback for exotic time fields. */
 export function cronTimeLabel(expr: string): string {

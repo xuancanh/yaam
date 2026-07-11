@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCron, cronFiresOnDay, cronMatches, cronTimeLabel, describeCron, fieldMatches, humanizeCron } from './cron'
+import { buildCron, cronFireMinutesOnDay, cronFiresOnDay, cronMatches, cronTimeLabel, describeCron, fieldMatches, humanizeCron } from './cron'
 
 describe('fieldMatches', () => {
   it('matches wildcards, values, ranges, lists, and steps', () => {
@@ -116,5 +116,31 @@ describe('cronTimeLabel', () => {
     expect(cronTimeLabel('*/10 * * * *')).toBe('every 10 min')
     expect(cronTimeLabel('0 */2 * * *')).toBe(':00 every 2 h')
     expect(cronTimeLabel('* * * * *')).toBe('every minute')
+  })
+})
+
+describe('cronFireMinutesOnDay', () => {
+  const wed = new Date(2026, 0, 7) // Wednesday, Jan 7 2026
+  it('lists exact firing minutes for fixed-time schedules', () => {
+    expect(cronFireMinutesOnDay('30 9 * * *', wed)).toEqual([9 * 60 + 30])
+    expect(cronFireMinutesOnDay('0 9,17 * * *', wed)).toEqual([9 * 60, 17 * 60])
+  })
+  it('is empty on days the schedule skips', () => {
+    expect(cronFireMinutesOnDay('0 9 * * 1', wed)).toEqual([])
+    expect(cronFireMinutesOnDay('bad', wed)).toEqual([])
+  })
+  it('expands hourly and step schedules across the day', () => {
+    const hourly = cronFireMinutesOnDay('15 * * * *', wed, 100)
+    expect(hourly).toHaveLength(24)
+    expect(hourly[0]).toBe(15)
+    expect(hourly[23]).toBe(23 * 60 + 15)
+    const steps = cronFireMinutesOnDay('0 */6 * * *', wed)
+    expect(steps).toEqual([0, 360, 720, 1080])
+  })
+  it('caps dense expressions at the earliest firings', () => {
+    const capped = cronFireMinutesOnDay('* * * * *', wed, 10)
+    expect(capped).toHaveLength(10)
+    expect(capped[0]).toBe(0)
+    expect(capped[9]).toBe(9)
   })
 })

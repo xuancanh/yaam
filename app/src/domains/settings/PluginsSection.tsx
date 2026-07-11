@@ -35,10 +35,10 @@ function PluginRow({ p, installed, onInstall }: { p: PluginEntry; installed: str
 
 /** Claude plugin marketplaces: browse a marketplace repo and install plugins
  *  for chat — skills/commands become skill registries, .mcp.json becomes MCP
- *  servers. Claude-Code-only parts (agents, hooks) are skipped. */
+ *  servers, agents/*.md are hired as durable agents. */
 export function PluginsSection() {
-  const s = useConductorSelector(x => ({ settings: x.settings, skillRegistries: x.skillRegistries, mcpServers: x.mcpServers, personas: x.personas }), shallowEqual)
-  const { updateSettings, addSkillRegistry, addMcpServer, addPersona, updatePersona, installAddonJson } = useActions()
+  const s = useConductorSelector(x => ({ settings: x.settings, skillRegistries: x.skillRegistries, mcpServers: x.mcpServers, durableAgents: x.durableAgents }), shallowEqual)
+  const { updateSettings, addSkillRegistry, addMcpServer, addDurableAgent, installAddonJson } = useActions()
   const registries = s.settings.pluginRegistries ?? [DEFAULT_PLUGIN_REGISTRY]
   const [open, setOpen] = useState<string | null>(null)
   const [plugins, setPlugins] = useState<PluginEntry[]>([])
@@ -81,13 +81,13 @@ export function PluginsSection() {
           : { transport: 'http' })
         mcps++
       }
-      // plugin agents arrive as personas (pickable when starting a chat)
-      const havePersona = new Set(s.personas.map(pe => pe.name))
-      let personas = 0
-      for (const pe of res.personas) {
-        if (havePersona.has(pe.name)) continue
-        updatePersona(addPersona(), pe)
-        personas++
+      // plugin agents are hired as durable agents (prompt = charter)
+      const haveAgent = new Set((s.durableAgents ?? []).filter(d => !d.archived).map(d => d.name))
+      let agents = 0
+      for (const a of res.agents) {
+        if (haveAgent.has(a.name)) continue
+        addDurableAgent({ name: a.name, role: a.description.slice(0, 120) || undefined, charter: a.body })
+        agents++
       }
       // hooks arrive as a generated addon; its exec scope stays ungranted
       // until the user enables it in Settings → Addons
@@ -95,7 +95,7 @@ export function PluginsSection() {
       const parts = [
         regs ? `${regs} skill registr${regs > 1 ? 'ies' : 'y'}` : '',
         mcps ? `${mcps} MCP server${mcps > 1 ? 's' : ''}` : '',
-        personas ? `${personas} persona${personas > 1 ? 's' : ''}` : '',
+        agents ? `${agents} durable agent${agents > 1 ? 's' : ''}` : '',
         res.hookAddonJson ? 'hooks addon (grant exec to activate)' : '',
         res.skipped.length ? `skipped: ${res.skipped.join(', ')}` : '',
       ].filter(Boolean)

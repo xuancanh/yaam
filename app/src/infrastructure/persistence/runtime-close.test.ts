@@ -21,7 +21,7 @@ type AppState = import('../../core/types').AppState
 
 const state = {
   schemaVersion: 1, tasks: [], crons: [], settings: { apiKey: '' }, toolsCatalog: [], agentTypes: [],
-  templates: [], mcpServers: [], skills: [], personas: [], skillRegistries: [], chatAgentTypes: [],
+  templates: [], mcpServers: [], skills: [], skillRegistries: [], chatAgentTypes: [],
   workspaces: [{ id: 'ws-a', name: 'A' }], activeWorkspace: 'ws-a', workspaceData: {},
   agents: [{ id: 'a1', log: [] }], groups: [], activeGroup: null, minimizedIds: [], addons: [], addonStorage: {},
   messages: [], events: [], notifications: [],

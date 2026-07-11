@@ -28,7 +28,6 @@ export function selectMainState(s: AppState): MainPartition {
     templates: s.templates,
     mcpServers: s.mcpServers,
     skills: s.skills,
-    personas: s.personas,
     skillRegistries: s.skillRegistries,
     chatAgentTypes: s.chatAgentTypes,
     workspaces: s.workspaces,
