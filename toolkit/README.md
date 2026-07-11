@@ -24,8 +24,7 @@ cp -r toolkit/template my-addon
 
 Views run in a sandboxed iframe whose CSP forbids **all** external resources —
 no `<script src>`, no `<link rel=stylesheet>`. Instead, put include markers in
-your view; they are replaced with the referenced file's contents when the
-folder is installed or packed:
+your view; they are replaced with the referenced file's contents when packed:
 
 ```html
 <style>
@@ -40,6 +39,9 @@ folder is installed or packed:
 relative to the addon folder; `../../toolkit/…` reaches this kit from
 `registry/packages/<addon>/`. Includes resolve once (they don't nest), and
 single-file `.yaam.json` packages ship with everything already inlined.
+For direct **Install folder…**, references are canonically confined to the
+selected folder; keep included files inside it. Parent toolkit references are
+a pack-time developer convenience and must be packed before installation.
 
 ## SDK in 30 seconds
 

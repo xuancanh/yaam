@@ -90,12 +90,12 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
           let manifest: string | null = null
           for (const cand of ['addon.yaml', 'addon.yml', 'addon.json']) {
             try {
-              manifest = await io.readTextFile(`${dir}/${cand}`)
+              manifest = await io.readTextFile(`${dir}/${cand}`, dir)
               break
             } catch { /* try the next manifest name */ }
           }
           if (!manifest) throw new Error('no addon.yaml / addon.yml / addon.json in that folder')
-          const json = await loadAddonFolder(manifest, rel => io.readTextFile(`${dir}/${rel}`))
+          const json = await loadAddonFolder(manifest, rel => io.readTextFile(`${dir}/${rel}`, dir))
           installPackage(json, 'file')
         } catch (e) {
           flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)

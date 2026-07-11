@@ -57,6 +57,20 @@ describe('createAddonsActions install flows', () => {
     expect(c.installPackage).not.toHaveBeenCalled()
   })
 
+  it('confines every folder-package read to the selected directory', async () => {
+    const readTextFile = vi.fn(async (path: string) => path.endsWith('addon.yaml')
+      ? 'name: scoped\nview: view.html'
+      : '<main>safe</main>')
+    const io = fakeIo({ pickFolder: vi.fn(async () => '/addons/scoped'), readTextFile })
+    const c = ctx(io)
+
+    createAddonsActions(c).installAddonFromFolder()
+
+    await vi.waitFor(() => expect(c.installPackage).toHaveBeenCalled())
+    expect(readTextFile).toHaveBeenCalledWith('/addons/scoped/addon.yaml', '/addons/scoped')
+    expect(readTextFile).toHaveBeenCalledWith('/addons/scoped/view.html', '/addons/scoped')
+  })
+
   it('installAddonFromUrl fetches http URLs but reads non-http entries as files', async () => {
     const httpIo = fakeIo({ httpGetText: vi.fn(async () => '{"http":1}') })
     createAddonsActions(ctx(httpIo, { installPackage: vi.fn() })).installAddonFromUrl('https://x.dev/a.json')

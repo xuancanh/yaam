@@ -12,8 +12,8 @@ export interface PackageIoPort {
   pickFolder: () => Promise<string | null>
   /** save-file dialog seeded with a default name; null if cancelled */
   pickSavePath: (defaultName: string) => Promise<string | null>
-  /** read a text file from disk */
-  readTextFile: (path: string) => Promise<string>
+  /** read a text file from disk; `root` canonically confines folder-package refs */
+  readTextFile: (path: string, root?: string) => Promise<string>
   /** write a text file to disk */
   writeTextFile: (path: string, contents: string) => Promise<void>
   /** fetch a remote resource as text */
@@ -24,7 +24,7 @@ export const realPackageIoPort: PackageIoPort = {
   pickFile: () => native.pickFile(),
   pickFolder: () => native.pickFolder(),
   pickSavePath: name => native.pickSavePath(name),
-  readTextFile: path => native.readTextFile(path),
+  readTextFile: (path, root) => native.readTextFile(path, root),
   writeTextFile: (path, contents) => native.writeTextFile(path, contents),
   httpGetText: url => native.httpGetText(url),
 }

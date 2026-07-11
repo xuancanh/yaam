@@ -393,10 +393,8 @@ const SHORTHAND_TYPES = ['string', 'number', 'boolean', 'array', 'object']
 
 /** `<!-- @include path -->` (in markup) or `/* @include path *​/` (in CSS/JS)
  *  markers inside a folder addon's view HTML are replaced with the referenced
- *  file's contents at load/pack time — this is how views stay single-document
- *  (the sandbox CSP forbids external resources) while sharing the toolkit's
- *  sdk.js / ui.css instead of pasting them. Paths resolve like other refs
- *  (relative to the addon folder; ../ may reach the repo's toolkit/). */
+ *  file's contents at load/pack time. The in-app loader supplies a canonically
+ *  scoped reader so installed folders cannot escape their selected root. */
 export const INCLUDE_RE = /<!--\s*@include\s+(\S+)\s*-->|\/\*\s*@include\s+(\S+)\s*\*\//g
 
 /** Resolve every @include marker in view HTML (one level — includes don't nest). */

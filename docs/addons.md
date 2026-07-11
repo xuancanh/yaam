@@ -145,11 +145,14 @@ agent:
   every: "*/30 * * * *"            # optional: cron that wakes the agent (mini monitor)
 ```
 
-Views may pull in the shared toolkit with `@include` markers —
+At pack time, views may pull in the shared toolkit with `@include` markers —
 `/* @include ../../toolkit/ui.css */` inside `<style>`,
 `/* @include ../../toolkit/sdk.js */` inside `<script>`, or
 `<!-- @include file -->` in markup — replaced with the file's contents at
-install/pack time (see [`toolkit/README.md`](../toolkit/README.md)).
+install/pack time (see [`toolkit/README.md`](../toolkit/README.md)). In-app
+folder installation canonically confines references to the selected folder;
+parent toolkit references are supported by the developer pack command, which
+produces a self-contained `.yaam.json` before distribution.
 
 Install via **Settings → Addons → Install folder…**. The manifest YAML is a
 strict subset: `key: value` maps, `- item` lists (incl. lists of maps),
