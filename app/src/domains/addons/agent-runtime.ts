@@ -32,6 +32,7 @@ export function createAddonAgentRuntime(ports: AddonAgentPorts): AddonAgentRunti
       const addon = ports.stateRef.current.addons.find(a => a.id === addonId)
       if (!addon?.agent) return 'this addon declares no agent'
       if (!addon.enabled) return 'addon is disabled'
+      if (!addon.granted.includes('agent')) return 'permission "agent" not granted to this addon'
       if (!(st.masterEnabled && hasCreds(st))) return 'no brain configured — enable LLM Master in Settings'
       if (busy.has(addonId)) return 'agent is busy with a previous note — try again shortly'
       busy.add(addonId)
