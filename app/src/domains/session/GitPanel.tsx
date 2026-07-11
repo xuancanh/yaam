@@ -9,6 +9,7 @@ import { Icon } from '../../components/ui'
 import { CodeEditor } from './lazy-editor'
 import { splitDiffRows } from './diff-split'
 import type { SplitCell } from './diff-split'
+import { repoLabel } from '../../shared/git-repos'
 import { WorktreeMergeBar } from './WorktreeMergeBar'
 import { Divider } from './Divider'
 import { FolderExplorer } from './FilesPane'
@@ -423,7 +424,8 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
     }
   }
 
-  const repoName = (p: string) => p.slice(p.lastIndexOf('/') + 1) || p
+  // nested repos keep their intermediate folders in the picker (group/team/api)
+  const repoName = (p: string) => repoLabel(cwd ?? '', p)
 
   // no repository anywhere under the reviewed folder: there is no diff to
   // stage or commit, but the work is still reviewable — browse the whole

@@ -10,7 +10,7 @@ import {
   listDir, readFileB64, readTextFile, writeTextFile,
 } from '../../core/native'
 import type { DirEntryInfo, GitStatusResult } from '../../core/native'
-import { detectRepoDirs } from '../../shared/git-repos'
+import { detectRepoDirs, detectRepoDirsVia } from '../../shared/git-repos'
 import { shq, sshPrefix } from './remote-machine'
 
 // execCommand caps output at ~40 KB; keep binary reads under that (base64 ~4/3)
@@ -28,27 +28,11 @@ export interface SessionFs {
   gitStage(cwd: string, paths: string[]): Promise<void>
   gitUnstage(cwd: string, paths: string[]): Promise<void>
   gitCommit(cwd: string, message: string): Promise<string>
-  /** the repos reachable from cwd: itself, or its immediate repo subfolders
-   *  (multi-repo working folders) */
+  /** the repos reachable from cwd: itself, or repo subfolders up to
+   *  REPO_SCAN_DEPTH levels down (multi-repo working folders) */
   detectRepos(cwd: string): Promise<string[]>
   /** remote hosts can't push fs-change events — callers use manual refresh */
   readonly remote: boolean
-}
-
-/** cwd itself if it's a repo, else its immediate repo subfolders — the same
- *  algorithm as shared/git-repos, but over whichever adapter (local or ssh). */
-async function detectReposVia(a: Pick<SessionFs, 'gitStatus' | 'listDir'>, cwd: string): Promise<string[]> {
-  try {
-    await a.gitStatus(cwd)
-    return [cwd]
-  } catch {
-    const entries = await a.listDir(cwd).catch(() => [])
-    const repos: string[] = []
-    for (const e of entries.filter(x => x.isDir && x.name !== '.git').slice(0, 16)) {
-      try { await a.gitStatus(e.path); repos.push(e.path) } catch { /* not a repo */ }
-    }
-    return repos
-  }
 }
 
 /** The local (in-process native) adapter — the existing behavior verbatim. */
@@ -167,7 +151,7 @@ export function remoteFs(machine: Machine, id: string): SessionFs {
     },
     // reuses this adapter's own gitStatus/listDir, so the multi-repo probe runs
     // on the remote host (cheap: shared ControlMaster connection)
-    detectRepos: cwd => detectReposVia(adapter, cwd),
+    detectRepos: cwd => detectRepoDirsVia(adapter, cwd),
   }
   return adapter
 }

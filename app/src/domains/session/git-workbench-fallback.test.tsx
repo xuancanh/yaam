@@ -10,7 +10,7 @@ vi.mock('../../store', () => ({
   useActions: () => ({}),
   useConductorSelector: (sel: (s: unknown) => unknown) => sel({ settings: {} }),
 }))
-vi.mock('../../shared/git-repos', () => ({ detectRepoDirs: async () => [] }))
+vi.mock('../../shared/git-repos', () => ({ detectRepoDirs: async () => [], repoLabel: (_: string, p: string) => p }))
 vi.mock('../../core/native', () => ({
   isTauri: false,
   listDir: async () => [

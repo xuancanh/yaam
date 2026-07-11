@@ -116,9 +116,17 @@ describe('remoteFs.detectRepos', () => {
   it('finds repo subfolders when the folder is a multi-repo container', async () => {
     okOut('\n\n')                          // gitStatus(/srv) → not a repo
     okOut('repo-a/\nrepo-b/\nnotes.txt\n') // listDir(/srv)
-    okOut('/srv/repo-a\nmain\n')           // gitStatus(/srv/repo-a) → repo
-    okOut('\n\n')                          // gitStatus(/srv/repo-b) → not a repo
+    okOut('.git/\nsrc/\n')                 // listDir(/srv/repo-a) → has .git → repo
+    okOut('readme.md\n')                   // listDir(/srv/repo-b) → nothing below
     expect(await remoteFs(m, 'a1').detectRepos('/srv')).toEqual(['/srv/repo-a'])
+  })
+
+  it('reaches repos nested below the top level (remote listings only)', async () => {
+    okOut('\n\n')            // gitStatus(/srv) → not a repo
+    okOut('group/\n')        // listDir(/srv)
+    okOut('api/\n')          // listDir(/srv/group)
+    okOut('.git/\napp.py\n') // listDir(/srv/group/api) → repo at depth 2
+    expect(await remoteFs(m, 'a1').detectRepos('/srv')).toEqual(['/srv/group/api'])
   })
 })
 
