@@ -15,6 +15,9 @@ use tauri::{AppHandle, Emitter, State};
 /// save often produces several events (write, chmod, rename-in); batching them
 /// keeps the UI from refreshing many times for one logical change.
 const DEBOUNCE_MS: u64 = 250;
+const MAX_WATCHERS: usize = 64;
+const MAX_QUEUED_EVENTS: usize = 1024;
+const MAX_BATCH_PATHS: usize = 10_000;
 
 #[derive(Default)]
 pub struct WatchManager {
@@ -53,15 +56,24 @@ impl WatchManager {
     pub fn watch(&self, app: AppHandle, root: String) -> Result<(), String> {
         let canon =
             std::fs::canonicalize(&root).map_err(|e| format!("watch root unavailable: {e}"))?;
+        if !canon.is_dir() { return Err("watch root is not a directory".to_string()); }
         let root_key = canon.to_string_lossy().into_owned();
+        {
+            let watchers = self.watchers.lock().map_err(|e| e.to_string())?;
+            if !watchers.contains_key(&root_key) && watchers.len() >= MAX_WATCHERS {
+                return Err(format!("too many watched roots (max {MAX_WATCHERS})"));
+            }
+        }
 
         // The notify callback runs on notify's own thread; it just forwards events
         // to the debounce thread through a channel.
-        let (tx, rx) = mpsc::channel::<notify::Event>();
+        let (tx, rx) = mpsc::sync_channel::<notify::Event>(MAX_QUEUED_EVENTS);
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 if let Ok(event) = res {
-                    let _ = tx.send(event);
+                    // A refresh consumes current filesystem state, so dropping
+                    // redundant storm events is safer than unbounded buffering.
+                    let _ = tx.try_send(event);
                 }
             })
             .map_err(|e| e.to_string())?;
@@ -77,8 +89,10 @@ impl WatchManager {
             while let Ok(first) = rx.recv() {
                 let mut batch: Vec<PathBuf> = first.paths;
                 while let Ok(ev) = rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS)) {
-                    batch.extend(ev.paths);
+                    let remaining = MAX_BATCH_PATHS.saturating_sub(batch.len());
+                    batch.extend(ev.paths.into_iter().take(remaining));
                 }
+                batch.truncate(MAX_BATCH_PATHS);
                 let paths = dedup_visible_paths(batch);
                 if !paths.is_empty() {
                     let _ = app.emit(

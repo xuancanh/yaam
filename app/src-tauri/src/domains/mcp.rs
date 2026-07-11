@@ -6,7 +6,7 @@ use crate::util::expand_tilde;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{sync_channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -26,8 +26,42 @@ impl Drop for Proc {
 
 /// Live stdio MCP server processes by server id. Each process is behind its
 /// own mutex so one slow request doesn't block other servers.
-#[derive(Default)]
-pub struct McpManager(Mutex<HashMap<String, Arc<Mutex<Proc>>>>);
+#[derive(Clone, Default)]
+pub struct McpManager(Arc<Mutex<HashMap<String, Arc<Mutex<Proc>>>>>);
+
+const MAX_PAYLOAD_BYTES: usize = 2 * 1024 * 1024;
+const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_QUEUED_LINES: usize = 256;
+
+/// Read one newline-delimited record without ever retaining more than `max`
+/// bytes. Oversized records are fully drained so the child cannot deadlock its
+/// pipe; callers can reject them and continue with the next record.
+fn read_bounded_line(reader: &mut impl BufRead, max: usize) -> std::io::Result<Option<(String, bool)>> {
+    let mut bytes = Vec::new();
+    let mut oversized = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return if bytes.is_empty() && !oversized {
+                Ok(None)
+            } else {
+                Ok(Some((String::from_utf8_lossy(&bytes).into_owned(), oversized)))
+            };
+        }
+        let newline = available.iter().position(|b| *b == b'\n');
+        let take = newline.map_or(available.len(), |i| i + 1);
+        if !oversized {
+            let remaining = max.saturating_sub(bytes.len());
+            bytes.extend_from_slice(&available[..take.min(remaining)]);
+            if take > remaining { oversized = true; }
+        }
+        reader.consume(take);
+        if newline.is_some() {
+            while matches!(bytes.last(), Some(b'\n' | b'\r')) { bytes.pop(); }
+            return Ok(Some((String::from_utf8_lossy(&bytes).into_owned(), oversized)));
+        }
+    }
+}
 
 fn get_proc(mgr: &McpManager, id: &str) -> Result<Arc<Mutex<Proc>>, String> {
     mgr.0
@@ -46,6 +80,9 @@ fn start_impl(
     env: HashMap<String, String>,
     cwd: Option<String>,
 ) -> Result<(), String> {
+    if id.is_empty() || id.len() > 256 || command.trim().is_empty() {
+        return Err("invalid MCP server id or command".to_string());
+    }
     let mut c = Command::new(&command);
     c.args(&args)
         .envs(&env)
@@ -71,19 +108,24 @@ fn start_impl(
     let stdout = child.stdout.take().ok_or("no stdout pipe")?;
     let stderr = child.stderr.take();
 
-    let (tx, rx) = channel::<String>();
+    let (tx, rx) = sync_channel::<String>(MAX_QUEUED_LINES);
     std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if tx.send(line).is_err() {
-                break;
+        let mut reader = BufReader::new(stdout);
+        while let Ok(Some((line, oversized))) = read_bounded_line(&mut reader, MAX_LINE_BYTES) {
+            if oversized {
+                log::warn!("MCP server emitted an oversized stdout record; discarded");
+            } else if tx.send(line).is_err() {
+                break
             }
         }
     });
     if let Some(err) = stderr {
         let label = id.clone();
         std::thread::spawn(move || {
-            for line in BufReader::new(err).lines().map_while(Result::ok) {
-                log::info!("[mcp:{label}] {line}");
+            let mut reader = BufReader::new(err);
+            while let Ok(Some((line, oversized))) = read_bounded_line(&mut reader, 64 * 1024) {
+                if oversized { log::warn!("[mcp:{label}] oversized stderr line discarded"); }
+                else { log::info!("[mcp:{label}] {line}"); }
             }
         });
     }
@@ -100,6 +142,9 @@ fn start_impl(
 /// Server-initiated notifications/requests that arrive in between are skipped
 /// (v1: we don't service reverse requests like roots/list).
 fn request_impl(mgr: &McpManager, id: &str, payload: String, timeout_ms: u64) -> Result<String, String> {
+    if payload.len() > MAX_PAYLOAD_BYTES {
+        return Err(format!("MCP request exceeds {MAX_PAYLOAD_BYTES} bytes"));
+    }
     let want_id = serde_json::from_str::<serde_json::Value>(&payload)
         .ok()
         .and_then(|v| v.get("id").cloned())
@@ -128,6 +173,9 @@ fn request_impl(mgr: &McpManager, id: &str, payload: String, timeout_ms: u64) ->
 }
 
 fn notify_impl(mgr: &McpManager, id: &str, payload: String) -> Result<(), String> {
+    if payload.len() > MAX_PAYLOAD_BYTES {
+        return Err(format!("MCP notification exceeds {MAX_PAYLOAD_BYTES} bytes"));
+    }
     let proc = get_proc(mgr, id)?;
     let mut p = proc.lock().map_err(|_| "server mutex poisoned")?;
     p.stdin
@@ -161,9 +209,11 @@ pub async fn mcp_stdio_request(
     payload: String,
     timeout_ms: Option<u64>,
 ) -> Result<String, String> {
-    // request_impl blocks while waiting for the child's reply; async commands
-    // run on Tauri's pooled runtime, and the wait is bounded by the timeout.
-    request_impl(&state, &id, payload, timeout_ms.unwrap_or(60_000))
+    let manager = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move ||
+        request_impl(&manager, &id, payload, timeout_ms.unwrap_or(60_000)))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -183,7 +233,7 @@ pub async fn mcp_stdio_stop(state: tauri::State<'_, McpManager>, id: String) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{request_impl, start_impl, stop_impl, McpManager};
+    use super::{read_bounded_line, request_impl, start_impl, stop_impl, McpManager, MAX_PAYLOAD_BYTES};
     use std::collections::HashMap;
 
     #[test]
@@ -213,5 +263,19 @@ mod tests {
         let err =
             request_impl(&mgr, "nope", r#"{"id":1}"#.into(), 1_000).unwrap_err();
         assert!(err.contains("not running"));
+    }
+
+    #[test]
+    fn bounds_protocol_lines_and_request_payloads() {
+        let mut input = std::io::BufReader::new(std::io::Cursor::new(b"123456789\nok\n"));
+        let (first, oversized) = read_bounded_line(&mut input, 4).unwrap().unwrap();
+        assert_eq!(first, "1234");
+        assert!(oversized);
+        assert_eq!(read_bounded_line(&mut input, 4).unwrap().unwrap(), ("ok".into(), false));
+
+        let mgr = McpManager::default();
+        let err = request_impl(&mgr, "missing", "x".repeat(MAX_PAYLOAD_BYTES + 1), 1_000)
+            .unwrap_err();
+        assert!(err.contains("exceeds"));
     }
 }

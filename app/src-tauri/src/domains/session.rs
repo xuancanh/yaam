@@ -23,6 +23,7 @@ const TAP_RING_CAP: usize = 200_000;
 const TAP_CHANNEL_CAP: usize = 512;
 
 struct SessionTap {
+    generation: u64,
     ring: std::collections::VecDeque<u8>,
     tx: tokio::sync::broadcast::Sender<Vec<u8>>,
 }
@@ -32,16 +33,17 @@ fn taps() -> &'static Mutex<HashMap<String, SessionTap>> {
     TAPS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn tap_entry<'a>(map: &'a mut HashMap<String, SessionTap>, id: &str) -> &'a mut SessionTap {
-    map.entry(id.to_string()).or_insert_with(|| SessionTap {
+fn tap_start(id: &str, generation: u64) {
+    taps().lock().unwrap().insert(id.to_string(), SessionTap {
+        generation,
         ring: std::collections::VecDeque::new(),
         tx: tokio::sync::broadcast::channel(TAP_CHANNEL_CAP).0,
-    })
+    });
 }
 
-pub(crate) fn tap_push(id: &str, bytes: &[u8]) {
+pub(crate) fn tap_push(id: &str, generation: u64, bytes: &[u8]) {
     let mut map = taps().lock().unwrap();
-    let tap = tap_entry(&mut map, id);
+    let Some(tap) = map.get_mut(id).filter(|tap| tap.generation == generation) else { return };
     tap.ring.extend(bytes.iter().copied());
     let excess = tap.ring.len().saturating_sub(TAP_RING_CAP);
     if excess > 0 {
@@ -51,14 +53,24 @@ pub(crate) fn tap_push(id: &str, bytes: &[u8]) {
 }
 
 /// Ring backlog + live receiver for one session's raw terminal output.
-pub fn tap_subscribe(id: &str) -> (Vec<u8>, tokio::sync::broadcast::Receiver<Vec<u8>>) {
-    let mut map = taps().lock().unwrap();
-    let tap = tap_entry(&mut map, id);
-    (tap.ring.iter().copied().collect(), tap.tx.subscribe())
+pub fn tap_subscribe(id: &str) -> Option<(Vec<u8>, tokio::sync::broadcast::Receiver<Vec<u8>>)> {
+    let map = taps().lock().unwrap();
+    let tap = map.get(id)?;
+    Some((tap.ring.iter().copied().collect(), tap.tx.subscribe()))
 }
 
 pub(crate) fn tap_remove(id: &str) {
     taps().lock().unwrap().remove(id);
+}
+
+fn tap_remove_generation(id: &str, generation: u64) {
+    let mut map = taps().lock().unwrap();
+    if map.get(id).map(|tap| tap.generation) == Some(generation) { map.remove(id); }
+}
+
+fn valid_session_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Resolve a shell name with the user's login PATH without interpolating it
@@ -286,6 +298,7 @@ impl SessionManager {
         let generation = self
             .next_generation
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        tap_start(&id, generation);
         {
             let mut sessions = self.sessions.lock().unwrap();
             // Reusing a live id: explicitly shut the old process down first.
@@ -336,7 +349,7 @@ impl SessionManager {
             while let Ok(first) = rx.recv() {
                 let (merged, _coalesced) = coalesce_output(first, &rx, OUTPUT_COALESCE_MAX_BYTES);
                 // tee raw bytes to remote subscribers (mobile companion terminals)
-                tap_push(&id_out, &merged);
+                tap_push(&id_out, generation, &merged);
                 let data = base64::engine::general_purpose::STANDARD.encode(&merged);
                 let _ = app_out.emit(
                     "session-data",
@@ -366,7 +379,14 @@ impl SessionManager {
             }
             drop(sessions);
             if !stale {
+                let tap_id = id_exit.clone();
                 let _ = app_exit.emit("session-exit", ExitEvent { id: id_exit, code });
+                // Keep the final screen briefly for a remote viewer, then
+                // reclaim it. A generation check protects a quick relaunch.
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(300));
+                    tap_remove_generation(&tap_id, generation);
+                });
             }
         });
 
@@ -554,7 +574,12 @@ pub fn spawn_session(
     rows: Option<u16>,
     cols: Option<u16>,
 ) -> Result<(), String> {
-    state.spawn(app, id, command, terminal_shell, command_shell, cwd, rows, cols)
+    if !valid_session_id(&id) { return Err("invalid session id".to_string()); }
+    state.spawn(
+        app, id, command, terminal_shell, command_shell, cwd,
+        Some(rows.unwrap_or(24).clamp(1, 500)),
+        Some(cols.unwrap_or(80).clamp(2, 1000)),
+    )
 }
 
 #[tauri::command]
@@ -563,6 +588,9 @@ pub fn write_session(
     id: String,
     data: String,
 ) -> Result<(), String> {
+    if !valid_session_id(&id) || data.len() > 1024 * 1024 {
+        return Err("invalid session id or input exceeds 1 MB".to_string());
+    }
     state.write(&id, &data)
 }
 
@@ -573,11 +601,13 @@ pub fn resize_session(
     rows: u16,
     cols: u16,
 ) -> Result<(), String> {
-    state.resize(&id, rows, cols)
+    if !valid_session_id(&id) { return Err("invalid session id".to_string()); }
+    state.resize(&id, rows.clamp(1, 500), cols.clamp(2, 1000))
 }
 
 #[tauri::command]
 pub fn kill_session(state: State<'_, SessionManager>, id: String) -> Result<(), String> {
+    if !valid_session_id(&id) { return Err("invalid session id".to_string()); }
     state.kill(&id);
     // the ring stays through a plain exit (devices can still read the final
     // screen); an explicit kill/delete drops it
@@ -604,7 +634,7 @@ pub fn detect_cli_session(
 mod tests {
     use super::{
         coalesce_output, derive_session_id, resolve_login_executable, select_session_id,
-        session_launch_spec,
+        session_launch_spec, tap_remove, tap_start, tap_subscribe, valid_session_id,
     };
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
@@ -613,6 +643,18 @@ mod tests {
     /// Resolve a guaranteed system shell through an explicit path.
     fn resolves_absolute_terminal_shell() {
         assert_eq!(resolve_login_executable("/bin/sh").unwrap(), "/bin/sh");
+    }
+
+    #[test]
+    fn tap_streams_exist_only_for_valid_live_session_generations() {
+        let id = format!("tap-test-{}", std::process::id());
+        tap_remove(&id);
+        assert!(tap_subscribe(&id).is_none());
+        tap_start(&id, 1);
+        assert!(tap_subscribe(&id).is_some());
+        tap_remove(&id);
+        assert!(valid_session_id("session-abc_123"));
+        assert!(!valid_session_id("../../escape"));
     }
 
     #[test]

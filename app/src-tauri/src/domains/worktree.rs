@@ -76,11 +76,65 @@ fn meta_path(root: &Path) -> PathBuf {
     root.join(".yaam-worktree.json")
 }
 
+fn write_metadata(root: &Path, info: &WorktreeInfo) -> Result<(), String> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(meta_path(root)).map_err(|e| e.to_string())?;
+    file.write_all(serde_json::to_string_pretty(info).map_err(|e| e.to_string())?.as_bytes())
+        .map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())
+}
+
+fn rollback_created(root: &Path, repos: &[WorktreeRepo], branch: &str) {
+    for repo in repos.iter().rev() {
+        let source = PathBuf::from(&repo.source);
+        let dest = root.join(&repo.name);
+        let _ = git(&source, &["worktree", "remove", "--force", &dest.to_string_lossy()]);
+        let _ = git(&source, &["branch", "-D", branch]);
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+fn managed_base() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+    Ok(PathBuf::from(home).join(".yaam/worktrees"))
+}
+
 fn load_info(root: &str) -> Result<WorktreeInfo, String> {
-    let root = PathBuf::from(expand_tilde(root));
+    let root = std::fs::canonicalize(expand_tilde(root))
+        .map_err(|e| format!("worktree unavailable: {e}"))?;
+    let managed = std::fs::canonicalize(managed_base()?)
+        .map_err(|e| format!("managed worktree folder unavailable: {e}"))?;
+    if root.parent() != Some(managed.as_path()) {
+        return Err("refusing a worktree outside ~/.yaam/worktrees".to_string());
+    }
     let text = std::fs::read_to_string(meta_path(&root))
         .map_err(|e| format!("not a yaam worktree ({e})"))?;
-    serde_json::from_str(&text).map_err(|e| format!("bad worktree metadata: {e}"))
+    let info: WorktreeInfo = serde_json::from_str(&text)
+        .map_err(|e| format!("bad worktree metadata: {e}"))?;
+    if Path::new(&info.root) != root
+        || info.slug.is_empty()
+        || sanitize_slug(&info.slug) != info.slug
+        || info.repos.is_empty()
+        || !Path::new(&info.workdir).starts_with(&root)
+        || info.repos.iter().any(|repo| {
+            repo.name.is_empty()
+                || repo.name == "."
+                || repo.name == ".."
+                || repo.name.contains('/')
+                || repo.name.contains('\\')
+                || repo.branch != format!("yaam/{}", info.slug)
+        })
+    {
+        return Err("worktree metadata failed provenance validation".to_string());
+    }
+    Ok(info)
 }
 
 /// The repos to isolate: the base itself, or its immediate repo subfolders.
@@ -120,24 +174,42 @@ fn create_impl(base_cwd: &str, slug: &str) -> Result<WorktreeInfo, String> {
         ));
     }
     let single = repos.len() == 1 && repos[0].1 == base;
-    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
-    let root = PathBuf::from(home).join(".yaam/worktrees").join(&slug);
+    let branch = format!("yaam/{slug}");
+    // Preflight every source before changing the first repository. This both
+    // gives a clear collision error and proves any branch created below belongs
+    // to this transaction, so rollback may safely delete it.
+    for (name, source) in &repos {
+        if git(source, &["rev-parse", "--verify", &format!("refs/heads/{branch}")]).is_ok() {
+            return Err(format!("{name}: branch {branch} already exists"));
+        }
+    }
+    let root = managed_base()?.join(&slug);
     if root.exists() {
         return Err(format!("worktree {} already exists", root.display()));
     }
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-    let branch = format!("yaam/{slug}");
 
     let mut out_repos = Vec::new();
     for (name, source) in &repos {
-        let base_ref = git(source, &["symbolic-ref", "--short", "HEAD"])
-            .or_else(|_| git(source, &["rev-parse", "HEAD"]))?;
+        let base_ref = match git(source, &["symbolic-ref", "--short", "HEAD"])
+            .or_else(|_| git(source, &["rev-parse", "HEAD"])) {
+            Ok(base_ref) => base_ref,
+            Err(e) => {
+                rollback_created(&root, &out_repos, &branch);
+                return Err(format!("{name}: {e}"));
+            }
+        };
         let dest = root.join(name);
-        git(
+        if let Err(e) = git(
             source,
             &["worktree", "add", "-b", &branch, &dest.to_string_lossy(), "HEAD"],
-        )
-        .map_err(|e| format!("{name}: {e}"))?;
+        ) {
+            // The failing git may already have created its branch/directory.
+            let _ = git(source, &["worktree", "remove", "--force", &dest.to_string_lossy()]);
+            let _ = git(source, &["branch", "-D", &branch]);
+            rollback_created(&root, &out_repos, &branch);
+            return Err(format!("{name}: {e}"));
+        }
         out_repos.push(WorktreeRepo {
             name: name.clone(),
             source: source.to_string_lossy().to_string(),
@@ -173,11 +245,10 @@ fn create_impl(base_cwd: &str, slug: &str) -> Result<WorktreeInfo, String> {
         workdir: workdir.to_string_lossy().to_string(),
         repos: out_repos,
     };
-    std::fs::write(
-        meta_path(&root),
-        serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
+    if let Err(e) = write_metadata(&root, &info) {
+        rollback_created(&root, &info.repos, &branch);
+        return Err(e);
+    }
     Ok(info)
 }
 
@@ -286,7 +357,7 @@ pub async fn worktree_remove(root: String, delete_branch: Option<bool>) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::{create_impl, diff_impl, merge_impl, remove_impl};
+    use super::{create_impl, diff_impl, load_info, merge_impl, remove_impl};
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -315,6 +386,39 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn rejects_forged_metadata_outside_the_managed_worktree_folder() {
+        let dir = TestDir::new("forged");
+        std::fs::write(
+            dir.0.join(".yaam-worktree.json"),
+            r#"{"root":"/tmp","base":"/tmp","slug":"fake","workdir":"/tmp","repos":[]}"#,
+        )
+        .unwrap();
+        assert!(load_info(&dir.0.to_string_lossy())
+            .unwrap_err()
+            .contains("outside ~/.yaam/worktrees"));
+    }
+
+    #[test]
+    fn multi_repo_creation_rolls_back_when_a_later_repo_fails() {
+        let base = TestDir::new("rollback-base");
+        let first = base.0.join("a-first");
+        let second = base.0.join("b-second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        init_repo(&first);
+        sh(&second, "git init -q -b main && git config user.email t@t && git config user.name t");
+        let slug = format!("rollback-{}", std::process::id());
+
+        let err = create_impl(&base.0.to_string_lossy(), &slug).unwrap_err();
+        assert!(err.contains("b-second"));
+        let managed = PathBuf::from(std::env::var("HOME").unwrap()).join(".yaam/worktrees").join(&slug);
+        assert!(!managed.exists());
+        let branches = Command::new("git").args(["branch", "--list", &format!("yaam/{slug}")])
+            .current_dir(&first).output().unwrap();
+        assert!(String::from_utf8_lossy(&branches.stdout).trim().is_empty());
     }
 
     fn init_repo(dir: &Path) {

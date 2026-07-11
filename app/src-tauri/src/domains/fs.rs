@@ -3,7 +3,7 @@
 //! timeout-bounded shell exec.
 use crate::util::expand_tilde;
 use serde::Serialize;
-use std::io::Read;
+use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -133,21 +133,72 @@ fn read_text_range_impl(
     offset: usize,
     limit: usize,
 ) -> Result<TextRange, String> {
-    let text = std::fs::read_to_string(scoped_path(root, path)?).map_err(|e| e.to_string())?;
-    let all: Vec<&str> = text.split('\n').collect();
-    let total = all.len();
     let start = offset.max(1);
-    let lines = all
-        .iter()
-        .skip(start - 1)
-        .take(limit.max(1))
-        .map(|s| s.to_string())
-        .collect();
+    let take = limit.max(1);
+    let file = std::fs::File::open(scoped_path(root, path)?).map_err(|e| e.to_string())?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut lines = Vec::with_capacity(take.min(10_000));
+    let mut total = 0usize;
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let read = reader.read_line(&mut line).map_err(|e| e.to_string())?;
+        if read == 0 {
+            // str::split('\n') reports one empty line for an empty file and
+            // one final empty line when the file ends in a newline.
+            if total == 0 {
+                total += 1;
+                if total >= start && lines.len() < take {
+                    lines.push(String::new());
+                }
+            }
+            break;
+        }
+        total += 1;
+        let had_newline = line.ends_with('\n');
+        if had_newline {
+            line.pop();
+            if line.ends_with('\r') { line.pop(); }
+        }
+        if total >= start && lines.len() < take {
+            lines.push(line.clone());
+        }
+        if !had_newline { break; }
+        // A trailing newline produces a final empty split segment. Peek one
+        // byte without retaining the rest of the file.
+        if reader.fill_buf().map_err(|e| e.to_string())?.is_empty() {
+            total += 1;
+            if total >= start && lines.len() < take { lines.push(String::new()); }
+            break;
+        }
+    }
     Ok(TextRange {
         lines,
         total,
         start,
     })
+}
+
+/// Drain a pipe completely while retaining only its bounded tail. Continuing
+/// to drain is essential: stopping at the cap would block the child on a full
+/// OS pipe and turn truncation into a deadlock.
+fn read_capped_tail<R: Read>(reader: &mut R, cap: usize) -> (Vec<u8>, bool) {
+    let mut kept = Vec::with_capacity(cap);
+    let mut chunk = [0u8; 8192];
+    let mut truncated = false;
+    loop {
+        let n = match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        kept.extend_from_slice(&chunk[..n]);
+        if kept.len() > cap {
+            let excess = kept.len() - cap;
+            kept.drain(..excess);
+            truncated = true;
+        }
+    }
+    (kept, truncated)
 }
 
 /// Read one file as base64 — the viewer/import path for binary formats (PDF,
@@ -241,22 +292,65 @@ fn delete_path_impl(root: &str, path: &str) -> Result<(), String> {
 
 /// Run a user-configured credential command through a login shell and return
 /// its stdout (e.g. `claude default-credential-export`, corporate token CLIs).
-async fn run_credential_command_impl(cmd: String) -> Result<String, String> {
-    let out = tauri::async_runtime::spawn_blocking(move || {
-        Command::new("/bin/sh").args(["-lc", &cmd]).output()
+pub(crate) async fn run_credential_command_impl(cmd: String) -> Result<String, String> {
+    run_credential_command_with_limits(cmd, std::time::Duration::from_secs(30), 1024 * 1024).await
+}
+
+async fn run_credential_command_with_limits(
+    cmd: String,
+    timeout: std::time::Duration,
+    cap: usize,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-lc", &cmd])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command.spawn()
+            .map_err(|e| format!("credential command failed to run: {e}"))?;
+        let pid = child.id() as i32;
+        let mut stdout = child.stdout.take();
+        let mut stderr = child.stderr.take();
+        let out_thread = std::thread::spawn(move || stdout.as_mut()
+            .map(|p| read_capped_tail(p, cap)).unwrap_or_default());
+        let err_thread = std::thread::spawn(move || stderr.as_mut()
+            .map(|p| read_capped_tail(p, cap)).unwrap_or_default());
+        let started = std::time::Instant::now();
+        let status = loop {
+            if let Some(status) = child.try_wait().map_err(|e| e.to_string())? { break status; }
+            if started.elapsed() >= timeout {
+                #[cfg(unix)]
+                unsafe { libc::kill(-pid, libc::SIGKILL); }
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = out_thread.join();
+                let _ = err_thread.join();
+                return Err(format!("credential command timed out after {}s", timeout.as_secs_f32()));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        let (stdout, stdout_truncated) = out_thread.join().unwrap_or_default();
+        let (stderr, stderr_truncated) = err_thread.join().unwrap_or_default();
+        if stdout_truncated || stderr_truncated {
+            return Err(format!("credential command output exceeds {cap} bytes"));
+        }
+        if !status.success() {
+            return Err(format!(
+                "credential command exited with {}: {}",
+                status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&stderr).trim()
+            ));
+        }
+        Ok(String::from_utf8_lossy(&stdout).trim().to_string())
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| format!("credential command failed to run: {e}"))?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        return Err(format!(
-            "credential command exited with {}: {}",
-            out.status.code().unwrap_or(-1),
-            stderr
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// One-shot shell execution for chat agents: run a command, capture merged
@@ -288,20 +382,11 @@ async fn exec_command_impl(
         // than the pipe buffer would otherwise block forever before exiting
         let mut stdout_pipe = child.stdout.take();
         let mut stderr_pipe = child.stderr.take();
-        let out_thread = std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(p) = stdout_pipe.as_mut() {
-                let _ = p.read_to_end(&mut buf);
-            }
-            buf
-        });
-        let err_thread = std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(p) = stderr_pipe.as_mut() {
-                let _ = p.read_to_end(&mut buf);
-            }
-            buf
-        });
+        const PIPE_CAP: usize = 40_000;
+        let out_thread = std::thread::spawn(move || stdout_pipe.as_mut()
+            .map(|p| read_capped_tail(p, PIPE_CAP)).unwrap_or_default());
+        let err_thread = std::thread::spawn(move || stderr_pipe.as_mut()
+            .map(|p| read_capped_tail(p, PIPE_CAP)).unwrap_or_default());
         let kill_tree = |child: &mut std::process::Child| {
             #[cfg(unix)]
             unsafe {
@@ -323,8 +408,8 @@ async fn exec_command_impl(
                 }
             }
         };
-        let stdout_buf = out_thread.join().unwrap_or_default();
-        let stderr_buf = err_thread.join().unwrap_or_default();
+        let (stdout_buf, stdout_truncated) = out_thread.join().unwrap_or_default();
+        let (stderr_buf, stderr_truncated) = err_thread.join().unwrap_or_default();
         let mut text = String::from_utf8_lossy(&stdout_buf).to_string();
         let err = String::from_utf8_lossy(&stderr_buf);
         if !err.trim().is_empty() {
@@ -332,6 +417,9 @@ async fn exec_command_impl(
                 text.push('\n');
             }
             text.push_str(&err);
+        }
+        if stdout_truncated || stderr_truncated {
+            text = format!("… (output truncated)\n{text}");
         }
         if timed_out {
             if !text.trim().is_empty() {
@@ -343,7 +431,7 @@ async fn exec_command_impl(
             ));
         }
         // cap what travels back to the LLM
-        const CAP: usize = 40_000;
+        const CAP: usize = PIPE_CAP;
         if text.len() > CAP {
             let tail_at = text.len() - CAP;
             let cut = text
@@ -439,7 +527,7 @@ mod tests {
     use super::{
         copy_path_impl, create_dir_impl, delete_path_impl, exec_command_impl, list_dir_impl,
         move_path_impl, read_text_impl, read_text_range_impl, resolve_in_root,
-        run_credential_command_impl, write_text_impl,
+        run_credential_command_impl, run_credential_command_with_limits, write_text_impl,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -521,6 +609,22 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("exited with 7"));
         assert!(error.contains("credential denied"));
+
+        let timeout = tauri::async_runtime::block_on(run_credential_command_with_limits(
+            "sleep 2".to_string(),
+            std::time::Duration::from_millis(20),
+            1024,
+        ))
+        .unwrap_err();
+        assert!(timeout.contains("timed out"));
+
+        let oversized = tauri::async_runtime::block_on(run_credential_command_with_limits(
+            "yes x | head -n 10000".to_string(),
+            std::time::Duration::from_secs(2),
+            1024,
+        ))
+        .unwrap_err();
+        assert!(oversized.contains("exceeds"));
     }
 
     #[test]
@@ -548,6 +652,21 @@ mod tests {
 
         assert_eq!(result.code, -1);
         assert!(result.output.contains("timed out"));
+    }
+
+    #[test]
+    fn exec_command_bounds_noisy_output_while_preserving_the_tail() {
+        let result = tauri::async_runtime::block_on(exec_command_impl(
+            "yes x | head -n 100000; printf 'FINAL-MARKER\\n'".to_string(),
+            None,
+            Some(5_000),
+        ))
+        .unwrap();
+
+        assert_eq!(result.code, 0);
+        assert!(result.output.starts_with("… (output truncated)"));
+        assert!(result.output.contains("FINAL-MARKER"));
+        assert!(result.output.len() < 41_000);
     }
 
     // ---- workspace scope authorization (resolve_in_root) ----
@@ -702,5 +821,15 @@ mod tests {
         assert_eq!(tail.lines, vec!["l5".to_string()]);
         // offset 0 is treated as line 1
         assert_eq!(read_text_range_impl(None, &p, 0, 1).unwrap().start, 1);
+
+        std::fs::write(&file, "l1\nl2\n").unwrap();
+        let trailing = read_text_range_impl(None, &p, 1, 10).unwrap();
+        assert_eq!(trailing.lines, vec!["l1", "l2", ""]);
+        assert_eq!(trailing.total, 3);
+
+        std::fs::write(&file, "").unwrap();
+        let empty = read_text_range_impl(None, &p, 1, 10).unwrap();
+        assert_eq!(empty.lines, vec![""]);
+        assert_eq!(empty.total, 1);
     }
 }

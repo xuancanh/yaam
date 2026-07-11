@@ -42,10 +42,40 @@ pub struct DetachedInfo {
 fn dir() -> PathBuf {
     let d = PathBuf::from(crate::util::expand_tilde("~/.yaam/detached"));
     let _ = std::fs::create_dir_all(&d);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700));
+    }
     d
 }
 fn spec_path(id: &str) -> PathBuf { dir().join(format!("{id}.json")) }
 fn sock_path(id: &str) -> PathBuf { dir().join(format!("{id}.sock")) }
+
+fn valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+fn write_spec(path: &std::path::Path, spec: &DetachedSpec) -> Result<(), String> {
+    use std::fs::OpenOptions;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(path).map_err(|e| e.to_string())?;
+    file.write_all(serde_json::to_string(spec).map_err(|e| e.to_string())?.as_bytes())
+        .map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 fn spec_for_sock(sock: &std::path::Path) -> PathBuf { sock.with_extension("json") }
 
@@ -95,6 +125,13 @@ pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
     let _ = std::fs::remove_file(sock);
     let listener = match UnixListener::bind(sock) { Ok(l) => l, Err(_) => return 1 };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if std::fs::set_permissions(sock, std::fs::Permissions::from_mode(0o600)).is_err() {
+            return 1;
+        }
+    }
     let pair = match native_pty_system().openpty(PtySize { rows: spec.rows, cols: spec.cols, pixel_width: 0, pixel_height: 0 }) {
         Ok(p) => p,
         Err(_) => return 1,
@@ -175,14 +212,11 @@ pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
     let ours = std::fs::read_to_string(spec_for_sock(sock))
         .ok()
         .and_then(|s| serde_json::from_str::<DetachedSpec>(&s).ok())
-        .is_none_or(|d| d.pid == spec.pid);
+        .map_or(true, |d| d.pid == spec.pid);
     if ours {
         let mut completed = spec.clone();
         completed.exit_code = Some(code);
-        let _ = std::fs::write(
-            spec_for_sock(sock),
-            serde_json::to_string(&completed).unwrap_or_default(),
-        );
+        let _ = write_spec(&spec_for_sock(sock), &completed);
         let _ = std::fs::remove_file(sock); // a replacement host may own this path now
     }
     code
@@ -277,6 +311,7 @@ pub fn detach_entry() -> bool {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--yaam-host") {
         let id = args.get(i + 1).cloned().unwrap_or_default();
+        if !valid_id(&id) { std::process::exit(1); }
         let spec: DetachedSpec = std::fs::read_to_string(spec_path(&id))
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -284,7 +319,7 @@ pub fn detach_entry() -> bool {
         // record our pid for kill/monitor
         let mut spec2 = spec.clone();
         spec2.pid = Some(std::process::id() as i32);
-        let _ = std::fs::write(spec_path(&id), serde_json::to_string(&spec2).unwrap_or_default());
+        let _ = write_spec(&spec_path(&id), &spec2);
         std::process::exit(run_host(&spec2, &sock_path(&id)));
     }
     if let Some(i) = args.iter().position(|a| a == "--yaam-attach") {
@@ -303,6 +338,7 @@ pub fn detach_entry() -> bool {
 /// that only persisted the attach wrapper).
 #[tauri::command]
 pub fn detached_spawn(id: String, command: String, cwd: Option<String>, command_shell: Option<String>, rows: Option<u16>, cols: Option<u16>) -> Result<String, String> {
+    if !valid_id(&id) { return Err("invalid detached session id".to_string()); }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let sock = sock_path(&id);
     let attach = format!("\"{}\" --yaam-attach \"{}\"", exe.display(), sock.display());
@@ -321,7 +357,7 @@ pub fn detached_spawn(id: String, command: String, cwd: Option<String>, command_
     } else {
         DetachedSpec { id: id.clone(), command, cwd, command_shell, rows: rows.unwrap_or(24), cols: cols.unwrap_or(80), pid: None, exit_code: None }
     };
-    std::fs::write(spec_path(&id), serde_json::to_string(&spec).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    write_spec(&spec_path(&id), &spec)?;
     let mut cmd = std::process::Command::new(&exe);
     cmd.args(["--yaam-host", &id])
         .stdin(std::process::Stdio::null())
@@ -356,6 +392,7 @@ pub fn detached_list() -> Vec<DetachedInfo> {
             let p = e.path();
             if p.extension().and_then(|x| x.to_str()) != Some("json") { continue }
             if let Some(spec) = std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str::<DetachedSpec>(&s).ok()) {
+                if !valid_id(&spec.id) { continue; }
                 let running = UnixStream::connect(sock_path(&spec.id)).is_ok();
                 if !running {
                     let _ = std::fs::remove_file(&p); // stale leftovers
@@ -374,6 +411,7 @@ pub fn detached_list() -> Vec<DetachedInfo> {
 /// End a detached session for real (SIGTERM its host's process group).
 #[tauri::command]
 pub fn detached_kill(id: String) -> Result<(), String> {
+    if !valid_id(&id) { return Err("invalid detached session id".to_string()); }
     if let Some(spec) = std::fs::read_to_string(spec_path(&id)).ok().and_then(|s| serde_json::from_str::<DetachedSpec>(&s).ok()) {
         if let Some(pid) = spec.pid {
             unsafe { libc::kill(-pid, libc::SIGTERM) };
@@ -399,6 +437,15 @@ mod tests {
         assert_eq!((t1, p1.as_slice()), (F_RESIZE, &[40u8, 0, 120, 0][..]));
         let (t2, p2) = read_frame(&mut r).unwrap();
         assert_eq!((t2, p2.as_slice()), (F_DATA, b"ls -la\n".as_slice()));
+    }
+
+    #[test]
+    fn detached_ids_cannot_escape_the_private_state_directory() {
+        assert!(valid_id("agent-abc_123"));
+        assert!(!valid_id(""));
+        assert!(!valid_id("../../outside"));
+        assert!(!valid_id("nested/session"));
+        assert!(detached_kill("../../outside".into()).is_err());
     }
 
     #[test]

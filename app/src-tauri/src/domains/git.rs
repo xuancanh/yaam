@@ -23,20 +23,26 @@ pub struct GitStatusResult {
 
 fn parse_porcelain_status(root: String, branch: String, output: &[u8]) -> GitStatusResult {
     let mut files = Vec::new();
-    for line in String::from_utf8_lossy(output).lines() {
-        if line.len() < 4 || line.as_bytes().get(2) != Some(&b' ') {
+    let fields: Vec<&[u8]> = output.split(|b| *b == 0).filter(|field| !field.is_empty()).collect();
+    let mut i = 0;
+    while i < fields.len() {
+        let field = fields[i];
+        i += 1;
+        if field.len() < 4 || field.get(2) != Some(&b' ') {
             continue;
         }
-        let status = line[..2].trim().to_string();
-        let mut path = line[3..].to_string();
-        if let Some((_, to)) = path.split_once(" -> ") {
-            path = to.to_string();
+        let index = field[0] as char;
+        let work = field[1] as char;
+        // In porcelain -z, rename/copy records carry the destination first and
+        // the source as the following NUL field. The UI wants the destination.
+        if matches!(index, 'R' | 'C') || matches!(work, 'R' | 'C') {
+            i = (i + 1).min(fields.len());
         }
         files.push(GitFileStatus {
-            path: path.trim_matches('"').to_string(),
-            status,
-            index: line[..1].to_string(),
-            work: line[1..2].to_string(),
+            path: String::from_utf8_lossy(&field[3..]).into_owned(),
+            status: String::from_utf8_lossy(&field[..2]).trim().to_string(),
+            index: index.to_string(),
+            work: work.to_string(),
         });
     }
     GitStatusResult {
@@ -88,7 +94,7 @@ pub fn status(cwd: &str) -> Result<GitStatusResult, String> {
     let root = String::from_utf8_lossy(&root_out.stdout).trim().to_string();
     let branch = run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
     let out = Command::new("git")
-        .args(["status", "--porcelain"])
+        .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
         .current_dir(&dir)
         .output()
         .map_err(|e| format!("failed to run git: {e}"))?;
@@ -170,7 +176,7 @@ mod tests {
         let result = parse_porcelain_status(
             "/repo".to_string(),
             "main".to_string(),
-            b" M src/main.rs\nA  src/new.rs\n?? notes.txt\ninvalid\n",
+            b" M src/main.rs\0A  src/new.rs\0?? notes.txt\0invalid\0",
         );
 
         assert_eq!(result.root, "/repo");
@@ -191,8 +197,11 @@ mod tests {
 
     #[test]
     fn reports_the_destination_of_a_rename() {
-        let result =
-            parse_porcelain_status("/repo".to_string(), "main".to_string(), b"R  old-name.rs -> new-name.rs\n");
+        let result = parse_porcelain_status(
+            "/repo".to_string(),
+            "main".to_string(),
+            b"R  new-name.rs\0old-name.rs\0",
+        );
 
         assert_eq!(result.files.len(), 1);
         assert_eq!(result.files[0].status, "R");
@@ -200,9 +209,14 @@ mod tests {
     }
 
     #[test]
-    fn strips_porcelain_quotes_from_paths() {
-        let result = parse_porcelain_status("/repo".to_string(), "main".to_string(), b"?? \"file with spaces.txt\"\n");
+    fn preserves_spaces_newlines_and_arrow_text_in_paths() {
+        let result = parse_porcelain_status(
+            "/repo".to_string(),
+            "main".to_string(),
+            b"?? file with spaces.txt\0?? line\nbreak -> literal.txt\0",
+        );
 
         assert_eq!(result.files[0].path, "file with spaces.txt");
+        assert_eq!(result.files[1].path, "line\nbreak -> literal.txt");
     }
 }

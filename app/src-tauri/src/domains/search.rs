@@ -21,6 +21,29 @@ struct Engine {
     text: Field,
 }
 
+const MAX_REINDEX_DOCS: usize = 50_000;
+const MAX_UPSERT_DOCS: usize = 1_000;
+const MAX_REINDEX_TEXT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_UPSERT_TEXT_BYTES: usize = 16 * 1024 * 1024;
+
+fn validate_docs(docs: &[ChatDoc], max_docs: usize, max_text_bytes: usize) -> Result<(), String> {
+    if docs.len() > max_docs { return Err(format!("too many chat documents (max {max_docs})")); }
+    let mut text_bytes = 0usize;
+    for doc in docs {
+        if doc.chat_id.is_empty() || doc.chat_id.len() > 256
+            || doc.msg_id.is_empty() || doc.msg_id.len() > 256
+            || doc.role.len() > 32
+        {
+            return Err("chat document identifier is empty or oversized".to_string());
+        }
+        text_bytes = text_bytes.saturating_add(doc.text.len());
+        if text_bytes > max_text_bytes {
+            return Err(format!("chat document text exceeds {max_text_bytes} aggregate bytes"));
+        }
+    }
+    Ok(())
+}
+
 /// Bound one message's contribution to the in-RAM index (unicode-safe cut).
 fn bound_body(text: String) -> String {
     if text.len() <= 20_000 {
@@ -57,6 +80,7 @@ pub struct ChatHit {
 
 /// Rebuild the in-RAM index from the full set of chat messages.
 pub fn reindex(state: &ChatSearchState, docs: Vec<ChatDoc>) -> Result<usize, String> {
+    validate_docs(&docs, MAX_REINDEX_DOCS, MAX_REINDEX_TEXT_BYTES)?;
     let mut schema_builder = Schema::builder();
     let chat_id = schema_builder.add_text_field("chat_id", STORED);
     // msg_id is STRING (indexed as one raw term) so upsert/remove can delete by it
@@ -96,6 +120,7 @@ pub fn reindex(state: &ChatSearchState, docs: Vec<ChatDoc>) -> Result<usize, Str
 /// Incrementally add/replace messages by msg_id. Falls back to a full reindex
 /// when no index exists yet (first call). Returns the number of docs written.
 pub fn upsert(state: &ChatSearchState, docs: Vec<ChatDoc>) -> Result<usize, String> {
+    validate_docs(&docs, MAX_UPSERT_DOCS, MAX_UPSERT_TEXT_BYTES)?;
     {
         let mut guard = state.0.lock().map_err(|e| e.to_string())?;
         if let Some(engine) = guard.as_mut() {
@@ -126,6 +151,9 @@ pub fn upsert(state: &ChatSearchState, docs: Vec<ChatDoc>) -> Result<usize, Stri
 /// Remove messages from the index by msg_id (e.g. a deleted chat). No-op when
 /// there is no index yet. Returns the number of ids requested for removal.
 pub fn remove(state: &ChatSearchState, msg_ids: Vec<String>) -> Result<usize, String> {
+    if msg_ids.len() > 5_000 || msg_ids.iter().any(|id| id.is_empty() || id.len() > 256) {
+        return Err("too many, empty, or oversized message ids".to_string());
+    }
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     let Some(engine) = guard.as_mut() else {
         return Ok(0);
@@ -147,6 +175,7 @@ pub fn search(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<ChatHit>, String> {
+    if query.len() > 2_000 { return Err("search query exceeds 2000 bytes".to_string()); }
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     let Some(engine) = guard.as_ref() else {
         return Ok(vec![]);
@@ -325,5 +354,16 @@ mod tests {
     fn remove_before_any_index_is_a_no_op() {
         let state = ChatSearchState::default();
         assert_eq!(remove(&state, vec!["x".to_string()]).unwrap(), 0);
+    }
+
+    #[test]
+    fn rejects_oversized_document_metadata_batches_and_queries() {
+        let state = ChatSearchState::default();
+        assert!(reindex(&state, vec![doc(&"c".repeat(257), "m", "user", "text")])
+            .unwrap_err().contains("identifier"));
+        assert!(upsert(&state, (0..1001).map(|i| doc("c", &format!("m{i}"), "user", "x")).collect())
+            .unwrap_err().contains("too many"));
+        assert!(search(&state, "q".repeat(2001), None).err().unwrap().contains("2000"));
+        assert!(remove(&state, vec![String::new()]).unwrap_err().contains("message ids"));
     }
 }
