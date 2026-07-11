@@ -16,6 +16,10 @@ import { ACCENT } from '../../core/data'
 import { execCommand as runShellCommand } from '../../core/native'
 import * as native from '../../core/native'
 
+const ADDON_STORAGE_VALUE_CHARS = 256 * 1024
+const ADDON_STORAGE_TOTAL_CHARS = 1024 * 1024
+const ADDON_STORAGE_KEY_CHARS = 128
+
 export interface AddonApiCtx {
   stateRef: MutableRefObject<AppState>
   dispatch: (f: (s: AppState) => AppState) => void
@@ -257,14 +261,19 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
     storage: {
       get: key => stateRef.current.addonStorage[addonId]?.[String(key)],
       set: (key, value) => {
-        let size = 0
-        try { size = (JSON.stringify(value) ?? '').length } catch { throw new Error('storage.set: value is not JSON-serializable') }
-        if (size > 262_144) throw new Error('storage.set: value exceeds 256 KB')
+        const storageKey = String(key)
+        if (!storageKey || storageKey.length > ADDON_STORAGE_KEY_CHARS) throw new Error('storage.set: key must be 1-128 characters')
+        let encoded: string | undefined
+        try { encoded = JSON.stringify(value) } catch { throw new Error('storage.set: value is not JSON-serializable') }
+        if (encoded === undefined) throw new Error('storage.set: value is not JSON-serializable')
+        if (encoded.length > ADDON_STORAGE_VALUE_CHARS) throw new Error('storage.set: value exceeds 256 KB')
+        const next = { ...(stateRef.current.addonStorage[addonId] ?? {}), [storageKey]: value }
+        if (JSON.stringify(next).length > ADDON_STORAGE_TOTAL_CHARS) throw new Error('storage.set: addon storage exceeds 1 MB')
         dispatch(s2 => ({
           ...s2,
           addonStorage: {
             ...s2.addonStorage,
-            [addonId]: { ...(s2.addonStorage[addonId] ?? {}), [String(key)]: value },
+            [addonId]: { ...(s2.addonStorage[addonId] ?? {}), [storageKey]: value },
           },
         }))
       },
