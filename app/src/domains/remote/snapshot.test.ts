@@ -37,7 +37,7 @@ describe('buildRemoteSnapshot', () => {
       ],
       agents: [
         agent({ id: 'a1', task: 'auth refactor', summary: 'tests green', actionNeeded: 'review PR', attention: true }),
-        agent({ id: 'a2', name: 'helper', kind: 'chat', chatLog, chatModel: 'sonnet-4', durableAgentId: 'da1', chatPinned: true }),
+        agent({ id: 'a2', name: 'helper', kind: 'chat', cwd: '/chat/root', chatLog, chatModel: 'sonnet-4', durableAgentId: 'da1', chatPinned: true }),
         agent({ id: 'a3', archived: true }),
         agent({ id: 'a4', name: 'elsewhere', workspaceId: 'w2' }),
       ],
@@ -60,7 +60,7 @@ describe('buildRemoteSnapshot', () => {
     expect(snap.chats.map(c => c.id)).toEqual(['a2'])
     expect(snap.chats[0].model).toBe('sonnet-4')
     expect(snap.chats[0].msgs.map(m => m.id)).toEqual(['m1', 'm2'])
-    expect(snap.chats[0]).toMatchObject({ durableAgentId: 'da1', pinned: true, busy: true, lastAt: 2 })
+    expect(snap.chats[0]).toMatchObject({ durableAgentId: 'da1', cwd: '/chat/root', pinned: true, busy: true, lastAt: 2 })
 
     // archived durable agents are excluded
     expect(snap.durables.map(d => d.id)).toEqual(['agent-default', 'da1'])

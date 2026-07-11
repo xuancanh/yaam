@@ -76,6 +76,8 @@ export interface RemoteSnapshot {
     id: string
     name: string
     model: string
+    /** this conversation's own file-tool root */
+    cwd: string
     /** owning durable agent (unclaimed/legacy chats fall to the built-in one) */
     durableAgentId: string
     pinned: boolean
@@ -201,6 +203,7 @@ export function buildRemoteSnapshot(
         id: a.id,
         name: a.name,
         model: a.chatModel ?? a.model,
+        cwd: a.cwd ?? '',
         durableAgentId: durableOf(a),
         pinned: Boolean(a.chatPinned),
         busy: a.status === 'running',

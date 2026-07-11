@@ -114,9 +114,9 @@ export interface DirEntryInfo {
 }
 
 /** List one directory through the backend for the workspace file tree. */
-export async function listDir(path: string): Promise<DirEntryInfo[]> {
+export async function listDir(path: string, root?: string): Promise<DirEntryInfo[]> {
   if (!isTauri) return []
-  const raw = await invoke('list_dir', { path })
+  const raw = await invoke('list_dir', { path, root })
   const entries = expectObjectArray(raw, ['name', 'path', 'is_dir'], 'listDir')
   return entries.map(e => ({ name: e.name as string, path: e.path as string, isDir: e.is_dir as boolean }))
 }

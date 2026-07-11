@@ -16,6 +16,7 @@ import { fitTerminal, remoteResize, serializeScreen, terminalSize } from '../../
 import { confirmAction } from '../../components/Confirm'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import { buildRemoteSnapshot } from './snapshot'
+import { authorizedRemoteRoot, remoteFileRoots } from './authorization'
 
 // short debounce: chat deltas land in the store per animation frame, and the
 // SSE stream pushes every publish — this is the streaming granularity remotes see
@@ -43,18 +44,8 @@ function termFor(id: string): { data: string; cols: number } {
   return { data: serializeScreen(id), cols: terminalSize(id)?.cols ?? 80 }
 }
 
-/** Paths a paired phone may browse: anything under a live session's working
- *  folder (incl. worktree mirrors) — the same scope the mobile UI offers. */
-function pathAllowed(path: string): boolean {
-  if (!path.startsWith('/')) return false
-  const roots = useAppStore.getState().agents
-    .filter(a => !a.archived)
-    .flatMap(a => [a.cwd, a.worktree?.workdir, a.worktree?.root])
-    .filter((p): p is string => !!p)
-  return roots.some(r => path === r || path.startsWith(`${r.replace(/\/+$/, '')}/`))
-}
-
 const RPC_READ_CAP = 200_000
+const approvedGitRoots = new Set<string>()
 
 /** fs/git browsing computed on the desktop with its normal native adapters;
  *  the answer lands in the server's response store for the phone to pick up. */
@@ -63,44 +54,48 @@ async function answerRpc(kind: string, requestId: string, payload: string): Prom
   try {
     switch (kind) {
       case 'rpc_fs_list': {
-        if (!pathAllowed(payload)) return await respond({ error: 'path outside session folders' })
-        const entries = await listDir(payload)
+        const root = authorizedRemoteRoot(useAppStore.getState(), payload)
+        if (!root) return await respond({ error: 'path outside active session folders' })
+        const entries = await listDir(payload, root)
         return await respond({ entries: entries.map(e => ({ name: e.name, path: e.path, isDir: e.isDir })) })
       }
       case 'rpc_fs_read': {
-        if (!pathAllowed(payload)) return await respond({ error: 'path outside session folders' })
+        const root = authorizedRemoteRoot(useAppStore.getState(), payload)
+        if (!root) return await respond({ error: 'path outside active session folders' })
         const name = payload.slice(payload.lastIndexOf('/') + 1)
         // office docs: extract readable text desktop-side (same as the chat pipeline)
         if (/\.(docx|xlsx|pptx)$/i.test(name)) {
-          const extracted = await extractFileText(name, b64ToBytes(await readFileB64(payload)))
+          const extracted = await extractFileText(name, b64ToBytes(await readFileB64(payload, root)))
           return await respond({ text: extracted.text ?? '(no text extracted)', kind: 'office' })
         }
-        const text = await readTextFile(payload)
+        const text = await readTextFile(payload, root)
         return await respond({ text: text.length > RPC_READ_CAP ? `${text.slice(0, RPC_READ_CAP)}\n… (truncated)` : text })
       }
       case 'rpc_fs_b64': {
         // binary payloads for the rich viewer (images, PDFs) — size-capped
-        if (!pathAllowed(payload)) return await respond({ error: 'path outside session folders' })
-        const b64 = await readFileB64(payload)
+        const root = authorizedRemoteRoot(useAppStore.getState(), payload)
+        if (!root) return await respond({ error: 'path outside active session folders' })
+        const b64 = await readFileB64(payload, root)
         if (b64.length > 8_000_000) return await respond({ error: 'file too large to preview remotely' })
         return await respond({ b64 })
       }
       case 'rpc_git_status': {
-        if (!pathAllowed(payload)) return await respond({ error: 'path outside session folders' })
+        const root = authorizedRemoteRoot(useAppStore.getState(), payload)
+        if (!root) return await respond({ error: 'path outside active session folders' })
+        await listDir(payload, root) // canonical/symlink-safe authorization
         const st = await gitStatus(payload)
+        if (approvedGitRoots.size >= 100) approvedGitRoots.clear()
+        approvedGitRoots.add(st.root.replace(/\/+$/, ''))
         return await respond({ root: st.root, branch: st.branch, files: st.files.map(f => ({ path: f.path, status: f.status, index: f.index, work: f.work })) })
       }
       case 'rpc_git_diff': {
         const req = JSON.parse(payload) as { root: string; path: string; staged: boolean }
         // a repo root may sit ABOVE the session cwd — accept ancestors of
         // allowed folders too (the root came from our own rpc_git_status)
-        const roots = useAppStore.getState().agents
-          .filter(a => !a.archived)
-          .flatMap(a => [a.cwd, a.worktree?.workdir, a.worktree?.root])
-          .filter((p): p is string => !!p)
+        const roots = remoteFileRoots(useAppStore.getState())
         const base = req.root.replace(/\/+$/, '')
-        const ok = base.startsWith('/') && roots.some(r => r === base || r.startsWith(`${base}/`) || base.startsWith(`${r.replace(/\/+$/, '')}/`))
-        if (!ok) return await respond({ error: 'path outside session folders' })
+        const active = roots.some(r => r === base || r.startsWith(`${base}/`) || base.startsWith(`${r}/`))
+        if (!approvedGitRoots.has(base) || !active) return await respond({ error: 'git root was not authorized by status' })
         return await respond({ diff: await gitFileDiffSide(req.root, req.path, req.staged) })
       }
       default:

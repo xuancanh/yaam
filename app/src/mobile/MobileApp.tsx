@@ -291,8 +291,7 @@ function ChatDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   const { echoes, addEcho } = useEchoes(c?.msgs ?? [])
   const [atts, setAtts] = useState<Attachment[]>([])
   const [filesOpen, setFilesOpen] = useState(false)
-  // any session sharing the workspace gives us a browsable folder
-  const folder = snap.sessions.find(s => s.cwd)?.cwd ?? ''
+  const folder = c?.cwd ?? ''
   if (!c) return <div className="empty">This chat is gone.</div>
   const pending = c.msgs.find(m => m.approval === 'pending')
   const send = (text: string) => {
