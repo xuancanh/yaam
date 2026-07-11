@@ -156,7 +156,10 @@ export function enableGpuRenderer(id: string) {
   if (!entry || entry.gl || !entry.term.element) return
   try {
     const gl = new WebglAddon()
-    gl.onContextLoss(() => { gl.dispose(); entry.gl = undefined }) // xterm falls back to DOM
+    gl.onContextLoss(() => {
+      gl.dispose()
+      if (entry.gl === gl) entry.gl = undefined
+    }) // xterm falls back to DOM; don't clear a replacement renderer
     entry.term.loadAddon(gl)
     entry.gl = gl
   } catch { /* no WebGL — DOM renderer still works */ }

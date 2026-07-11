@@ -52,8 +52,13 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
       if (roRaf) cancelAnimationFrame(roRaf)
       window.clearTimeout(late)
       ro.disconnect()
-      disableGpuRenderer(agent.id)
-      if (term.element && term.element.parentElement === el) el.removeChild(term.element)
+      // React can mount the destination pane before cleaning up the source
+      // pane. Only the host that still owns xterm may release its renderer;
+      // otherwise this obsolete cleanup would disable WebGL in the new pane.
+      if (term.element && term.element.parentElement === el) {
+        disableGpuRenderer(agent.id)
+        el.removeChild(term.element)
+      }
     }
   }, [agent.id])
 
