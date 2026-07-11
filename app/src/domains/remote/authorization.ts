@@ -51,6 +51,15 @@ export function remoteCommandAllowed(s: AppState, command: RemoteCommand): boole
       const chat = agents.find(a => a.id === command.agent_id && a.kind === 'chat')
       return !!chat?.chatLog?.some(m => m.id === command.id && m.approval === 'pending')
     }
+    case 'chat_reply': {
+      // quick-reply chip: only text the assistant actually proposed on that message
+      const chat = agents.find(a => a.id === command.agent_id && a.kind === 'chat')
+      return !!chat?.chatLog?.some(m => m.id === command.id && m.suggestions?.includes(command.text))
+    }
+    case 'chat_rate': {
+      const chat = agents.find(a => a.id === command.agent_id && a.kind === 'chat')
+      return !!chat?.chatLog?.some(m => m.id === command.id && m.role === 'assistant')
+    }
     default:
       return false
   }

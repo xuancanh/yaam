@@ -229,6 +229,9 @@ export function RemoteCompanion() {
         case 'session_resume': return a.resume(c.id)
         case 'approve_master': return a.resolveToolApproval(c.id, c.ok)
         case 'approve_chat': return a.approveChatTool(c.agent_id, c.id, c.ok)
+        // quick-reply chip tapped on the phone (agent_id = chat, id = message)
+        case 'chat_reply': return a.sendQuickReply(c.agent_id, c.id, c.text)
+        case 'chat_rate': return a.rateChatReply(c.agent_id, c.id, c.ok ? 'up' : 'down', c.text || undefined)
         default: console.warn('[yaam] unknown remote command:', c.kind)
       }
     }

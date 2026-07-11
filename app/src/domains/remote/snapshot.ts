@@ -21,6 +21,10 @@ export interface RemoteMsg {
   text: string
   at: number
   approval?: string
+  /** assistant quick-reply chips — tapping one sends it as the user (chat_reply) */
+  suggestions?: string[]
+  /** the user's 👍/👎 on this assistant reply (chat_rate) */
+  feedback?: string
   /** Master message shape, when this is from the orchestrator conversation. */
   kind?: Message['kind']
   thinking?: string
@@ -217,7 +221,7 @@ export function buildRemoteSnapshot(
         msgs: (a.chatLog ?? [])
           .filter(m => m.role !== 'thinking')
           .slice(-MSG_CAP)
-          .map(m => ({ id: m.id, role: m.role, text: clip(m.text), at: m.at, approval: m.approval })),
+          .map(m => ({ id: m.id, role: m.role, text: clip(m.text), at: m.at, approval: m.approval, suggestions: m.suggestions, feedback: m.feedback })),
       })),
     master: {
       busy: Boolean(s.masterBusy),

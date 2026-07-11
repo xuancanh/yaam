@@ -115,7 +115,10 @@ function makeAppPort(ctx: ChatCtx, agentId: string, turnId: string): ChatAppPort
       ].join('\n\n')
       ctx.dispatch(s => ({
         ...s,
-        tasks: s.tasks.concat([{ id, title: `Grant ${who}: ${capability}`.slice(0, 72), col: 'backlog', agentId: null, description, criteria: [] }]),
+        tasks: s.tasks.concat([{
+          id, title: `Grant ${who}: ${capability}`.slice(0, 72), col: 'backlog', agentId: null, description, criteria: [],
+          requestedBy: durable?.id ?? conv?.durableAgentId,
+        }]),
       }))
       ctx.notify('escalate', `${who} requests a capability`, capability.slice(0, 140), agentId)
       return `Request filed for the user to review (board task ${id}). It is NOT granted yet — continue with what you can do meanwhile.`

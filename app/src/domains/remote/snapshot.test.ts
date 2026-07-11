@@ -25,7 +25,7 @@ describe('buildRemoteSnapshot', () => {
   it('splits sessions and chats, includes screens, task chats, and both approval kinds', () => {
     const chatLog: ChatMsg[] = [
       { id: 'm0', role: 'thinking', text: 'hmm', at: 0 },
-      { id: 'm1', role: 'assistant', text: 'run rm -rf dist?', at: 1, approval: 'pending' },
+      { id: 'm1', role: 'assistant', text: 'run rm -rf dist?', at: 1, approval: 'pending', suggestions: ['Yes', 'No'], feedback: 'up' },
       { id: 'm2', role: 'user', text: 'sure', at: 2 },
     ]
     const taskChat: TaskChatMsg[] = [{ id: 'tc1', role: 'watcher', text: 'tests green', at: 3 }]
@@ -62,6 +62,8 @@ describe('buildRemoteSnapshot', () => {
     expect(snap.chats.map(c => c.id)).toEqual(['a2'])
     expect(snap.chats[0].model).toBe('sonnet-4')
     expect(snap.chats[0].msgs.map(m => m.id)).toEqual(['m1', 'm2'])
+    // quick-reply chips and ratings ride along so the phone mirrors desktop
+    expect(snap.chats[0].msgs[0]).toMatchObject({ suggestions: ['Yes', 'No'], feedback: 'up' })
     expect(snap.chats[0]).toMatchObject({ durableAgentId: 'da1', cwd: '/chat/root', pinned: true, busy: true, lastAt: 2 })
 
     // archived durable agents are excluded

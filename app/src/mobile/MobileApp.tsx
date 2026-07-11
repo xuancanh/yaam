@@ -315,6 +315,38 @@ function ChatDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
         )}
         <Messages msgs={c.msgs} echoes={echoes} botWho={c.name} />
         {c.busy && <div className="sysline">· thinking… ·</div>}
+        {(() => {
+          // quick-reply chips + 👍/👎 on the latest reply, mirroring desktop
+          const last = [...c.msgs].reverse().find(m => m.role === 'assistant')
+          if (!last || c.busy || echoes.length) return null
+          return (
+            <>
+              {!!last.suggestions?.length && (
+                <div className="btnrow" style={{ flexWrap: 'wrap' }}>
+                  {last.suggestions.map(r => (
+                    <button key={r} className="btn ghost" onClick={() => { addEcho(r); void sendCommand({ kind: 'chat_reply', id: last.id, agent_id: c.id, text: r }) }}>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 14, justifyContent: 'flex-end', padding: '2px 14px 6px' }}>
+                <button
+                  style={{ background: 'none', border: 'none', fontSize: 15, opacity: last.feedback === 'up' ? 1 : 0.4, padding: 4 }}
+                  onClick={() => void sendCommand({ kind: 'chat_rate', id: last.id, agent_id: c.id, ok: true })}
+                >
+                  👍
+                </button>
+                <button
+                  style={{ background: 'none', border: 'none', fontSize: 15, opacity: last.feedback === 'down' ? 1 : 0.4, padding: 4 }}
+                  onClick={() => void sendCommand({ kind: 'chat_rate', id: last.id, agent_id: c.id, ok: false })}
+                >
+                  👎
+                </button>
+              </div>
+            </>
+          )
+        })()}
         {pending && (
           <div className="btnrow">
             <button className="btn ghost" onClick={() => void sendCommand({ kind: 'approve_chat', id: pending.id, agent_id: c.id, ok: false })}>Deny</button>

@@ -59,12 +59,13 @@ export function AgentHome({ agent, onEditProfile, onNewConversation, onOpenChat 
   onNewConversation: () => void
   onOpenChat: (chatId: string) => void
 }) {
-  const s = useConductorSelector(x => ({ agents: x.agents, crons: x.crons, activeWorkspace: x.activeWorkspace }), shallowEqual)
-  const { updateDurableAgent } = useActions()
+  const s = useConductorSelector(x => ({ agents: x.agents, crons: x.crons, tasks: x.tasks, activeWorkspace: x.activeWorkspace }), shallowEqual)
+  const { updateDurableAgent, archiveTask } = useActions()
   const [openApp, setOpenApp] = useState<AgentApp | null>(null)
   const conversations = homeConversations(s.agents, agent.id, s.activeWorkspace)
   const loops = s.crons.filter(c => c.durableAgentId === agent.id)
   const apps = agent.apps ?? []
+  const requests = s.tasks.filter(t => t.requestedBy === agent.id && !t.archived && t.col !== 'done')
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
@@ -106,6 +107,36 @@ export function AgentHome({ agent, onEditProfile, onNewConversation, onOpenChat 
             )}
           </div>
         </div>
+
+        {/* capability requests the agent filed and is waiting on */}
+        {requests.length > 0 && (
+          <div>
+            <SectionHead label={`WAITING ON YOU · ${requests.length}`} hint="capabilities this agent asked for (request_capability)" />
+            <div style={{ ...CARD, border: '1px solid rgba(245,196,81,.35)', padding: '4px 8px' }}>
+              {requests.map((t, i) => (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 8px', borderBottom: i < requests.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                  <span style={{ fontSize: 13, flexShrink: 0 }}>⚠</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.title}</div>
+                    {t.description && (
+                      <div style={{ fontSize: 11, color: 'var(--mut)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {t.description.split('\n').find(l => l.startsWith('Why: '))?.slice(5) ?? t.description.replace(/\s+/g, ' ').slice(0, 120)}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="open-btn"
+                    title="Clear this request (grant the capability in Settings first if you intend to — then tell the agent it's available)"
+                    style={{ padding: '4px 12px', fontSize: 11, flexShrink: 0 }}
+                    onClick={() => archiveTask(t.id)}
+                  >
+                    Resolve
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* self-built mini apps */}
         <div>

@@ -32,7 +32,13 @@ describe('remote command authorization', () => {
     ...state,
     agents: [
       { id: 'session', kind: 'real', workspaceId: 'active' },
-      { id: 'chat', kind: 'chat', workspaceId: 'active', chatLog: [{ id: 'approval', approval: 'pending' }] },
+      {
+        id: 'chat', kind: 'chat', workspaceId: 'active',
+        chatLog: [
+          { id: 'approval', approval: 'pending' },
+          { id: 'reply', role: 'assistant', suggestions: ['Yes, ship it'] },
+        ],
+      },
       { id: 'background', kind: 'real', workspaceId: 'background' },
       { id: 'archived', kind: 'real', workspaceId: 'active', archived: true },
     ],
@@ -51,6 +57,13 @@ describe('remote command authorization', () => {
     expect(remoteCommandAllowed(scoped, command('approve_chat', 'approval', 'chat'))).toBe(true)
     // any EXISTING workspace is switchable — that is the feature, not a leak
     expect(remoteCommandAllowed(scoped, command('workspace_switch', 'background'))).toBe(true)
+  })
+
+  it('quick replies must match a proposed suggestion; ratings need an assistant message', () => {
+    expect(remoteCommandAllowed(scoped, { kind: 'chat_reply', id: 'reply', agent_id: 'chat', text: 'Yes, ship it', ok: false })).toBe(true)
+    expect(remoteCommandAllowed(scoped, { kind: 'chat_reply', id: 'reply', agent_id: 'chat', text: 'injected text', ok: false })).toBe(false)
+    expect(remoteCommandAllowed(scoped, command('chat_rate', 'reply', 'chat'))).toBe(true)
+    expect(remoteCommandAllowed(scoped, command('chat_rate', 'approval', 'chat'))).toBe(false) // not an assistant msg
   })
 
   it('rejects background, archived, mismatched, and unknown targets', () => {

@@ -748,6 +748,9 @@ export interface BoardTask {
   /** archived tasks leave the board but stay recoverable; deletion only
    *  happens from the Archived viewer */
   archived?: boolean
+  /** durable agent that filed this as a capability request (request_capability)
+   *  — surfaced as a pending request on that agent's home page */
+  requestedBy?: string
 }
 
 export interface AddonTool {
