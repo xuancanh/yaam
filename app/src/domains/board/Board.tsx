@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { DragEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT } from '../../core/data'
@@ -475,12 +475,20 @@ const COLS: Array<{ id: BoardCol; label: string; dot: string }> = [
 
 /** Render the active workspace's draggable watcher-driven kanban board. */
 export function Board() {
-  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, dragOverCol: x.dragOverCol, newTaskOpen: x.newTaskOpen }), shallowEqual)
-  const { enterCol, dropTo, closeNewTask } = useActions()
+  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, dragOverCol: x.dragOverCol, newTaskOpen: x.newTaskOpen, focusTaskId: x.focusTaskId }), shallowEqual)
+  const { enterCol, dropTo, closeNewTask, clearBoardFocus } = useActions()
   const [creating, setCreating] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [reviewTaskId, setReviewTaskId] = useState<string | null>(null)
   const [archivedOpen, setArchivedOpen] = useState(false)
+  // one-shot handoff from addon focusTask / deep links: open the requested
+  // task's detail, then clear the flag so later visits start clean
+  const { focusTaskId } = s
+  useEffect(() => {
+    if (!focusTaskId) return
+    setOpenTaskId(focusTaskId)
+    clearBoardFocus()
+  }, [focusTaskId, clearBoardFocus])
   const byId = new Map(s.agents.map(a => [a.id, a]))
   const openTask = openTaskId ? s.tasks.find(t => t.id === openTaskId) : undefined
 

@@ -10,6 +10,12 @@ const workflows = (await api.storage.get('workflows')) || []
 const wf = workflows.find(w => w.id === wfId)
 if (!wf || !Array.isArray(wf.nodes) || !wf.nodes.length) return
 
+// paused workflows ignore their trigger (the Enable toggle in Settings)
+if (wf.enabled === false) {
+  await api.logEvent(`workflow "${wf.name}" ignored a cron trigger — workflow is paused`)
+  return
+}
+
 // one running machine per workflow — a slow pipeline must not stack on itself
 const runs = (await api.storage.get('runs')) || []
 if (runs.some(r => r.wfId === wf.id && r.status === 'running')) {
@@ -17,9 +23,12 @@ if (runs.some(r => r.wfId === wf.id && r.status === 'running')) {
   return
 }
 
+wf.runSeq = (wf.runSeq || 0) + 1
+await api.storage.set('workflows', workflows)
+
 const start = wf.nodes.find(n => n.id === wf.start) || wf.nodes[0]
 const run = {
-  id: 'run' + Date.now().toString(36),
+  id: 'run' + Date.now().toString(36), num: wf.runSeq,
   wfId: wf.id, wfName: wf.name, startedAt: Date.now(), status: 'running',
   trigger: 'cron', current: start.id, taskId: null,
   visits: {}, path: [],

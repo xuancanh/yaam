@@ -1,164 +1,277 @@
-<!DOCTYPE html><html><head><style>
-:root{--bg:#0A0B0F;--panel:#12151C;--panel2:#0D0F14;--line:#1a1e26;--line2:#23272F;--text:#E7E9F0;--mut:#8B93A1;--dim:#5a6170;--acc:#F5C451;--green:#3DDC97;--red:#FF5C5C;--amber:#FFB020}
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+:root{--bg:#0A0B0F;--bg2:#08090C;--panel:#12151C;--card:#0D0F14;--line:#1a1e26;--line2:#23272F;--line3:#2C313B;--text:#E7E9F0;--soft:#C7CCD6;--mut:#8B93A1;--mut2:#9AA3B2;--dim:#626B79;--acc:#F5C451;--accsoft:rgba(245,196,81,.13);--accbord:rgba(245,196,81,.4);--green:#3DDC97;--red:#FF5C5C;--redsoft:#FF7A7A;--amber:#FFB020;--purple:#A371F7;--gray:#6B7280}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',system-ui,sans-serif;display:flex;height:100vh;overflow:hidden;font-size:13px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;display:flex;flex-direction:column;height:100vh;overflow:hidden}
 .mono{font-family:'JetBrains Mono',monospace}
-h2{font-size:10px;letter-spacing:.6px;color:var(--dim);margin:0 0 8px;text-transform:uppercase;font-weight:600}
-button{background:transparent;border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:11.5px;padding:6px 13px;cursor:pointer;font-family:inherit;transition:border-color .12s,color .12s,background .12s}
-button:hover{border-color:var(--acc);color:var(--acc)}
-button:disabled{opacity:.4;cursor:default;pointer-events:none}
-button.primary{border-color:rgba(61,220,151,.45);color:var(--green)}
-button.primary:hover{background:rgba(61,220,151,.08)}
-button.danger:hover{border-color:var(--red);color:var(--red)}
-button.ghost{border-color:transparent;color:var(--mut);padding:6px 8px}
-button.ghost:hover{color:var(--acc)}
-button.linkdone{border-color:rgba(61,220,151,.4);color:var(--green);font-size:10.5px;padding:5px 9px}
-button.linkfail{border-color:rgba(255,92,92,.4);color:var(--red);font-size:10.5px;padding:5px 9px}
-input,textarea,select{background:var(--bg);border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:11.5px;padding:6px 9px;outline:none;font-family:inherit;width:100%}
-input:focus,textarea:focus{border-color:rgba(245,196,81,.45)}
+button{font-family:inherit;cursor:pointer}
+button:disabled{opacity:.45;cursor:default;pointer-events:none}
+input,textarea{font-family:inherit;outline:none}
+.btn{display:inline-flex;align-items:center;gap:7px;background:#171B23;border:1px solid var(--line3);border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;color:var(--text)}
+.btn:hover{border-color:#3a4150}
+.btn.quiet{background:transparent;color:var(--mut2)}
+.btn.quiet:hover{color:var(--text)}
+.btn.accent{background:var(--acc);border-color:var(--acc);color:#1a1400}
+.btn.accent:hover{filter:brightness(1.08)}
+.btn.danger{border-color:rgba(255,92,92,.4);color:var(--redsoft);background:transparent}
+.btn.danger:hover{background:rgba(255,92,92,.12)}
+#banner{display:none;background:rgba(255,92,92,.08);border-bottom:1px solid rgba(255,92,92,.3);color:var(--red);font-size:11.5px;padding:7px 16px;flex:none}
+.topbar{height:46px;flex:none;background:var(--card);border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:12px;padding:0 16px}
+.seg{display:flex;align-items:center;gap:3px;background:var(--panel);border:1px solid var(--line2);border-radius:9px;padding:3px}
+.seg button{border:none;background:transparent;color:var(--mut);font-size:12px;font-weight:600;padding:5px 14px;border-radius:7px}
+.seg button:hover{color:var(--soft)}
+.seg button.on{background:var(--accsoft);color:var(--acc)}
+.sw{width:38px;height:22px;border-radius:999px;border:1px solid var(--line3);background:var(--line3);position:relative;flex:none;transition:background .15s;padding:0}
+.sw i{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.sw.on{background:var(--green)}
+.sw.on i{left:18px}
+@keyframes cpulse{50%{opacity:.35}}
 
-#side{width:232px;border-right:1px solid var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:none}
-#side .brand{font-size:14px;font-weight:600;display:flex;gap:8px;align-items:center;padding:0 4px}
-#side .tag{font-size:10.5px;color:var(--dim);padding:0 4px;margin-bottom:12px}
-.wf{background:transparent;border:1px solid transparent;border-radius:9px;padding:9px 10px;cursor:pointer;display:flex;gap:8px;align-items:center}
-.wf:hover{background:var(--panel)}
-.wf.sel{background:var(--panel);border-color:var(--line2)}
-.wf .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:12.5px}
-.wf .meta{font-size:9.5px;color:var(--dim)}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--line2);flex:none}
-.dot.running{background:var(--amber);animation:pulse 1.1s ease-in-out infinite}
-.dot.done{background:var(--green)}.dot.failed{background:var(--red)}
-@keyframes pulse{50%{opacity:.35}}
-.cron-chip{font-family:'JetBrains Mono',monospace;font-size:8.5px;color:var(--acc);border:1px solid rgba(245,196,81,.3);border-radius:4px;padding:1px 4px}
+/* ---------- list page ---------- */
+#pgList{flex:1;display:none;flex-direction:column;min-height:0}
+#listBody{flex:1;overflow-y:auto;padding:20px}
+#stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+#stats .st{background:var(--card);border:1px solid var(--line2);border-radius:12px;padding:14px 16px}
+#stats .v{font-size:24px;font-weight:600}
+#stats .l{font-size:11.5px;color:var(--mut);margin-top:2px}
+#grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
+.wfcard{background:var(--card);border:1px solid var(--line2);border-radius:14px;padding:16px;cursor:pointer;position:relative}
+.wfcard:hover{border-color:var(--line3);background:#0f1218}
+.wfcard .ic{width:36px;height:36px;flex:none;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px}
+.wfcard .nm{font-size:15px;font-weight:600;line-height:1.3}
+.wfcard .trg{font-size:11px;color:var(--mut);font-family:'JetBrains Mono',monospace;margin-top:3px}
+.wfcard .ds{font-size:12.5px;color:var(--mut);line-height:1.5;margin-top:12px;min-height:20px}
+.wfcard .ft{display:flex;align-items:center;gap:8px;margin-top:13px;padding-top:13px;border-top:1px solid var(--line);flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;border-radius:6px;padding:3px 9px}
+.chip .d{width:6px;height:6px;border-radius:50%}
+.k{font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace}
+.dots{width:28px;height:28px;border-radius:7px;border:1px solid var(--line2);background:transparent;color:var(--mut);font-size:15px;line-height:1}
+.dots:hover{background:#171B23;color:var(--text)}
+.menu{display:none;position:absolute;top:46px;right:14px;width:160px;background:var(--panel);border:1px solid var(--line3);border-radius:10px;box-shadow:0 16px 44px rgba(0,0,0,.55);z-index:31;padding:5px}
+.menu.open{display:block}
+.menu button{width:100%;text-align:left;background:transparent;border:none;border-radius:7px;padding:8px 10px;color:var(--soft);font-size:12.5px}
+.menu button:hover{background:#171B23}
+.menu button.red{color:var(--redsoft)}
+#onboard{flex:1;display:flex;align-items:center;justify-content:center}
+#onboard .card{background:var(--card);border:1px solid var(--line2);border-radius:14px;padding:28px 32px;max-width:460px;text-align:center}
+#onboard h3{margin:0 0 8px;font-size:15px}
+#onboard p{color:var(--mut);font-size:12px;line-height:1.6;margin:0 0 16px}
 
-#main{flex:1;display:flex;flex-direction:column;min-width:0}
-#bar{display:flex;gap:8px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--line);flex:none;flex-wrap:wrap}
-#wfName{background:transparent;border:1px solid transparent;font-size:14.5px;font-weight:600;width:190px;padding:4px 8px}
-#wfName:hover,#wfName:focus{border-color:var(--line2)}
-.sep{width:1px;height:22px;background:var(--line);margin:0 2px}
-#linkHint{font-size:11px;display:none;align-items:center;gap:6px}
-
-#canvasWrap{flex:1;position:relative;overflow:auto;background-image:radial-gradient(circle,#161a22 1px,transparent 1px);background-size:22px 22px}
-svg{display:block}
-.node{cursor:grab}
-.node rect.body{fill:var(--panel);stroke:var(--line2);stroke-width:1.2}
-.node.sel rect.body{stroke:var(--acc);filter:drop-shadow(0 0 6px rgba(245,196,81,.25))}
-.node.linksrc rect.body{stroke:var(--acc);stroke-dasharray:4 3}
-.node rect.stripe{fill:var(--line2)}
-.node.running rect.stripe{fill:var(--amber)}
-.node.done rect.stripe{fill:var(--green)}
-.node.failed rect.stripe{fill:var(--red)}
-.node text{fill:var(--text);font-size:12px;font-weight:600;pointer-events:none;font-family:'IBM Plex Sans',system-ui}
-.node .sub{fill:var(--mut);font-size:9.5px;font-weight:400}
-.node .startbadge{fill:var(--acc);font-size:9px;font-weight:700}
-.edge{stroke-width:1.7;fill:none;cursor:pointer}
-.edge.done{stroke:rgba(61,220,151,.65);marker-end:url(#arrG)}
-.edge.fail{stroke:rgba(255,92,92,.6);stroke-dasharray:6 4;marker-end:url(#arrR)}
-.edge:hover{stroke-width:2.6}
-#ghost{stroke-width:1.4;stroke-dasharray:5 4;fill:none;pointer-events:none}
-
-#editor{position:absolute;right:14px;top:14px;width:268px;background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:14px;display:none;flex-direction:column;gap:7px;box-shadow:0 14px 34px rgba(0,0,0,.55)}
-#editor label{font-size:9.5px;color:var(--dim);letter-spacing:.4px;text-transform:uppercase;font-weight:600}
+/* ---------- detail page ---------- */
+#pgDetail{flex:1;display:none;flex-direction:column;min-height:0}
+.backbtn{width:30px;height:30px;border-radius:8px;border:1px solid var(--line2);background:transparent;color:var(--mut2);display:flex;align-items:center;justify-content:center;flex:none}
+.backbtn:hover{background:#171B23;color:var(--text)}
+#wfPick{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line2);border-radius:9px;padding:5px 12px;cursor:pointer;position:relative}
+#wfPick:hover{border-color:#3a4150}
+#wfPick .nm{font-size:13px;font-weight:600;line-height:1.1}
+#wfPick .tg{font-size:10px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-top:1px}
+#wfMenu{display:none;position:absolute;top:44px;left:0;width:280px;background:var(--panel);border:1px solid var(--line3);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);z-index:30;padding:6px}
+#wfMenu.open{display:block}
+#wfMenu button{width:100%;text-align:left;display:flex;align-items:center;gap:10px;background:transparent;border:none;border-radius:8px;padding:9px 11px}
+#wfMenu button:hover{background:#171B23}
+#wfMenu .d{width:8px;height:8px;border-radius:50%;flex:none}
+#replayPill{display:none;align-items:center;gap:9px;background:var(--accsoft);border:1px solid var(--accbord);border-radius:8px;padding:5px 11px}
+#replayPill span{font-size:11.5px;font-weight:600;color:var(--acc)}
+#replayPill button{background:transparent;border:none;color:var(--mut2);font-size:11.5px;font-weight:600;text-decoration:underline;padding:0}
+#hint{flex:none;font-size:10px;color:var(--dim);padding:5px 16px;border-bottom:1px solid var(--line)}
+#hint b.g{color:var(--green)}#hint b.r{color:var(--red)}
+kbd{font-family:'JetBrains Mono',monospace;font-size:9px;border:1px solid var(--line2);border-radius:4px;padding:0 4px;color:var(--mut)}
+#detailBody{flex:1;display:flex;min-height:0}
+#canvasWrap{flex:1;min-width:0;overflow:auto;position:relative;background-color:var(--bg2);background-image:radial-gradient(circle,#161a22 1px,transparent 1px);background-size:22px 22px}
+#canvas{position:relative}
+#edgeSvg{position:absolute;top:0;left:0;overflow:visible;pointer-events:none}
+#edgeSvg path.e{pointer-events:stroke;cursor:pointer}
+#edgeSvg path.e:hover{stroke-width:3}
+.elbl{position:absolute;transform:translateX(-50%);z-index:1;font-size:10px;font-weight:600;border:1px solid;border-radius:6px;padding:2px 8px;white-space:nowrap;pointer-events:none}
+.node{position:absolute;width:196px;background:var(--card);border:1.5px solid var(--gray);border-radius:12px;padding:11px 12px;user-select:none;z-index:2;cursor:grab}
+.node .t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .s{font-size:10px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .st{display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;margin-top:9px}
+.node .st .d{width:7px;height:7px;border-radius:50%}
+.node .tag{font-size:8.5px;font-weight:700;letter-spacing:.5px;color:#7FD1FF;flex:none}
+.node .startb{font-size:8.5px;font-weight:700;letter-spacing:.5px;color:var(--acc)}
+.node.linksrc{border-style:dashed}
+#inspector{position:absolute;right:14px;top:14px;width:280px;background:var(--panel);border:1px solid var(--line3);border-radius:12px;padding:14px;display:none;flex-direction:column;gap:7px;box-shadow:0 14px 34px rgba(0,0,0,.55);z-index:5;max-height:calc(100% - 28px);overflow-y:auto}
+#inspector label{font-size:9.5px;color:var(--dim);letter-spacing:.4px;text-transform:uppercase;font-weight:600}
+#inspector input,#inspector textarea{width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:11.5px;padding:6px 9px}
+#inspector input:focus,#inspector textarea:focus{border-color:var(--accbord)}
 .chk{display:flex;gap:7px;align-items:center;font-size:11.5px;color:var(--mut);cursor:pointer}
 .chk input{width:auto;accent-color:var(--acc)}
 .trow{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--mut)}
 .trow b{font-size:10.5px}
-
-#bottom{border-top:1px solid var(--line);padding:12px 16px;max-height:240px;overflow-y:auto;flex:none}
-.run{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:6px;cursor:pointer}
-.run .head{display:flex;gap:10px;align-items:center}
-.run .st{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;border-radius:5px;padding:1px 8px;border:1px solid}
-.st.running{color:var(--amber);border-color:rgba(255,176,32,.4)}
-.st.done{color:var(--green);border-color:rgba(61,220,151,.4)}
-.st.failed{color:var(--red);border-color:rgba(255,92,92,.4)}
-.run .meta{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim)}
-.run .path{display:none;margin-top:8px;border-top:1px solid var(--line);padding-top:7px;flex-wrap:wrap;gap:4px;align-items:center}
-.run.open .path{display:flex}
-.step{display:inline-flex;gap:6px;align-items:center;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;padding:3px 8px;font-size:10.5px}
-.via{font-size:10px;color:var(--dim)}
-.via.done{color:var(--green)}.via.failed{color:var(--red)}
-.empty{color:var(--dim);font-size:12px;padding:8px 2px}
-#banner{display:none;background:rgba(255,92,92,.08);border-bottom:1px solid rgba(255,92,92,.3);color:var(--red);font-size:11.5px;padding:7px 16px}
-#onboard{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
-#onboard .card{background:var(--panel);border:1px solid var(--line2);border-radius:14px;padding:28px 32px;max-width:440px;text-align:center}
-#onboard h3{margin:0 0 8px;font-size:15px}
-#onboard p{color:var(--mut);font-size:12px;line-height:1.6;margin:0 0 16px}
-.hintline{font-size:10px;color:var(--dim);padding:5px 16px;border-bottom:1px solid var(--line)}
-.hintline b.g{color:var(--green)}.hintline b.r{color:var(--red)}
-kbd{font-family:'JetBrains Mono',monospace;font-size:9px;border:1px solid var(--line2);border-radius:4px;padding:0 4px;color:var(--mut)}
+.linkbtn{border:1px solid;border-radius:7px;background:transparent;font-size:10.5px;padding:4px 9px;font-weight:600}
+#rail{width:290px;flex:none;background:var(--card);border-left:1px solid var(--line2);display:none;flex-direction:column;min-height:0}
+#rail .hd{padding:13px 16px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:8px}
+#rail .hd b{font-size:13.5px}
+#rail .hd span{font-size:11px;color:var(--dim)}
+#runList{flex:1;overflow-y:auto;padding:11px;display:flex;flex-direction:column;gap:8px}
+.runcard{width:100%;text-align:left;display:flex;gap:11px;background:transparent;border:1px solid var(--line2);border-radius:10px;padding:11px 12px}
+.runcard:hover{border-color:#3a4150}
+.runcard.on{background:var(--accsoft);border-color:var(--accbord)}
+.runcard .d{width:8px;height:8px;border-radius:50%;margin-top:4px;flex:none}
+.runcard .n{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600}
+.runcard .sc{font-size:10.5px;font-weight:600;border-radius:5px;padding:1px 7px}
+.runcard .tr{font-size:11.5px;color:var(--mut2);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.runcard .wh{font-size:10.5px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-top:2px}
+#pgSettingsTab{flex:1;overflow-y:auto;padding:22px;display:none}
+#pgSettingsTab .wrap{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+.scard{background:var(--card);border:1px solid var(--line2);border-radius:12px;overflow:hidden}
+.srow{display:flex;align-items:center;gap:14px;padding:13px 15px;border-bottom:1px solid var(--line)}
+.srow:last-child{border-bottom:none}
+.srow .g{flex:1;min-width:0}
+.srow .t{font-size:13px;font-weight:600}
+.srow .d{font-size:11.5px;color:var(--mut);margin-top:2px;line-height:1.45}
+.shead{font-size:14px;font-weight:600;margin-bottom:10px}
+.opt{border:1px solid var(--line2);background:var(--panel);color:var(--mut2);font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:7px}
+.opt:hover{border-color:#3a4150}
+.opt.on{background:var(--accsoft);color:var(--acc);border-color:var(--accbord)}
+.danger-h{font-size:11px;font-weight:600;letter-spacing:.4px;color:var(--redsoft);font-family:'JetBrains Mono',monospace;margin-bottom:9px}
+.empty{color:var(--dim);font-size:12px;padding:8px 4px}
+textarea.desc{width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:12px;padding:8px 10px;resize:vertical}
+textarea.desc:focus{border-color:var(--accbord)}
+input.cronin{background:var(--bg);border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:11.5px;padding:6px 9px;width:110px;font-family:'JetBrains Mono',monospace}
 </style></head><body>
-<div id="side">
-  <div class="brand">⛓ Workflows</div>
-  <div class="tag">state machines over board tasks</div>
-  <h2 style="padding:0 4px">Machines</h2>
-  <div id="wfList"></div>
-  <button class="ghost" style="text-align:left" onclick="addWorkflow()">＋ New workflow</button>
-</div>
-<div id="main">
-  <div id="banner"></div>
-  <div id="bar">
-    <input id="wfName" onchange="renameWf(this.value)" spellcheck="false">
-    <button class="primary" id="runBtn" onclick="runNow()">▶ Run now</button>
-    <button onclick="addNode()">＋ Step</button>
-    <span id="linkHint"></span>
+<div id="banner"></div>
+
+<!-- ============ LIST PAGE ============ -->
+<div id="pgList">
+  <div class="topbar">
+    <span style="font-weight:600;font-size:14px">Workflows</span>
+    <span style="font-size:11.5px;color:var(--dim)">state machines that chain one-shot agents over board tasks</span>
     <span style="flex:1"></span>
-    <select id="cronSel" onchange="cronPreset()" style="width:150px">
-      <option value="">no cron trigger</option>
-      <option value="0 * * * *">hourly, on the hour</option>
-      <option value="0 6 * * *">daily · 06:00</option>
-      <option value="0 6 * * 1">Mondays · 06:00</option>
-      <option value="custom">custom…</option>
-    </select>
-    <input id="cron" class="mono" placeholder="*/30 * * * *" style="width:110px;display:none">
-    <button id="cronBtn" onclick="toggleCron()">Arm</button>
-    <div class="sep"></div>
-    <button class="danger" id="delWf" onclick="removeWorkflow()">Delete</button>
+    <button class="btn accent" onclick="newWorkflow()">＋ New workflow</button>
   </div>
-  <div class="hintline">one active step per run · select a step, then <b class="g">on done →</b> / <b class="r">on fail →</b> and click the target · loops allowed (visit-capped) · no transition = the machine halts there · <kbd>⌫</kbd> deletes · <kbd>Esc</kbd> cancels linking</div>
-  <div id="canvasWrap">
-    <svg id="svg" width="1600" height="900">
-      <defs>
-        <marker id="arrG" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3DDC97"/></marker>
-        <marker id="arrR" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#FF5C5C"/></marker>
-      </defs>
-      <g id="edges"></g><path id="ghost" d=""/><g id="nodes"></g>
-    </svg>
-    <div id="editor">
-      <label>Step title</label><input id="eTitle">
-      <label>What the agent should do</label><textarea id="eDesc" rows="4" placeholder="clear instructions for a one-shot agent…"></textarea>
-      <label>Acceptance criteria — one per line</label><textarea id="eCrit" rows="3" placeholder="tests pass&#10;docs updated"></textarea>
-      <label>Working directory</label><input id="eCwd" placeholder="(workspace default)">
-      <div style="display:flex;gap:8px">
-        <div style="flex:1"><label>Max visits / run</label><input id="eMax" type="number" min="1" max="9" placeholder="3"></div>
-        <div style="flex:1.4;display:flex;align-items:flex-end"><div class="chk"><input type="checkbox" id="eIso"><span>worktree ⑂</span></div></div>
-      </div>
-      <label style="margin-top:3px">Transitions</label>
-      <div class="trow"><b style="color:var(--green)">on done</b><span id="tDone" style="flex:1">— halt (success)</span><button class="linkdone" onclick="linkFrom('done')">set →</button><button class="ghost" onclick="clearLink('onDone')">✕</button></div>
-      <div class="trow"><b style="color:var(--red)">on fail</b><span id="tFail" style="flex:1">— halt (failure)</span><button class="linkfail" onclick="linkFrom('fail')">set →</button><button class="ghost" onclick="clearLink('onFail')">✕</button></div>
-      <div style="display:flex;gap:6px;margin-top:5px">
-        <button class="primary" style="flex:1" onclick="saveNode()">Save</button>
-        <button onclick="setStart()" title="the machine enters here">▶ start</button>
-        <button class="danger" onclick="deleteNode()">✕</button>
-      </div>
-    </div>
-    <div id="onboard" style="display:none">
-      <div class="card">
-        <h3>⛓ Workflows are state machines</h3>
-        <p>Each step is a board-task spec. When its task finishes, the machine takes the <b style="color:var(--green)">on&nbsp;done</b> or
-        <b style="color:var(--red)">on&nbsp;fail</b> transition — so you can branch into remediation steps, loop back for retries
-        (visit-capped), and halt wherever you choose. Trigger runs by hand or on a cron.</p>
-        <button class="primary" onclick="seedDemo()">Create an example machine</button>
-        <button onclick="addWorkflow()">Start empty</button>
-      </div>
-    </div>
+  <div id="listBody">
+    <div id="stats"></div>
+    <div id="grid"></div>
   </div>
-  <div id="bottom">
-    <h2>Run history <span id="histCount" class="mono" style="color:var(--dim);text-transform:none;letter-spacing:0"></span></h2>
-    <div id="runList"></div>
+  <div id="onboard" style="display:none">
+    <div class="card">
+      <h3>⛓ Workflows are state machines</h3>
+      <p>Each step is a board-task spec. When its task finishes, the machine takes the <b style="color:var(--green)">on&nbsp;done</b> or
+      <b style="color:var(--red)">on&nbsp;fail</b> transition — branch into remediation steps, loop back for visit-capped retries,
+      and halt wherever you choose. Trigger runs by hand or on a cron.</p>
+      <button class="btn accent" onclick="seedDemo()">Create an example machine</button>
+      <button class="btn" onclick="newWorkflow()">Start empty</button>
+    </div>
   </div>
 </div>
+
+<!-- ============ DETAIL PAGE ============ -->
+<div id="pgDetail">
+  <div class="topbar">
+    <button class="backbtn" onclick="backToList()" title="All workflows">‹</button>
+    <div id="wfPick" onclick="toggleWfMenu(event)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F5C451" stroke-width="1.7" stroke-linecap="round"><circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 6H15a3 3 0 013 3v6.5"/></svg>
+      <div><div class="nm" id="pickName"></div><div class="tg" id="pickTrig"></div></div>
+      <span style="color:var(--dim);font-size:11px">▾</span>
+      <div id="wfMenu"></div>
+    </div>
+    <div id="replayPill"><span style="width:6px;height:6px;border-radius:50%;background:var(--acc)"></span><span id="replayLbl"></span><button onclick="backToLive()">Back to live</button></div>
+    <span style="flex:1"></span>
+    <div class="seg" id="tabSeg">
+      <button data-tab="editor" onclick="setTab('editor')">Editor</button>
+      <button data-tab="history" onclick="setTab('history')">History</button>
+      <button data-tab="settings" onclick="setTab('settings')">Settings</button>
+    </div>
+    <button class="btn accent" id="runBtn" onclick="runNow()">▶ Run</button>
+  </div>
+  <div id="hint">one active step per run · select a step, then <b class="g">on done →</b> / <b class="r">on fail →</b> and click the target · loops allowed (visit-capped) · no transition = the machine halts there · click an edge to remove it · <kbd>⌫</kbd> deletes · <kbd>Esc</kbd> cancels linking</div>
+
+  <div id="detailBody">
+    <div id="canvasWrap">
+      <div id="canvas">
+        <svg id="edgeSvg">
+          <defs>
+            <marker id="arrG" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3DDC97"/></marker>
+            <marker id="arrR" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#FF5C5C"/></marker>
+            <marker id="arrDim" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2a2f39"/></marker>
+          </defs>
+          <g id="edges"></g><path id="ghost" fill="none" stroke-width="1.4" stroke-dasharray="5 4"/>
+        </svg>
+        <div id="nodes"></div>
+      </div>
+      <div id="inspector">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="tag" style="font-size:8.5px;font-weight:700;letter-spacing:.5px;color:#7FD1FF">STEP</span>
+          <span id="iStatus" class="chip"></span>
+          <span style="flex:1"></span>
+          <button class="btn quiet" style="padding:2px 7px" onclick="closeInspector()">✕</button>
+        </div>
+        <label>Step title</label><input id="eTitle">
+        <label>What the agent should do</label><textarea id="eDesc" rows="4" placeholder="clear instructions for a one-shot agent…"></textarea>
+        <label>Acceptance criteria — one per line</label><textarea id="eCrit" rows="3" placeholder="tests pass&#10;docs updated"></textarea>
+        <label>Working directory</label><input id="eCwd" placeholder="(workspace default)">
+        <div style="display:flex;gap:8px">
+          <div style="flex:1"><label>Max visits / run</label><input id="eMax" type="number" min="1" max="9" placeholder="3"></div>
+          <div style="flex:1.4;display:flex;align-items:flex-end"><div class="chk"><input type="checkbox" id="eIso"><span>worktree ⑂</span></div></div>
+        </div>
+        <label style="margin-top:3px">Transitions</label>
+        <div class="trow"><b style="color:var(--green)">on done</b><span id="tDone" style="flex:1">— halt (success)</span><button class="linkbtn" style="color:var(--green);border-color:rgba(61,220,151,.4)" onclick="linkFrom('done')">set →</button><button class="btn quiet" style="padding:3px 7px" onclick="clearLink('onDone')">✕</button></div>
+        <div class="trow"><b style="color:var(--red)">on fail</b><span id="tFail" style="flex:1">— halt (failure)</span><button class="linkbtn" style="color:var(--red);border-color:rgba(255,92,92,.4)" onclick="linkFrom('fail')">set →</button><button class="btn quiet" style="padding:3px 7px" onclick="clearLink('onFail')">✕</button></div>
+        <div style="display:flex;gap:6px;margin-top:5px">
+          <button class="btn accent" style="flex:1;justify-content:center" onclick="saveNode()">Save</button>
+          <button class="btn" onclick="setStart()" title="the machine enters here">▶ start</button>
+          <button class="btn" onclick="addStepAfter()" title="add a step after this one (linked on done)">＋ after</button>
+          <button class="btn danger" onclick="deleteNode()">✕</button>
+        </div>
+      </div>
+    </div>
+    <div id="rail">
+      <div class="hd">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B93A1" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5 6 5-12 2.5 6h4"/></svg>
+        <b>Run history</b><span>click to replay</span>
+      </div>
+      <div id="runList"></div>
+    </div>
+  </div>
+
+  <div id="pgSettingsTab">
+    <div class="wrap">
+      <div class="scard">
+        <div class="srow">
+          <div class="g"><div class="t">Enable this workflow</div><div class="d">When paused, the cron trigger is ignored and no scheduled runs start. You can still hit ▶ Run yourself.</div></div>
+          <button class="sw" id="enSw" onclick="toggleEnabled()"><i></i></button>
+        </div>
+      </div>
+      <div>
+        <div class="shead">Trigger</div>
+        <div class="scard">
+          <div class="srow">
+            <div class="g"><div class="t">Cron trigger</div><div class="d">Start a run automatically on a schedule. One machine per workflow — a firing is skipped while a run is still going.</div></div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;align-items:center" id="cronOpts"></div>
+          </div>
+          <div class="srow" id="cronCustomRow" style="display:none">
+            <div class="g"><div class="t">Custom expression</div><div class="d">Five fields: minute hour day month weekday.</div></div>
+            <input class="cronin" id="cronCustom" placeholder="*/30 * * * *">
+          </div>
+          <div class="srow">
+            <div class="g"><div class="t" id="armState">Not armed</div><div class="d" id="armDetail"></div></div>
+            <button class="btn" id="armBtn" onclick="toggleCron()">Arm</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="shead">Description</div>
+        <div class="scard"><div style="padding:12px 15px">
+          <textarea class="desc" id="wfDesc" rows="2" placeholder="What this workflow does — shown on its card in the list."></textarea>
+        </div></div>
+      </div>
+      <div>
+        <div class="danger-h">DANGER ZONE</div>
+        <div class="scard" style="border-color:rgba(255,92,92,.25)">
+          <div class="srow">
+            <div class="g"><div class="t">Delete workflow</div><div class="d">Permanently remove this workflow. Its run history entries are removed too.</div></div>
+            <button class="btn danger" id="delBtn" onclick="removeWorkflow()">Delete workflow</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 'use strict'
+// ---------------- host bridge ----------------
 let seq = 0
 const pending = {}
 function call(method, ...args){
@@ -186,22 +299,31 @@ function banner(msg){
 const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
 const ago = t => { const s = (Date.now() - t) / 1000; return s < 90 ? 'just now' : s < 3600 ? Math.round(s / 60) + 'm ago' : s < 86400 ? Math.round(s / 3600) + 'h ago' : Math.round(s / 86400) + 'd ago' }
 
-let workflows = [], runs = [], selWf = null, selNode = null, openRun = null
-let linkSrc = null, linkKind = null // linking a transition: source node + 'done'|'fail'
-const wf = () => workflows.find(w => w.id === selWf)
+// ---------------- state ----------------
+let workflows = [], runs = []
+const ui = { page: 'list', tab: 'editor', wf: null, node: null, run: 'live', menu: null, wfMenu: false }
+let linkSrc = null, linkKind = null
+const NW = 196, NH = 64
+const wf = () => workflows.find(w => w.id === ui.wf)
 const nodeOf = id => { const w = wf(); return w && w.nodes.find(n => n.id === id) }
+const enabled = w => w.enabled !== false
 const save = () => call('storage.set', 'workflows', workflows).catch(e => banner(e.message))
+const STC = { done: ['#3DDC97', 'Done'], running: ['#F5C451', 'Running'], failed: ['#FF5C5C', 'Failed'], idle: ['#6B7280', 'Idle'], skipped: ['#3a4150', 'Skipped'] }
+const RSC = { running: ['#F5C451', 'Running'], done: ['#3DDC97', 'Success'], failed: ['#FF5C5C', 'Failed'] }
 
 async function load(){
-  try { workflows = (await call('storage.get', 'workflows')) || [] } catch (e) { banner(e.message); workflows = [] }
-  if (!selWf && workflows.length) selWf = workflows[0].id
+  try {
+    workflows = (await call('storage.get', 'workflows')) || []
+    runs = (await call('storage.get', 'runs')) || []
+  } catch (e) { banner(e.message) }
+  if (!ui.wf && workflows.length) ui.wf = workflows[0].id
   render()
-  refreshRuns()
 }
 
-// live step status: from this workflow's newest run (fresh for 2 min after it ends)
+// ---------------- run status maps ----------------
 function liveStatus(){
-  const r = runs.find(x => x.wfId === selWf)
+  // live step stripes come from this workflow's newest run (fresh 2 min after end)
+  const r = runs.find(x => x.wfId === ui.wf)
   const map = {}
   if (r && (r.status === 'running' || Date.now() - (r.finishedAt || r.startedAt) < 120000)) {
     for (const p of r.path || []) map[p.nodeId] = p.outcome
@@ -209,112 +331,233 @@ function liveStatus(){
   }
   return map
 }
+function replayStatus(run){
+  const map = {}
+  for (const p of run.path || []) map[p.nodeId] = p.outcome
+  if (run.status === 'running' && run.current) map[run.current] = 'running'
+  return map
+}
+const statusMap = () => {
+  if (ui.run === 'live') return { map: liveStatus(), replay: null }
+  const r = runs.find(x => x.id === ui.run)
+  return r ? { map: replayStatus(r), replay: r } : { map: liveStatus(), replay: null }
+}
 
+// ---------------- render ----------------
 function render(){
+  document.getElementById('pgList').style.display = ui.page === 'list' ? 'flex' : 'none'
+  document.getElementById('pgDetail').style.display = ui.page === 'detail' ? 'flex' : 'none'
+  if (ui.page === 'list') renderList()
+  else renderDetail()
+}
+
+function renderList(){
+  const empty = !workflows.length
+  document.getElementById('onboard').style.display = empty ? 'flex' : 'none'
+  document.getElementById('listBody').style.display = empty ? 'none' : 'block'
+  if (empty) return
+  const running = w => runs.some(r => r.wfId === w.id && r.status === 'running')
+  const stats = [
+    [workflows.length, 'Workflows', 'var(--text)'],
+    [workflows.filter(enabled).length, 'Active', 'var(--green)'],
+    [runs.length, 'Recent runs', 'var(--text)'],
+    [workflows.filter(running).length, 'Running now', 'var(--acc)'],
+  ]
+  document.getElementById('stats').innerHTML = stats.map(s =>
+    '<div class="st"><div class="v" style="color:' + s[2] + '">' + s[0] + '</div><div class="l">' + s[1] + '</div></div>').join('')
+  const grid = document.getElementById('grid')
+  grid.innerHTML = ''
+  for (const w of workflows) {
+    const mine = runs.filter(r => r.wfId === w.id)
+    const done = mine.filter(r => r.status === 'done').length
+    const isRun = running(w)
+    const live = !enabled(w) ? ['var(--gray)', 'Paused'] : isRun ? ['var(--acc)', 'Running'] : ['var(--green)', 'Active']
+    const last = mine[0]
+    const card = document.createElement('div')
+    card.className = 'wfcard'
+    card.onclick = () => openWorkflow(w.id)
+    const trig = w.cronOn ? 'On cron ' + esc(w.cron) : 'Manual only'
+    card.innerHTML = '<div style="display:flex;align-items:flex-start;gap:11px">'
+      + '<span class="ic" style="background:' + (w.cronOn ? 'rgba(127,209,255,.15)' : 'rgba(61,220,151,.15)') + '">' + (w.cronOn ? '🕒' : '▶') + '</span>'
+      + '<div style="flex:1;min-width:0"><div class="nm">' + esc(w.name) + '</div><div class="trg">' + trig + '</div></div></div>'
+      + '<div class="ds">' + (esc(w.desc) || 'No description yet — add one in the workflow’s Settings tab.') + '</div>'
+      + '<div class="ft"><span class="chip" style="color:' + live[0] + ';background:color-mix(in srgb,' + live[0] + ' 14%,transparent)"><span class="d" style="background:' + live[0] + '"></span>' + live[1] + '</span>'
+      + '<span class="k">' + w.nodes.length + ' steps</span>'
+      + '<span class="k">' + (mine.length ? Math.round(done / mine.length * 100) + '% pass' : '—') + '</span>'
+      + '<span style="flex:1"></span>'
+      + '<span class="k">' + (last ? (last.status === 'running' ? 'running now' : 'last run ' + ago(last.startedAt)) : 'no runs yet') + '</span></div>'
+    // controls row (toggle + menu) — separate from the open-card click
+    const ctl = document.createElement('div')
+    ctl.style.cssText = 'position:absolute;top:14px;right:14px;display:flex;align-items:center;gap:6px'
+    ctl.onclick = ev => ev.stopPropagation()
+    const sw = document.createElement('button')
+    sw.className = 'sw' + (enabled(w) ? ' on' : ''); sw.innerHTML = '<i></i>'
+    sw.title = 'Enable / pause the cron trigger'
+    sw.onclick = () => toggleWfEnabled(w.id)
+    const dots = document.createElement('button')
+    dots.className = 'dots'; dots.textContent = '⋮'
+    dots.onclick = ev => { ev.stopPropagation(); ui.menu = ui.menu === w.id ? null : w.id; renderList() }
+    ctl.appendChild(sw); ctl.appendChild(dots)
+    card.appendChild(ctl)
+    const menu = document.createElement('div')
+    menu.className = 'menu' + (ui.menu === w.id ? ' open' : '')
+    menu.onclick = ev => ev.stopPropagation()
+    const mk = (label, fn, red) => { const b = document.createElement('button'); if (red) b.className = 'red'; b.textContent = label; b.onclick = fn; return b }
+    menu.appendChild(mk('Open', () => openWorkflow(w.id)))
+    menu.appendChild(mk('Duplicate', () => duplicateWorkflow(w.id)))
+    menu.appendChild(mk(delArmed === w.id ? 'Sure? click again' : 'Delete', () => deleteWorkflow(w.id), true))
+    card.appendChild(menu)
+    grid.appendChild(card)
+  }
+}
+
+function renderDetail(){
   const w = wf()
-  const list = document.getElementById('wfList')
-  list.innerHTML = ''
-  for (const x of workflows) {
-    const running = runs.some(r => r.wfId === x.id && r.status === 'running')
-    const el = document.createElement('div')
-    el.className = 'wf' + (x.id === selWf ? ' sel' : '')
-    el.innerHTML = `<span class="dot${running ? ' running' : ''}"></span><span class="nm">${esc(x.name)}</span>`
-      + (x.cronOn ? `<span class="cron-chip">${esc(x.cron)}</span>` : '')
-      + `<span class="meta">${x.nodes.length}</span>`
-    el.onclick = () => { selWf = x.id; selNode = null; cancelLink(); render(); refreshRuns() }
-    list.appendChild(el)
-  }
-  document.getElementById('onboard').style.display = workflows.length ? 'none' : 'flex'
-  document.getElementById('bar').style.visibility = w ? 'visible' : 'hidden'
-  if (w) {
-    document.getElementById('wfName').value = w.name
-    const sel = document.getElementById('cronSel')
-    const preset = [...sel.options].some(o => o.value === w.cron) ? w.cron : (w.cron ? 'custom' : '')
-    sel.value = preset
-    const cronIn = document.getElementById('cron')
-    cronIn.style.display = preset === 'custom' ? '' : 'none'
-    cronIn.value = w.cron || ''
-    const btn = document.getElementById('cronBtn')
-    btn.textContent = w.cronOn ? '✓ Armed' : 'Arm'
-    btn.className = w.cronOn ? 'primary' : ''
-    const running = runs.some(r => r.wfId === w.id && r.status === 'running')
-    const runBtn = document.getElementById('runBtn')
-    runBtn.disabled = running || !w.nodes.length
-    runBtn.textContent = running ? '● Running…' : '▶ Run now'
-  }
-  const hint = document.getElementById('linkHint')
-  hint.style.display = linkSrc ? 'flex' : 'none'
+  if (!w) { ui.page = 'list'; render(); return }
+  document.getElementById('pickName').textContent = w.name
+  document.getElementById('pickTrig').textContent = w.cronOn ? 'On cron ' + w.cron : 'Manual only'
+  for (const b of document.querySelectorAll('#tabSeg button')) b.className = b.dataset.tab === ui.tab ? 'on' : ''
+  const { replay } = statusMap()
+  const pill = document.getElementById('replayPill')
+  pill.style.display = replay ? 'flex' : 'none'
+  if (replay) document.getElementById('replayLbl').textContent = 'Replaying run ' + runLabel(replay) + ' · ' + ago(replay.startedAt)
+  document.getElementById('hint').style.display = ui.tab === 'editor' && !linkSrc ? '' : (linkSrc ? '' : 'none')
   if (linkSrc) {
-    hint.style.color = linkKind === 'done' ? 'var(--green)' : 'var(--red)'
-    hint.innerHTML = `◈ click the <b>on ${linkKind}</b> target — <kbd>Esc</kbd> cancels`
+    const h = document.getElementById('hint')
+    h.style.display = ''
+    h.innerHTML = '◈ click the <b class="' + (linkKind === 'done' ? 'g' : 'r') + '">on ' + linkKind + '</b> target — <kbd>Esc</kbd> cancels'
+  } else if (ui.tab === 'editor') {
+    document.getElementById('hint').innerHTML = 'one active step per run · select a step, then <b class="g">on done →</b> / <b class="r">on fail →</b> and click the target · loops allowed (visit-capped) · no transition = the machine halts there · click an edge to remove it · <kbd>⌫</kbd> deletes · <kbd>Esc</kbd> cancels linking'
   }
-  drawGraph()
-  drawEditor()
+  const isCanvas = ui.tab !== 'settings'
+  document.getElementById('detailBody').style.display = isCanvas ? 'flex' : 'none'
+  document.getElementById('pgSettingsTab').style.display = isCanvas ? 'none' : 'block'
+  document.getElementById('rail').style.display = ui.tab === 'history' ? 'flex' : 'none'
+  const running = runs.some(r => r.wfId === w.id && r.status === 'running')
+  const runBtn = document.getElementById('runBtn')
+  runBtn.disabled = running || !w.nodes.length
+  runBtn.textContent = running ? '● Running…' : '▶ Run'
+  const menu = document.getElementById('wfMenu')
+  menu.className = ui.wfMenu ? 'open' : ''
+  if (ui.wfMenu) {
+    menu.innerHTML = ''
+    for (const x of workflows) {
+      const isRun = runs.some(r => r.wfId === x.id && r.status === 'running')
+      const b = document.createElement('button')
+      b.innerHTML = '<span class="d" style="background:' + (isRun ? 'var(--acc)' : enabled(x) ? 'var(--green)' : 'var(--gray)') + '"></span>'
+        + '<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600">' + esc(x.name) + '</div>'
+        + '<div style="font-size:10.5px;color:var(--mut);font-family:\'JetBrains Mono\',monospace;margin-top:1px">' + (x.cronOn ? 'On cron ' + esc(x.cron) : 'Manual only') + '</div></div>'
+      b.onclick = ev => { ev.stopPropagation(); ui.wf = x.id; ui.node = null; ui.run = 'live'; ui.wfMenu = false; cancelLink(); render() }
+      menu.appendChild(b)
+    }
+  }
+  if (isCanvas) { drawGraph(); drawInspector(); if (ui.tab === 'history') drawRail() }
+  else drawSettings()
 }
 
+// ---------------- canvas ----------------
 function edgePath(s, t){
-  const x1 = s.x + 172, y1 = s.y + 28, x2 = t.x, y2 = t.y + 28
-  if (x2 >= x1 - 20) return `M${x1},${y1} C${x1 + 46},${y1} ${x2 - 46},${y2} ${x2},${y2}`
-  // back-edge (a loop): swing underneath so it stays readable
-  const dip = Math.max(y1, y2) + 58
-  return `M${x1},${y1} C${x1 + 60},${dip} ${x2 - 60},${dip} ${x2},${y2}`
+  const x1 = s.x + NW, y1 = s.y + NH / 2, x2 = t.x, y2 = t.y + NH / 2
+  if (x2 >= x1 - 20) {
+    const dx = Math.max(46, Math.abs(x2 - x1) / 2)
+    return { d: `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`, lx: (x1 + x2) / 2, ly: (y1 + y2) / 2 - 11 }
+  }
+  const dip = Math.max(y1, y2) + 64 // back-edge (a loop): swing underneath
+  return { d: `M${x1},${y1} C${x1 + 60},${dip} ${x2 - 60},${dip} ${x2},${y2}`, lx: (x1 + x2) / 2, ly: dip - 14 }
 }
-
 function drawGraph(){
   const w = wf()
   const gN = document.getElementById('nodes'), gE = document.getElementById('edges')
   gN.innerHTML = ''; gE.innerHTML = ''
   document.getElementById('ghost').setAttribute('d', '')
+  // clear stale edge labels
+  for (const el of document.querySelectorAll('.elbl')) el.remove()
   if (!w) return
-  const live = liveStatus()
+  const { map, replay } = statusMap()
+  const canvas = document.getElementById('canvas')
+  const maxX = Math.max(900, ...w.nodes.map(n => n.x + NW + 280))
+  const maxY = Math.max(560, ...w.nodes.map(n => n.y + NH + 150))
+  canvas.style.width = maxX + 'px'; canvas.style.height = maxY + 'px'
+  const svg = document.getElementById('edgeSvg')
+  svg.setAttribute('width', maxX); svg.setAttribute('height', maxY)
   const byId = {}
   for (const n of w.nodes) byId[n.id] = n
-  for (const n of w.nodes) for (const [field, cls] of [['onDone', 'done'], ['onFail', 'fail']]) {
-    const t = n[field] && byId[n[field]]
+  for (const n of w.nodes) for (const spec of [['onDone', 'done'], ['onFail', 'fail']]) {
+    const t = n[spec[0]] && byId[n[spec[0]]]
     if (!t) continue
+    const { d, lx, ly } = edgePath(n, t)
+    const active = map[n.id] && map[n.id] !== 'skipped' && map[t.id]
+    const col = spec[1] === 'done' ? '#3DDC97' : '#FF5C5C'
     const p = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    p.setAttribute('d', edgePath(n, t))
-    p.setAttribute('class', 'edge ' + cls)
+    p.setAttribute('d', d)
+    p.setAttribute('class', 'e')
+    p.setAttribute('fill', 'none')
+    p.setAttribute('stroke', active || !replay ? col : '#2a2f39')
+    p.setAttribute('stroke-opacity', active || !replay ? (spec[1] === 'done' ? '.65' : '.6') : '1')
+    p.setAttribute('stroke-width', active ? '2.2' : '1.6')
+    if (spec[1] === 'fail') p.setAttribute('stroke-dasharray', '6 4')
+    p.setAttribute('marker-end', active || !replay ? (spec[1] === 'done' ? 'url(#arrG)' : 'url(#arrR)') : 'url(#arrDim)')
     const tt = document.createElementNS('http://www.w3.org/2000/svg', 'title')
-    tt.textContent = `${n.title} — on ${cls === 'done' ? 'done' : 'fail'} → ${t.title} (click to remove)`
+    tt.textContent = `${n.title} — on ${spec[1]} → ${t.title} (click to remove)`
     p.appendChild(tt)
-    p.onclick = ev => { ev.stopPropagation(); n[field] = null; save(); render() }
+    p.onclick = ev => {
+      ev.stopPropagation()
+      if (ui.tab !== 'editor') return
+      n[spec[0]] = null; save(); render()
+    }
     gE.appendChild(p)
+    const lbl = document.createElement('span')
+    lbl.className = 'elbl'
+    lbl.textContent = 'on ' + spec[1]
+    lbl.style.left = lx + 'px'; lbl.style.top = ly + 'px'
+    lbl.style.color = col
+    lbl.style.borderColor = 'color-mix(in srgb,' + col + ' 40%,transparent)'
+    lbl.style.background = '#12151C'
+    canvas.appendChild(lbl)
   }
   const start = w.start && byId[w.start] ? w.start : (w.nodes[0] && w.nodes[0].id)
   for (const n of w.nodes) {
-    const st = live[n.id] || ''
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
-    g.setAttribute('class', 'node' + (n.id === selNode ? ' sel' : '') + (n.id === linkSrc ? ' linksrc' : '') + (st ? ' ' + st : ''))
-    g.setAttribute('transform', `translate(${n.x},${n.y})`)
+    const stk = map[n.id] || 'idle'
+    const st = STC[stk] || STC.idle
+    const dimmed = replay && (stk === 'idle' || stk === 'skipped')
+    const el = document.createElement('div')
+    el.className = 'node' + (n.id === linkSrc ? ' linksrc' : '')
+    el.style.left = n.x + 'px'; el.style.top = n.y + 'px'
+    el.style.borderColor = n.id === ui.node ? 'var(--acc)' : st[0]
+    el.style.boxShadow = n.id === ui.node ? '0 0 0 2px rgba(245,196,81,.35)'
+      : stk === 'running' ? '0 0 0 3px color-mix(in srgb,' + st[0] + ' 18%,transparent)' : 'none'
+    el.style.opacity = dimmed ? '.5' : '1'
     const bits = []
     if ((n.criteria || []).length) bits.push(n.criteria.length + ' crit')
     if (n.isolate) bits.push('⑂')
     if (!n.onDone) bits.push('halts on ✓')
-    if (st && st !== 'pending') bits.push(st)
-    g.innerHTML = `<rect class="body" width="172" height="56" rx="10"/><rect class="stripe" x="0" y="0" width="4" height="56" rx="2"/>`
-      + (n.id === start ? `<text x="160" y="15" text-anchor="end" class="startbadge">▶ START</text>` : '')
-      + `<text x="14" y="23">${esc(n.title.slice(0, 19))}</text>`
-      + `<text x="14" y="41" class="sub">${esc(bits.join(' · ') || 'new step')}</text>`
-    g.onmousedown = ev => startDrag(ev, n)
-    g.onclick = ev => { ev.stopPropagation(); clickNode(n) }
-    gN.appendChild(g)
+    el.innerHTML = '<div style="display:flex;align-items:center;gap:8px">'
+      + '<div style="flex:1;min-width:0"><div class="t">' + esc(n.title) + '</div>'
+      + '<div class="s">' + esc(bits.join(' · ') || 'new step') + '</div></div>'
+      + (n.id === start ? '<span class="startb">▶ START</span>' : '<span class="tag">STEP</span>') + '</div>'
+      + '<div class="st" style="color:' + st[0] + '"><span class="d" style="background:' + st[0] + (stk === 'running' ? ';animation:cpulse 1.3s ease-in-out infinite' : '') + '"></span>' + st[1] + '</div>'
+    el.onpointerdown = ev => startDrag(ev, n)
+    el.onclick = ev => { ev.stopPropagation(); clickNode(n) }
+    gN.appendChild(el)
   }
 }
 
-// ---------- drag (grid snap) + transition ghost line ----------
+// drag (grid snap) + transition ghost line
 let drag = null
-function startDrag(ev, n){ if (!linkSrc) drag = { n, dx: ev.clientX - n.x, dy: ev.clientY - n.y, moved: false } }
-window.addEventListener('mousemove', ev => {
+function startDrag(ev, n){
+  if (linkSrc || ui.tab !== 'editor') return
+  drag = { n, dx: ev.clientX - n.x, dy: ev.clientY - n.y, moved: false }
+}
+window.addEventListener('pointermove', ev => {
   if (linkSrc) {
     const s = nodeOf(linkSrc)
     if (s) {
       const wrapEl = document.getElementById('canvasWrap')
-      const wrap = wrapEl.getBoundingClientRect()
-      const mx = ev.clientX - wrap.left + wrapEl.scrollLeft
-      const my = ev.clientY - wrap.top + wrapEl.scrollTop
+      const r = wrapEl.getBoundingClientRect()
+      const mx = ev.clientX - r.left + wrapEl.scrollLeft
+      const my = ev.clientY - r.top + wrapEl.scrollTop
       const gh = document.getElementById('ghost')
-      gh.setAttribute('d', `M${s.x + 172},${s.y + 28} L${mx},${my}`)
+      gh.setAttribute('d', `M${s.x + NW},${s.y + NH / 2} L${mx},${my}`)
       gh.setAttribute('stroke', linkKind === 'done' ? '#3DDC97' : '#FF5C5C')
     }
   }
@@ -324,14 +567,20 @@ window.addEventListener('mousemove', ev => {
   drag.n.y = Math.max(0, Math.round((ev.clientY - drag.dy) / 10) * 10)
   drawGraph()
 })
-window.addEventListener('mouseup', () => { if (drag && drag.moved) save(); drag = null })
+window.addEventListener('pointerup', () => { if (drag && drag.moved) save(); drag = null })
 window.addEventListener('keydown', ev => {
-  if (ev.key === 'Escape') cancelLink(true)
-  if ((ev.key === 'Backspace' || ev.key === 'Delete') && selNode && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) deleteNode()
+  if (ev.key === 'Escape') { cancelLink(true); ui.wfMenu = false; ui.menu = null; render() }
+  if ((ev.key === 'Backspace' || ev.key === 'Delete') && ui.node && ui.tab === 'editor' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) deleteNode()
+})
+document.addEventListener('click', () => {
+  let dirty = false
+  if (ui.wfMenu) { ui.wfMenu = false; dirty = true }
+  if (ui.menu) { ui.menu = null; dirty = true }
+  if (dirty) render()
 })
 function cancelLink(rerender){ linkSrc = null; linkKind = null; if (rerender) render() }
-
 function clickNode(n){
+  if (drag && drag.moved) return // a drag just ended — not a select
   if (linkSrc && linkSrc !== n.id) {
     const s = nodeOf(linkSrc)
     if (s) s[linkKind === 'done' ? 'onDone' : 'onFail'] = n.id // cycles are legal — visit caps break loops at run time
@@ -339,16 +588,28 @@ function clickNode(n){
     save(); render()
     return
   }
-  selNode = n.id
+  ui.node = n.id
   render()
 }
+document.getElementById('canvasWrap').addEventListener('click', ev => {
+  if (ev.target === document.getElementById('canvasWrap') || ev.target === document.getElementById('canvas')) {
+    ui.node = null; cancelLink(); render()
+  }
+})
 
-function drawEditor(){
-  const w = wf()
-  const n = w && w.nodes.find(x => x.id === selNode)
-  const ed = document.getElementById('editor')
-  ed.style.display = n ? 'flex' : 'none'
+// ---------------- inspector ----------------
+function drawInspector(){
+  const n = nodeOf(ui.node)
+  const ed = document.getElementById('inspector')
+  ed.style.display = n && ui.tab === 'editor' ? 'flex' : 'none'
   if (!n) return
+  const { map } = statusMap()
+  const stk = map[n.id] || 'idle'
+  const st = STC[stk] || STC.idle
+  const chip = document.getElementById('iStatus')
+  chip.textContent = st[1]
+  chip.style.color = st[0]
+  chip.style.background = 'color-mix(in srgb,' + st[0] + ' 14%,transparent)'
   document.getElementById('eTitle').value = n.title
   document.getElementById('eDesc').value = n.description || ''
   document.getElementById('eCrit').value = (n.criteria || []).join('\n')
@@ -359,8 +620,9 @@ function drawEditor(){
   document.getElementById('tDone').textContent = name(n.onDone) || '— halt (success)'
   document.getElementById('tFail').textContent = name(n.onFail) || '— halt (failure)'
 }
+function closeInspector(){ ui.node = null; render() }
 function saveNode(){
-  const n = nodeOf(selNode); if (!n) return
+  const n = nodeOf(ui.node); if (!n) return
   n.title = document.getElementById('eTitle').value.trim() || n.title
   n.description = document.getElementById('eDesc').value
   n.criteria = document.getElementById('eCrit').value.split('\n').map(x => x.trim()).filter(Boolean)
@@ -370,81 +632,185 @@ function saveNode(){
   save(); render()
 }
 function deleteNode(){
-  const w = wf()
-  w.nodes = w.nodes.filter(x => x.id !== selNode)
-  for (const n of w.nodes) {
-    if (n.onDone === selNode) n.onDone = null
-    if (n.onFail === selNode) n.onFail = null
-  }
-  if (w.start === selNode) w.start = w.nodes[0] && w.nodes[0].id
-  selNode = null; cancelLink()
-  save(); render()
-}
-function linkFrom(kind){ if (!selNode) return; linkSrc = selNode; linkKind = kind; render() }
-function clearLink(field){ const n = nodeOf(selNode); if (!n) return; n[field] = null; save(); render() }
-function setStart(){ const w = wf(); if (w && selNode) { w.start = selNode; save(); render() } }
-
-function renameWf(name){
   const w = wf(); if (!w) return
-  w.name = name.trim() || w.name
+  w.nodes = w.nodes.filter(x => x.id !== ui.node)
+  for (const n of w.nodes) {
+    if (n.onDone === ui.node) n.onDone = null
+    if (n.onFail === ui.node) n.onFail = null
+  }
+  if (w.start === ui.node) w.start = w.nodes[0] && w.nodes[0].id
+  ui.node = null; cancelLink()
   save(); render()
 }
-function addWorkflow(){
-  const id = 'w' + Date.now().toString(36)
-  workflows.push({ id, name: 'workflow ' + (workflows.length + 1), cron: '', cronOn: false, start: null, nodes: [] })
-  selWf = id; selNode = null
+function linkFrom(kind){ if (!ui.node) return; linkSrc = ui.node; linkKind = kind; render() }
+function clearLink(field){ const n = nodeOf(ui.node); if (!n) return; n[field] = null; save(); render() }
+function setStart(){ const w = wf(); if (w && ui.node) { w.start = ui.node; save(); render() } }
+function addStepAfter(){
+  const w = wf(); const src = nodeOf(ui.node)
+  if (!w || !src) return
+  const id = 'n' + Date.now().toString(36)
+  w.nodes.push({ id, title: 'step ' + (w.nodes.length + 1), description: '', criteria: [], onDone: null, onFail: null, x: src.x + NW + 60, y: src.y })
+  if (!src.onDone) src.onDone = id
+  ui.node = id
   save(); render()
+}
+function mkNode(w){
+  const id = 'n' + Date.now().toString(36)
+  w.nodes.push({ id, title: 'step ' + (w.nodes.length + 1), description: '', criteria: [], onDone: null, onFail: null, x: 60 + (w.nodes.length % 5) * (NW + 60), y: 60 + Math.floor(w.nodes.length / 5) * 130 })
+  if (!w.start) w.start = id
+  return id
+}
+
+// ---------------- workflow CRUD ----------------
+function openWorkflow(id){ ui.wf = id; ui.page = 'detail'; ui.tab = 'editor'; ui.run = 'live'; ui.node = null; ui.menu = null; cancelLink(); render() }
+function backToList(){ ui.page = 'list'; ui.wfMenu = false; cancelLink(); render() }
+function toggleWfMenu(ev){ if (ev) ev.stopPropagation(); ui.wfMenu = !ui.wfMenu; render() }
+function setTab(t){ ui.tab = t; ui.node = null; if (t !== 'history') ui.run = 'live'; cancelLink(); render() }
+function backToLive(){ ui.run = 'live'; render() }
+function newWorkflow(){
+  const id = 'w' + Date.now().toString(36)
+  const w = { id, name: 'workflow ' + (workflows.length + 1), desc: '', cron: '', cronOn: false, enabled: true, start: null, nodes: [], runSeq: 0 }
+  workflows.push(w)
+  mkNode(w)
+  ui.node = w.nodes[0].id
+  save()
+  openWorkflow(id)
 }
 function seedDemo(){
   const id = 'w' + Date.now().toString(36)
   const mk = (nid, title, description, x, y, criteria) => ({ id: nid, title, description, criteria: criteria || [], x, y, onDone: null, onFail: null })
   const plan = mk('plan', 'plan', 'Study the codebase and write IMPLEMENTATION_PLAN.md for the change described in this workflow run.', 40, 130, ['plan file exists with concrete steps'])
-  const impl = mk('impl', 'implement', 'Implement the change following IMPLEMENTATION_PLAN.md.', 290, 130, ['typecheck passes', 'lint passes'])
-  const test = mk('test', 'verify', 'Run the full test suite and typecheck; fix nothing — only verify and report.', 540, 130, ['test suite green'])
-  const fix = mk('fix', 'fix failures', 'The verify step failed. Diagnose the failing tests/typecheck and repair the implementation.', 540, 300, ['previously failing checks now pass'])
-  const rel = mk('rel', 'release notes', 'Summarize what shipped into RELEASE_NOTES.md.', 790, 130, [])
+  const impl = mk('impl', 'implement', 'Implement the change following IMPLEMENTATION_PLAN.md.', 300, 130, ['typecheck passes', 'lint passes'])
+  const test = mk('test', 'verify', 'Run the full test suite and typecheck; fix nothing — only verify and report.', 560, 130, ['test suite green'])
+  const fix = mk('fix', 'fix failures', 'The verify step failed. Diagnose the failing tests/typecheck and repair the implementation.', 560, 320, ['previously failing checks now pass'])
+  const rel = mk('rel', 'release notes', 'Summarize what shipped into RELEASE_NOTES.md.', 820, 130, [])
   plan.onDone = 'impl'
   impl.onDone = 'test'
   test.onDone = 'rel'
   test.onFail = 'fix'      // failure branch…
   fix.onDone = 'test'      // …loops back to verify (visit-capped)
   fix.maxVisits = 2
-  workflows.push({ id, name: 'ship a change', cron: '', cronOn: false, start: 'plan', nodes: [plan, impl, test, fix, rel] })
-  selWf = id
+  workflows.push({ id, name: 'ship a change', desc: 'Plan → implement → verify, with a remediation loop on failures, then release notes.', cron: '', cronOn: false, enabled: true, start: 'plan', nodes: [plan, impl, test, fix, rel], runSeq: 0 })
+  save()
+  openWorkflow(id)
+}
+function duplicateWorkflow(id){
+  const src = workflows.find(x => x.id === id); if (!src) return
+  const nid = 'w' + Date.now().toString(36)
+  workflows.push({ ...JSON.parse(JSON.stringify(src)), id: nid, name: src.name + ' (copy)', cronOn: false, enabled: false, runSeq: 0 })
+  ui.menu = null
+  save(); render()
+  call('flash', 'workflow duplicated — paused until you enable it')
+}
+let delArmed = null, delTimer = 0
+function armDelete(id){
+  // two-click confirm — the sandbox blocks modal dialogs
+  delArmed = id
+  clearTimeout(delTimer)
+  delTimer = setTimeout(() => { delArmed = null; render() }, 2600)
+  render()
+}
+async function deleteWorkflow(id){
+  if (delArmed !== id) { armDelete(id); return }
+  const w = workflows.find(x => x.id === id)
+  if (w && w.cronOn) await call('schedules.remove', 'wf-' + w.id).catch(() => {})
+  workflows = workflows.filter(x => x.id !== id)
+  runs = runs.filter(r => r.wfId !== id)
+  await call('storage.set', 'runs', runs).catch(() => {})
+  if (ui.wf === id) ui.wf = workflows.length ? workflows[0].id : null
+  delArmed = null; ui.menu = null
   save(); render()
 }
-let delArmed = 0
 async function removeWorkflow(){
   const w = wf(); if (!w) return
-  if (Date.now() - delArmed > 2500) { // two-click confirm — sandbox blocks modals
-    delArmed = Date.now()
-    document.getElementById('delWf').textContent = 'sure? click again'
-    setTimeout(() => { document.getElementById('delWf').textContent = 'Delete' }, 2600)
+  if (delArmed !== w.id) {
+    armDelete(w.id)
+    document.getElementById('delBtn').textContent = 'Sure? click again'
+    setTimeout(() => { const b = document.getElementById('delBtn'); if (b) b.textContent = 'Delete workflow' }, 2600)
     return
   }
-  if (w.cronOn) await call('schedules.remove', 'wf-' + w.id).catch(() => {})
-  workflows = workflows.filter(x => x.id !== w.id)
-  selWf = workflows.length ? workflows[0].id : null
-  document.getElementById('delWf').textContent = 'Delete'
-  save(); render()
+  await deleteWorkflow(w.id)
+  ui.page = 'list'
+  render()
 }
-function addNode(){
-  const w = wf(); if (!w) return
-  const id = 'n' + Date.now().toString(36)
-  w.nodes.push({ id, title: 'step ' + (w.nodes.length + 1), description: '', criteria: [], onDone: null, onFail: null, x: 60 + (w.nodes.length % 5) * 210, y: 60 + Math.floor(w.nodes.length / 5) * 110 })
-  if (!w.start) w.start = id
-  selNode = id
+function toggleWfEnabled(id){
+  const w = workflows.find(x => x.id === id); if (!w) return
+  w.enabled = !enabled(w)
   save(); render()
 }
 
+// ---------------- settings tab ----------------
+const PRESETS = [['', 'None'], ['0 * * * *', 'Hourly'], ['0 6 * * *', 'Daily 06:00'], ['0 6 * * 1', 'Mon 06:00'], ['custom', 'Custom…']]
+function drawSettings(){
+  const w = wf(); if (!w) return
+  const sw = document.getElementById('enSw')
+  sw.className = 'sw' + (enabled(w) ? ' on' : '')
+  const co = document.getElementById('cronOpts')
+  co.innerHTML = ''
+  const preset = PRESETS.some(p => p[0] === w.cron) ? w.cron : 'custom'
+  for (const p of PRESETS) {
+    const b = document.createElement('button')
+    b.className = 'opt' + (preset === p[0] ? ' on' : '')
+    b.textContent = p[1]
+    b.onclick = () => {
+      if (p[0] === 'custom') { document.getElementById('cronCustomRow').style.display = 'flex'; return }
+      document.getElementById('cronCustomRow').style.display = 'none'
+      w.cron = p[0]
+      if (!p[0] && w.cronOn) toggleCron() // "None" while armed = disarm
+      else save()
+      render()
+    }
+    co.appendChild(b)
+  }
+  document.getElementById('cronCustomRow').style.display = preset === 'custom' ? 'flex' : 'none'
+  const ci = document.getElementById('cronCustom')
+  ci.value = preset === 'custom' ? (w.cron || '') : ''
+  ci.onchange = () => { w.cron = ci.value.trim(); save(); render() }
+  document.getElementById('armState').textContent = w.cronOn ? '✓ Armed — runs on ' + w.cron : 'Not armed'
+  document.getElementById('armDetail').textContent = w.cronOn
+    ? 'The schedule "wf-' + w.id + '" starts a run at the workflow’s start step.'
+    : (w.cron ? 'Arm to create the schedule for ' + w.cron + '.' : 'Pick a preset or a custom expression first.')
+  const ab = document.getElementById('armBtn')
+  ab.textContent = w.cronOn ? 'Disarm' : 'Arm'
+  ab.className = w.cronOn ? 'btn' : 'btn accent'
+  const dsc = document.getElementById('wfDesc')
+  dsc.value = w.desc || ''
+  dsc.onchange = () => { w.desc = dsc.value.trim().slice(0, 240); save() }
+}
+function toggleEnabled(){
+  const w = wf(); if (!w) return
+  w.enabled = !enabled(w)
+  save(); render()
+}
+async function toggleCron(){
+  const w = wf(); if (!w) return
+  try {
+    if (w.cronOn) {
+      await call('schedules.remove', 'wf-' + w.id)
+      w.cronOn = false
+    } else {
+      const cron = (w.cron || '').trim()
+      if (cron.split(/\s+/).length !== 5) { banner('pick a preset or give a 5-field cron, e.g. 0 6 * * *'); return }
+      const res = await call('schedules.add', { name: 'wf-' + w.id, schedule: cron })
+      if (typeof res === 'string' && res.indexOf('created') === -1) { banner(res); return }
+      w.cronOn = true
+    }
+  } catch (e) { banner(e.message); return }
+  save(); render()
+}
+
+// ---------------- runs ----------------
+const runLabel = r => r.num ? '#' + r.num : r.id.slice(-4)
 async function runNow(){
   const w = wf()
   if (!w || !w.nodes.length) return
   try {
     const allRuns = (await call('storage.get', 'runs')) || []
     if (allRuns.some(r => r.wfId === w.id && r.status === 'running')) { banner('a run of this machine is already going'); return }
+    w.runSeq = (w.runSeq || 0) + 1
+    await save()
     const start = w.nodes.find(n => n.id === w.start) || w.nodes[0]
-    const run = { id: 'run' + Date.now().toString(36), wfId: w.id, wfName: w.name, startedAt: Date.now(), status: 'running', trigger: 'manual', current: start.id, taskId: null, visits: {}, path: [] }
+    const run = { id: 'run' + Date.now().toString(36), num: w.runSeq, wfId: w.id, wfName: w.name, startedAt: Date.now(), status: 'running', trigger: 'manual', current: start.id, taskId: null, visits: {}, path: [] }
     const taskId = await call('tasks.add', start.title, 'backlog', {
       description: ['[workflow "' + w.name + '" · run ' + run.id + ' · step ' + start.id + ']', start.description || ''].filter(Boolean).join('\n\n'),
       criteria: start.criteria || [], cwd: start.cwd || undefined, isolate: start.isolate === true ? true : undefined,
@@ -457,62 +823,46 @@ async function runNow(){
     await call('storage.set', 'runs', [run, ...allRuns].slice(0, 30))
     await call('tasks.start', taskId)
     await call('flash', 'machine entered "' + start.title + '"')
+    ui.run = 'live'
   } catch (e) { banner(e.message) }
   refreshRuns()
 }
-
-function cronPreset(){
-  const v = document.getElementById('cronSel').value
-  document.getElementById('cron').style.display = v === 'custom' ? '' : 'none'
-  if (v && v !== 'custom') document.getElementById('cron').value = v
-}
-async function toggleCron(){
-  const w = wf(); if (!w) return
-  try {
-    if (w.cronOn) {
-      await call('schedules.remove', 'wf-' + w.id)
-      w.cronOn = false
-    } else {
-      const sel = document.getElementById('cronSel').value
-      const cron = (sel === 'custom' ? document.getElementById('cron').value : sel).trim()
-      if (cron.split(/\s+/).length !== 5) { banner('pick a preset or give a 5-field cron, e.g. 0 6 * * *'); return }
-      const res = await call('schedules.add', { name: 'wf-' + w.id, schedule: cron })
-      if (typeof res === 'string' && res.indexOf('created') === -1) { banner(res); return }
-      w.cron = cron
-      w.cronOn = true
-    }
-  } catch (e) { banner(e.message); return }
-  save(); render()
-}
-
 async function refreshRuns(){
   try { runs = (await call('storage.get', 'runs')) || [] } catch (e) { return }
-  const mine = runs.filter(x => !selWf || x.wfId === selWf)
-  document.getElementById('histCount').textContent = mine.length ? '· ' + mine.length : ''
+  if (ui.page === 'list') { renderList(); return }
+  if (ui.tab === 'history') drawRail()
+  drawGraph() // repaint live stripes / replay
+  renderDetail()
+}
+function drawRail(){
   const el = document.getElementById('runList')
   el.innerHTML = ''
-  for (const r of mine.slice(0, 10)) {
-    const steps = r.path || []
-    const dur = r.finishedAt ? Math.max(1, Math.round((r.finishedAt - r.startedAt) / 60000)) + ' min' : ''
-    const d = document.createElement('div')
-    d.className = 'run' + (openRun === r.id ? ' open' : '')
-    const pathHtml = steps.map((p, i) => {
-      const via = i ? `<span class="via ${p.via || ''}">${p.via === 'failed' ? '✗→' : '✓→'}</span>` : ''
-      return via + `<span class="step"><span class="dot ${p.outcome}"></span>${esc(p.title || p.nodeId)}</span>`
-    }).join('')
-    d.innerHTML = `<div class="head"><span class="st ${r.status}">${r.status}</span>`
-      + `<b style="font-size:12px">${esc(r.wfName)}</b>`
-      + `<span class="meta">${steps.length} step(s)${dur ? ' · ' + dur : ''} · ${r.trigger || 'manual'} · ${ago(r.startedAt)}</span>`
-      + `<span style="flex:1"></span><span class="meta">${openRun === r.id ? '▾' : '▸'}</span></div>`
-      + `<div class="path">${pathHtml || '<span class="empty">no steps recorded</span>'}</div>`
-    d.onclick = () => { openRun = openRun === r.id ? null : r.id; refreshRuns() }
-    el.appendChild(d)
+  const mine = runs.filter(r => r.wfId === ui.wf)
+  const liveCard = document.createElement('button')
+  liveCard.className = 'runcard' + (ui.run === 'live' ? ' on' : '')
+  liveCard.innerHTML = '<span class="d" style="background:var(--acc)"></span><div style="flex:1;min-width:0">'
+    + '<div style="display:flex;align-items:center;gap:8px"><span class="n">LIVE</span>'
+    + '<span class="sc" style="color:var(--acc);background:var(--accsoft)">Live state</span></div>'
+    + '<div class="tr">Current machine state</div><div class="wh">now</div></div>'
+  liveCard.onclick = () => { ui.run = 'live'; render() }
+  el.appendChild(liveCard)
+  for (const r of mine.slice(0, 15)) {
+    const st = RSC[r.status] || RSC.done
+    const dur = r.finishedAt ? Math.max(1, Math.round((r.finishedAt - r.startedAt) / 60000)) + ' min' : 'running'
+    const steps = (r.path || []).length
+    const b = document.createElement('button')
+    b.className = 'runcard' + (ui.run === r.id ? ' on' : '')
+    b.innerHTML = '<span class="d" style="background:' + st[0] + '"></span><div style="flex:1;min-width:0">'
+      + '<div style="display:flex;align-items:center;gap:8px"><span class="n">' + runLabel(r) + '</span>'
+      + '<span class="sc" style="color:' + st[0] + ';background:color-mix(in srgb,' + st[0] + ' 14%,transparent)">' + st[1] + '</span></div>'
+      + '<div class="tr">' + (r.trigger === 'cron' ? 'Cron trigger' : 'Manual run') + ' · ' + steps + ' step(s)</div>'
+      + '<div class="wh">' + ago(r.startedAt) + ' · ' + dur + '</div></div>'
+    b.onclick = () => { ui.run = r.id; render() }
+    el.appendChild(b)
   }
-  if (!mine.length) el.innerHTML = '<div class="empty">no runs yet — hit ▶ Run now or arm a cron trigger</div>'
-  drawGraph() // repaint live step stripes
+  if (!mine.length) el.innerHTML += '<div class="empty">no runs yet — hit ▶ Run or arm the cron trigger in Settings</div>'
 }
 
-document.getElementById('svg').onclick = () => { selNode = null; cancelLink(); render() }
 load()
 parent.postMessage({ type: 'yaam:getState' }, '*')
 </script></body></html>

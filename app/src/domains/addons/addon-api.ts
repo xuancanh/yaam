@@ -63,6 +63,11 @@ export function createAddonApi(ctx: AddonApiCtx, addonId: string): AddonApi {
     },
     launchSession: (command, cwd, name) => ctx.launchSession(String(command), cwd ? String(cwd) : '', name ? String(name) : undefined),
     focusSession: sid => dispatch(s2 => (s2.agents.some(a => a.id === sid) ? focusSessionIn(s2, sid) : s2)),
+    // pure UI navigation: switch to the board and hand the task id to it —
+    // no data leaves the app, and unknown/archived tasks are a no-op
+    focusTask: tid => dispatch(s2 => (s2.tasks.some(t => t.id === tid && !t.archived)
+      ? { ...s2, view: 'board', focusTaskId: String(tid) }
+      : s2)),
     flash: t => ctx.flash(String(t).slice(0, 80)),
     logEvent: t => ctx.logEvent(`[addon] ${String(t).slice(0, 120)}`),
     notify: (title, detail) => ctx.notify(String(title).slice(0, 80), String(detail).slice(0, 120)),

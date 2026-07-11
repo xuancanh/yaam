@@ -31,16 +31,16 @@
     },
     {
       "name": "workflows",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "icon": "⛓",
-      "description": "Task workflows as state machines — steps with on-done / on-fail transitions, remediation branches, visit-capped retry loops, drag-and-drop editor, cron triggers, per-run path history.",
+      "description": "Task workflows as state machines — steps with on-done / on-fail transitions, remediation branches, visit-capped retry loops. Workflow list with pass rates and pause toggles, drag-and-drop canvas editor with labeled transitions, cron triggers, and replayable run history.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/workflows.yaam.json"
     },
     {
       "name": "github-issues",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "icon": "🐙",
-      "description": "Pulls open GitHub issues on a schedule into a review queue; add them to the board yourself or let the addon's customizable triage agent file the tasks. Token stays in the OS keychain.",
+      "description": "A GitHub issue triage inbox — sync open issues from any number of repos on a schedule, spawn linked board tasks (or let the customizable triage agent decide), track their progress, and optionally close issues on GitHub when their task is done. Token stays in the OS keychain.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/github-issues.yaam.json"
     },
     {

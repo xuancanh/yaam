@@ -42,6 +42,8 @@ export interface BoardActions {
   /** open the New-task dialog from anywhere (jumps to the board) */
   openNewTask: () => void
   closeNewTask: () => void
+  /** consume the one-shot focusTaskId handoff after opening the detail */
+  clearBoardFocus: () => void
   /** run one of the watcher's one-click options: send it to the task's live
    *  session, record the acceptance, and learn the pattern */
   runTaskSuggestion: (taskId: string, msgId: string, suggestionId: string) => void
@@ -83,6 +85,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
   return {
     openNewTask: () => dispatch(s => ({ ...s, view: 'board', newTaskOpen: true })),
     closeNewTask: () => dispatch(s => (s.newTaskOpen ? { ...s, newTaskOpen: false } : s)),
+    clearBoardFocus: () => dispatch(s => (s.focusTaskId ? { ...s, focusTaskId: null } : s)),
 
     runTaskSuggestion: (taskId, msgId, suggestionId) => {
       const st = ctx.stateRef.current

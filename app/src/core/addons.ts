@@ -31,6 +31,8 @@ export interface AddonApi {
   launchSession: (command: string, cwd?: string, name?: string) => string | null
   /** bring a session into view (its pane/tab) */
   focusSession: (sessionId: string) => void
+  /** jump the app to the board with this task's detail open */
+  focusTask: (taskId: string) => void
   /** toast in the UI */
   flash: (text: string) => void
   /** entry in the Activity timeline */
@@ -131,6 +133,7 @@ export const METHOD_PERMISSION: Record<string, AddonPermission> = {
   sendToSession: 'sessions:send',
   launchSession: 'sessions:launch',
   focusSession: 'ui',
+  focusTask: 'ui',
   flash: 'ui',
   logEvent: 'ui',
   notify: 'ui',
@@ -163,6 +166,7 @@ export function enforcePermissions(api: AddonApi, granted: AddonPermission[]): A
     sendToSession: guard('sendToSession', api.sendToSession),
     launchSession: guard('launchSession', api.launchSession),
     focusSession: guard('focusSession', api.focusSession),
+    focusTask: guard('focusTask', api.focusTask),
     flash: guard('flash', api.flash),
     logEvent: guard('logEvent', api.logEvent),
     notify: guard('notify', api.notify),
@@ -213,7 +217,7 @@ export function enforcePermissions(api: AddonApi, granted: AddonPermission[]): A
 
 /** Dotted-path RPC dispatch used by the view bridge (yaam:call messages). */
 export const ADDON_RPC_METHODS = [
-  'getState', 'sendToSession', 'launchSession', 'focusSession', 'flash', 'logEvent', 'notify',
+  'getState', 'sendToSession', 'launchSession', 'focusSession', 'focusTask', 'flash', 'logEvent', 'notify',
   'sessions.readOutput', 'sessions.stop',
   'tasks.add', 'tasks.update', 'tasks.rename', 'tasks.move', 'tasks.remove', 'tasks.start', 'tasks.restart', 'tasks.chat',
   'tasks.get', 'tasks.approve', 'tasks.reject',

@@ -7,9 +7,12 @@ export interface BoardSlice {
   dragOverCol: BoardCol | null
   /** the New-task dialog, openable from anywhere (⌘N, command palette) */
   newTaskOpen: boolean
+  /** one-shot handoff: open this task's detail when the board next renders
+   *  (set by addon focusTask / deep links, cleared by the board) */
+  focusTaskId: string | null
 }
 
 /** Initial board slice for a fresh app state. */
 export function freshBoardSlice(): BoardSlice {
-  return { tasks: [], dragOverCol: null, newTaskOpen: false }
+  return { tasks: [], dragOverCol: null, newTaskOpen: false, focusTaskId: null }
 }

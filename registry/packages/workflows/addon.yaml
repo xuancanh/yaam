@@ -5,9 +5,9 @@
 #   node scripts/pack-addon.mjs registry/packages/workflows
 manifest: 3
 name: Workflows
-version: 2.0.0
+version: 3.0.0
 icon: ⛓
-description: Task workflows as state machines — every step is a board-task spec with on-done / on-fail transitions, so runs branch into remediation steps, loop back for visit-capped retries, and halt where you choose. Drag-and-drop editor, cron triggers, and a per-run path history.
+description: Task workflows as state machines — every step is a board-task spec with on-done / on-fail transitions, so runs branch into remediation steps, loop back for visit-capped retries, and halt where you choose. Workflow list with pass rates and pause toggles, drag-and-drop canvas editor with labeled transitions, cron triggers, and a run history you can replay on the canvas.
 author: yaam
 
 permissions:

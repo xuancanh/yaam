@@ -45,7 +45,7 @@ PERMISSION SCOPES (request only what the code calls)
                    (cols: backlog|progress|review|done|failed; started tasks get a watcher-driven session — one-shot by default — with the spec+criteria as a goal; isolate=true runs it in a git worktree reviewed via the queue; machineId runs it on a saved remote machine; scheduleAt defers the start)
 - schedules      → schedules.add({name, schedule: '5-field cron' | at: epochMs, cmd?, cwd?, task?: {title, description, criteria, cwd, machineId, isolate, sessionMode, startNow}}) · schedules.toggle(name, on?) · schedules.remove(name)
 - agent          → agent.wake(note) → Promise<reply string> (the addon's own agent; costs API tokens)
-- ui             → flash(text), notify(title, detail), logEvent(text), focusSession(id)
+- ui             → flash(text), notify(title, detail), logEvent(text), focusSession(id), focusTask(taskId)
 - storage        → storage.get(key), storage.set(key, value), storage.list(), storage.remove(key)   (persistent, namespaced per addon, 256KB/value)
 - http           → http.request(method, url, {headers?, body?}) → Promise<{status, contentType, text}> — url host MUST be in the manifest "hosts" (https only); header/body values may embed {{secret:NAME}}
 - secrets        → secrets.list() → [{name, label, set}] — no direct value reads; values are substituted from the OS keychain into allowed HTTP headers/bodies, so the destination receives them and its response is visible to addon code
