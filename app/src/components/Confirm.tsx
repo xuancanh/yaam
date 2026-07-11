@@ -24,20 +24,35 @@ export function confirmAction(opts: ConfirmOptions): Promise<boolean> {
   dismissOpen?.()
 
   return new Promise<boolean>(resolve => {
+    const previous = document.activeElement as HTMLElement | null
+    let settled = false
     const overlay = document.createElement('div')
+    overlay.setAttribute('role', 'dialog')
+    overlay.setAttribute('aria-modal', 'true')
     overlay.style.cssText =
       'position:fixed;inset:0;background:rgba(4,5,8,.6);z-index:9999;display:flex;align-items:center;justify-content:center;'
 
     const done = (ok: boolean) => {
+      if (settled) return
+      settled = true
       overlay.remove()
       if (dismissOpen === dismiss) dismissOpen = null
       document.removeEventListener('keydown', onKey, true)
+      previous?.focus()
       resolve(ok)
     }
     const dismiss = () => done(false)
     dismissOpen = dismiss
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.stopPropagation(); done(false) }
+      else if (e.key === 'Tab') {
+        const buttons = [cancel, ok]
+        const at = buttons.indexOf(document.activeElement as HTMLButtonElement)
+        if ((!e.shiftKey && at === buttons.length - 1) || (e.shiftKey && at <= 0)) {
+          e.preventDefault()
+          buttons[e.shiftKey ? buttons.length - 1 : 0].focus()
+        }
+      }
     }
     document.addEventListener('keydown', onKey, true)
     overlay.addEventListener('click', e => { if (e.target === overlay) done(false) })
@@ -49,12 +64,16 @@ export function confirmAction(opts: ConfirmOptions): Promise<boolean> {
 
     const title = document.createElement('div')
     title.className = 'grotesk'
+    title.id = 'yaam-confirm-title'
+    overlay.setAttribute('aria-labelledby', title.id)
     title.style.cssText = 'font-size:14.5px;font-weight:600;color:var(--text);'
     title.textContent = opts.title
     box.appendChild(title)
 
     if (opts.detail) {
       const detail = document.createElement('div')
+      detail.id = 'yaam-confirm-detail'
+      overlay.setAttribute('aria-describedby', detail.id)
       detail.style.cssText = 'font-size:12.5px;color:var(--mut);margin-top:6px;line-height:1.55;'
       detail.textContent = opts.detail
       box.appendChild(detail)

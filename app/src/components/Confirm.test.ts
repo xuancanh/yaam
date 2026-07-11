@@ -55,4 +55,17 @@ describe('confirmAction', () => {
     byLabel('Delete').click()
     await expect(second).resolves.toBe(true)
   })
+
+  it('exposes modal semantics and restores focus to the invoking control', async () => {
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+    const p = confirmAction({ title: 'Confirm?' })
+    expect(overlay()?.getAttribute('role')).toBe('dialog')
+    expect(overlay()?.getAttribute('aria-modal')).toBe('true')
+    expect(document.activeElement).toBe(byLabel('Cancel'))
+    byLabel('Cancel').click()
+    await p
+    expect(document.activeElement).toBe(trigger)
+  })
 })

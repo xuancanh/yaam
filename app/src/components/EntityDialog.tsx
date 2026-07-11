@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import { IC, Icon } from './ui'
 
 // Shared spacious modal for viewing & editing one configured entity —
@@ -12,12 +13,43 @@ export function EntityDialog({ onClose, width = 760, children }: {
   width?: number
   children: ReactNode
 }) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
+    const panel = panelRef.current
+    const first = panel?.querySelector<HTMLElement>('input, textarea, select, button, [tabindex]:not([tabindex="-1"])')
+    ;(first ?? panel)?.focus()
+    return () => previous?.focus()
+  }, [])
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      onClose()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = [...(panelRef.current?.querySelectorAll<HTMLElement>(
+      'input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) ?? [])]
+    if (!focusable.length) { event.preventDefault(); panelRef.current?.focus(); return }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+  }
   return (
     <div
       onClick={onClose}
       style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.55)', zIndex: 46, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '7vh' }}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Configuration dialog"
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
         onClick={e => e.stopPropagation()}
         style={{
           width, maxWidth: '94vw', maxHeight: '86vh', overflowY: 'auto', background: 'var(--panel2)',
