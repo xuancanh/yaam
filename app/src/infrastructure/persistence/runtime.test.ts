@@ -34,6 +34,7 @@ function fakeStore(initial: AppState) {
   return {
     getState: () => state,
     subscribe: (fn: (s: AppState, p: AppState) => void) => { listeners.add(fn); return () => { listeners.delete(fn) } },
+    listenerCount: () => listeners.size,
     set(next: AppState) { const prev = state; state = next; for (const l of [...listeners]) l(next, prev) },
   }
 }
@@ -50,6 +51,15 @@ describe('createPersistenceRuntime', () => {
     vi.advanceTimersByTime(1000)
     expect(native.saveStateFile).not.toHaveBeenCalled()
     rt.dispose()
+  })
+
+  it('start() is idempotent and dispose removes every subscription', () => {
+    const store = fakeStore(baseState())
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.start()
+    expect(store.listenerCount()).toBe(3)
+    rt.dispose()
+    expect(store.listenerCount()).toBe(0)
   })
 
   it('debounces a main-partition save after a durable slice change', () => {
@@ -137,5 +147,45 @@ describe('createPersistenceRuntime', () => {
     rt.dispose() // before the 800ms debounce elapses
     vi.advanceTimersByTime(2000)
     expect(native.saveStateFile).not.toHaveBeenCalled()
+  })
+
+  it('mirrors settings credentials and deletes removed dynamic accounts', async () => {
+    const device = { id: 'phone-1', name: 'Phone', token: 'device-token', at: 1 }
+    const store = fakeStore(baseState({ settings: { ...baseState().settings, remoteDevices: [device] } }))
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.keychainReady.add('remote.device.phone-1.token')
+    rt.start(); rt.markReady()
+
+    store.set({ ...store.getState(), settings: { ...store.getState().settings, remoteToken: 'new-url-token', remoteDevices: [] } })
+    await vi.advanceTimersByTimeAsync(900)
+
+    expect(native.secretSet).toHaveBeenCalledWith('remote.urlToken', 'new-url-token')
+    expect(native.secretDelete).toHaveBeenCalledWith('remote.device.phone-1.token')
+    expect(rt.keychainReady.has('remote.device.phone-1.token')).toBe(false)
+    rt.dispose()
+  })
+
+  it('retries failed session writes and removals without another state change', async () => {
+    const agent = { id: 'retry-1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
+    const store = fakeStore(baseState())
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+    vi.mocked(native.saveSession)
+      .mockRejectedValueOnce(new Error('disk busy'))
+      .mockResolvedValue(undefined)
+
+    store.set({ ...store.getState(), agents: [agent] })
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(800)
+    expect(native.saveSession).toHaveBeenCalledTimes(2)
+
+    vi.mocked(native.removeSession)
+      .mockRejectedValueOnce(new Error('disk busy'))
+      .mockResolvedValue(undefined)
+    store.set({ ...store.getState(), agents: [] })
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(800)
+    expect(native.removeSession).toHaveBeenCalledTimes(2)
+    rt.dispose()
   })
 })

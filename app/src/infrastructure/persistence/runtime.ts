@@ -43,6 +43,7 @@ export function createPersistenceRuntime(
   let mainTimer: number | undefined
   let sessionTimer: number | undefined
   let secretTimer: number | undefined
+  let started = false
   const unsubs: Array<() => void> = []
 
   // warn once per failure streak, not on every debounced save
@@ -73,11 +74,27 @@ export function createPersistenceRuntime(
     for (const a of store.getState().agents) {
       next.set(a.id, a)
       if (savedAgents.get(a.id) !== a) {
-        native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { saveFailed = false }).catch(e => onSaveError('session', e))
+        native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { saveFailed = false }).catch(e => {
+          onSaveError('session', e)
+          // This identity was optimistically recorded below. Remove it only if
+          // it is still current, so the unchanged session remains dirty and a
+          // retry cannot overwrite a newer in-flight revision.
+          if (savedAgents.get(a.id) === a) savedAgents.delete(a.id)
+          armSession()
+        })
       }
     }
     for (const id of savedAgents.keys()) {
-      if (!next.has(id)) native.removeSession(id).catch(() => {})
+      if (!next.has(id)) {
+        const removed = savedAgents.get(id)!
+        native.removeSession(id).catch(e => {
+          onSaveError('session removal', e)
+          // Keep a tombstone-like old identity so the next sweep retries the
+          // delete. Do not restore it if a session with this id was re-added.
+          if (!store.getState().agents.some(a => a.id === id)) savedAgents.set(id, removed)
+          armSession()
+        })
+      }
     }
     savedAgents.clear()
     for (const [id, a] of next) savedAgents.set(id, a)
@@ -106,7 +123,21 @@ export function createPersistenceRuntime(
     secretTimer = window.setTimeout(() => {
       void (async () => {
         let changed = false
-        for (const { account, value } of secretEntries(store.getState())) {
+        const entries = secretEntries(store.getState())
+        const currentAccounts = new Set(entries.map(entry => entry.account))
+        // Dynamic credentials (for example a revoked remote device) must not
+        // survive forever just because their state entry disappeared.
+        for (const account of [...keychainReady]) {
+          if (currentAccounts.has(account)) continue
+          try {
+            await native.secretDelete(account)
+            keychainReady.delete(account)
+            changed = true
+          } catch (e) {
+            console.error(`[yaam] keychain cleanup failed for ${account}:`, e)
+          }
+        }
+        for (const { account, value } of entries) {
           try {
             if (value) {
               await native.secretSet(account, value)
@@ -146,6 +177,8 @@ export function createPersistenceRuntime(
     keychainReady,
     markReady() { ready = true },
     start() {
+      if (started) return
+      started = true
       unsubs.push(store.subscribe((s, prev) => { if (mainPartitionChanged(s, prev)) armMain() }))
       unsubs.push(store.subscribe((s, prev) => {
         if (!sessionsChanged(s, prev)) return
@@ -171,11 +204,14 @@ export function createPersistenceRuntime(
     },
     flush,
     dispose() {
+      started = false
       if (mainTimer) window.clearTimeout(mainTimer)
       if (sessionTimer) window.clearTimeout(sessionTimer)
       if (secretTimer) window.clearTimeout(secretTimer)
       for (const u of unsubs) u()
-      closeOff?.()
+      unsubs.length = 0
+      mainTimer = undefined; sessionTimer = undefined; secretTimer = undefined
+      closeOff?.(); closeOff = undefined
       window.removeEventListener('beforeunload', onBeforeUnload)
     },
   }

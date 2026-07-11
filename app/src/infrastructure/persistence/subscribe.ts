@@ -27,10 +27,14 @@ export function sessionsChanged(a: AppState, b: AppState): boolean {
   return a.agents !== b.agents
 }
 
-/** True when a credential-bearing slice changed (API key, chat agent types, or
- *  MCP servers) — the only inputs the keychain mirror cares about. */
+/** True when any credential-bearing field/slice changed — the inputs owned by
+ *  the keychain mirror, including settings-nested profiles/remote devices. */
 export function secretsChanged(a: AppState, b: AppState): boolean {
   return a.settings.apiKey !== b.settings.apiKey
+    || a.settings.githubToken !== b.settings.githubToken
+    || a.settings.remoteToken !== b.settings.remoteToken
+    || a.settings.remoteDevices !== b.settings.remoteDevices
+    || a.settings.brainProfiles !== b.settings.brainProfiles
     || a.chatAgentTypes !== b.chatAgentTypes
     || a.mcpServers !== b.mcpServers
 }
