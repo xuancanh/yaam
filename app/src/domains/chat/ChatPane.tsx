@@ -67,11 +67,10 @@ function ThinkingBubble({ m, live }: { m: ChatMsg; live: boolean }) {
   return (
     <div style={{ padding: '0 4px', minWidth: 0, flexShrink: 0 }}>
       <button
-        className="mono"
         onClick={() => setOverride(!open)}
         style={{
           display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
-          fontSize: 10.5, color: 'var(--dim)', cursor: 'pointer', padding: '2px 6px',
+          fontSize: 11, color: 'var(--dim)', cursor: 'pointer', padding: '2px 6px', fontFamily: 'var(--font-sans)',
         }}
       >
         <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▸</span>
@@ -112,7 +111,7 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', flexShrink: 0 }}>agent wants to run</span>
-        {verdict && <span className="mono" style={{ fontSize: 10.5, color: m.approval === 'approved' ? 'var(--green)' : 'var(--dim)', marginLeft: 'auto' }}>{verdict}</span>}
+        {verdict && <span style={{ fontSize: 11, color: m.approval === 'approved' ? 'var(--green)' : 'var(--dim)', marginLeft: 'auto' }}>{verdict}</span>}
         {pending && busy && (
           <span style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
             <button className="approve-btn" style={{ padding: '3px 12px', fontSize: 11 }} onClick={() => onDecide('once')}>Allow once</button>
@@ -140,8 +139,8 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
   if (m.role === 'tool' && collapseTool) return null
   if (m.role === 'tool') {
     return (
-      <div className="mono" title={m.text} style={{
-        fontSize: 10.5, color: 'var(--dim)', padding: '2px 10px', alignSelf: 'stretch', minWidth: 0, flexShrink: 0,
+      <div title={m.text} style={{
+        fontSize: 11, color: 'var(--dim)', padding: '2px 10px', alignSelf: 'stretch', minWidth: 0, flexShrink: 0,
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
       }}>
         ⚙ {m.text}
@@ -169,9 +168,9 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
           <HoverBtn title={copied ? 'Copied!' : 'Copy message'} paths={COPY_IC} onClick={copy} />
         </div>}
         <div style={{
-          maxWidth: '78%', minWidth: 0, borderRadius: 14, padding: 'var(--bubble-pad)', fontSize: 'var(--chat-font)', lineHeight: 1.55,
-          background: hexToRgba(ACCENT, 0.13),
-          border: `1px solid ${hexToRgba(ACCENT, 0.28)}`,
+          maxWidth: '78%', minWidth: 0, borderRadius: 16, padding: 'var(--bubble-pad)', fontSize: 'var(--chat-font)', lineHeight: 1.55,
+          background: 'var(--panel2)',
+          border: '1px solid var(--line2)',
           color: 'var(--text)', overflowWrap: 'break-word',
         }}>
           <Markdown text={m.text} />
@@ -208,7 +207,6 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, minHeight: 22 }}>
         {artifact && onArtifact && (
           <button
-            className="mono"
             title="Render this output live in a sandboxed panel"
             onClick={() => onArtifact(artifact)}
             style={{
@@ -284,8 +282,8 @@ function ArtifactPanel({ artifact, onClose }: { artifact: ChatArtifact; onClose:
     <div style={{ width: '46%', minWidth: 320, flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--line)', background: 'var(--panel)' }}>
       <div style={{ height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', borderBottom: '1px solid var(--line)' }}>
         <Icon paths={['M4 5h16v14H4z', 'M4 9h16']} size={13} stroke={1.7} />
-        <span className="mono" style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4 }}>ARTIFACT · {artifact.kind.toUpperCase()}</span>
-        <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)' }}>sandboxed · no network</span>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4 }}>ARTIFACT · {artifact.kind.toUpperCase()}</span>
+        <span style={{ fontSize: 10, color: 'var(--dim)' }}>sandboxed · no network</span>
         <div style={{ flex: 1 }} />
         <button
           className="icon-btn"
@@ -365,8 +363,8 @@ function SlashMenu({ items, sel, onPick }: {
             padding: '7px 12px', background: i === sel ? 'rgba(245,196,81,.1)' : 'transparent', cursor: 'pointer',
           }}
         >
-          <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', flexShrink: 0 }}>/{it.name}</span>
-          {it.source && <span className="mono" style={{ fontSize: 9.5, color: 'var(--faint)', flexShrink: 0 }}>[{it.source}]</span>}
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', flexShrink: 0 }}>/{it.name}</span>
+          {it.source && <span style={{ fontSize: 10, color: 'var(--faint)', flexShrink: 0 }}>[{it.source}]</span>}
           <span style={{ fontSize: 11, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {it.description}
           </span>
@@ -600,7 +598,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   const canThink = chatType ? supportsThinking(chatType.provider, curModel) : false
   const pickerStyle = {
     background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 6, color: 'var(--mut)',
-    fontSize: 10, padding: '2px 3px', maxWidth: 150, cursor: 'pointer', flexShrink: 0,
+    fontSize: 10.5, padding: '2px 3px', maxWidth: 150, cursor: 'pointer', flexShrink: 0, fontFamily: 'var(--font-sans)',
   } as const
 
   return (
@@ -643,8 +641,8 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
         {queue.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 7 }}>
             {queue.map((q, i) => (
-              <span key={i} className="mono" style={{
-                display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--mut)',
+              <span key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--mut)',
                 background: 'var(--panel2)', border: '1px dashed var(--line2)', borderRadius: 7, padding: '3px 8px', maxWidth: 320,
               }}>
                 <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -663,7 +661,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
           </div>
         )}
         {composer.sourceTurnId && composer.mode && (
-          <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, padding: '5px 8px', borderLeft: '2px solid var(--accent)', color: 'var(--mut)', fontSize: 10.5 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, padding: '5px 8px', borderLeft: '2px solid var(--accent)', color: 'var(--mut)', fontSize: 11 }}>
             <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{composer.mode === 'replace' ? 'REPLACE FROM MESSAGE' : 'FORK FROM MESSAGE'}</span>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{turns.get(composer.sourceTurnId)?.input.text}</span>
             <button className="icon-btn" title="Cancel revision" onClick={() => setChatComposer(agent.id, { draft: '', attachments: [], mode: undefined, sourceTurnId: undefined })} style={{ width: 18, height: 18, marginLeft: 'auto', flexShrink: 0 }}>
@@ -674,8 +672,8 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
         {(atts.length > 0 || loadingAtts > 0) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 7 }}>
             {atts.map((a, i) => (
-              <span key={a.path ?? i} className="mono" title={a.path} style={{
-                display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5,
+              <span key={a.path ?? i} title={a.path} style={{
+                display: 'flex', alignItems: 'center', gap: 6, fontSize: 11,
                 color: a.kind === 'image' ? 'var(--accent)' : 'var(--mut)',
                 background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 7, padding: '3px 8px', maxWidth: 260,
               }}>
@@ -692,10 +690,10 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                 </button>
               </span>
             ))}
-            {loadingAtts > 0 && <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', padding: '3px 4px' }}>reading {loadingAtts} file{loadingAtts > 1 ? 's' : ''}…</span>}
+            {loadingAtts > 0 && <span style={{ fontSize: 11, color: 'var(--dim)', padding: '3px 4px' }}>reading {loadingAtts} file{loadingAtts > 1 ? 's' : ''}…</span>}
           </div>
         )}
-        <div style={{ position: 'relative', background: 'var(--panel2)', border: `1px solid ${dragOver ? 'var(--accent)' : 'var(--line2)'}`, borderRadius: 11, padding: '8px 11px' }}>
+        <div style={{ position: 'relative', background: 'var(--panel2)', border: `1px solid ${dragOver ? 'var(--accent)' : 'var(--line2)'}`, borderRadius: 14, padding: '9px 12px' }}>
           {dragOver && (
             <div style={{
               position: 'absolute', inset: 0, zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -712,7 +710,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={onKey}
-            placeholder={busy ? 'agent is working — messages queue until it finishes…' : 'Message this agent — “/” for skills & commands. It can edit files, run commands, call MCP tools…'}
+            placeholder={busy ? 'Working — new messages will queue…' : 'Message this agent — ⏎ to send, ⇧⏎ for a new line'}
             rows={2}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none',
@@ -720,13 +718,12 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
             }}
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span className="mono" style={{ fontSize: 10, color: note ? 'var(--green)' : 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {note ?? `${agent.cwd || 'no working folder'} · ↩ send · / commands · @ attach a project file · drop files`}
+            <span style={{ fontSize: 10.5, color: note ? 'var(--green)' : 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {note ?? `${agent.cwd || 'no working folder'} · / commands · @ files`}
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', flexShrink: 0 }}>
               {chatTypes.length > 1 && (
                 <select
-                  className="mono"
                   title="Provider (chat agent type) — takes effect on the next message"
                   value={chatType?.id ?? ''}
                   disabled={busy}
@@ -740,7 +737,6 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
               )}
               {modelOptions.length > 0 && (
                 <select
-                  className="mono"
                   title="Model — takes effect on the next message"
                   value={curModel}
                   disabled={busy}
@@ -752,7 +748,6 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
               )}
               {canThink && (
                 <select
-                  className="mono"
                   title="Thinking effort — how much the model reasons before answering"
                   value={agent.chatEffort ?? ''}
                   disabled={busy}

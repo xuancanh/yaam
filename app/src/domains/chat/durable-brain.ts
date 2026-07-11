@@ -111,11 +111,18 @@ export interface Reflection {
 export async function reflectTranscript(cfg: LlmConfig, agent: DurableAgent, conversation: Agent, sinceAt: number): Promise<Reflection | null> {
   const msgs = (conversation.chatLog ?? []).filter(m => m.at > sinceAt && (m.role === 'user' || m.role === 'assistant'))
   if (msgs.length < 2) return null
-  const transcript = msgs.map(m => `${m.role === 'user' ? 'USER' : 'AGENT'}: ${m.text.slice(0, 1200)}`).join('\n').slice(-14_000)
+  const transcript = msgs.map(m => {
+    // explicit ratings are the strongest learning signal — mark them inline
+    const mark = m.role === 'assistant' && m.feedback ? ` [user rated this ${m.feedback === 'down' ? '👎' : '👍'}]` : ''
+    return `${m.role === 'user' ? 'USER' : `AGENT${mark}`}: ${m.text.slice(0, 1200)}`
+  }).join('\n').slice(-14_000)
+  // outcome signals reflection can't see in the prose: turns that errored out
+  const failed = (conversation.chatTurns ?? []).filter(t => t.at > sinceAt && t.status === 'failed').length
+  const signals = failed ? `\n\n(Outcome signals: ${failed} turn(s) in this span failed with errors.)` : ''
   const res = await callApi(
     cfg,
-    `You distill a finished conversation for the durable agent "${agent.name}"${agent.role ? ` (${agent.role})` : ''} so future conversations benefit. Journal = what happened (terse bullets, past tense). Lessons = ONLY durable, generalizable learnings — user corrections, stated preferences, approaches that failed/worked. No transient details. Call submit_reflection exactly once.`,
-    [{ role: 'user', content: `Conversation "${conversation.name}":\n\n${transcript}` }],
+    `You distill a finished conversation for the durable agent "${agent.name}"${agent.role ? ` (${agent.role})` : ''} so future conversations benefit. Journal = what happened (terse bullets, past tense). Lessons = ONLY durable, generalizable learnings — user corrections, stated preferences, approaches that failed/worked. Replies marked [user rated 👎/👍] carry explicit feedback: weight them heavily when distilling lessons. No transient details. Call submit_reflection exactly once.`,
+    [{ role: 'user', content: `Conversation "${conversation.name}":\n\n${transcript}${signals}` }],
     REFLECT_TOOL,
   )
   const call = res.content.find((b): b is ApiContentBlock => b.type === 'tool_use' && b.name === 'submit_reflection')

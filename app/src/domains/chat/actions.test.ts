@@ -148,5 +148,7 @@ describe('chat composer actions', () => {
     // no durable home dir → the lesson lands in shared workspace memory
     const corrections = JSON.stringify(state.assistantMemory)
     expect(corrections).toContain('too verbose, lead with the answer')
+    // and it queues for the agent's next turn so it acknowledges the change
+    expect(state.agents[0].chatPendingFeedback).toEqual(['👎 too verbose, lead with the answer'])
   })
 })

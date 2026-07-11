@@ -203,6 +203,9 @@ export interface SessionRecord {
   /** extended-thinking effort for this session; absent = off (only sent to
    *  models that support it — see supportsThinking in llm/client) */
   chatEffort?: 'low' | 'medium' | 'high'
+  /** ratings/notes given since the agent's last turn — surfaced to the model
+   *  on its next reply (it acknowledges the adjustment), then cleared */
+  chatPendingFeedback?: string[]
   /** skill sources for this chat: 'local' and/or SkillRegistry ids */
   skillSourceIds?: string[]
   /** chat tool safety: 'ask' permits reads and pauses mutations/external actions;

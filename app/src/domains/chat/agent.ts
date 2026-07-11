@@ -69,7 +69,18 @@ export function toolNeedsApproval(name: string): boolean {
   return name.startsWith(MCP_PREFIX) || !READ_ONLY_TOOLS.has(name)
 }
 
+/** Self-modification is reviewed even in auto mode: the charter is the user's
+ *  job description for the agent, so drift needs an explicit sign-off. The
+ *  approval card shows exactly what the agent wants to change. */
+export const ALWAYS_ASK_TOOLS = new Set(['update_my_profile'])
+
 function approvalPreview(name: string, input: Record<string, unknown>): string {
+  if (name === 'update_my_profile') {
+    const fields = Object.entries(input)
+      .filter((e): e is [string, string] => typeof e[1] === 'string' && !!e[1].trim())
+      .map(([k, v]) => `${k} → ${v.trim()}`)
+    return (fields.join('\n') || JSON.stringify(input)).slice(0, 1500)
+  }
   const value = name === 'run_command' ? input.command
     : name === 'run_applescript' ? input.script
       : name === 'move_path' || name === 'copy_path' ? `${String(input.from ?? '')} → ${String(input.to ?? '')}`
@@ -254,7 +265,7 @@ function builtinTools(skills: CatalogSkill[]) {
     },
     {
       name: 'update_my_profile',
-      description: 'Rewrite parts of YOUR OWN durable profile — the charter (your system prompt / job description), role line, name, default model, or home folder. Use when accumulated lessons show your charter should evolve, or when the user asks you to change how you operate. Pass only the fields to change; the charter you pass REPLACES the current one, so carry forward everything still true. In ask mode the user approves this first.',
+      description: 'Rewrite parts of YOUR OWN durable profile — the charter (your system prompt / job description), role line, name, default model, or home folder. Use when accumulated lessons show your charter should evolve, or when the user asks you to change how you operate. Pass only the fields to change; the charter you pass REPLACES the current one, so carry forward everything still true. The user ALWAYS reviews and approves the change first (even in auto mode) — so state the change plainly and be ready to explain why.',
       input_schema: {
         type: 'object',
         properties: {
@@ -729,8 +740,9 @@ export async function runChatTurn(
           return { type: 'tool_result', tool_use_id: b.id, content }
         }
         // Ask mode permits reads but pauses every mutating/external capability.
+        // Self-modification (charter/profile changes) is reviewed regardless.
         const gated = toolNeedsApproval(name)
-        if (gated && app && (getAgent()?.permMode ?? 'ask') !== 'auto') {
+        if (gated && app && (ALWAYS_ASK_TOOLS.has(name) || (getAgent()?.permMode ?? 'ask') !== 'auto')) {
           const decision = await app.requestApproval(name, approvalPreview(name, input))
           if (decision === 'deny') {
             content = 'The user declined this action. Do not retry it as-is — ask them or take another approach.'

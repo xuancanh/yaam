@@ -317,7 +317,8 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
   ctx.dispatch(s => ({
     ...s,
     agents: s.agents.map(a => a.id === agentId
-      ? { ...a, status: 'running' as const, chatTurns: [...(a.chatTurns ?? []), turn].slice(-200) }
+      // pending feedback is consumed by this turn (injected below) — clear it
+      ? { ...a, status: 'running' as const, chatTurns: [...(a.chatTurns ?? []), turn].slice(-200), chatPendingFeedback: undefined }
       : a),
   }))
   let autoCompact = false
@@ -479,7 +480,13 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
         memoryDigest(wsMemory(ctx.stateRef.current, agent.workspaceId), ['notes', 'preferences', 'corrections']),
       ].filter(Boolean).join('\n') || undefined,
       agent.chatCompactedAt ? undefined : agent.chatContextSummary,
-      ctx.stateRef.current.settings.assistantPrompts?.chat,
+      // fresh ratings ride along once so the agent visibly closes the loop
+      [
+        ctx.stateRef.current.settings.assistantPrompts?.chat,
+        agent.chatPendingFeedback?.length
+          ? `SINCE YOUR LAST REPLY the user rated your work:\n${agent.chatPendingFeedback.map(f => `- ${f}`).join('\n')}\nOpen your reply with ONE short sentence acknowledging the adjustment you are making, then apply it.`
+          : '',
+      ].filter(Boolean).join('\n\n') || undefined,
       durableSection,
     )
     seal()

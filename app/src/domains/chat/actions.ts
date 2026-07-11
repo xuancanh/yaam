@@ -330,6 +330,15 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
           ? `- [user 👍 ${new Date().toISOString().slice(0, 10)}] ${note.trim()}`
           : '' // a bare 👍 is recorded on the message, not worth a lesson line
       if (!line) return
+      // surface the feedback to the agent on its NEXT turn so it visibly
+      // acknowledges the adjustment (cleared by the runner when consumed)
+      const pending = `${rating === 'down' ? '👎' : '👍'} ${note?.trim() || `on: "${excerpt}"`}`
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === agentId
+          ? { ...a, chatPendingFeedback: [...(a.chatPendingFeedback ?? []), pending].slice(-5) }
+          : a),
+      }))
       const durable = conv.durableAgentId ? (st.durableAgents ?? []).find(d => d.id === conv.durableAgentId) : undefined
       if (durable?.homeDir?.trim()) {
         void appendBrainFile(durable, LESSONS_FILE, line)
