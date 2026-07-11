@@ -269,7 +269,14 @@ export function RemoteCompanion() {
       }).catch(() => {})
       // a phone (re)connected while publishing was idle — hand it a fresh
       // snapshot now instead of waiting for the next store change
-      void remoteActive().then(a => { if (!dead && a && !wasActive) publish() }).catch(() => {})
+      void remoteActive().then(active => {
+        if (dead) return
+        if (!active) {
+          wasActive = false
+        } else if (!wasActive) {
+          publish()
+        }
+      }).catch(() => {})
     }, POLL_MS)
 
     return () => {
