@@ -6,6 +6,39 @@ import type { AppState } from '../core/types'
 
 /** Select Tauri HTTP on desktop and the browser fetch implementation in web previews. */
 const doFetch: typeof fetch = (...args) => (isTauri ? tauriFetch(...args) : fetch(...args))
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+async function readTextBounded(res: Response, cap = MAX_RESPONSE_BYTES): Promise<string> {
+  const declared = Number(res.headers.get('content-length') ?? 0)
+  if (Number.isFinite(declared) && declared > cap) {
+    await res.body?.cancel().catch(() => {})
+    throw new Error(`API response exceeds the ${cap} byte limit`)
+  }
+  if (!res.body) {
+    const text = await res.text()
+    if (text.length > cap) throw new Error(`API response exceeds the ${cap} byte limit`)
+    return text
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  let bytes = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    bytes += value.byteLength
+    if (bytes > cap) {
+      await reader.cancel().catch(() => {})
+      throw new Error(`API response exceeds the ${cap} byte limit`)
+    }
+    text += decoder.decode(value, { stream: true })
+  }
+  return text + decoder.decode()
+}
+
+async function readJsonBounded<T>(res: Response, cap = MAX_RESPONSE_BYTES): Promise<T> {
+  return JSON.parse(await readTextBounded(res, cap)) as T
+}
 
 export interface ProviderDef {
   id: string
@@ -33,6 +66,57 @@ export function providerFor(id: string): ProviderDef {
   return PROVIDERS.find(pr => pr.id === id) ?? PROVIDERS[0]
 }
 
+// ---------------------------------------------------------------- extended thinking
+
+export type ThinkingEffort = 'low' | 'medium' | 'high'
+
+/** Anthropic thinking budgets per effort (min allowed is 1024). */
+export const THINKING_BUDGETS: Record<ThinkingEffort, number> = { low: 2048, medium: 8192, high: 16384 }
+
+/** Whether a provider+model pair accepts a thinking/effort request parameter.
+ *  Conservative: unknown models get no parameter rather than a 400. */
+export function supportsThinking(providerId: string, model: string): boolean {
+  const m = model.toLowerCase()
+  switch (providerId) {
+    case 'anthropic':
+    case 'anthropic-compat':
+    case 'bedrock':
+      // extended thinking landed with the 3.7/4.x generations
+      return /claude/.test(m) && !/claude-3-[05]/.test(m)
+    case 'openai':
+      return /^(o\d|gpt-5)/.test(m)
+    case 'gemini':
+      return /^gemini-[23]/.test(m)
+    default:
+      return false // deepseek-reasoner etc. think unconditionally — no parameter
+  }
+}
+
+/** Anthropic request fields controlled by the thinking setting. Thinking
+ *  requires temperature 1; the budget is added on top of the answer budget. */
+function anthropicTuning(thinking?: ThinkingEffort): Record<string, unknown> {
+  if (!thinking) return { max_tokens: 8192, temperature: 0.2 }
+  const budget = THINKING_BUDGETS[thinking]
+  return { max_tokens: 8192 + budget, temperature: 1, thinking: { type: 'enabled', budget_tokens: budget } }
+}
+
+/** Prepare retained history for the Anthropic wire. Thinking blocks are kept
+ *  ONLY when signed and thinking is on (tool loops require the last assistant
+ *  turn's signed thinking back verbatim); everything else — unsigned blocks
+ *  from OpenAI-protocol models, or any thinking block while the feature is
+ *  off — must be stripped or the API rejects the whole request. */
+export function forAnthropicWire(messages: ApiMessage[], thinkingOn: boolean): ApiMessage[] {
+  return messages.map(m => {
+    if (!Array.isArray(m.content)) return m
+    const blocks = (m.content as ApiContentBlock[])
+      .filter(b => b.type !== 'thinking' || (thinkingOn && b.signature))
+      .map(b => (b.type === 'thinking'
+        ? { type: 'thinking', thinking: b.text ?? '', signature: b.signature }
+        : b))
+    return { ...m, content: blocks }
+  })
+}
+
 export interface ApiContentBlock {
   type: string
   text?: string
@@ -43,6 +127,9 @@ export interface ApiContentBlock {
   incompleteArgs?: boolean
   /** image block (vision): base64 payload in the Anthropic shape */
   source?: { type: 'base64'; media_type: string; data: string }
+  /** thinking block: Anthropic's integrity signature — required to pass the
+   *  block back during a tool loop; absent on OpenAI-protocol reasoning */
+  signature?: string
 }
 
 export interface ApiResponse {
@@ -86,6 +173,9 @@ export interface LlmConfig {
   awsProfile: string
   awsRefreshCmd: string
   credCmd: string
+  /** request extended thinking / reasoning effort (only set for models where
+   *  supportsThinking is true; absent = provider default) */
+  thinking?: ThinkingEffort
 }
 
 // ---------------------------------------------------------------- credential command
@@ -155,11 +245,12 @@ function anthropicAuthHeaders(key: string): Record<string, string> {
 
 /** Send one Anthropic-shaped request through direct HTTP or the Bedrock bridge. */
 async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], signal?: AbortSignal): Promise<ApiResponse> {
+  const wireMessages = forAnthropicWire(messages, !!cfg.thinking)
   if (cfg.provider.id === 'bedrock') {
     // model id goes in the URL on Bedrock; auth is SigV4 in the backend
-    const body = JSON.stringify({ anthropic_version: 'bedrock-2023-05-31', max_tokens: 8192, temperature: 0.2, system, messages, tools })
+    const body = JSON.stringify({ anthropic_version: 'bedrock-2023-05-31', ...anthropicTuning(cfg.thinking), system, messages: wireMessages, tools })
     const raw = await bedrockInvoke(cfg.awsRegion || 'us-east-1', cfg.awsProfile, cfg.awsRefreshCmd, cfg.credCmd, cfg.model, body)
-    return withNormalizedUsage(JSON.parse(raw) as ApiResponse)
+    return withNormalizedUsage(normalizeThinkingBlocks(JSON.parse(raw) as ApiResponse))
   }
   // Build the request with a supplied key so auth failures can refresh and retry once.
   const anthropicBase = (cfg.provider.id === 'anthropic-compat' ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
@@ -171,7 +262,7 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model: cfg.model, max_tokens: 8192, temperature: 0.2, system, messages, tools }),
+    body: JSON.stringify({ model: cfg.model, ...anthropicTuning(cfg.thinking), system, messages: wireMessages, tools }),
     signal,
   })
   let res = await send(await resolveKey(cfg))
@@ -179,9 +270,21 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
     // stale credential — re-run the credential command and retry once
     res = await send(await resolveKey(cfg, true))
   }
-  const data = await res.json() as ApiResponse
+  const data = await readJsonBounded<ApiResponse>(res)
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
-  return withNormalizedUsage(data)
+  return withNormalizedUsage(normalizeThinkingBlocks(data))
+}
+
+/** Anthropic returns thinking blocks as { thinking, signature } with no
+ *  `text`; the rest of the app reads reasoning from `.text`. Mirror it. */
+function normalizeThinkingBlocks(data: ApiResponse): ApiResponse {
+  if (!Array.isArray(data.content)) return data
+  return {
+    ...data,
+    content: data.content.map(b => (b.type === 'thinking' && b.text === undefined
+      ? { ...b, text: (b as ApiContentBlock & { thinking?: string }).thinking ?? '' }
+      : b)),
+  }
 }
 
 interface OaiToolCall {
@@ -247,7 +350,8 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
     body: JSON.stringify({
       model: cfg.model,
       max_tokens: 8192,
-      temperature: 0.2,
+      // reasoning models fix their own temperature and reject overrides
+      ...(cfg.thinking ? { reasoning_effort: cfg.thinking } : { temperature: 0.2 }),
       messages: toOpenAiMessages(system, messages),
       tools: (tools as Array<{ name: string; description: string; input_schema: unknown }>).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
     }),
@@ -258,11 +362,11 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
     // stale credential — re-run the credential command and retry once
     res = await send(await resolveKey(cfg, true))
   }
-  const data = await res.json() as {
+  const data = await readJsonBounded<{
     choices?: Array<{ message: OaiMessage; finish_reason: string }>
     usage?: { prompt_tokens?: number; completion_tokens?: number }
     error?: { message: string }
-  }
+  }>(res)
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
   const msg = data.choices?.[0]?.message
   const content: ApiContentBlock[] = []
@@ -350,6 +454,11 @@ function makeThinkSplitter(route: StreamDelta): { push: (chunk: string) => void;
 /** Consume an SSE response — incrementally when the body streams, or from the
  *  buffered text otherwise (plugin fallback) — invoking onData per event. */
 async function consumeSse(res: Response, onData: (data: string) => void): Promise<void> {
+  const declared = Number(res.headers.get('content-length') ?? 0)
+  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+    await res.body?.cancel().catch(() => {})
+    throw new Error(`API response exceeds the ${MAX_RESPONSE_BYTES} byte limit`)
+  }
   const process = (chunk: string, carry: string): string => {
     const text = carry + chunk
     const lines = text.split('\n')
@@ -367,14 +476,20 @@ async function consumeSse(res: Response, onData: (data: string) => void): Promis
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let carry = ''
+    let bytes = 0
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
+      bytes += value.byteLength
+      if (bytes > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {})
+        throw new Error(`API response exceeds the ${MAX_RESPONSE_BYTES} byte limit`)
+      }
       carry = process(decoder.decode(value, { stream: true }), carry)
     }
     process('\n', carry)
   } else {
-    process(await res.text() + '\n', '')
+    process(await readTextBounded(res) + '\n', '')
   }
 }
 
@@ -390,7 +505,7 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model: cfg.model, max_tokens: 8192, temperature: 0.2, system, messages, tools, stream: true }),
+    body: JSON.stringify({ model: cfg.model, ...anthropicTuning(cfg.thinking), system, messages: forAnthropicWire(messages, !!cfg.thinking), tools, stream: true }),
     signal,
   })
   let res = await send(await resolveKey(cfg))
@@ -398,7 +513,7 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
     res = await send(await resolveKey(cfg, true))
   }
   if (!res.ok) {
-    const data = await res.json().catch(() => null) as ApiResponse | null
+    const data = await readJsonBounded<ApiResponse>(res, 256 * 1024).catch(() => null)
     throw new Error(data?.error?.message || `API error ${res.status}`)
   }
   const blocks: (ApiContentBlock & { partialJson?: string })[] = []
@@ -422,13 +537,16 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
     } else if (ev.type === 'content_block_delta') {
       const b = blocks[index]
       if (!b) return
-      const d = ev.delta as { type: string; text?: string; thinking?: string; partial_json?: string }
+      const d = ev.delta as { type: string; text?: string; thinking?: string; partial_json?: string; signature?: string }
       if (d.type === 'text_delta' && d.text) {
         b.text = (b.text ?? '') + d.text
         onDelta(d.text)
       } else if (d.type === 'thinking_delta' && d.thinking) {
         b.text = (b.text ?? '') + d.thinking
         onDelta(d.thinking, 'thinking')
+      } else if (d.type === 'signature_delta' && d.signature) {
+        // thinking-block integrity signature — must round-trip in tool loops
+        b.signature = (b.signature ?? '') + d.signature
       } else if (d.type === 'input_json_delta' && d.partial_json) {
         b.partialJson = (b.partialJson ?? '') + d.partial_json
       }
@@ -464,7 +582,8 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
     body: JSON.stringify({
       model: cfg.model,
       max_tokens: 8192,
-      temperature: 0.2,
+      // reasoning models fix their own temperature and reject overrides
+      ...(cfg.thinking ? { reasoning_effort: cfg.thinking } : { temperature: 0.2 }),
       stream: true,
       stream_options: { include_usage: true },
       messages: toOpenAiMessages(system, messages),
@@ -477,7 +596,7 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
     res = await send(await resolveKey(cfg, true))
   }
   if (!res.ok) {
-    const data = await res.json().catch(() => null) as { error?: { message?: string } } | null
+    const data = await readJsonBounded<{ error?: { message?: string } }>(res, 256 * 1024).catch(() => null)
     throw new Error(data?.error?.message || `API error ${res.status}`)
   }
   let text = ''
@@ -540,7 +659,7 @@ export function hasCreds(settings: AppState['settings']): boolean {
 /** Config for a chat-agent type: its own provider/key/base, falling back to
  *  the Master Brain credentials when it shares the provider and sets no key. */
 export function buildChatCfg(
-  t: { provider: string; model: string; apiKey?: string; baseUrl?: string },
+  t: { provider: string; model: string; apiKey?: string; baseUrl?: string; effort?: ThinkingEffort },
   settings: AppState['settings'],
 ): LlmConfig {
   const shared = t.provider === settings.provider && !t.apiKey
@@ -553,6 +672,8 @@ export function buildChatCfg(
     awsProfile: settings.awsProfile,
     awsRefreshCmd: settings.awsRefreshCmd,
     credCmd: shared ? settings.credCmd : '',
+    // a persisted effort survives model switches — only send it where valid
+    ...(t.effort && supportsThinking(t.provider, t.model) ? { thinking: t.effort } : {}),
   }
 }
 

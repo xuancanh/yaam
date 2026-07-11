@@ -769,9 +769,11 @@ export async function runChatTurn(
         })
         return { type: 'tool_result', tool_use_id: b.id, content: content.slice(0, 50_000) }
       }))
-    // thinking blocks never go back over the wire — providers reject or
-    // mis-handle replayed reasoning, and it wastes tokens
-    history.push({ role: 'assistant', content: res.content.filter(b => b.type !== 'thinking') })
+    // unsigned thinking blocks never go back over the wire — providers reject
+    // or mis-handle replayed reasoning. SIGNED blocks (Anthropic extended
+    // thinking) must be retained: the API requires them back verbatim during a
+    // tool loop, and forAnthropicWire strips/converts them per request.
+    history.push({ role: 'assistant', content: res.content.filter(b => b.type !== 'thinking' || b.signature) })
     history.push({ role: 'user', content: results })
   }
   // cap the persistent conversation so long chats stay affordable

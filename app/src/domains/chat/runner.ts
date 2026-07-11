@@ -431,7 +431,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       ? durablePromptSection(durableAgent, await loadBrain(durableAgent).catch(() => ({ lessons: '', journal: '' })))
       : undefined
     const usage = await runChatTurn(
-      buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model }, st),
+      buildChatCfg({ ...chatType, model: agent.chatModel || chatType.model, effort: agent.chatEffort }, st),
       () => ctx.stateRef.current.agents.find(a => a.id === agentId),
       skills,
       mcp,

@@ -200,6 +200,9 @@ export interface SessionRecord {
   reflectedAt?: number
   /** model chosen for this session (from the type's models list) */
   chatModel?: string
+  /** extended-thinking effort for this session; absent = off (only sent to
+   *  models that support it — see supportsThinking in llm/client) */
+  chatEffort?: 'low' | 'medium' | 'high'
   /** skill sources for this chat: 'local' and/or SkillRegistry ids */
   skillSourceIds?: string[]
   /** chat tool safety: 'ask' permits reads and pauses mutations/external actions;
@@ -247,6 +250,9 @@ export interface ChatMsg {
   turnId?: string
   /** assistant-proposed quick replies — clicking one sends it as the user */
   suggestions?: string[]
+  /** user's rating of this assistant reply (👍/👎) — durable agents turn the
+   *  rating + note into a lesson their future turns apply */
+  feedback?: 'up' | 'down'
 }
 
 export interface RouteEntry {

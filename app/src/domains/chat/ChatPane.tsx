@@ -1,8 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
-import { useActions } from '../../store'
+import { useActions, useConductorSelector } from '../../store'
 import { ACCENT, hexToRgba } from '../../core/data'
+import { providerFor, supportsThinking } from '../../llm/client'
+import type { ThinkingEffort } from '../../llm/client'
 import { isTauri, pickFiles, pickSavePath, readFileB64, writeTextFile } from '../../core/native'
 import { listMentionFiles, matchFiles } from './mentions'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
@@ -25,6 +27,8 @@ const RETRY_IC = ['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']
 const CLIP_IC = ['M21 11l-8.5 8.5a5 5 0 01-7-7L14 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-3-3L16 6']
 const EDIT_IC = ['M4 20h4l11-11-4-4L4 16v4z', 'M13 7l4 4']
 const FORK_IC = ['M7 4v5a3 3 0 003 3h4', 'M17 4v5a3 3 0 01-3 3', 'M14 12v8']
+const UP_IC = ['M7 11v9H4v-9h3', 'M7 11l4-7c1.5 0 2.5 1 2.5 2.5L13 11h5.3c1 0 1.8 1 1.5 2l-1.5 5.5c-.2.9-1 1.5-2 1.5H7']
+const DOWN_IC = ['M17 13V4h3v9h-3', 'M17 13l-4 7c-1.5 0-2.5-1-2.5-2.5L11 13H5.7c-1 0-1.8-1-1.5-2l1.5-5.5c.2-.9 1-1.5 2-1.5H17']
 
 /** Load one dropped/picked file into an attachment: images stay base64 for
  *  vision; documents go through best-effort text extraction; binaries attach
@@ -124,9 +128,11 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
   )
 }
 
-function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork, onQuickReply }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void; onQuickReply?: (msgId: string, reply: string) => void }) {
+function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork, onQuickReply, onRate }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void; onQuickReply?: (msgId: string, reply: string) => void; onRate?: (msgId: string, rating: 'up' | 'down', note?: string) => void }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [noteText, setNoteText] = useState('')
   if (m.role === 'thinking') return <ThinkingBubble m={m} live={!!live} />
   if (m.role === 'tool' && m.approval) {
     return <ApprovalBubble m={m} busy={!!busy} onDecide={ok => onApprove?.(m.id, ok)} />
@@ -215,11 +221,59 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
             Open {artifact.kind.toUpperCase()} artifact
           </button>
         )}
-        <div style={{ display: 'flex', gap: 2, opacity: hover && !live ? 1 : 0, transition: 'opacity .12s' }}>
+        <div style={{ display: 'flex', gap: 2, opacity: (hover || !!m.feedback || noteOpen) && !live ? 1 : 0, transition: 'opacity .12s' }}>
           <HoverBtn title={copied ? 'Copied!' : 'Copy message'} paths={COPY_IC} onClick={copy} />
           {canRetry && onRetry && <HoverBtn title="Retry — regenerate from the last message" paths={RETRY_IC} onClick={onRetry} />}
+          {onRate && (
+            <>
+              <button
+                className="icon-btn"
+                title={m.feedback === 'up' ? 'Remove rating' : 'Good reply — the agent learns from this'}
+                onClick={() => { setNoteOpen(false); onRate(m.id, 'up') }}
+                style={{ width: 22, height: 22, borderRadius: 6, color: m.feedback === 'up' ? 'var(--green)' : undefined }}
+              >
+                <Icon paths={UP_IC} size={12} stroke={1.8} />
+              </button>
+              <button
+                className="icon-btn"
+                title={m.feedback === 'down' ? 'Remove rating' : 'Bad reply — tell the agent what was wrong'}
+                onClick={() => {
+                  if (m.feedback === 'down') { setNoteOpen(false); onRate(m.id, 'down'); return }
+                  setNoteOpen(v => !v)
+                }}
+                style={{ width: 22, height: 22, borderRadius: 6, color: m.feedback === 'down' ? 'var(--red, #e5697a)' : undefined }}
+              >
+                <Icon paths={DOWN_IC} size={12} stroke={1.8} />
+              </button>
+            </>
+          )}
         </div>
       </div>
+      {noteOpen && onRate && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, maxWidth: 480 }}>
+          <input
+            autoFocus
+            value={noteText}
+            onChange={e => setNoteText(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { onRate(m.id, 'down', noteText.trim() || undefined); setNoteOpen(false); setNoteText('') }
+              if (e.key === 'Escape') { setNoteOpen(false); setNoteText('') }
+            }}
+            placeholder="what was wrong? (optional — becomes a lesson the agent applies)"
+            style={{
+              flex: 1, background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 7,
+              color: 'var(--text)', fontSize: 11.5, padding: '5px 9px', outline: 'none',
+            }}
+          />
+          <button
+            className="open-btn"
+            style={{ padding: '4px 12px', fontSize: 11, flexShrink: 0 }}
+            onClick={() => { onRate(m.id, 'down', noteText.trim() || undefined); setNoteOpen(false); setNoteText('') }}
+          >
+            Send
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -323,7 +377,8 @@ function SlashMenu({ items, sel, onPick }: {
 }
 
 export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
-  const { sendChatMessage, sendQuickReply, stopChat, retryChat, editAndResendChat, forkChatTurn, clearChat, compactChat, chatSkills, approveChatTool, setChatComposer } = useActions()
+  const { sendChatMessage, sendQuickReply, stopChat, retryChat, editAndResendChat, forkChatTurn, clearChat, compactChat, chatSkills, approveChatTool, setChatComposer, setChatConfig, rateChatReply } = useActions()
+  const chatTypes = useConductorSelector(x => x.chatAgentTypes)
   const composer = agent.chatComposer ?? { draft: '', attachments: [], queue: [] }
   const draft = composer.draft
   const atts = composer.attachments
@@ -535,6 +590,19 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   const lastAssistantId = !busy ? [...log].reverse().find(m => m.role === 'assistant')?.id : undefined
   const hasUserMsg = log.some(m => m.role === 'user')
 
+  // chat-bar brain picker: agent type (provider), model, thinking effort
+  const chatType = chatTypes.find(t => t.id === agent.chatTypeId) ?? chatTypes.find(t => t.enabled) ?? chatTypes[0]
+  const curModel = agent.chatModel || chatType?.model || ''
+  const modelOptions = useMemo(() => {
+    const base = chatType?.models?.length ? chatType.models : chatType ? providerFor(chatType.provider).models : []
+    return [...new Set([curModel, chatType?.model ?? '', ...base].filter(Boolean))]
+  }, [chatType, curModel])
+  const canThink = chatType ? supportsThinking(chatType.provider, curModel) : false
+  const pickerStyle = {
+    background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 6, color: 'var(--mut)',
+    fontSize: 10, padding: '2px 3px', maxWidth: 150, cursor: 'pointer', flexShrink: 0,
+  } as const
+
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', background: 'var(--bg2)' }}>
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -557,6 +625,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                   onEdit={m.role === 'user' && turn && !busy ? () => reviseTurn(turn, 'replace') : undefined}
                   onFork={m.role === 'user' && turn && !busy ? () => reviseTurn(turn, 'fork') : undefined}
                   onQuickReply={(msgId, reply) => sendQuickReply(agent.id, msgId, reply)}
+                  onRate={m.role === 'assistant' ? (msgId, rating, note) => rateChatReply(agent.id, msgId, rating, note) : undefined}
                 />
               </Fragment>
             )
@@ -654,12 +723,55 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
             <span className="mono" style={{ fontSize: 10, color: note ? 'var(--green)' : 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {note ?? `${agent.cwd || 'no working folder'} · ↩ send · / commands · @ attach a project file · drop files`}
             </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', flexShrink: 0 }}>
+              {chatTypes.length > 1 && (
+                <select
+                  className="mono"
+                  title="Provider (chat agent type) — takes effect on the next message"
+                  value={chatType?.id ?? ''}
+                  disabled={busy}
+                  onChange={e => setChatConfig(agent.id, { chatTypeId: e.target.value })}
+                  style={pickerStyle}
+                >
+                  {chatTypes.filter(t => t.enabled || t.id === chatType?.id).map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              )}
+              {modelOptions.length > 0 && (
+                <select
+                  className="mono"
+                  title="Model — takes effect on the next message"
+                  value={curModel}
+                  disabled={busy}
+                  onChange={e => setChatConfig(agent.id, { chatModel: e.target.value })}
+                  style={pickerStyle}
+                >
+                  {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              )}
+              {canThink && (
+                <select
+                  className="mono"
+                  title="Thinking effort — how much the model reasons before answering"
+                  value={agent.chatEffort ?? ''}
+                  disabled={busy}
+                  onChange={e => setChatConfig(agent.id, { chatEffort: (e.target.value || null) as ThinkingEffort | null })}
+                  style={pickerStyle}
+                >
+                  <option value="">think: off</option>
+                  <option value="low">think: low</option>
+                  <option value="medium">think: med</option>
+                  <option value="high">think: high</option>
+                </select>
+              )}
+            </div>
             <button
               className="icon-btn"
               title="Attach files (PDF, office docs, images, text…)"
               onClick={() => { void pickFiles().then(ps => addPaths(ps)) }}
               disabled={!isTauri}
-              style={{ width: 26, height: 26, borderRadius: 7, marginLeft: 'auto', marginRight: 6, flexShrink: 0 }}
+              style={{ width: 26, height: 26, borderRadius: 7, marginLeft: 4, marginRight: 6, flexShrink: 0 }}
             >
               <Icon paths={CLIP_IC} size={14} stroke={1.7} />
             </button>

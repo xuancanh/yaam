@@ -11,6 +11,9 @@ import { mkId } from '../../shared/id'
 import { defaultDetail, mkMemory, mkTools } from '../../core/data'
 import { buildContextSummary } from './turns'
 import { resolveDecision } from '../master/harness-stats'
+import { withMemoryAppend } from '../master/assistant-memory'
+import { LESSONS_FILE, appendBrainFile, commitBrain } from './durable-brain'
+import type { ThinkingEffort } from '../../llm/client'
 
 export interface ChatActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -46,6 +49,12 @@ export interface ChatActions {
   /** distill the API context into a summary (manual /compact) */
   compactChat: (agentId: string) => Promise<string>
   setChatComposer: (agentId: string, patch: Partial<ChatComposerState>) => void
+  /** switch this conversation's brain from the chat bar: agent type (provider),
+   *  model, and thinking effort (null clears the effort) */
+  setChatConfig: (agentId: string, patch: { chatTypeId?: string; chatModel?: string; chatEffort?: ThinkingEffort | null }) => void
+  /** rate an assistant reply 👍/👎; durable agents record the rating (plus the
+   *  optional note) as a lesson so future turns adjust */
+  rateChatReply: (agentId: string, msgId: string, rating: 'up' | 'down', note?: string) => void
   setChatPinned: (agentId: string, pinned: boolean) => void
   setChatTags: (agentId: string, tags: string[]) => void
   archiveChat: (agentId: string) => void
@@ -274,6 +283,63 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
         return { ...a, chatComposer: { ...current, ...patch } }
       }),
     })),
+
+    setChatConfig: (agentId, patch) => dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => {
+        if (a.id !== agentId) return a
+        const chatType = patch.chatTypeId
+          ? s.chatAgentTypes.find(t => t.id === patch.chatTypeId)
+          : s.chatAgentTypes.find(t => t.id === a.chatTypeId)
+        // switching the type resets the model to that type's default unless
+        // the same dispatch names one explicitly
+        const model = patch.chatModel
+          ?? (patch.chatTypeId ? chatType?.model : a.chatModel)
+          ?? chatType?.model
+        return {
+          ...a,
+          ...(patch.chatTypeId ? { chatTypeId: patch.chatTypeId } : {}),
+          chatModel: model,
+          ...(patch.chatEffort !== undefined ? { chatEffort: patch.chatEffort ?? undefined } : {}),
+          // the session card's display line mirrors the active brain
+          model: chatType ? `${chatType.name} · ${model}` : a.model,
+        }
+      }),
+    })),
+
+    rateChatReply: (agentId, msgId, rating, note) => {
+      const st = stateRef.current
+      const conv = st.agents.find(a => a.id === agentId)
+      const msg = conv?.chatLog?.find(m => m.id === msgId)
+      if (!conv || !msg || msg.role !== 'assistant') return
+      const cleared = msg.feedback === rating && !note // same thumb again = un-rate
+      dispatch(s => ({
+        ...s,
+        agents: s.agents.map(a => a.id === agentId
+          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, feedback: cleared ? undefined : rating } : m)) }
+          : a),
+      }))
+      if (cleared) return
+      // turn the rating into a durable lesson: explicit feedback is the highest-
+      // signal learning input, so it lands in the brain immediately instead of
+      // waiting for reflection (which only sees the transcript text)
+      const excerpt = msg.text.replace(/\s+/g, ' ').trim().slice(0, 160)
+      const line = rating === 'down'
+        ? `- [user 👎 ${new Date().toISOString().slice(0, 10)}] ${note?.trim() || `the user rejected this kind of reply: "${excerpt}"`}`
+        : note?.trim()
+          ? `- [user 👍 ${new Date().toISOString().slice(0, 10)}] ${note.trim()}`
+          : '' // a bare 👍 is recorded on the message, not worth a lesson line
+      if (!line) return
+      const durable = conv.durableAgentId ? (st.durableAgents ?? []).find(d => d.id === conv.durableAgentId) : undefined
+      if (durable?.homeDir?.trim()) {
+        void appendBrainFile(durable, LESSONS_FILE, line)
+          .then(() => commitBrain(durable, `feedback · ${rating}`))
+          .catch(() => {})
+      } else {
+        dispatch(s => withMemoryAppend(s, 'corrections', line.replace(/^- /, ''), conv.workspaceId))
+      }
+      ctx.logEvent('edit', agentId, `Rated a reply ${rating === 'up' ? '👍' : '👎'}${note?.trim() ? ' with a note' : ''}`)
+    },
 
     setChatPinned: (agentId, pinned) => dispatch(s => ({
       ...s,

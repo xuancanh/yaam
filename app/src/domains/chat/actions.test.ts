@@ -76,4 +76,77 @@ describe('chat composer actions', () => {
     expect(state.tasks.find(t => t.id === taskId)).toMatchObject({ title: 'two', col: 'backlog', agentId: null })
     expect(state.agents[0].chatTurns?.find(t => t.id === 't2')?.promotedTaskId).toBe(taskId)
   })
+
+  it('setChatConfig switches type/model/effort and keeps the display line honest', () => {
+    const chat = {
+      id: 'chat-1', kind: 'chat', chatLog: [], log: [],
+      chatTypeId: 'ct-a', chatModel: 'claude-sonnet-5', model: 'Claude · claude-sonnet-5',
+    } as unknown as Agent
+    let state = {
+      agents: [chat], skills: [], skillRegistries: [],
+      chatAgentTypes: [
+        { id: 'ct-a', name: 'Claude', provider: 'anthropic', model: 'claude-sonnet-5', enabled: true },
+        { id: 'ct-b', name: 'DeepSeek', provider: 'deepseek', model: 'deepseek-chat', enabled: true },
+      ],
+      settings: {}, activeWorkspace: 'ws',
+    } as unknown as AppState
+    const stateRef = { current: state }
+    const actions = createChatActions({
+      stateRef,
+      dispatch: update => { state = update(state); stateRef.current = state },
+      logEvent: vi.fn(), runChatMessage: vi.fn(), stopChatMessage: vi.fn(), retryChatMessage: vi.fn(),
+      replayChatMessage: vi.fn(),
+      resetChatRuntime: vi.fn(), resolveChatApproval: vi.fn(), compactChatContext: vi.fn(async () => ''), skillCatalogs: { current: new Map() },
+    })
+
+    actions.setChatConfig('chat-1', { chatEffort: 'high' })
+    expect(state.agents[0]).toMatchObject({ chatEffort: 'high', chatModel: 'claude-sonnet-5' })
+
+    // switching the type resets the model to the new type's default
+    actions.setChatConfig('chat-1', { chatTypeId: 'ct-b' })
+    expect(state.agents[0]).toMatchObject({
+      chatTypeId: 'ct-b', chatModel: 'deepseek-chat', model: 'DeepSeek · deepseek-chat',
+      chatEffort: 'high', // persists — the runner gates it per model support
+    })
+
+    actions.setChatConfig('chat-1', { chatModel: 'deepseek-reasoner', chatEffort: null })
+    expect(state.agents[0]).toMatchObject({ chatModel: 'deepseek-reasoner', model: 'DeepSeek · deepseek-reasoner' })
+    expect(state.agents[0].chatEffort).toBeUndefined()
+  })
+
+  it('rateChatReply marks the message, toggles off, and files 👎 notes as memory', () => {
+    const chat = {
+      id: 'chat-1', kind: 'chat', log: [], workspaceId: 'ws',
+      chatLog: [
+        { id: 'm1', role: 'assistant', text: 'a long reply the user disliked', at: 1 },
+        { id: 'm2', role: 'user', text: 'q', at: 2 },
+      ],
+    } as unknown as Agent
+    let state = {
+      agents: [chat], skills: [], skillRegistries: [], chatAgentTypes: [],
+      settings: {}, activeWorkspace: 'ws', durableAgents: [], assistantMemory: {},
+    } as unknown as AppState
+    const stateRef = { current: state }
+    const actions = createChatActions({
+      stateRef,
+      dispatch: update => { state = update(state); stateRef.current = state },
+      logEvent: vi.fn(), runChatMessage: vi.fn(), stopChatMessage: vi.fn(), retryChatMessage: vi.fn(),
+      replayChatMessage: vi.fn(),
+      resetChatRuntime: vi.fn(), resolveChatApproval: vi.fn(), compactChatContext: vi.fn(async () => ''), skillCatalogs: { current: new Map() },
+    })
+
+    actions.rateChatReply('chat-1', 'm2', 'up') // user messages are not ratable
+    expect(state.agents[0].chatLog?.[1].feedback).toBeUndefined()
+
+    actions.rateChatReply('chat-1', 'm1', 'up')
+    expect(state.agents[0].chatLog?.[0].feedback).toBe('up')
+    actions.rateChatReply('chat-1', 'm1', 'up') // same thumb again un-rates
+    expect(state.agents[0].chatLog?.[0].feedback).toBeUndefined()
+
+    actions.rateChatReply('chat-1', 'm1', 'down', 'too verbose, lead with the answer')
+    expect(state.agents[0].chatLog?.[0].feedback).toBe('down')
+    // no durable home dir → the lesson lands in shared workspace memory
+    const corrections = JSON.stringify(state.assistantMemory)
+    expect(corrections).toContain('too verbose, lead with the answer')
+  })
 })
