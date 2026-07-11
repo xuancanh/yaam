@@ -616,24 +616,40 @@ export async function execAddonTool(s: AppState, name: string, input: Record<str
 }
 
 /** Fire a lifecycle hook across all enabled addons (errors contained). */
+const addonHookTails = new Map<string, Promise<void>>()
+
 export async function execAddonHook(
   s: AppState,
   hook: AddonHookName,
   event: Record<string, unknown>,
   apiFor: (addonId: string) => AddonApi,
 ): Promise<void> {
+  const jobs: Promise<void>[] = []
   for (const a of s.addons) {
     const src = a.enabled ? a.hooks?.[hook] : undefined
     if (!src) continue
     const api = apiFor(a.id)
-    try {
-      await runHandler(src, event, api)
-    } catch (e) {
-      // logEvent is itself permission-guarded (ui) — a hook failure in an
-      // addon without that scope must not escape as an unhandled rejection
+    // Lifecycle events can overlap (two task moves, or a cron firing while a
+    // task hook runs). Serialize each addon's handlers so storage read/modify/
+    // write workflows cannot lose transitions; unrelated addons still run in
+    // parallel and one failed handler never poisons its queue.
+    const previous = addonHookTails.get(a.id) ?? Promise.resolve()
+    const job = previous.catch(() => {}).then(async () => {
       try {
-        api.logEvent(`addon "${a.name}" ${hook} failed: ${e instanceof Error ? e.message : String(e)}`)
-      } catch { /* no ui scope — swallow */ }
-    }
+        await runHandler(src, event, api)
+      } catch (e) {
+        // logEvent is itself permission-guarded (ui) — a hook failure in an
+        // addon without that scope must not escape as an unhandled rejection
+        try {
+          api.logEvent(`addon "${a.name}" ${hook} failed: ${e instanceof Error ? e.message : String(e)}`)
+        } catch { /* no ui scope — swallow */ }
+      }
+    })
+    addonHookTails.set(a.id, job)
+    void job.finally(() => {
+      if (addonHookTails.get(a.id) === job) addonHookTails.delete(a.id)
+    })
+    jobs.push(job)
   }
+  await Promise.all(jobs)
 }
