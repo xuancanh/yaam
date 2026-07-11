@@ -92,6 +92,7 @@ Run everything from `app/`. Cargo must be on PATH (`export PATH="$HOME/.cargo/bi
   root tsconfig is a solution-style config with `files: []`.)
 - `npm run lint` — oxlint. Three pre-existing `only-export-components` warnings in
   `ui.tsx` and files that export both a component and helpers are expected/benign.
+- `npm test` — run the full frontend Vitest suite once (`vitest run`).
 - `npm run build` — production frontend build (`tsc -b && vite build`).
 - `(cd src-tauri && cargo check)` — typecheck Rust. `cargo test --lib` runs the
   colocated backend domain tests.
