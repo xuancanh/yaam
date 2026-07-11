@@ -13,6 +13,7 @@ import * as native from '../../core/native'
 import { createAddonApi } from '../../domains/addons/addon-api'
 import { createAddonAgentRuntime } from '../../domains/addons/agent-runtime'
 import { createAddonRuntime } from '../../domains/addons/runtime'
+import { createDevAddonWatcher } from '../../domains/addons/dev-watch'
 import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
 import type { SessionRuntime } from './session'
@@ -22,6 +23,9 @@ export interface AddonSubsystem {
   disposeAddon: (addonId: string) => void
   installPackage: (json: string, source: Addon['source']) => void
   sendAddonChat: (id: string, text: string) => void
+  /** begin polling dev-installed addon folders (hot reinstall on change) */
+  start: () => void
+  dispose: () => void
 }
 
 /** routes an addon's send-to-session through the shared command (addon actor) */
@@ -82,5 +86,20 @@ export function createAddonSubsystem(k: ConductorKernel, refs: RuntimeRefs, sess
   }
   fireAddonHookRef.current = fireAddonHook
 
-  return { makeAddonApi, disposeAddon, installPackage: addonRuntime.installPackage, sendAddonChat: (id, text) => { void addonRuntime.sendAddonChat(id, text) } }
+  const devWatcher = createDevAddonWatcher({
+    stateRef,
+    readTextFile: (path, root) => native.readTextFile(path, root),
+    installPackage: addonRuntime.installPackage,
+    flash,
+    logEvent: text => logEvent('build', null, text),
+  })
+
+  return {
+    makeAddonApi,
+    disposeAddon,
+    installPackage: addonRuntime.installPackage,
+    sendAddonChat: (id, text) => { void addonRuntime.sendAddonChat(id, text) },
+    start: devWatcher.start,
+    dispose: devWatcher.dispose,
+  }
 }

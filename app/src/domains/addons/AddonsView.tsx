@@ -117,7 +117,7 @@ function MarketDetail({ e, installed }: { e: RegistryEntry; installed?: Addon })
 
 export function AddonsView() {
   const s = useConductorSelector(x => ({ settings: x.settings, addons: x.addons }), shallowEqual)
-  const { installAddonFromFile, installAddonFromFolder, updateSettings } = useActions()
+  const { installAddonFromFile, installAddonFromFolder, installAddonForDev, updateSettings } = useActions()
   const [query, setQuery] = useState('')
   const [market, setMarket] = useState<RegistryEntry[]>([])
   const [regErrors, setRegErrors] = useState<Record<string, string>>({})
@@ -175,6 +175,7 @@ export function AddonsView() {
         <button className="approve-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12 }} onClick={() => setGenerating(true)}>✦ Generate…</button>
         <button className="open-btn" style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={installAddonFromFile}>Install file…</button>
         <button className="open-btn" title="Multi-file addon: addon.yaml + view.html / tools/*.js / hooks/*.js" style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={installAddonFromFolder}>Install folder…</button>
+        <button className="open-btn" title="Install a folder AND watch it — edits (or yaam-addon rebuilds into it) hot-reload the addon" style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={installAddonForDev}>Dev install…</button>
       </ViewHeader>
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>

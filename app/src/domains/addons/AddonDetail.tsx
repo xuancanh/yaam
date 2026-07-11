@@ -51,7 +51,7 @@ function SecretRow({ addonId, name, label }: { addonId: string; name: string; la
 /** Settings & permissions for an installed addon. `inTab` hides the "Open tab"
  *  button when the panel is already rendered inside that tab. */
 export function AddonDetail({ a, inTab }: { a: Addon; inTab?: boolean }) {
-  const { toggleAddon, toggleAddonGrant, removeAddon, exportAddon, openAddon } = useActions()
+  const { toggleAddon, toggleAddonGrant, removeAddon, exportAddon, openAddon, setAddonDevPath } = useActions()
   const parts = [
     a.html ? 'view' : '', a.tools?.length ? `${a.tools.length} tool(s)` : '',
     a.hooks ? 'hooks' : '', a.agent ? 'agent' : '',
@@ -68,6 +68,15 @@ export function AddonDetail({ a, inTab }: { a: Addon; inTab?: boolean }) {
         </div>
         <Switch on={a.enabled} onToggle={() => toggleAddon(a.id)} />
       </div>
+      {a.devPath && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(245,196,81,.35)', background: 'rgba(245,196,81,.07)' }}>
+          <span className="mono" style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: 'var(--accent)' }}>DEV</span>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--mut)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.devPath}>
+            watching {a.devPath} — edits hot-reload this addon
+          </span>
+          <button className="open-btn" style={{ flex: 'none', padding: '4px 10px', fontSize: 11 }} onClick={() => setAddonDevPath(a.id, null)}>Stop watching</button>
+        </div>
+      )}
       <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6, marginTop: 14 }}>{a.desc || 'No description.'}</div>
       <div className="mono" style={{ fontSize: 11, color: 'var(--mut)', marginTop: 8 }}>ships: {parts.join(' · ') || 'nothing?'}</div>
 

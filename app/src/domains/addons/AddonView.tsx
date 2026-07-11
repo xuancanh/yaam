@@ -148,6 +148,7 @@ export function AddonView() {
       <ViewHeader title={`${addon.icon} ${addon.name}`}>
         <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>
           {addon.desc || 'addon'} · v{addon.version} · {addon.source === 'master' ? 'built by Master' : `installed (${addon.source})`} · {addon.createdAt}
+          {addon.devPath && <span className="mono" style={{ marginLeft: 8, padding: '1px 7px', borderRadius: 5, border: '1px solid rgba(245,196,81,.35)', background: 'rgba(245,196,81,.09)', color: 'var(--accent)', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6 }} title={`watching ${addon.devPath}`}>DEV</span>}
         </span>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 4, marginRight: 8 }}>

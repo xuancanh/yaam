@@ -157,10 +157,10 @@ export function createAppRuntime(): AppRuntime {
       // refresh + (re)arm the store mirror in case state moved between build and start
       stateRef.current = useAppStore.getState()
       unsubMirror ??= useAppStore.subscribe(next => { stateRef.current = next })
-      session.start(); chat.start(); master.start()
+      session.start(); chat.start(); master.start(); addon.start()
     },
     dispose() {
-      session.dispose(); chat.dispose(); master.dispose()
+      session.dispose(); chat.dispose(); master.dispose(); addon.dispose()
       toastTimer?.dispose()
       for (const d of timers) d.dispose()
       timers.clear()

@@ -33,6 +33,10 @@ export interface AddonsActions {
   installAddonJson: (json: string) => void
   installAddonFromFile: () => void
   installAddonFromFolder: () => void
+  /** install a folder AND keep watching it — edits hot-reinstall the addon */
+  installAddonForDev: () => void
+  /** set/clear the watched dev folder on an installed addon */
+  setAddonDevPath: (id: string, devPath: string | null) => void
   generateAddon: (prompt: string) => Promise<string>
   installAddonFromUrl: (url: string) => void
   exportAddon: (id: string) => void
@@ -82,26 +86,14 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
       })()
     },
 
-    installAddonFromFolder: () => {
-      void (async () => {
-        try {
-          const dir = await io.pickFolder()
-          if (!dir) return
-          let manifest: string | null = null
-          for (const cand of ['addon.yaml', 'addon.yml', 'addon.json']) {
-            try {
-              manifest = await io.readTextFile(`${dir}/${cand}`, dir)
-              break
-            } catch { /* try the next manifest name */ }
-          }
-          if (!manifest) throw new Error('no addon.yaml / addon.yml / addon.json in that folder')
-          const json = await loadAddonFolder(manifest, rel => io.readTextFile(`${dir}/${rel}`, dir))
-          installPackage(json, 'file')
-        } catch (e) {
-          flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      })()
-    },
+    installAddonFromFolder: () => { void installFolder(ctx, io, false) },
+
+    installAddonForDev: () => { void installFolder(ctx, io, true) },
+
+    setAddonDevPath: (id, devPath) => dispatch(s => ({
+      ...s,
+      addons: s.addons.map(a => (a.id === id ? { ...a, devPath: devPath ?? undefined } : a)),
+    })),
 
     installAddonFromUrl: url => {
       void (async () => {
@@ -166,5 +158,38 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
         }
       })
     },
+  }
+}
+
+/** Pick + load + install a folder-format addon; `dev` keeps the folder watched. */
+async function installFolder(ctx: AddonsActionsCtx, io: PackageIoPort, dev: boolean): Promise<void> {
+  const { dispatch, stateRef, flash, installPackage } = ctx
+  try {
+    const dir = await io.pickFolder()
+    if (!dir) return
+    let manifest: string | null = null
+    for (const cand of ['addon.yaml', 'addon.yml', 'addon.json']) {
+      try {
+        manifest = await io.readTextFile(`${dir}/${cand}`, dir)
+        break
+      } catch { /* try the next manifest name */ }
+    }
+    if (!manifest) throw new Error('no addon.yaml / addon.yml / addon.json in that folder')
+    const json = await loadAddonFolder(manifest, rel => io.readTextFile(`${dir}/${rel}`, dir))
+    installPackage(json, 'file')
+    if (dev) {
+      // installPackage upserts by package name — pin the watched folder on it
+      const name = String((JSON.parse(json) as { name?: unknown }).name ?? '')
+      const installed = stateRef.current.addons.find(a => a.name === name)
+      if (installed) {
+        dispatch(s => ({
+          ...s,
+          addons: s.addons.map(a => (a.id === installed.id ? { ...a, devPath: dir } : a)),
+        }))
+        flash(`Watching ${dir} — edits reload the addon`)
+      }
+    }
+  } catch (e) {
+    flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
   }
 }

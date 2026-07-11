@@ -825,6 +825,8 @@ export interface Addon {
   enabled: boolean
   source: 'master' | 'file' | 'url' | 'registry'
   createdAt: string
+  /** dev install: source folder that is watched and hot-reinstalled on change */
+  devPath?: string
 }
 
 export type View =

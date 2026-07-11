@@ -99,6 +99,8 @@ export function createAddonRuntime(ctx: AddonRuntimeCtx): AddonRuntime {
         enabled: true,
         source,
         createdAt: new Date().toLocaleString(),
+        // a dev-installed addon stays watched across hot reinstalls
+        ...(existing?.devPath ? { devPath: existing.devPath } : {}),
       }
       dispatch(s2 => ({
         ...s2,
