@@ -52,31 +52,46 @@ const BUILTINS = [
   { name: 'export', description: 'Export this conversation as markdown' },
 ]
 
-/** Reasoning trace: always collapsible. Defaults open while the model is
- *  streaming its thoughts and collapsed once the answer starts; the user can
- *  override either way by clicking the header. */
+/** Reasoning trace. While the model thinks it stays collapsed to ONE live
+ *  progress line — the newest thought streaming by next to the pulse — and a
+ *  click expands the full trace (auto-following the newest text). Done traces
+ *  collapse to a "thought · Nk chars" header. */
 function ThinkingBubble({ m, live }: { m: ChatMsg; live: boolean }) {
-  // null = follow the default (open while live, collapsed when done)
+  // null = follow the default (collapsed); a click pins it either way
   const [override, setOverride] = useState<boolean | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
-  const open = override ?? live
+  const open = override ?? false
   // keep the newest reasoning in view while it streams
   useEffect(() => {
     if (open && live && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
   }, [open, live, m.text])
   const chars = m.text.length > 400 ? ` · ${(m.text.length / 1000).toFixed(1)}k chars` : ''
+  // live progress: the tail of what it is thinking about right now
+  const lastLine = [...m.text.trimEnd().split('\n')].reverse().find(l => l.trim())?.trim().slice(-120) ?? ''
   return (
     <div style={{ padding: '0 4px', minWidth: 0, flexShrink: 0 }}>
       <button
         onClick={() => setOverride(!open)}
+        title={open ? 'Collapse the reasoning trace' : 'Expand the full reasoning trace'}
         style={{
-          display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
+          display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', maxWidth: '100%', minWidth: 0,
           fontSize: 11, color: 'var(--dim)', cursor: 'pointer', padding: '2px 6px', fontFamily: 'var(--font-sans)',
         }}
       >
-        <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▸</span>
+        <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s', flexShrink: 0 }}>▸</span>
         {live
-          ? <><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'cpulse 0.9s ease-in-out infinite' }} /> thinking…</>
+          ? <>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'cpulse 0.9s ease-in-out infinite', flexShrink: 0 }} />
+              <span style={{ flexShrink: 0 }}>thinking{chars}</span>
+              {!open && lastLine && (
+                <span style={{
+                  fontStyle: 'italic', color: 'var(--faint)', minWidth: 0, maxWidth: 460, textAlign: 'left',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', direction: 'rtl', // ellipsis at the START — the newest words stay visible
+                }}>
+                  <bdi>{lastLine}</bdi>
+                </span>
+              )}
+            </>
           : <>thought{chars}</>}
       </button>
       {open && (
@@ -178,9 +193,10 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
           <HoverBtn title={copied ? 'Copied!' : 'Copy message'} paths={COPY_IC} onClick={copy} />
         </div>}
         <div style={{
-          maxWidth: '78%', minWidth: 0, borderRadius: 16, padding: 'var(--bubble-pad)', fontSize: 'var(--chat-font)', lineHeight: 1.55,
-          background: 'var(--panel2)',
+          maxWidth: '72%', minWidth: 0, borderRadius: '18px 18px 6px 18px', padding: 'var(--bubble-pad)', fontSize: 'var(--chat-font)', lineHeight: 1.6,
+          background: 'var(--panel3)',
           border: '1px solid var(--line2)',
+          boxShadow: 'var(--shadow-card)',
           color: 'var(--text)', overflowWrap: 'break-word',
         }}>
           <Markdown text={m.text} />
@@ -195,7 +211,7 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
       onMouseLeave={() => setHover(false)}
       style={{ flexShrink: 0, minWidth: 0, padding: '2px 4px', animation: 'cfade .18s ease-out both' }}
     >
-      <div style={{ fontSize: 'var(--chat-font)', lineHeight: 1.6, color: 'var(--text)', overflowWrap: 'break-word' }}>
+      <div style={{ fontSize: 'var(--chat-font)', lineHeight: 1.65, color: 'var(--text)', overflowWrap: 'break-word' }}>
         <Markdown text={m.text} />
         {live && <span className="stream-caret" />}
       </div>
@@ -207,7 +223,7 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
               className="open-btn"
               title="Send this as your reply"
               onClick={() => onQuickReply(m.id, reply)}
-              style={{ padding: '5px 13px', fontSize: 12 }}
+              style={{ padding: '6px 15px', fontSize: 12.5, borderRadius: 999 }}
             >
               {reply}
             </button>
@@ -606,21 +622,21 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
     return [...new Set([curModel, chatType?.model ?? '', ...base].filter(Boolean))]
   }, [chatType, curModel])
   const canThink = chatType ? supportsThinking(chatType.provider, curModel) : false
-  const pickerStyle = {
-    background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 6, color: 'var(--mut)',
-    fontSize: 10.5, padding: '2px 3px', maxWidth: 150, cursor: 'pointer', flexShrink: 0, fontFamily: 'var(--font-sans)',
-  } as const
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', background: 'var(--bg2)' }}>
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div ref={scrollRef} style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '16px 36px' }}>
+      <div ref={scrollRef} style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '22px 40px 10px' }}>
         {/* ChatGPT-style readable column: content centered at a comfortable width */}
-        <div style={{ maxWidth: 860, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--chat-gap)' }}>
+        <div style={{ maxWidth: 820, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--chat-gap)' }}>
           {log.map((m, i) => {
             const turn = m.turnId ? turns.get(m.turnId) : undefined
+            // extra air between TURNS (vs. within a turn) gives the transcript
+            // a readable rhythm without any added chrome
+            const newTurn = i > 0 && m.turnId !== log[i - 1].turnId
             return (
               <Fragment key={m.id}>
+                {newTurn && <div style={{ height: 12, flexShrink: 0 }} />}
                 <Bubble
                   m={m}
                   live={busy && i === log.length - 1}
@@ -641,13 +657,14 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
           {busy && log[log.length - 1]?.role !== 'assistant' && (
             <div style={{ display: 'flex', flexShrink: 0, alignItems: 'center', gap: 9, padding: '4px 4px' }}>
               <span className="typing-dots"><span /><span /><span /></span>
-              <span style={{ fontSize: 11.5, color: 'var(--mut)' }}>working…</span>
+              <span style={{ fontSize: 12.5, color: 'var(--mut)' }}>working…</span>
             </div>
           )}
         </div>
       </div>
-      <div style={{ borderTop: '1px solid var(--line)', padding: '10px 36px', flexShrink: 0 }}>
-        <div style={{ maxWidth: 860, margin: '0 auto' }}>
+      {/* no hard border above the composer — its elevation separates it */}
+      <div style={{ padding: '6px 40px 16px', flexShrink: 0 }}>
+        <div style={{ maxWidth: 820, margin: '0 auto' }}>
         {queue.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 7 }}>
             {queue.map((q, i) => (
@@ -703,11 +720,11 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
             {loadingAtts > 0 && <span style={{ fontSize: 11, color: 'var(--dim)', padding: '3px 4px' }}>reading {loadingAtts} file{loadingAtts > 1 ? 's' : ''}…</span>}
           </div>
         )}
-        <div style={{ position: 'relative', background: 'var(--panel2)', border: `1px solid ${dragOver ? 'var(--accent)' : 'var(--line2)'}`, borderRadius: 14, padding: '9px 12px' }}>
+        <div className="chat-composer" style={{ padding: '10px 13px 8px', ...(dragOver ? { border: '1px solid var(--accent)' } : {}) }}>
           {dragOver && (
             <div style={{
               position: 'absolute', inset: 0, zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(245,196,81,.08)', border: '1px dashed var(--accent)', borderRadius: 11,
+              background: 'rgba(245,196,81,.08)', border: '1px dashed var(--accent)', borderRadius: 16,
               fontSize: 12, color: 'var(--accent)', pointerEvents: 'none',
             }}>
               drop files to attach
@@ -724,7 +741,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
             rows={2}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none',
-              color: 'var(--text)', fontFamily: 'var(--font-sans)', fontSize: 13, lineHeight: 1.5,
+              color: 'var(--text)', fontFamily: 'var(--font-sans)', fontSize: 'var(--chat-font)', lineHeight: 1.55, marginBottom: 2,
             }}
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -738,7 +755,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                   value={chatType?.id ?? ''}
                   disabled={busy}
                   onChange={e => setChatConfig(agent.id, { chatTypeId: e.target.value })}
-                  style={pickerStyle}
+                  className="chat-picker"
                 >
                   {chatTypes.filter(t => t.enabled || t.id === chatType?.id).map(t => (
                     <option key={t.id} value={t.id}>{t.name}</option>
@@ -751,7 +768,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                   value={curModel}
                   disabled={busy}
                   onChange={e => setChatConfig(agent.id, { chatModel: e.target.value })}
-                  style={pickerStyle}
+                  className="chat-picker"
                 >
                   {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
@@ -762,7 +779,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                   value={agent.chatEffort ?? ''}
                   disabled={busy}
                   onChange={e => setChatConfig(agent.id, { chatEffort: (e.target.value || null) as ThinkingEffort | null })}
-                  style={pickerStyle}
+                  className="chat-picker"
                 >
                   <option value="">think: off</option>
                   <option value="low">think: low</option>
@@ -785,13 +802,13 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                 className="send-btn"
                 title="Stop the current reply"
                 onClick={() => stopChat(agent.id)}
-                style={{ width: 28, height: 28, flexShrink: 0 }}
+                style={{ flexShrink: 0 }}
               >
                 <Icon paths={['M8 8h8v8H8z']} size={13} stroke={2} />
               </button>
             ) : (
-              <button className="send-btn" onClick={send} style={{ width: 28, height: 28, flexShrink: 0, opacity: draft.trim() ? 1 : 0.45 }}>
-                <Icon paths={IC.send} size={14} stroke={2.2} />
+              <button className="send-btn" onClick={send} style={{ flexShrink: 0, opacity: draft.trim() || atts.length ? 1 : 0.45 }}>
+                <Icon paths={IC.send} size={15} stroke={2.2} />
               </button>
             )}
           </div>
