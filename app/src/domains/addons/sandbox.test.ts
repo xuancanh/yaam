@@ -72,6 +72,7 @@ describe('addon sandbox — isolation attributes', () => {
   it('sandboxes the frame at an opaque origin with a network-denying CSP', () => {
     const doc = sandboxDocument(ADDON_RPC_METHODS)
     expect(doc).toContain("default-src 'none'")   // no network (connect-src falls back to default)
+    expect(doc).toContain("'unsafe-eval'")       // handler bodies compile inside the isolated frame
     expect(doc).not.toContain('allow-same-origin') // opaque origin
     expect(doc).not.toContain("connect-src")       // nothing re-enables network
   })

@@ -90,7 +90,10 @@ parent.postMessage({ type: 'yaam:ready' }, '*');
 /** The sandboxed HTML document: opaque origin + network-denying CSP + bootstrap. */
 export function sandboxDocument(methods: readonly string[]): string {
   return `<!doctype html><html><head>` +
-    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'">` +
+    // Dynamic compilation is required for installed handler bodies. It is
+    // safe only in this opaque-origin, network-denied frame; the privileged
+    // app WebView never receives unsafe-eval.
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'">` +
     `</head><body><script>${sandboxBootstrap(methods)}</script></body></html>`
 }
 
