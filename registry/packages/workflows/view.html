@@ -449,11 +449,13 @@ async function runNow(){
       description: ['[workflow "' + w.name + '" · run ' + run.id + ' · step ' + start.id + ']', start.description || ''].filter(Boolean).join('\n\n'),
       criteria: start.criteria || [], cwd: start.cwd || undefined, isolate: start.isolate === true ? true : undefined,
     })
-    await call('tasks.start', taskId)
     run.taskId = taskId
     run.visits[start.id] = 1
     run.path.push({ nodeId: start.id, title: start.title, taskId, outcome: 'running', at: Date.now() })
+    // Persist the active task before starting it; a fast one-shot can finish
+    // before a later storage RPC and its transition hook would miss the run.
     await call('storage.set', 'runs', [run, ...allRuns].slice(0, 30))
+    await call('tasks.start', taskId)
     await call('flash', 'machine entered "' + start.title + '"')
   } catch (e) { banner(e.message) }
   refreshRuns()

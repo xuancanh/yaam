@@ -56,10 +56,12 @@ const taskId = await api.tasks.add(next.title, 'backlog', {
   cwd: next.cwd || undefined,
   isolate: next.isolate === true ? true : undefined,
 })
-await api.tasks.start(taskId)
 run.current = next.id
 run.taskId = taskId
 run.visits[next.id] = visits
 run.path.push({ nodeId: next.id, title: next.title, taskId, outcome: 'running', at: Date.now(), via: outcome })
+// Checkpoint the transition before launch so an immediately-completing
+// one-shot cannot emit onTaskMoved while the run still points at the old task.
 await api.storage.set('runs', runs)
+await api.tasks.start(taskId)
 await api.logEvent(`workflow "${run.wfName}": ${outcome === 'done' ? '✓' : '✗'} "${input.title}" → "${next.title}"${visits > 1 ? ' (visit ' + visits + ')' : ''}`)

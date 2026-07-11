@@ -31,10 +31,12 @@ const taskId = await api.tasks.add(start.title, 'backlog', {
   cwd: start.cwd || undefined,
   isolate: start.isolate === true ? true : undefined,
 })
-await api.tasks.start(taskId)
 run.taskId = taskId
 run.visits[start.id] = 1
 run.path.push({ nodeId: start.id, title: start.title, taskId, outcome: 'running', at: Date.now() })
 
+// Checkpoint before launch: a fast one-shot may reach done immediately, and
+// onTaskMoved must already be able to associate that task with this run.
 await api.storage.set('runs', [run, ...runs].slice(0, 30))
+await api.tasks.start(taskId)
 await api.notify('Workflow started', `"${wf.name}" — entered step "${start.title}"`)
