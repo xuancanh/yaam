@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { useAppStore } from '../../core/store'
 import { AddonSource } from './AddonSource'
+import { AddonDetail } from './AddonDetail'
 import { addonSnapshot } from '../../core/addons'
 import type { Addon } from '../../core/types'
 import { IC, Icon, MasterMark, ViewHeader } from '../../components/ui'
@@ -91,7 +92,7 @@ function withViewCsp(html: string): string {
   return `<!DOCTYPE html><html><head>${VIEW_CSP}</head><body>${html}</body></html>`
 }
 
-/** Render an addon's preview, source, or customization mode. */
+/** Render an addon's view, source, customization, or settings mode. */
 export function AddonView() {
   // Only `addons`/`activeAddon` drive this view reactively; the full-state
   // snapshot handed to the iframe (gated by its state:read grant) is pushed
@@ -99,7 +100,7 @@ export function AddonView() {
   // whole store and rerender on unrelated terminal/chat activity.
   const s = useConductorSelector(x => ({ addons: x.addons, activeAddon: x.activeAddon }), shallowEqual)
   const { removeAddon, addonRpc } = useActions()
-  const [mode, setMode] = useState<'view' | 'source' | 'chat'>('view')
+  const [mode, setMode] = useState<'view' | 'source' | 'chat' | 'settings'>('view')
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
   const addon = s.addons.find(a => a.id === s.activeAddon)
@@ -150,7 +151,7 @@ export function AddonView() {
         </span>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 4, marginRight: 8 }}>
-          {(addon.html ? ['view', 'source', 'chat'] as const : ['source', 'chat'] as const).map(m => (
+          {(addon.html ? ['view', 'source', 'chat', 'settings'] as const : ['source', 'chat', 'settings'] as const).map(m => (
             <button
               key={m}
               onClick={() => setMode(m)}
@@ -162,7 +163,7 @@ export function AddonView() {
                 fontSize: 11.5, fontWeight: 600,
               }}
             >
-              {m === 'view' ? 'Preview' : m === 'source' ? 'Source' : 'Customize'}
+              {m === 'view' ? 'View' : m === 'source' ? 'Source' : m === 'chat' ? 'Customize' : 'Settings'}
             </button>
           ))}
         </div>
@@ -188,6 +189,11 @@ export function AddonView() {
       )}
       {effectiveMode === 'source' && <AddonSource addon={addon} />}
       {effectiveMode === 'chat' && <AddonChat addon={addon} />}
+      {effectiveMode === 'settings' && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--bg2)' }}>
+          <AddonDetail a={addon} inTab />
+        </div>
+      )}
     </div>
   )
 }
