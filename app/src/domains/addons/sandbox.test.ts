@@ -13,24 +13,24 @@ function fakeFrame(): SandboxFrame {
   let hostCb: Parameters<SandboxFrame['onMessage']>[0] = () => {}
   const pending = new Map<number, { res: (v: unknown) => void; rej: (e: Error) => void }>()
   let rpcSeq = 0
-  const rpc = (method: string, args: unknown[]) => new Promise((res, rej) => {
+  const rpc = (callId: number, method: string, args: unknown[]) => new Promise((res, rej) => {
     const id = ++rpcSeq; pending.set(id, { res, rej })
-    hostCb({ type: 'yaam:api', id, method, args })
+    hostCb({ type: 'yaam:api', callId, id, method, args })
   })
-  const buildApi = (snapshot: unknown) => {
+  const buildApi = (snapshot: unknown, callId: number) => {
     const a: Record<string, unknown> = { getState: () => snapshot }
     for (const m of ADDON_RPC_METHODS) {
       if (m === 'getState') continue
       const parts = m.split('.'); let o = a as Record<string, unknown>
       for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] ??= {}; o = o[parts[i]] as Record<string, unknown> }
-      o[parts[parts.length - 1]] = (...args: unknown[]) => rpc(m, args)
+      o[parts[parts.length - 1]] = (...args: unknown[]) => rpc(callId, m, args)
     }
     return a
   }
   const runExec = async (msg: { callId: number; source: string; arg: unknown; snapshot: unknown }) => {
     try {
       const fn = new Function('input', 'api', '"use strict"; return (async () => {\n' + msg.source + '\n})();')
-      const out = await fn(msg.arg, buildApi(msg.snapshot))
+      const out = await fn(msg.arg, buildApi(msg.snapshot, msg.callId))
       hostCb({ type: 'yaam:result', callId: msg.callId, ok: true, value: out })
     } catch (e) {
       hostCb({ type: 'yaam:result', callId: msg.callId, ok: false, error: e instanceof Error ? e.message : String(e) })
@@ -92,6 +92,18 @@ describe('addon sandbox — host RPC routing', () => {
     const { api, flash } = fakeApi(['ui'])
     await sb.run('await api.flash("hi"); return "done"', null, api)
     expect(flash).toHaveBeenCalledWith('hi')
+  })
+
+  it('keeps concurrent handlers bound to their own permission-scoped api', async () => {
+    const first = fakeApi(['ui'])
+    const second = fakeApi(['ui'])
+    const slow = sb.run('await new Promise(r => setTimeout(r, 10)); await api.flash("first")', null, first.api)
+    const fast = sb.run('await api.flash("second")', null, second.api)
+
+    await Promise.all([slow, fast])
+    expect(first.flash).toHaveBeenCalledWith('first')
+    expect(first.flash).not.toHaveBeenCalledWith('second')
+    expect(second.flash).toHaveBeenCalledWith('second')
   })
 
   it('rejects a permission-denied api call (surfaced to the handler)', async () => {

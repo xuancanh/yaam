@@ -14,7 +14,7 @@ import type { AddonApi } from '../../core/addons'
 
 type HostMsg =
   | { type: 'yaam:ready' }
-  | { type: 'yaam:api'; id: number; method: string; args: unknown[] }
+  | { type: 'yaam:api'; callId: number; id: number; method: string; args: unknown[] }
   | { type: 'yaam:result'; callId: number; ok: true; value: unknown }
   | { type: 'yaam:result'; callId: number; ok: false; error: string }
 
@@ -46,21 +46,21 @@ export function sandboxBootstrap(methods: readonly string[]): string {
 "use strict";
 const pending = new Map();
 let rpcSeq = 0;
-function rpc(method, args) {
+function rpc(callId, method, args) {
   return new Promise((res, rej) => {
     const id = ++rpcSeq;
     pending.set(id, { res, rej });
-    parent.postMessage({ type: 'yaam:api', id, method, args }, '*');
+    parent.postMessage({ type: 'yaam:api', callId, id, method, args }, '*');
   });
 }
-function buildApi(snapshot) {
+function buildApi(snapshot, callId) {
   const api = { getState: () => snapshot };
   for (const m of ${JSON.stringify(methods)}) {
     if (m === 'getState') continue;
     const parts = m.split('.');
     let obj = api;
     for (let i = 0; i < parts.length - 1; i++) { obj[parts[i] ] = obj[parts[i]] || {}; obj = obj[parts[i]]; }
-    obj[parts[parts.length - 1]] = (...args) => rpc(m, args);
+    obj[parts[parts.length - 1]] = (...args) => rpc(callId, m, args);
   }
   return api;
 }
@@ -76,7 +76,7 @@ addEventListener('message', async (e) => {
     try {
       // api methods are async RPC, so the handler body runs inside an async IIFE
       const fn = new Function('input', 'api', '"use strict"; return (async () => {\\n' + d.source + '\\n})();');
-      const out = await fn(d.arg, buildApi(d.snapshot));
+      const out = await fn(d.arg, buildApi(d.snapshot, d.callId));
       parent.postMessage({ type: 'yaam:result', callId: d.callId, ok: true, value: out }, '*');
     } catch (err) {
       parent.postMessage({ type: 'yaam:result', callId: d.callId, ok: false, error: String((err && err.message) || err) }, '*');
@@ -118,7 +118,7 @@ export function createAddonSandbox(makeFrame: () => SandboxFrame = createIframeF
     if (msg.type === 'yaam:ready') { markReady?.(); return }
     if (msg.type === 'yaam:api') {
       // A running handler is calling the api. Validate + invoke on the host.
-      const call = [...calls.values()][0] // one handler runs at a time
+      const call = calls.get(msg.callId)
       let reply: { type: 'yaam:api-result'; id: number; ok: true; value: unknown } | { type: 'yaam:api-result'; id: number; ok: false; error: string }
       try {
         if (!(ADDON_RPC_METHODS as readonly string[]).includes(msg.method)) {
