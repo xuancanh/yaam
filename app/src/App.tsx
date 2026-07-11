@@ -1,23 +1,31 @@
+import { lazy, Suspense } from 'react'
 import { ConductorProvider, useConductorSelector } from './store'
 import { TitleBar } from './domains/shell/TitleBar'
 import { IconRail } from './domains/shell/IconRail'
 import { Sidebar } from './domains/master/Sidebar'
 import { Workspace } from './domains/session/Workspace'
-import { ControlCenter } from './domains/shell/ControlCenter'
-import { Board } from './domains/board/Board'
-import { Timeline } from './domains/shell/Timeline'
-import { Schedules } from './domains/schedules/Schedules'
-import { TemplatesView } from './domains/schedules/TemplatesView'
-import { ToolsView } from './domains/settings/ToolsView'
-import { AddonsView } from './domains/addons/AddonsView'
-import { ChatView } from './domains/chat/ChatView'
-import { SettingsView } from './domains/settings/SettingsView'
-import { AddonView } from './domains/addons/AddonView'
 import { SlideOver } from './domains/shell/SlideOver'
 import { Drawer } from './domains/shell/Drawer'
 import { CommandPalette } from './domains/shell/CommandPalette'
 import { Toast } from './domains/shell/Toast'
 import { RemoteCompanion } from './domains/remote/RemoteCompanion'
+
+// Keep the terminal workspace responsive at startup. Secondary product areas
+// are substantial and mutually exclusive, so fetch their UI only on first use.
+const ControlCenter = lazy(() => import('./domains/shell/ControlCenter').then(m => ({ default: m.ControlCenter })))
+const Board = lazy(() => import('./domains/board/Board').then(m => ({ default: m.Board })))
+const Timeline = lazy(() => import('./domains/shell/Timeline').then(m => ({ default: m.Timeline })))
+const Schedules = lazy(() => import('./domains/schedules/Schedules').then(m => ({ default: m.Schedules })))
+const TemplatesView = lazy(() => import('./domains/schedules/TemplatesView').then(m => ({ default: m.TemplatesView })))
+const ToolsView = lazy(() => import('./domains/settings/ToolsView').then(m => ({ default: m.ToolsView })))
+const AddonsView = lazy(() => import('./domains/addons/AddonsView').then(m => ({ default: m.AddonsView })))
+const ChatView = lazy(() => import('./domains/chat/ChatView').then(m => ({ default: m.ChatView })))
+const SettingsView = lazy(() => import('./domains/settings/SettingsView').then(m => ({ default: m.SettingsView })))
+const AddonView = lazy(() => import('./domains/addons/AddonView').then(m => ({ default: m.AddonView })))
+
+function ViewFallback() {
+  return <div style={{ padding: 24, color: 'var(--dim)', fontSize: 13 }}>Loading view…</div>
+}
 
 /** Select the active top-level view from the centralized navigation state. */
 function MainArea() {
@@ -25,16 +33,20 @@ function MainArea() {
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       {view === 'workspace' && <Workspace />}
-      {view === 'overview' && <ControlCenter />}
-      {view === 'board' && <Board />}
-      {view === 'timeline' && <Timeline />}
-      {view === 'crons' && <Schedules />}
-      {view === 'templates' && <TemplatesView />}
-      {view === 'tools' && <ToolsView />}
-      {view === 'addons' && <AddonsView />}
-      {view === 'chat' && <ChatView />}
-      {view === 'settings' && <SettingsView />}
-      {view === 'addon' && <AddonView />}
+      {view !== 'workspace' && (
+        <Suspense fallback={<ViewFallback />}>
+          {view === 'overview' && <ControlCenter />}
+          {view === 'board' && <Board />}
+          {view === 'timeline' && <Timeline />}
+          {view === 'crons' && <Schedules />}
+          {view === 'templates' && <TemplatesView />}
+          {view === 'tools' && <ToolsView />}
+          {view === 'addons' && <AddonsView />}
+          {view === 'chat' && <ChatView />}
+          {view === 'settings' && <SettingsView />}
+          {view === 'addon' && <AddonView />}
+        </Suspense>
+      )}
     </div>
   )
 }
