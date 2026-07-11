@@ -249,6 +249,32 @@ button {
   cursor: pointer;
 }
 
+/* thinking indicator: a light sweep across the text while the model reasons */
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.shimmer-text {
+  background: linear-gradient(90deg, var(--dim) 35%, var(--text) 50%, var(--dim) 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2s linear infinite;
+}
+.thinking-toggle:hover {
+  color: var(--mut2);
+}
+.thinking-toggle:hover .shimmer-text {
+  animation-play-state: paused;
+  color: var(--mut2);
+  background: none;
+}
+
 @keyframes cpulse {
   0%,
   100% {

@@ -71,6 +71,7 @@ function ThinkingBubble({ m, live }: { m: ChatMsg; live: boolean }) {
   return (
     <div style={{ padding: '0 4px', minWidth: 0, flexShrink: 0 }}>
       <button
+        className="thinking-toggle"
         onClick={() => setOverride(!open)}
         title={open ? 'Collapse the reasoning trace' : 'Expand the full reasoning trace'}
         style={{
@@ -82,7 +83,7 @@ function ThinkingBubble({ m, live }: { m: ChatMsg; live: boolean }) {
         {live
           ? <>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'cpulse 0.9s ease-in-out infinite', flexShrink: 0 }} />
-              <span style={{ flexShrink: 0 }}>thinking{chars}</span>
+              <span className="shimmer-text" style={{ flexShrink: 0, fontWeight: 600 }}>thinking{chars}</span>
               {!open && lastLine && (
                 <span style={{
                   fontStyle: 'italic', color: 'var(--faint)', minWidth: 0, maxWidth: 460, textAlign: 'left',
@@ -91,6 +92,7 @@ function ThinkingBubble({ m, live }: { m: ChatMsg; live: boolean }) {
                   <bdi>{lastLine}</bdi>
                 </span>
               )}
+              <span style={{ flexShrink: 0, fontSize: 9.5, color: 'var(--faint)' }}>{open ? '' : '· click to expand'}</span>
             </>
           : <>thought{chars}</>}
       </button>
@@ -698,7 +700,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
           {busy && (agent.chatActivity || log[log.length - 1]?.role !== 'assistant') && (
             <div style={{ display: 'flex', flexShrink: 0, alignItems: 'center', gap: 9, padding: '4px 4px', minWidth: 0 }}>
               <span className="typing-dots"><span /><span /><span /></span>
-              <span style={{ fontSize: 12.5, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <span className="shimmer-text" style={{ fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {agent.chatActivity ?? 'working…'}
               </span>
             </div>
