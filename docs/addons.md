@@ -41,7 +41,7 @@ the kanban board is fully reproducible as an addon
                      │  focusSession · flash/notify/logEvent   │
                      │  tasks.* · schedules.* · storage.*      │
                      │  http.request (host-allowlisted)        │
-                     │  secrets.list (values stay in keychain) │
+                     │  secrets.list (no direct value reads)   │
                      └───────────────────┬─────────────────────┘
                                          │
                               store actions / PTY layer
@@ -251,9 +251,12 @@ addon has (the sandbox CSP blocks everything else), and it is double-gated:
   `*.suffix`; https only, plain http allowed just for localhost);
 - header and body values may embed `{{secret:NAME}}` for a secret declared in
   the manifest — the value is read from the **OS keychain** and substituted
-  host-side, so addon code (and the addon's agent) never sees it. Secrets are
-  refused in URLs (query strings leak into logs). `secrets.list()` returns
-  only names + whether a value is stored.
+  host-side and is not exposed through a read API. The allowlisted destination
+  does receive it, and its response is returned to the addon, so grant `http`
+  + `secrets` only when you trust both the package and that destination.
+  Secrets are refused in URLs (query strings leak into logs), and redirects
+  are not followed. `secrets.list()` returns only names + whether a value is
+  stored.
 
 Users fill secret values per addon in the **Addons view → Secrets** (rows show
 set/unset); uninstalling the addon deletes its keychain entries. Responses are
@@ -354,11 +357,11 @@ Method reference (permission in brackets):
 | `yaam('schedules.remove', name)` | — | [schedules] |
 | `yaam('agent.wake', note)` | agent's reply | [agent] chat with / poke the addon's own agent |
 | `yaam('storage.get', key)` | stored value | [storage] |
-| `yaam('storage.set', key, value)` | — | [storage] persists across restarts, namespaced per addon; ≤256 KB per value |
+| `yaam('storage.set', key, value)` | — | [storage] persists across restarts, namespaced per addon; ≤256 KB per value and ≤1 MB total |
 | `yaam('storage.list')` | key names | [storage] |
 | `yaam('storage.remove', key)` | — | [storage] |
 | `yaam('http.request', method, url, {headers?, body?})` | `{status, contentType, text}` | [http] host must match the manifest `hosts`; `{{secret:NAME}}` allowed in headers/body (§3.1) |
-| `yaam('secrets.list')` | `{name, label, set}[]` | [secrets] names only — values never leave the keychain |
+| `yaam('secrets.list')` | `{name, label, set}[]` | [secrets] names/set-state only; values are only substituted into allowed HTTP headers/bodies |
 
 ### 4.3 Theme & the toolkit
 
@@ -447,9 +450,10 @@ Handler contract:
 - `onCronFired` — fired when a schedule fires.
   `input = { name, kind: 'task' | 'command' | 'log' | 'agent' }`.
 - All are async JS function bodies `(input, api) => Promise<void>` run in the
-  same sandboxed iframe as tool handlers (`await` api calls); each addon's hook
-  runs independently and failures are contained (logged to the Activity feed as
-  `addon "<name>" <hook> failed: …`).
+  same sandboxed iframe as tool handlers (`await` api calls). Hooks are
+  serialized per addon so storage-backed state machines can safely perform
+  read/modify/write transitions; different addons remain independent. Failures
+  are contained (logged to the Activity feed as `addon "<name>" <hook> failed: …`).
 - `masterPromptAppend` — plain text appended to Master's system prompt under
   an `ADDON DIRECTIVES` section while the addon is enabled **and holds the
   `master:prompt` scope**. This is the sanctioned way to change Master's
@@ -570,14 +574,14 @@ seed.
   must be enabled per-addon in Settings → Addons. Appending to Master's system
   prompt requires the dedicated `master:prompt` scope.
 - **Network & secrets**: `http.request` can only reach hosts the package
-  declares, over https; secret values live in the OS keychain, are injected
-  host-side via `{{secret:NAME}}` in headers/body (refused in URLs), and are
-  never readable by addon code or the addon's agent. Uninstall deletes them.
-- **Tools/hooks**: run in the app context. The `api` argument is
-  permission-checked, but this is app-privileged JS — treat installing a
-  package with tools/hooks like installing a browser extension. Read the
-  Source tab; revoke scopes you're not comfortable with; prefer view-only
-  packages from unknown sources.
+  declares, over https, without following redirects. Secret values live in the
+  OS keychain and are injected host-side via `{{secret:NAME}}` in headers/body
+  (refused in URLs). They have no direct read API, but the destination receives
+  them and can echo them in its response. Uninstall deletes keychain entries.
+- **Tools/hooks**: run in a separate opaque-origin, network-denied iframe, not
+  the main webview. Their only app authority is the permission-checked API.
+  Treat grants like browser-extension permissions: read the Source tab and
+  revoke scopes you are not comfortable with.
 - **Grants are yours**: requested ≠ granted. Chips in Settings are the source
   of truth; upgrades can't re-acquire revoked scopes.
 

@@ -86,11 +86,12 @@ visible banner instead of a silent failure.
    like part of YAAM, not a web page inside it.
 8. **Keep destructive reach small.** Request only the scopes you call; prefer
    `backlog` over auto-starting tasks; cap stored lists (storage values are
-   limited to 256 KB each).
+   limited to 256 KB each and 1 MB total per addon).
 
 ## Handler contract (tools & hooks)
 
 Handlers run in an isolated sandbox with **no** DOM/network/Tauri access — only
 the `api` object (and `input`). Every `api` method except `getState()` returns
 a Promise: **always `await`**. Contain your own errors; a thrown handler is
-logged and dropped. See `docs/addons.md` §5–6 for shapes and events.
+logged and dropped. Lifecycle hooks are serialized per addon. See
+`docs/addons.md` §5–6 for shapes and events.

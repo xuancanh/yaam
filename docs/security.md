@@ -81,14 +81,20 @@ Addon scopes are:
 - `agent`;
 - `master:prompt`;
 - `ui`;
-- `storage`.
+- `storage`;
+- `http`;
+- `secrets`;
+- `exec`.
 
 Every API method maps to exactly one scope. Disabled addons receive no grants.
-Fresh installs do not auto-grant the machine-acting or LLM-steering scopes:
-session send/launch, tasks, schedules, addon agent, and Master prompt changes.
+Fresh installs auto-grant only `state:read`, `ui`, and `storage`. Machine,
+network, secret, shell, and LLM-steering scopes start revoked, including for
+legacy packages that predate explicit grants.
 Upgrades preserve only grants still requested by the new package.
 
-Addon storage is namespaced by addon id and values are capped at 256 KiB.
+Addon storage is namespaced by addon id, JSON-only, capped at 256 KiB per value
+and 1 MiB total per addon. Hooks are serialized per addon so their storage
+read/modify/write transitions cannot overlap.
 
 ## LLM action controls
 
@@ -226,6 +232,11 @@ tools can make network requests allowed by their implementation.
 
 Addon frames do not inherit this HTTP capability because they have an opaque
 origin, a network-denying CSP, and only the host RPC surface.
+Permission-gated addon `http.request` separately enforces the package host
+allowlist, substitutes declared secrets only into headers/bodies, and does not
+follow redirects. The allowlisted server receives substituted secrets and its
+bounded response is visible to the addon, so `http` + `secrets` is a trust grant
+to both package and destination, not a non-disclosure boundary.
 
 ### Mobile companion server
 

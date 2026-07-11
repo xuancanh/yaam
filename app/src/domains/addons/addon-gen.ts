@@ -48,7 +48,7 @@ PERMISSION SCOPES (request only what the code calls)
 - ui             → flash(text), notify(title, detail), logEvent(text), focusSession(id)
 - storage        → storage.get(key), storage.set(key, value), storage.list(), storage.remove(key)   (persistent, namespaced per addon, 256KB/value)
 - http           → http.request(method, url, {headers?, body?}) → Promise<{status, contentType, text}> — url host MUST be in the manifest "hosts" (https only); header/body values may embed {{secret:NAME}}
-- secrets        → secrets.list() → [{name, label, set}] — names only; VALUES stay in the OS keychain and are only injected into http.request templating, never readable by code
+- secrets        → secrets.list() → [{name, label, set}] — no direct value reads; values are substituted from the OS keychain into allowed HTTP headers/bodies, so the destination receives them and its response is visible to addon code
 
 STATE SNAPSHOT (getState() and the view's state push)
 { workspace, sessions: [{id, name, status: running|idle|needs|error, ephemeral, repo, task, summary, actionNeeded, cwd, cost, used, machineId, isolated}],
