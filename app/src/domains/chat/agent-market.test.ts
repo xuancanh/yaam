@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAgentIndex, resolveAgentUrl } from './agent-market'
+import { agentProfileInstallDetail, parseAgentIndex, resolveAgentUrl } from './agent-market'
 import { exportRecord, parseAgentExport } from './agent-templates'
 import type { DurableAgent } from '../../core/types'
 
@@ -65,5 +65,18 @@ describe('AgentExport dashboard + apps round trip', () => {
   it('ignores a blank dashboard', () => {
     const parsed = parseAgentExport(JSON.stringify({ yaamAgent: 1, name: 'A', dashboard: '   ' }))!
     expect(parsed.dashboard).toBeUndefined()
+  })
+})
+
+describe('agentProfileInstallDetail', () => {
+  it('discloses token-spending loops and sandboxed apps before marketplace install', () => {
+    const detail = agentProfileInstallDetail({
+      yaamAgent: 1, name: 'Captain', color: '#6FA8FF', charter: 'Ship releases.',
+      loops: [{ name: 'sweep', schedule: '0 17 * * 5', prompt: 'review' }],
+      apps: [{ name: 'Checklist', html: '<p>ok</p>' }],
+    })
+    expect(detail).toContain('sweep [0 17 * * 5]')
+    expect(detail).toMatch(/spend LLM tokens/)
+    expect(detail).toContain('Checklist')
   })
 })

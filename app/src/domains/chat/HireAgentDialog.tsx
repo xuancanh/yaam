@@ -5,9 +5,10 @@ import { DialogHeader, EntityDialog } from '../../components/EntityDialog'
 import { describeCron } from '../schedules/cron'
 import { DURABLE_AGENT_TEMPLATES, parseAgentExport } from './agent-templates'
 import type { AgentExport } from './agent-templates'
-import { fetchAgentMarket, fetchAgentProfile } from './agent-market'
+import { agentProfileInstallDetail, fetchAgentMarket, fetchAgentProfile } from './agent-market'
 import type { MarketAgentEntry } from './agent-market'
 import { mkId } from '../../shared/id'
+import { confirmAction } from '../../components/Confirm'
 
 // "Hire an agent": pick a role template (charter + starter loops scaffolded),
 // install one from an agent marketplace (any configured registry whose
@@ -75,6 +76,12 @@ export function HireAgentDialog({ onClose, onHired }: { onClose: () => void; onH
         setErr(`“${entry.name}” from ${entry.registry} is not a valid agent profile.`)
         return
       }
+      const approved = await confirmAction({
+        title: `Hire “${parsed.name.slice(0, 40)}” from ${entry.registry}?`,
+        detail: agentProfileInstallDetail(parsed),
+        confirmLabel: 'Hire agent',
+      })
+      if (!approved) return
       onHired(adopt(parsed))
     } catch (e) {
       setErr(`could not install “${entry.name}”: ${e instanceof Error ? e.message : e}`)

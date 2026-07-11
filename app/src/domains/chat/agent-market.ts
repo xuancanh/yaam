@@ -65,3 +65,19 @@ export async function fetchAgentProfile(entry: MarketAgentEntry): Promise<AgentE
   const text = isHttp(entry.url) ? await httpGetText(entry.url) : await readTextFile(entry.url)
   return parseAgentExport(text)
 }
+
+/** Human-readable capability review shown after fetching a remote profile and
+ *  before installing it. Marketplace metadata is not enough: the profile can
+ *  add enabled token-spending loops and executable (sandboxed) mini apps. */
+export function agentProfileInstallDetail(profile: AgentExport): string {
+  const loops = profile.loops ?? []
+  const apps = profile.apps ?? []
+  return [
+    profile.role ? `Role: ${profile.role}` : '',
+    `Charter: ${profile.charter?.trim().slice(0, 500) || '(empty)'}`,
+    loops.length
+      ? `Enabled loops (${loops.length}): ${loops.map(l => `${l.name} [${l.schedule}]`).join(', ')}. These start immediately and spend LLM tokens when they fire.`
+      : 'Enabled loops: none',
+    `Sandboxed mini apps: ${apps.length}${apps.length ? ` (${apps.map(a => a.name).join(', ')})` : ''}`,
+  ].filter(Boolean).join('\n\n')
+}
