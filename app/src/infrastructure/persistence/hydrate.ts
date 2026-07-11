@@ -2,7 +2,7 @@
 // AppState to apply, plus the list of sessions whose terminals must be rebuilt.
 // No dispatch, no terminals, no native calls — so migrations are unit-testable.
 // The provider effect applies `next` and reattaches terminals for `restoredAgents`.
-import type { AppState, Agent, Addon, BoardTask, PersistedState } from '../../core/types'
+import type { AppState, Agent, Addon, BoardTask, DurableAgent, PersistedState } from '../../core/types'
 import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS } from '../../core/addons'
 import { mkMemory, mkTools } from '../../core/data'
 import { estimateLogUsage } from '../../core/usage'
@@ -22,7 +22,40 @@ export interface HydrationOutcome {
 const migrateCols = (tasks: BoardTask[]): BoardTask[] =>
   tasks.map(t => ((t.col as string) === 'routed' ? { ...t, col: 'backlog' as const } : t))
 
+interface LegacyPersona { id: string; name: string; description?: string; body?: string }
+
+/** Personas were replaced by durable agents in 0.5. Preserve user-authored
+ *  identities and rebind their old conversations instead of silently dropping
+ *  the removed persisted field. Stable ids make a retried migration idempotent. */
+function migratePersonas(p: Partial<PersistedState>): { agents: DurableAgent[]; ids: Map<string, string> } {
+  const raw = (p as Partial<PersistedState> & { personas?: unknown }).personas
+  const personas = Array.isArray(raw)
+    ? raw.filter((x): x is LegacyPersona => !!x && typeof x === 'object'
+      && typeof (x as LegacyPersona).id === 'string'
+      && typeof (x as LegacyPersona).name === 'string'
+      && !!(x as LegacyPersona).name.trim())
+    : []
+  const existing = new Set((p.durableAgents ?? []).map(d => d.id))
+  const ids = new Map<string, string>()
+  const agents: DurableAgent[] = []
+  for (const persona of personas) {
+    const id = `da-persona-${persona.id}`
+    ids.set(persona.id, id)
+    if (existing.has(id)) continue
+    agents.push({
+      id,
+      name: persona.name.trim().slice(0, 60),
+      role: typeof persona.description === 'string' ? persona.description.slice(0, 120) : undefined,
+      charter: typeof persona.body === 'string' ? persona.body.slice(0, 8000) : '',
+      color: '#B78AF7',
+      createdAt: 0,
+    })
+  }
+  return { agents, ids }
+}
+
 export function buildHydration(p: Partial<PersistedState>, seed: AppState): HydrationOutcome {
+  const personaMigration = migratePersonas(p)
   const workspaces = p.workspaces?.length ? p.workspaces : [{ id: 'ws-default', name: 'Default' }]
   const activeWorkspace = p.activeWorkspace && workspaces.some(w => w.id === p.activeWorkspace)
     ? p.activeWorkspace
@@ -45,8 +78,12 @@ export function buildHydration(p: Partial<PersistedState>, seed: AppState): Hydr
       const chatLog = interrupted
         ? [...(a.chatLog ?? []), { id: mkId('cm'), role: 'assistant' as const, text: '*(interrupted — the app closed mid-reply; send a message to continue)*', at: interruptedAt }]
         : a.chatLog
+      const legacyPersonaId = (a as Agent & { personaId?: string }).personaId
       return {
         ...a,
+        ...(!a.durableAgentId && legacyPersonaId && personaMigration.ids.has(legacyPersonaId)
+          ? { durableAgentId: personaMigration.ids.get(legacyPersonaId) }
+          : {}),
         ...(chatLog ? { chatLog } : {}),
         ...(chatTurns ? { chatTurns } : {}),
         ...usage,
@@ -123,8 +160,8 @@ export function buildHydration(p: Partial<PersistedState>, seed: AppState): Hydr
     chatMemory: p.chatMemory ?? {},
     // the built-in assistant survives even snapshots from before durable agents
     durableAgents: (p.durableAgents ?? []).some(a => a.builtin)
-      ? p.durableAgents!
-      : [builtinAssistant(), ...(p.durableAgents ?? [])],
+      ? [...p.durableAgents!, ...personaMigration.agents]
+      : [builtinAssistant(), ...(p.durableAgents ?? []), ...personaMigration.agents],
     assistantMemory: p.assistantMemory ?? {},
     harnessLog: p.harnessLog ?? [],
     addons: (p.addons ?? seed.addons).map(a => {

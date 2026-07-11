@@ -64,6 +64,19 @@ describe('buildHydration', () => {
     expect(chat.chatLog?.at(-1)?.text).toMatch(/interrupted/)
   })
 
+  it('migrates legacy personas to durable agents and rebinds their chats', () => {
+    const p = {
+      personas: [{ id: 'terse', name: 'Terse Engineer', description: 'direct', body: 'Lead with evidence.' }],
+      agents: [{ id: 'c1', kind: 'chat', status: 'idle', personaId: 'terse', chatLog: [] }],
+    } as unknown as Partial<PersistedState>
+
+    const { next } = buildHydration(p, seed())
+    expect(next.durableAgents.find(d => d.id === 'da-persona-terse')).toMatchObject({
+      name: 'Terse Engineer', role: 'direct', charter: 'Lead with evidence.',
+    })
+    expect(next.agents.find(a => a.id === 'c1')?.durableAgentId).toBe('da-persona-terse')
+  })
+
   it('drops tab-group slots referencing unknown session ids and empties dead groups', () => {
     const p = {
       agents: [{ id: 'a1', kind: 'real', cmd: 'claude', log: [] }],
