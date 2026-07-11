@@ -117,6 +117,9 @@ export interface SessionRuntimeState {
   /** transient: the monitor's proposed next actions — chips the user can click
    *  to send straight to the session. Cleared on click/dismiss/new turn. */
   suggestions?: SuggestedAction[]
+  /** transient: what the chat agent's current tool call is doing right now
+   *  (live activity line under the transcript while a tool runs) */
+  chatActivity?: string
 }
 
 /** One concrete next action an assistant proposes for a session: clicking it
@@ -242,7 +245,7 @@ export type Agent = SessionRecord & SessionRuntimeState
 /** The runtime-only keys, as a value — the single source of truth persistence
  *  uses to strip transient fields. Typed as keyof SessionRuntimeState so it stays
  *  in sync if the runtime shape changes. */
-export const SESSION_RUNTIME_KEYS: ReadonlyArray<keyof SessionRuntimeState> = ['status', 'escReason', 'responding', 'suggestions']
+export const SESSION_RUNTIME_KEYS: ReadonlyArray<keyof SessionRuntimeState> = ['status', 'escReason', 'responding', 'suggestions', 'chatActivity']
 
 /** one message in a chat-mode session */
 export interface ChatMsg {

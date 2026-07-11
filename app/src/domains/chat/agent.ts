@@ -14,8 +14,9 @@ import type { ApiContentBlock, ApiMessage, ApiUsage, LlmConfig } from '../../llm
 export interface ChatTurnEvent {
   /** delta = streamed text chunk · thinking = streamed reasoning chunk ·
    *  round = current stream bubble is complete (a tool round follows) ·
-   *  text = final reply · tool = tool trace */
-  kind: 'tool' | 'text' | 'delta' | 'thinking' | 'round'
+   *  text = final reply · tool = tool trace · activity = a tool STARTED
+   *  running (live "what am I doing" line so long calls never look stuck) */
+  kind: 'tool' | 'text' | 'delta' | 'thinking' | 'round' | 'activity'
   text: string
   tool?: ChatToolEvent
 }
@@ -777,6 +778,9 @@ export async function runChatTurn(
             return { type: 'tool_result', tool_use_id: b.id, content }
           }
         }
+        // live activity line while the call runs — long commands/fetches
+        // otherwise read as the agent being stuck
+        onEvent({ kind: 'activity', text: `${name} · ${approvalPreview(name, input).split('\n')[0].slice(0, 90)}` })
         try {
           if (name.startsWith(MCP_PREFIX)) {
             const [, server, ...rest] = name.split('__')

@@ -415,6 +415,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     let acc = ''
     let thinkId: string | null = null
     let thinkAcc = ''
+    let activityShown = false
     // Coalesce streamed delta writes to at most one store dispatch per animation
     // frame (a fast token stream otherwise dispatches per token, churning global
     // state). The latest text per bubble is force-flushed synchronously at every
@@ -466,6 +467,17 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       apiContent,
       history,
       e => {
+        // live "what am I doing" line: set when a tool starts, cleared as soon
+        // as the model streams again (or the turn settles in finally below)
+        if (e.kind === 'activity' || ((e.kind === 'delta' || e.kind === 'thinking') && activityShown)) {
+          activityShown = e.kind === 'activity'
+          const text = e.kind === 'activity' ? e.text : undefined
+          ctx.dispatch(s2 => ({
+            ...s2,
+            agents: s2.agents.map(a => (a.id === agentId ? { ...a, chatActivity: text } : a)),
+          }))
+        }
+        if (e.kind === 'activity') return
         if (e.kind === 'delta') {
           acc += e.text
           if (!streamId) {
@@ -605,7 +617,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     const released = ctx.aborts.clear(agentId, runSignal)
     if (released || !ctx.aborts.has(agentId)) {
       ctx.busy.delete(agentId)
-      ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
+      ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false, chatActivity: undefined } : a)) }))
     }
   }
   if (autoCompact) void compactConversation(ctx, agentId).catch(() => {})

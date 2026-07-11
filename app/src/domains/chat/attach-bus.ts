@@ -18,3 +18,25 @@ export function requestAttach(agentId: string, path: string): boolean {
   cb(path)
   return true
 }
+
+// Second channel: the agent home page asks a mounted chat pane to embed one
+// of the agent's mini apps in its artifact panel (sandboxed side-by-side).
+import type { AgentApp } from '../../core/types'
+
+const appSubs = new Map<string, (app: AgentApp) => void>()
+
+/** ChatPane subscribes for its conversation id; returns the unsubscribe. */
+export function onAppEmbed(agentId: string, cb: (app: AgentApp) => void): () => void {
+  appSubs.set(agentId, cb)
+  return () => {
+    if (appSubs.get(agentId) === cb) appSubs.delete(agentId)
+  }
+}
+
+/** True when a chat pane for this conversation accepted the embed. */
+export function requestAppEmbed(agentId: string, app: AgentApp): boolean {
+  const cb = appSubs.get(agentId)
+  if (!cb) return false
+  cb(app)
+  return true
+}

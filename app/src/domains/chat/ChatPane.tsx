@@ -11,7 +11,7 @@ import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import type { CatalogSkill } from '../../core/skills'
 import type { Agent, ChatAttachmentRecord, ChatMsg, ChatTurn } from '../../core/types'
 import type { ChatAttachment } from './runner'
-import { onAttachRequest } from './attach-bus'
+import { onAppEmbed, onAttachRequest } from './attach-bus'
 import { ALWAYS_ASK_TOOLS } from './agent'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
@@ -107,6 +107,33 @@ function ThinkingBubble({ m, live }: { m: ChatMsg; live: boolean }) {
   )
 }
 
+/** Rich attachment preview: image attachments render as real thumbnails,
+ *  loaded lazily from their path and cached for the session. */
+const thumbCache = new Map<string, string>()
+function AttachmentThumb({ att, size = 200 }: { att: ChatAttachmentRecord; size?: number }) {
+  const [src, setSrc] = useState<string | null>(att.path ? thumbCache.get(att.path) ?? null : null)
+  useEffect(() => {
+    if (src || !att.path) return
+    let live = true
+    void readFileB64(att.path).then(b64 => {
+      const url = `data:${att.mediaType ?? 'image/png'};base64,${b64}`
+      thumbCache.set(att.path!, url)
+      if (live) setSrc(url)
+    }).catch(() => {})
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [att.path])
+  if (!src) return null
+  return (
+    <img
+      src={src}
+      alt={att.name}
+      title={att.path ?? att.name}
+      style={{ maxWidth: size, maxHeight: size, borderRadius: 10, border: '1px solid var(--line2)', boxShadow: 'var(--shadow-card)', display: 'block', objectFit: 'cover' }}
+    />
+  )
+}
+
 /** small icon button shown on message hover */
 function HoverBtn({ title, paths, onClick }: { title: string; paths: string[]; onClick: () => void }) {
   return (
@@ -152,7 +179,7 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
   )
 }
 
-function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork, onQuickReply, onRate }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'always-tool' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void; onQuickReply?: (msgId: string, reply: string) => void; onRate?: (msgId: string, rating: 'up' | 'down', note?: string) => void }) {
+function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork, onQuickReply, onRate, atts }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'always-tool' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void; onQuickReply?: (msgId: string, reply: string) => void; onRate?: (msgId: string, rating: 'up' | 'down', note?: string) => void; atts?: ChatAttachmentRecord[] }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
@@ -200,6 +227,14 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
           color: 'var(--text)', overflowWrap: 'break-word',
         }}>
           <Markdown text={m.text} />
+          {(() => {
+            const imgs = (atts ?? []).filter(a => a.kind === 'image' && a.path).slice(0, 4)
+            return imgs.length ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                {imgs.map(a => <AttachmentThumb key={a.path ?? a.name} att={a} />)}
+              </div>
+            ) : null
+          })()}
         </div>
       </div>
     )
@@ -530,6 +565,11 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent.id, atts.length])
 
+  // agent home page "Embed in chat": show a mini app in the artifact panel
+  useEffect(() => {
+    return onAppEmbed(agent.id, app => setArtifact({ kind: 'html', source: app.html }))
+  }, [agent.id])
+
   // native drag & drop: Tauri reports OS file drops with real paths
   useEffect(() => {
     if (!active || !isTauri) return
@@ -650,14 +690,17 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                   onFork={m.role === 'user' && turn && !busy ? () => reviseTurn(turn, 'fork') : undefined}
                   onQuickReply={(msgId, reply) => sendQuickReply(agent.id, msgId, reply)}
                   onRate={m.role === 'assistant' ? (msgId, rating, note) => rateChatReply(agent.id, msgId, rating, note) : undefined}
+                  atts={m.role === 'user' ? turn?.input.attachments : undefined}
                 />
               </Fragment>
             )
           })}
-          {busy && log[log.length - 1]?.role !== 'assistant' && (
-            <div style={{ display: 'flex', flexShrink: 0, alignItems: 'center', gap: 9, padding: '4px 4px' }}>
+          {busy && (agent.chatActivity || log[log.length - 1]?.role !== 'assistant') && (
+            <div style={{ display: 'flex', flexShrink: 0, alignItems: 'center', gap: 9, padding: '4px 4px', minWidth: 0 }}>
               <span className="typing-dots"><span /><span /><span /></span>
-              <span style={{ fontSize: 12.5, color: 'var(--mut)' }}>working…</span>
+              <span style={{ fontSize: 12.5, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {agent.chatActivity ?? 'working…'}
+              </span>
             </div>
           )}
         </div>
@@ -704,8 +747,13 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
                 color: a.kind === 'image' ? 'var(--accent)' : 'var(--mut)',
                 background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 7, padding: '3px 8px', maxWidth: 260,
               }}>
+                {a.kind === 'image' && a.path && (
+                  <span style={{ width: 26, height: 26, borderRadius: 5, overflow: 'hidden', flexShrink: 0 }}>
+                    <AttachmentThumb att={a} size={26} />
+                  </span>
+                )}
                 <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {a.kind === 'image' ? '🖼' : '📎'} {a.name}
+                  {a.kind === 'image' ? (a.path ? '' : '🖼 ') : '📎 '}{a.name}
                 </span>
                 <button
                   className="icon-btn"
