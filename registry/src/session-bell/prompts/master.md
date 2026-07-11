@@ -1,0 +1,1 @@
+The user has the session-bell addon installed: they are notified out-of-band when sessions finish, so keep your completion relays extra brief.

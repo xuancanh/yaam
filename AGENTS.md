@@ -72,8 +72,18 @@ app/                     Tauri app (the whole product)
     icons/               app icons, generated from app/app-icon.svg via `tauri icon`
 docs/README.md           current architecture/domain/security documentation index
 docs/addons.md           canonical addon architecture + authoring reference
-registry/                seed addon registry (index.json + packages/*.yaam.json + qa-gate/ folder format)
-scripts/pack-addon.mjs   folder-format addon → single-file .yaam.json
+registry/                seed addon registry
+  src/                   EDITABLE addon sources (toolchain projects: addon.config.ts + view + TS handlers)
+  packages/              GENERATED folder-format addons + packed *.yaam.json — never edit by hand
+  index.json             registry index (updated by yaam-addon publish / scripts/build-addons.mjs)
+sdk/                     addon developer toolkit (npm workspace — build with `cd sdk && npm run build`):
+  addon-sdk/             @yaam/addon-sdk: typed API mirror + bridge + React bindings + testing stub + ui.css
+  yaam-addon/            build tool + CLI (build/pack/publish/dev/validate)
+  create-yaam-addon/     scaffolder (react-ts + vanilla templates)
+toolkit/                 vanilla (no-build) addon kit: sdk.js + ui.css + template
+scripts/pack-addon.mjs   folder-format addon → single-file .yaam.json (vanilla path)
+scripts/build-addons.mjs rebuild + publish every registry/src project into registry/packages
+scripts/validate-registry.mjs  registry integrity/version/scope-diff check (also runs in CI)
 design/                  original HTML design mockups (historical reference)
 ```
 
@@ -272,7 +282,16 @@ evaluate package code in the main webview.
 When extending the addon API surface: add to `AddonApi` → implement in
 `makeAddonApiRaw` → map in `METHOD_PERMISSION`/`ALL_PERMISSIONS` → whitelist in
 `ADDON_RPC_METHODS` → update the LLM-facing docs in `master-tools.ts`
-(create_addon), `addon-editor.ts`, AND `addon-gen.ts`.
+(create_addon), `addon-editor.ts`, AND `addon-gen.ts` → mirror it in the SDK
+(`sdk/addon-sdk/src/types.ts` + `permissions.ts`). The mirror is gate-enforced:
+`app/src/core/addon-sdk-compat.ts` fails the app typecheck and the SDK's
+host-compat tests fail until both sides agree.
+
+Shipped addons are built from `registry/src/` (see `docs/addons-tutorial.md`
+§8): edit the source project, bump its version in `addon.config.ts`, then
+`node scripts/build-addons.mjs <slug>` regenerates `registry/packages/`.
+Dev installs (Addons → Dev install…) watch a folder and hot-reinstall on
+change — `Addon.devPath` + `domains/addons/dev-watch.ts`.
 
 ## Conventions
 

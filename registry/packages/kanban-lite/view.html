@@ -1,0 +1,45 @@
+<!DOCTYPE html><html><head><style>
+*{box-sizing:border-box}body{margin:0;background:#0A0B0F;color:#E7E9F0;font-family:'IBM Plex Sans',system-ui,sans-serif;padding:16px;overflow-x:auto}
+h1{font-size:14px;margin:0 0 2px}small{color:#8B93A1}
+#board{display:flex;gap:12px;margin-top:14px;align-items:flex-start}
+.col{width:230px;flex-shrink:0;background:#0B0C10;border:1px solid #1a1e26;border-radius:12px}
+.col.over{border-color:#F5C451}
+.colhead{display:flex;align-items:center;gap:7px;padding:10px 12px;border-bottom:1px solid #1a1e26;font-size:12px;font-weight:600}
+.dot{width:8px;height:8px;border-radius:3px}
+.count{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10px;color:#8B93A1;background:#12151C;border-radius:5px;padding:1px 7px}
+.cards{padding:9px;display:flex;flex-direction:column;gap:8px;min-height:40px}
+.card{background:#12151C;border:1px solid #23272F;border-radius:9px;padding:9px 10px;cursor:grab;position:relative}
+.card:hover{border-color:#3a4150}
+.card .t{font-size:12px;font-weight:600;line-height:1.35}
+.card .m{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:10.5px;color:#8B93A1}
+.card .x{position:absolute;top:5px;right:6px;color:#626B79;cursor:pointer;font-size:11px;display:none}
+.card:hover .x{display:block}
+.start{color:#3DDC97;cursor:pointer;font-weight:600;background:none;border:none;font-size:10.5px;padding:0}
+.addrow{display:flex;gap:8px;margin-top:14px}
+input{flex:1;max-width:320px;background:#12151C;border:1px solid #2C313B;border-radius:8px;padding:7px 10px;color:#E7E9F0;outline:none;font-size:12.5px}
+button.add{background:#F5C451;color:#1a1400;border:none;border-radius:8px;padding:7px 14px;font-weight:600;font-size:12px;cursor:pointer}
+</style></head><body>
+<h1>Kanban (addon)</h1><small>the built-in board, rebuilt as a package — drag, rename (dblclick), start sessions</small>
+<div class=addrow><input id=nt placeholder="New task…"><button class=add onclick=addTask()>Add</button></div>
+<div id=board></div>
+<script>
+const COLS=[['backlog','Backlog','#6B7280'],['progress','In progress','#3DDC97'],['review','Needs review','#FFB020'],['done','Done','#4a5262'],['failed','Failed','#FF7A7A']];
+const pend={};function yaam(m,...a){return new Promise((res,rej)=>{const id=Math.random().toString(36).slice(2);pend[id]={res,rej};parent.postMessage({type:'yaam:call',callId:id,method:m,args:a},'*')})}
+let S={tasks:[],sessions:[]},drag=null;
+window.addEventListener('message',e=>{const d=e.data;if(d.type==='yaam:state'){S=d.state;render()}if(d.type==='yaam:result'&&pend[d.callId]){d.error?pend[d.callId].rej(new Error(d.error)):pend[d.callId].res(d.result);delete pend[d.callId]}});
+function agentOf(t){return S.sessions.find(s=>s.id===t.agentId)}
+function render(){document.getElementById('board').innerHTML=COLS.map(([id,label,color])=>{
+ const cards=S.tasks.filter(t=>t.col===id);
+ return `<div class=col data-col=${id} ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="drop(event,'${id}')">
+ <div class=colhead><span class=dot style=background:${color}></span>${label}<span class=count>${cards.length}</span></div>
+ <div class=cards>${cards.map(t=>{const a=agentOf(t);return `<div class=card draggable=true ondragstart="drag='${t.id}'" ondblclick="renameTask('${t.id}')">
+   <div class=t>${esc(t.title)}</div><span class=x onclick="yaam('tasks.remove','${t.id}')">✕</span>
+   <div class=m>${a?`<span style=color:#9AA3B2;cursor:pointer onclick="yaam('focusSession','${a.id}')">▸ ${esc(a.name)} · ${a.status}</span>`:`<button class=start onclick="yaam('tasks.start','${t.id}')">▶ Start session</button>`}</div>
+ </div>`}).join('')}</div></div>`}).join('')}
+function esc(x){return String(x).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+async function drop(e,col){e.preventDefault();document.querySelectorAll('.col').forEach(c=>c.classList.remove('over'));if(drag){await yaam('tasks.move',drag,col);drag=null;refresh()}}
+async function addTask(){const el=document.getElementById('nt');if(!el.value.trim())return;await yaam('tasks.add',el.value.trim(),'backlog');el.value='';refresh()}
+async function renameTask(id){const t=S.tasks.find(x=>x.id===id);const v=prompt('Rename task',t?t.title:'');if(v)await yaam('tasks.rename',id,v);refresh()}
+async function refresh(){S=await yaam('getState');render()}
+parent.postMessage({type:'yaam:getState'},'*')
+</script></body></html>

@@ -499,8 +499,16 @@ within exactly what the user granted.
 
 ---
 
-## 7. Writing an addon — three workflows
+## 7. Writing an addon — four workflows
 
+0. **The toolchain** (recommended for anything non-trivial): scaffold a
+   normal Vite + TypeScript (optionally React) project and let
+   `yaam-addon build` compile it into the sandbox format — typed API +
+   snapshot, npm packages, HMR dev server against a host stub, build-time
+   permission linting, and a **Dev install** in the app that hot-reloads on
+   every rebuild. The full walkthrough is
+   [`addons-tutorial.md`](addons-tutorial.md); the SDK lives in
+   [`sdk/`](../sdk).
 1. **Ask Master** (fastest): *"build me a tab that shows cost per session as
    bars"* → Master calls `create_addon`; the tab opens immediately. Master
    knows the full bridge/permission docs from its tool description.
@@ -509,7 +517,7 @@ within exactly what the user granted.
    package and edits it via a validated `update_addon` tool (full-package
    replacement, auto version bump, iframe reload). *"make the bars green"*,
    *"add a tool that restarts idle sessions"*.
-3. **By hand** (full control): write a folder-format addon (section 2.1) and
+3. **By hand, no build step**: write a folder-format addon (section 2.1) and
    install via **Settings → Addons → Install folder…**, or write the JSON and
    use **Install from file…**. Iterate by re-installing (same name
    replaces, grants preserved) or by editing in Customize. Use the **Source**
@@ -596,4 +604,8 @@ seed.
 | `workflows` | **State machines over tasks**: drag-and-drop step editor, on-done/on-fail transitions with visit-capped loops, cron triggers via `wf-<id>` schedules, `onTaskMoved` advancing runs, per-run path history |
 | `github-issues` | **External integration**: `hosts`-allowlisted `http.request`, keychain `secrets` (`{{secret:GITHUB_TOKEN}}`), scheduled sync via `onCronFired`, review queue in storage, agent-driven auto-triage with a user-customizable policy |
 | `usage-limit-rescheduler` | **Event-driven monitor agent**: `on: [onTaskMoved]` wake, failure diagnosis via `get_task`/`read_output`, one-time `at:` schedules, `tasks.restart` on `onCronFired`, attempt caps |
-| `dev-kitchen-sink` | **The whole surface, live** — one section per capability (state, sessions, tasks incl. review verbs, templates, schedules + run history, storage, HTTP + secrets, agent chat, UI calls, hook log), built on `toolkit/` via `@include` |
+| `dev-kitchen-sink` | **The whole surface, live** — one section per capability (state, sessions, tasks incl. review verbs, templates, schedules + run history, storage, HTTP + secrets, agent chat, UI calls, hook log) |
+
+All of these are built from toolchain source projects in
+[`registry/src/`](../registry/src) — `registry/packages/` is **generated**
+(`node scripts/build-addons.mjs`); edit the sources, not the artifacts.

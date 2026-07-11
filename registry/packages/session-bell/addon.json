@@ -1,0 +1,35 @@
+{
+  "manifest": 3,
+  "name": "session-bell",
+  "version": "1.0.1",
+  "icon": "🔔",
+  "description": "Rings the notification bell (and toasts) whenever any session finishes or asks for input.",
+  "author": "yaam",
+  "permissions": [
+    "state:read",
+    "sessions:send",
+    "master:prompt",
+    "ui"
+  ],
+  "tools": [
+    {
+      "name": "ping_all_sessions",
+      "description": "Send a short status-request message to every running session.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "what to type into each running session"
+          }
+        }
+      },
+      "handler": "tools/ping_all_sessions.js"
+    }
+  ],
+  "hooks": {
+    "onSessionExit": "hooks/onSessionExit.js",
+    "onNeedsInput": "hooks/onNeedsInput.js",
+    "masterPromptAppend": "hooks/masterPromptAppend.txt"
+  }
+}

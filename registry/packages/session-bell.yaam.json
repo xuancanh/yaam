@@ -1,10 +1,16 @@
 {
-  "manifest": 2,
+  "manifest": 3,
   "name": "session-bell",
-  "version": "1.0.0",
-  "icon": "\ud83d\udd14",
+  "version": "1.0.1",
+  "icon": "🔔",
   "description": "Rings the notification bell (and toasts) whenever any session finishes or asks for input.",
   "author": "yaam",
+  "permissions": [
+    "state:read",
+    "sessions:send",
+    "master:prompt",
+    "ui"
+  ],
   "tools": [
     {
       "name": "ping_all_sessions",
@@ -13,22 +19,17 @@
         "type": "object",
         "properties": {
           "message": {
-            "type": "string"
+            "type": "string",
+            "description": "what to type into each running session"
           }
         }
       },
-      "handler": "const state = api.getState(); const msg = input.message || 'status?'; let n = 0; for (const s of state.sessions) { if (s.status === 'running') { api.sendToSession(s.id, msg); n++; } } return `pinged ${n} running session(s)`;"
+      "handler": "const module = { exports: {} };\nconst exports = module.exports;\nvar __defProp = Object.defineProperty;\nvar __getOwnPropDesc = Object.getOwnPropertyDescriptor;\nvar __getOwnPropNames = Object.getOwnPropertyNames;\nvar __hasOwnProp = Object.prototype.hasOwnProperty;\nvar __export = (target, all) => {\n  for (var name in all)\n    __defProp(target, name, { get: all[name], enumerable: true });\n};\nvar __copyProps = (to, from, except, desc) => {\n  if (from && typeof from === \"object\" || typeof from === \"function\") {\n    for (let key of __getOwnPropNames(from))\n      if (!__hasOwnProp.call(to, key) && key !== except)\n        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n  }\n  return to;\n};\nvar __toCommonJS = (mod) => __copyProps(__defProp({}, \"__esModule\", { value: true }), mod);\n\n// registry/src/session-bell/src/tools/ping_all_sessions.ts\nvar ping_all_sessions_exports = {};\n__export(ping_all_sessions_exports, {\n  default: () => ping_all_sessions_default\n});\nmodule.exports = __toCommonJS(ping_all_sessions_exports);\nvar handler = async (input, api) => {\n  const state = api.getState();\n  const msg = input.message || \"status?\";\n  let n = 0;\n  for (const s of state.sessions) {\n    if (s.status === \"running\") {\n      api.sendToSession(s.id, msg);\n      n++;\n    }\n  }\n  return `pinged ${n} running session(s)`;\n};\nvar ping_all_sessions_default = handler;\nconst __handler = typeof module.exports === \"function\" ? module.exports : module.exports.default;\nif (typeof __handler !== \"function\") throw new Error(\"handler module needs a default export function (input, api) => ...\");\nreturn await __handler(input, api);"
     }
   ],
   "hooks": {
-    "onSessionExit": "api.notify(`${input.name} exited`, input.code === 0 ? 'finished cleanly' : `exit code ${input.code}`); api.flash(`${input.name} done`);",
-    "onNeedsInput": "api.flash(`${input.name} is waiting: ${String(input.question).slice(0, 40)}`);",
+    "onSessionExit": "const module = { exports: {} };\nconst exports = module.exports;\nvar __defProp = Object.defineProperty;\nvar __getOwnPropDesc = Object.getOwnPropertyDescriptor;\nvar __getOwnPropNames = Object.getOwnPropertyNames;\nvar __hasOwnProp = Object.prototype.hasOwnProperty;\nvar __export = (target, all) => {\n  for (var name in all)\n    __defProp(target, name, { get: all[name], enumerable: true });\n};\nvar __copyProps = (to, from, except, desc) => {\n  if (from && typeof from === \"object\" || typeof from === \"function\") {\n    for (let key of __getOwnPropNames(from))\n      if (!__hasOwnProp.call(to, key) && key !== except)\n        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n  }\n  return to;\n};\nvar __toCommonJS = (mod) => __copyProps(__defProp({}, \"__esModule\", { value: true }), mod);\n\n// registry/src/session-bell/src/hooks/onSessionExit.ts\nvar onSessionExit_exports = {};\n__export(onSessionExit_exports, {\n  default: () => onSessionExit_default\n});\nmodule.exports = __toCommonJS(onSessionExit_exports);\nvar handler = async (input, api) => {\n  api.notify(`${input.name} exited`, input.code === 0 ? \"finished cleanly\" : `exit code ${input.code}`);\n  api.flash(`${input.name} done`);\n};\nvar onSessionExit_default = handler;\nconst __handler = typeof module.exports === \"function\" ? module.exports : module.exports.default;\nif (typeof __handler !== \"function\") throw new Error(\"handler module needs a default export function (input, api) => ...\");\nreturn await __handler(input, api);",
+    "onNeedsInput": "const module = { exports: {} };\nconst exports = module.exports;\nvar __defProp = Object.defineProperty;\nvar __getOwnPropDesc = Object.getOwnPropertyDescriptor;\nvar __getOwnPropNames = Object.getOwnPropertyNames;\nvar __hasOwnProp = Object.prototype.hasOwnProperty;\nvar __export = (target, all) => {\n  for (var name in all)\n    __defProp(target, name, { get: all[name], enumerable: true });\n};\nvar __copyProps = (to, from, except, desc) => {\n  if (from && typeof from === \"object\" || typeof from === \"function\") {\n    for (let key of __getOwnPropNames(from))\n      if (!__hasOwnProp.call(to, key) && key !== except)\n        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n  }\n  return to;\n};\nvar __toCommonJS = (mod) => __copyProps(__defProp({}, \"__esModule\", { value: true }), mod);\n\n// registry/src/session-bell/src/hooks/onNeedsInput.ts\nvar onNeedsInput_exports = {};\n__export(onNeedsInput_exports, {\n  default: () => onNeedsInput_default\n});\nmodule.exports = __toCommonJS(onNeedsInput_exports);\nvar handler = async (input, api) => {\n  api.flash(`${input.name} is waiting: ${String(input.question).slice(0, 40)}`);\n};\nvar onNeedsInput_default = handler;\nconst __handler = typeof module.exports === \"function\" ? module.exports : module.exports.default;\nif (typeof __handler !== \"function\") throw new Error(\"handler module needs a default export function (input, api) => ...\");\nreturn await __handler(input, api);",
     "masterPromptAppend": "The user has the session-bell addon installed: they are notified out-of-band when sessions finish, so keep your completion relays extra brief."
-  },
-  "permissions": [
-    "state:read",
-    "sessions:send",
-    "master:prompt",
-    "ui"
-  ]
+  }
 }

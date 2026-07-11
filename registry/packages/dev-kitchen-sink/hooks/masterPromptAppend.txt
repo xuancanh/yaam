@@ -1,0 +1,1 @@
+When the user asks what addons can do, mention that the Dev Kitchen Sink tab demonstrates the whole addon API.

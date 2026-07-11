@@ -1,12 +1,12 @@
 {
-  "manifest": 2,
+  "manifest": 3,
   "name": "cost-pulse",
-  "version": "1.0.0",
-  "icon": "\ud83d\udca0",
+  "version": "1.0.1",
+  "icon": "💠",
   "description": "Live per-session spend as a bar chart tab.",
   "author": "yaam",
-  "html": "<!DOCTYPE html><html><head><style>body{margin:0;background:#0A0B0F;color:#E7E9F0;font-family:'IBM Plex Sans',system-ui,sans-serif;padding:24px}h1{font-size:15px;margin:0 0 4px}small{color:#8B93A1}.row{display:flex;align-items:center;gap:10px;margin-top:14px}.name{width:160px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track{flex:1;height:12px;background:#12151C;border-radius:6px;overflow:hidden}.fill{height:100%;background:#F5C451;border-radius:6px;transition:width .4s}.val{width:70px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;color:#8B93A1}#total{margin-top:22px;font-family:'JetBrains Mono',monospace;color:#F5C451}</style></head><body><h1>Cost pulse</h1><small>estimated spend per session \u00b7 live</small><div id=\"bars\"></div><div id=\"total\"></div><script>function esc(v){return String(v).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}function render(s){const max=Math.max(0.01,...s.sessions.map(x=>x.cost));document.getElementById('bars').innerHTML=s.sessions.map(x=>`<div class=row><div class=name>${esc(x.name)}</div><div class=track><div class=fill style=\"width:${(x.cost/max*100).toFixed(1)}%\"></div></div><div class=val>$${x.cost.toFixed(2)}</div></div>`).join('');document.getElementById('total').textContent=`total $${s.totals.cost.toFixed(2)} \u00b7 ${s.totals.running} running`}window.addEventListener('message',e=>{if(e.data&&e.data.type==='yaam:state')render(e.data.state)});parent.postMessage({type:'yaam:getState'},'*')</script></body></html>",
   "permissions": [
     "state:read"
-  ]
+  ],
+  "html": "<!DOCTYPE html><html><head><style>body{margin:0;background:#0A0B0F;color:#E7E9F0;font-family:'IBM Plex Sans',system-ui,sans-serif;padding:24px}h1{font-size:15px;margin:0 0 4px}small{color:#8B93A1}.row{display:flex;align-items:center;gap:10px;margin-top:14px}.name{width:160px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track{flex:1;height:12px;background:#12151C;border-radius:6px;overflow:hidden}.fill{height:100%;background:#F5C451;border-radius:6px;transition:width .4s}.val{width:70px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;color:#8B93A1}#total{margin-top:22px;font-family:'JetBrains Mono',monospace;color:#F5C451}</style></head><body><h1>Cost pulse</h1><small>estimated spend per session · live</small><div id=\"bars\"></div><div id=\"total\"></div><script>function esc(v){return String(v).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}function render(s){const max=Math.max(0.01,...s.sessions.map(x=>x.cost));document.getElementById('bars').innerHTML=s.sessions.map(x=>`<div class=row><div class=name>${esc(x.name)}</div><div class=track><div class=fill style=\"width:${(x.cost/max*100).toFixed(1)}%\"></div></div><div class=val>$${x.cost.toFixed(2)}</div></div>`).join('');document.getElementById('total').textContent=`total $${s.totals.cost.toFixed(2)} · ${s.totals.running} running`}window.addEventListener('message',e=>{if(e.data&&e.data.type==='yaam:state')render(e.data.state)});parent.postMessage({type:'yaam:getState'},'*')</script></body></html>"
 }

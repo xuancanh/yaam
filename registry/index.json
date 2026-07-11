@@ -3,58 +3,58 @@
   "packages": [
     {
       "name": "qa-gate",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "icon": "✅",
-      "description": "Independent QA audits: tasks reaching review get a one-shot auditor that re-verifies the criteria; failures bounce back with findings. Ships its own QA-officer agent you can chat with.",
+      "description": "Independent QA audits for board tasks — every task that reaches review gets a one-shot auditor session that re-verifies the acceptance criteria and reports its verdict to the task chat. Failing tasks bounce back to In progress.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/qa-gate.yaam.json"
     },
     {
       "name": "session-bell",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "icon": "🔔",
-      "description": "Notifications when any session finishes or asks for input; adds a ping_all_sessions tool for Master.",
+      "description": "Rings the notification bell (and toasts) whenever any session finishes or asks for input.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/session-bell.yaam.json"
     },
     {
       "name": "cost-pulse",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "icon": "💠",
-      "description": "Live per-session spend bar chart as a tab.",
+      "description": "Live per-session spend as a bar chart tab.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/cost-pulse.yaam.json"
     },
     {
       "name": "kanban-lite",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "icon": "🗂",
-      "description": "The built-in kanban board as a pure addon (proof of the addon platform).",
+      "description": "The built-in kanban board rebuilt entirely as an addon: drag & drop, add/rename/delete tasks, spawn sessions for cards.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/kanban-lite.yaam.json"
     },
     {
       "name": "workflows",
-      "version": "3.0.0",
+      "version": "3.0.1",
       "icon": "⛓",
-      "description": "Task workflows as state machines — steps with on-done / on-fail transitions, remediation branches, visit-capped retry loops. Workflow list with pass rates and pause toggles, drag-and-drop canvas editor with labeled transitions, cron triggers, and replayable run history.",
+      "description": "Task workflows as state machines — every step is a board-task spec with on-done / on-fail transitions, so runs branch into remediation steps, loop back for visit-capped retries, and halt where you choose. Workflow list with pass rates and pause toggles, drag-and-drop canvas editor with labeled transitions, cron triggers, and a run history you can replay on the canvas.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/workflows.yaam.json"
     },
     {
       "name": "github-issues",
-      "version": "2.1.0",
+      "version": "2.1.1",
       "icon": "🐙",
-      "description": "A GitHub issue triage inbox — sync open issues from any number of repos on a schedule, spawn linked board tasks (or let the customizable triage agent decide), track their progress, and optionally close issues on GitHub when their task is done. Token stays in the OS keychain.",
+      "description": "A GitHub issue triage inbox — sync open issues from any number of repos on a schedule, spawn linked board tasks (or let the addon's customizable triage agent decide), track their progress, and optionally close the issue on GitHub when the task is done. Token stays in the OS keychain.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/github-issues.yaam.json"
     },
     {
       "name": "usage-limit-rescheduler",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "icon": "⏳",
-      "description": "Tasks that failed on an API usage/rate limit get automatically rescheduled for right after the limit resets — detected from session output or the Anthropic usage API.",
+      "description": "When a board task fails because the CLI hit an API usage or rate limit, this addon's monitor agent reads the failure, figures out when the limit resets (from the session output, or the Anthropic usage API if you store an admin key), and automatically reschedules the task for right after the reset.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/usage-limit-rescheduler.yaam.json"
     },
     {
       "name": "dev-kitchen-sink",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "icon": "🧪",
-      "description": "Developer reference — exercises every addon capability (state, sessions, tasks with review verbs, templates, schedules, storage, allowlisted HTTP, keychain secrets, the addon agent, UI calls, all hooks, a Master tool). Built on the toolkit.",
+      "description": "Developer reference — a tab that exercises every addon capability (state, sessions, tasks incl. review verbs, templates, schedules, storage, allowlisted HTTP, keychain secrets, the addon's own agent, UI calls), plus all four hooks, a Master tool, and a masterPromptAppend.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/dev-kitchen-sink.yaam.json"
     }
   ],

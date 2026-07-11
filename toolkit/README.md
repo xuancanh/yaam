@@ -1,8 +1,14 @@
-# YAAM addon toolkit
+# YAAM addon toolkit (vanilla — no build step)
 
-Everything you need to build an addon with a native-feeling UI. The full
-authoring reference lives in [`docs/addons.md`](../docs/addons.md); this folder
-is the practical kit:
+> **Building anything non-trivial?** Use the typed toolchain instead:
+> `create-yaam-addon` scaffolds a Vite + TypeScript project that
+> `yaam-addon build` compiles into the addon format, with a typed SDK, an
+> HMR dev server, tests, and hot Dev installs. Walkthrough:
+> [`docs/addons-tutorial.md`](../docs/addons-tutorial.md) · packages: [`sdk/`](../sdk).
+
+This folder is the zero-tooling path: hand-written HTML + plain JS, nothing to
+install. The full authoring reference lives in
+[`docs/addons.md`](../docs/addons.md); this folder is the practical kit:
 
 | File | What it is |
 |---|---|

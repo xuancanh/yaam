@@ -1,0 +1,60 @@
+{
+  "manifest": 3,
+  "name": "Dev Kitchen Sink",
+  "version": "1.0.1",
+  "icon": "🧪",
+  "description": "Developer reference — a tab that exercises every addon capability (state, sessions, tasks incl. review verbs, templates, schedules, storage, allowlisted HTTP, keychain secrets, the addon's own agent, UI calls), plus all four hooks, a Master tool, and a masterPromptAppend.",
+  "author": "yaam",
+  "hosts": [
+    "api.github.com"
+  ],
+  "secrets": [
+    {
+      "name": "DEMO_TOKEN",
+      "label": "any string — only used to demo {{secret:…}} header templating"
+    }
+  ],
+  "permissions": [
+    "state:read",
+    "sessions:send",
+    "sessions:launch",
+    "tasks",
+    "schedules",
+    "agent",
+    "master:prompt",
+    "ui",
+    "storage",
+    "http",
+    "secrets"
+  ],
+  "view": "view.html",
+  "tools": [
+    {
+      "name": "sink_echo",
+      "description": "Kitchen-sink demo tool — echoes its input back with a state summary, proving Master can call addon tools.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "anything; it comes straight back"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "handler": "tools/sink_echo.js"
+    }
+  ],
+  "hooks": {
+    "onSessionExit": "hooks/onSessionExit.js",
+    "onNeedsInput": "hooks/onNeedsInput.js",
+    "onTaskMoved": "hooks/onTaskMoved.js",
+    "onCronFired": "hooks/onCronFired.js",
+    "masterPromptAppend": "hooks/masterPromptAppend.txt"
+  },
+  "agent": {
+    "system": "prompts/agent.md"
+  }
+}
