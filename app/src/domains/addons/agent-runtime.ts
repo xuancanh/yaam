@@ -36,23 +36,24 @@ export function createAddonAgentRuntime(ports: AddonAgentPorts): AddonAgentRunti
       if (!(st.masterEnabled && hasCreds(st))) return 'no brain configured — enable LLM Master in Settings'
       if (busy.has(addonId)) return 'agent is busy with a previous note — try again shortly'
       busy.add(addonId)
+      const runSignal = aborts.signal(addonId)
       try {
         let history = histories.get(addonId)
         if (!history) {
           history = []
           histories.set(addonId, history)
         }
-        const reply = await runAddonAgentTurn(buildCfg(st, st.monitorModel || undefined), addon, note, history, ports.makeAddonApi(addonId), aborts.signal(addonId))
+        const reply = await runAddonAgentTurn(buildCfg(st, st.monitorModel || undefined), addon, note, history, ports.makeAddonApi(addonId), runSignal)
         return reply || '(acted without a reply)'
       } catch (e) {
         // the addon was removed mid-turn — stop quietly
-        if (isAbortError(e) || aborts.signal(addonId).aborted) return 'agent cancelled'
+        if (isAbortError(e) || runSignal.aborted) return 'agent cancelled'
         const msg = e instanceof Error ? e.message : String(e)
         ports.logEvent('escalate', null, `Addon agent "${addon.name}" error: ${msg}`)
         return `agent error: ${msg}`
       } finally {
-        busy.delete(addonId)
-        aborts.clear(addonId)
+        const released = aborts.clear(addonId, runSignal)
+        if (released || !aborts.has(addonId)) busy.delete(addonId)
       }
     },
     dispose: (addonId) => {

@@ -79,6 +79,33 @@ describe('runWatcherLoop failure surfacing (a silent watcher reads as a broken c
     await runWatcherLoop(c, 't1', '[user message] status?')
     expect(c.pushTaskChat).toHaveBeenCalledWith('t1', 'watcher', 'watcher reply')
   })
+
+  it('an obsolete disposed run cannot unlock its replacement', async () => {
+    let rejectOld!: (e: Error) => void
+    let resolveNew!: (text: string) => void
+    turn
+      .mockImplementationOnce(() => new Promise<string>((_resolve, reject) => { rejectOld = reject }))
+      .mockImplementationOnce(() => new Promise<string>(resolve => { resolveNew = resolve }))
+    const c = ctx()
+    const oldRun = runWatcherLoop(c, 't1', 'old run')
+    await vi.waitFor(() => expect(turn).toHaveBeenCalledTimes(1))
+
+    c.aborts.abort('t1')
+    c.busy.delete('t1') // watcher-runtime.dispose allows a same-id task to restart
+    const replacement = runWatcherLoop(c, 't1', 'replacement run')
+    await vi.waitFor(() => expect(turn).toHaveBeenCalledTimes(2))
+    const replacementSignal = (turn.mock.calls as unknown[][])[1][6] as AbortSignal
+
+    const aborted = new Error('cancelled'); aborted.name = 'AbortError'
+    rejectOld(aborted)
+    await oldRun
+    expect(c.busy.has('t1')).toBe(true)
+    expect(replacementSignal.aborted).toBe(false)
+
+    resolveNew('done')
+    await replacement
+    expect(c.busy.has('t1')).toBe(false)
+  })
 })
 
 // silence the unused-import lint: the mock above replaces the real module

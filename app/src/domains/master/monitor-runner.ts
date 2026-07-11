@@ -40,6 +40,7 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
     return
   }
   ctx.busy.add(id)
+  const runSignal = ctx.aborts.signal(id)
   try {
     let pending: string | undefined = note
     while (pending !== undefined) {
@@ -99,21 +100,21 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
       }
       try {
         const cur = ctx.stateRef.current
-        await runMonitorTurn(buildCfg(st, st.monitorModel || undefined), agent, current, history, exec, ctx.aborts.signal(id), {
+        await runMonitorTurn(buildCfg(st, st.monitorModel || undefined), agent, current, history, exec, runSignal, {
           memoryDigest: memoryDigest(wsMemory(cur, agent.workspaceId), ['approvals', 'preferences', 'patterns']),
           calibration: calibrationNote(cur.harnessLog, 'monitor'),
           custom: cur.settings.assistantPrompts?.monitor,
         })
       } catch (e) {
         // the session was disposed mid-turn — stop quietly, don't report an error
-        if (isAbortError(e) || ctx.aborts.signal(id).aborted) { pending = undefined; break }
+        if (isAbortError(e) || runSignal.aborted) { pending = undefined; break }
         ctx.logEvent('escalate', id, `Monitor error: ${e instanceof Error ? e.message : String(e)}`)
       }
       pending = ctx.queue.get(id)
       ctx.queue.delete(id)
     }
   } finally {
-    ctx.busy.delete(id)
-    ctx.aborts.clear(id)
+    const released = ctx.aborts.clear(id, runSignal)
+    if (released || !ctx.aborts.has(id)) ctx.busy.delete(id)
   }
 }

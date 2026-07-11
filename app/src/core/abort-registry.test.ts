@@ -27,6 +27,18 @@ describe('AbortRegistry', () => {
     expect(r.signal('a')).not.toBe(s1)
   })
 
+  it('an obsolete owner cannot clear a replacement controller', () => {
+    const r = new AbortRegistry()
+    const old = r.signal('a')
+    r.abort('a')
+    const replacement = r.signal('a')
+
+    expect(r.clear('a', old)).toBe(false)
+    expect(r.has('a')).toBe(true)
+    expect(r.signal('a')).toBe(replacement)
+    expect(replacement.aborted).toBe(false)
+  })
+
   it('abortAll() aborts every tracked key', () => {
     const r = new AbortRegistry()
     const a = r.signal('a'); const b = r.signal('b')

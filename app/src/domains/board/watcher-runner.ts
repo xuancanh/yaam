@@ -85,6 +85,7 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
     return
   }
   ctx.busy.add(taskId)
+  const runSignal = ctx.aborts.signal(taskId)
   try {
     let pending: string[] = [note]
     while (pending.length) {
@@ -219,7 +220,7 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
       try {
         const curState = ctx.stateRef.current
         const workspaceId = findTaskInState(curState, taskId)?.workspaceId
-        const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec, ctx.aborts.signal(taskId), stream.call, {
+        const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec, runSignal, stream.call, {
           memoryDigest: memoryDigest(wsMemory(curState, workspaceId), ['preferences', 'patterns', 'corrections']),
           calibration: calibrationNote(curState.harnessLog, 'watcher'),
           custom: curState.settings.assistantPrompts?.watcher,
@@ -232,7 +233,7 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
       } catch (e) {
         stream.clear()
         // the task was deleted mid-turn — stop quietly, don't report an error
-        if (isAbortError(e) || ctx.aborts.signal(taskId).aborted) { pending = []; break }
+        if (isAbortError(e) || runSignal.aborted) { pending = []; break }
         const msg = e instanceof Error ? e.message : String(e)
         ctx.logEvent('escalate', null, `Watcher error: ${msg}`)
         // surface the failure where the user is looking — a silent watcher
@@ -243,7 +244,7 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
       ctx.queue.delete(taskId)
     }
   } finally {
-    ctx.busy.delete(taskId)
-    ctx.aborts.clear(taskId)
+    const released = ctx.aborts.clear(taskId, runSignal)
+    if (released || !ctx.aborts.has(taskId)) ctx.busy.delete(taskId)
   }
 }

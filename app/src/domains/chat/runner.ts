@@ -286,6 +286,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     return
   }
   ctx.busy.add(agentId)
+  const runSignal = ctx.aborts.signal(agentId)
   const turnId = mkId('turn')
   const startedAt = Date.now()
   const slashName = text.match(/^\/([\w][\w.-]*)/)?.[1]
@@ -470,7 +471,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
         }
       },
       persona || undefined,
-      ctx.aborts.signal(agentId),
+      runSignal,
       makeAppPort(ctx, agentId, turnId),
       // legacy single-string memory + the freshest shared memory-file lines
       [
@@ -558,7 +559,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     // the chat was deleted mid-reply — stop quietly, don't push an error bubble.
     // (any buffered delta frame still pending is a harmless no-op if the chat is
     // gone; the final seal on the success path already flushed it.)
-    if (isAbortError(e) || ctx.aborts.signal(agentId).aborted) {
+    if (isAbortError(e) || runSignal.aborted) {
       updateTurn({ status: 'stopped', completedAt: Date.now() })
       return
     }
@@ -567,9 +568,11 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     updateTurn({ status: 'failed', completedAt: Date.now(), error })
     ctx.pushChatLog(agentId, { role: 'assistant', text: `Error: ${error}`, turnId })
   } finally {
-    ctx.busy.delete(agentId)
-    ctx.aborts.clear(agentId)
-    ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
+    const released = ctx.aborts.clear(agentId, runSignal)
+    if (released || !ctx.aborts.has(agentId)) {
+      ctx.busy.delete(agentId)
+      ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false } : a)) }))
+    }
   }
   if (autoCompact) void compactConversation(ctx, agentId).catch(() => {})
 }

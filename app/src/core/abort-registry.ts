@@ -18,9 +18,18 @@ export class AbortRegistry {
     this.controllers.delete(key)
   }
 
-  /** Drop a key's controller WITHOUT aborting — its work finished cleanly. */
-  clear(key: string): void {
-    this.controllers.delete(key)
+  /** Drop a key's controller WITHOUT aborting. When `owner` is supplied, only
+   *  release that exact generation so an obsolete finally block cannot erase a
+   *  replacement run that started after abort(key). */
+  clear(key: string, owner?: AbortSignal): boolean {
+    const current = this.controllers.get(key)
+    if (owner && current?.signal !== owner) return false
+    return this.controllers.delete(key)
+  }
+
+  /** Whether a newer controller currently occupies this key. */
+  has(key: string): boolean {
+    return this.controllers.has(key)
   }
 
   /** Abort every tracked key (teardown). */
