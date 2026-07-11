@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Agent, AppState } from '../../core/types'
 import { createChatActions } from './actions'
 
+const native = vi.hoisted(() => ({ execCommand: vi.fn() }))
+vi.mock('../../core/native', async importOriginal => ({
+  ...await importOriginal<typeof import('../../core/native')>(),
+  isTauri: true,
+  execCommand: native.execCommand,
+}))
+
 describe('chat composer actions', () => {
   it('merges durable composer patches without dropping queued work', () => {
     const chat = {
@@ -150,5 +157,35 @@ describe('chat composer actions', () => {
     expect(corrections).toContain('too verbose, lead with the answer')
     // and it queues for the agent's next turn so it acknowledges the change
     expect(state.agents[0].chatPendingFeedback).toEqual(['👎 too verbose, lead with the answer'])
+  })
+
+  it('gives a new agent a default home folder (and the hygiene loop) when none is specified', async () => {
+    native.execCommand.mockResolvedValue({ code: 0, output: '/Users/u/YaamAgents/chef-remy\n' })
+    let state = {
+      agents: [], skills: [], skillRegistries: [], chatAgentTypes: [],
+      settings: {}, activeWorkspace: 'ws', durableAgents: [], crons: [],
+    } as unknown as AppState
+    const stateRef = { current: state }
+    const actions = createChatActions({
+      stateRef,
+      dispatch: update => { state = update(state); stateRef.current = state },
+      logEvent: vi.fn(), runChatMessage: vi.fn(), stopChatMessage: vi.fn(), retryChatMessage: vi.fn(),
+      replayChatMessage: vi.fn(),
+      resetChatRuntime: vi.fn(), resolveChatApproval: vi.fn(), compactChatContext: vi.fn(async () => ''), skillCatalogs: { current: new Map() },
+    })
+
+    const id = actions.addDurableAgent({ name: 'Chef Remy' })
+    await vi.waitFor(() => {
+      expect(state.durableAgents?.find(d => d.id === id)?.homeDir).toBe('/Users/u/YaamAgents/chef-remy')
+    })
+    // the folder name comes from the slugged agent name (collision → suffix)
+    expect(native.execCommand.mock.calls[0][0]).toContain('$HOME/YaamAgents/chef-remy')
+    expect(state.crons.some(c => c.durableAgentId === id && c.name === 'consolidate-lessons')).toBe(true)
+
+    // an explicit folder is respected — no provisioning, loop seeded directly
+    native.execCommand.mockClear()
+    const id2 = actions.addDurableAgent({ name: 'Scout', homeDir: '/tmp/scout' })
+    expect(native.execCommand).not.toHaveBeenCalled()
+    expect(state.durableAgents?.find(d => d.id === id2)?.homeDir).toBe('/tmp/scout')
   })
 })

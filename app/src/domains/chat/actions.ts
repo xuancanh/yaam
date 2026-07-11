@@ -13,6 +13,7 @@ import { buildContextSummary } from './turns'
 import { resolveDecision } from '../master/harness-stats'
 import { withMemoryAppend } from '../master/assistant-memory'
 import { LESSONS_FILE, appendBrainFile, commitBrain } from './durable-brain'
+import { execCommand, isTauri } from '../../core/native'
 import type { ThinkingEffort } from '../../llm/client'
 
 export interface ChatActionsCtx {
@@ -116,6 +117,37 @@ export function buildChatSession(st: AppState, opts: {
   }
 }
 
+/** Agents get a file brain by default: when no home folder was specified,
+ *  create ~/YaamAgents/<slug> (suffixed when taken, so two "Chef"s never share
+ *  a brain) and attach it once the folder exists. Best-effort — if it fails,
+ *  the agent still works with lessons going to the shared workspace memory. */
+async function provisionDefaultHome(
+  dispatch: ChatActionsCtx['dispatch'],
+  stateRef: ChatActionsCtx['stateRef'],
+  id: string,
+  name: string,
+): Promise<void> {
+  if (!isTauri) return
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent'
+  const suffix = id.replace(/[^a-z0-9]/gi, '').slice(-4).toLowerCase() || 'a'
+  // resolve to an ABSOLUTE path — tilde paths break the shell-quoted brain
+  // commands (git auto-commit, knowledge search)
+  const script = `d="$HOME/YaamAgents/${slug}"; [ -e "$d" ] && d="$d-${suffix}"; mkdir -p "$d" && cd "$d" && pwd`
+  try {
+    const { code, output } = await execCommand(script, undefined, 10_000)
+    const dir = output.trim().split('\n').pop()?.trim()
+    if (code !== 0 || !dir?.startsWith('/')) return
+    // attach only if the user has not set a folder in the meantime
+    const current = (stateRef.current.durableAgents ?? []).find(d => d.id === id)
+    if (!current || current.homeDir?.trim()) return
+    dispatch(s => ({
+      ...s,
+      durableAgents: (s.durableAgents ?? []).map(d => (d.id === id && !d.homeDir?.trim() ? { ...d, homeDir: dir } : d)),
+    }))
+    seedConsolidationLoop(dispatch, id)
+  } catch { /* folderless agents are still fully functional */ }
+}
+
 /** Memory hygiene by default: agents with a file brain get a weekly loop that
  *  rewrites LESSONS.md — merge duplicates, drop stale items, promote repeated
  *  lessons into principles. Deduped by cron name per agent. */
@@ -186,6 +218,8 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
         }],
       }))
       if (patch.homeDir?.trim()) seedConsolidationLoop(dispatch, id)
+      // no folder named → give the agent one by default (async, best-effort)
+      else void provisionDefaultHome(dispatch, stateRef, id, patch.name)
       ctx.logEvent('build', null, `Created durable agent “${patch.name}”`)
       return id
     },
