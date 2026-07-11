@@ -1,0 +1,14 @@
+/* Your addon's own styles. @yaam/addon-sdk/ui.css already provides the host
+   design tokens (--bg, --panel, --acc, …) and base components (.card, .row,
+   button, input, .pill, .dot). Add what's specific to this addon here. */
+
+#yaam-banner {
+  display: none;
+  background: rgba(255, 92, 92, 0.12);
+  border: 1px solid rgba(255, 92, 92, 0.4);
+  color: var(--red);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  margin-bottom: 12px;
+}

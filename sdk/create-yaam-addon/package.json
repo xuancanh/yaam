@@ -1,0 +1,17 @@
+{
+  "name": "create-yaam-addon",
+  "version": "0.1.0",
+  "description": "Scaffold a YAAM addon: `npm create yaam-addon my-addon` (react-ts or vanilla template).",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "create-yaam-addon": "index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "templates"
+  ],
+  "scripts": {
+    "test": "node --test test/"
+  }
+}

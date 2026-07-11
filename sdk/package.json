@@ -3,7 +3,9 @@
   "private": true,
   "description": "npm workspace for the YAAM addon developer toolkit (@yaam/addon-sdk, CLI, scaffolder).",
   "workspaces": [
-    "addon-sdk"
+    "addon-sdk",
+    "yaam-addon",
+    "create-yaam-addon"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

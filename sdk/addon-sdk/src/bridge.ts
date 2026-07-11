@@ -2,7 +2,7 @@
 // denies all network; postMessage to the host is the only channel out. The
 // host answers `yaam:call` with a correlated `yaam:result` and pushes
 // `yaam:state` snapshots (~3s apart, plus on request).
-import type { AddonSnapshot, YaamApi } from './types'
+import type { AddonSnapshot, YaamApi } from './types.js'
 
 export type StateListener = (state: AddonSnapshot | null, denied?: string) => void
 
@@ -78,7 +78,7 @@ export function createYaamClient(opts: YaamClientOptions = {}): YaamClient {
 
   const report = opts.onError ?? (msg => {
     // lazy import keeps the bridge usable in DOM-less handler tests
-    void import('./dom').then(m => m.banner(msg)).catch(() => console.error(msg))
+    void import('./dom.js').then(m => m.banner(msg)).catch(() => console.error(msg))
   })
 
   const guard = async <T,>(p: Promise<T>, fallback?: T): Promise<T | undefined> => {

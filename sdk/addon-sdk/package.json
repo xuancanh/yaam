@@ -21,11 +21,13 @@
     "./testing": {
       "types": "./dist/testing.d.ts",
       "default": "./dist/testing.js"
-    }
+    },
+    "./ui.css": "./ui.css"
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "ui.css"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

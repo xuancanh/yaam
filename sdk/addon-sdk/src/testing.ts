@@ -3,8 +3,8 @@
 // yaam:state / yaam:getState), enforces the same permission map, and backs
 // storage with an in-memory Map — so a view built on the bridge (or the React
 // bindings) runs unchanged in a plain browser tab or a jsdom test.
-import { ADDON_RPC_METHODS, METHOD_PERMISSION, ALL_PERMISSIONS } from './permissions'
-import type { AddonPermission, AddonSnapshot, SnapshotTask } from './types'
+import { ADDON_RPC_METHODS, METHOD_PERMISSION, ALL_PERMISSIONS } from './permissions.js'
+import type { AddonPermission, AddonSnapshot, SnapshotTask } from './types.js'
 
 export interface RecordedCall {
   method: string

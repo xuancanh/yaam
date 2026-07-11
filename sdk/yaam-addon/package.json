@@ -1,0 +1,36 @@
+{
+  "name": "yaam-addon",
+  "version": "0.1.0",
+  "description": "Build tool + CLI for YAAM addons: compile a Vite/React/TypeScript project into the sandboxed single-file addon format, validate it, and pack it for distribution.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "yaam-addon": "bin/yaam-addon.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "esbuild": "^0.25.0",
+    "vite": "^8.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@yaam/addon-sdk": "file:../addon-sdk",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.9"
+  }
+}

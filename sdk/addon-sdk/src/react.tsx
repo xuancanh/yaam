@@ -1,20 +1,21 @@
 // React bindings for addon views. Wrap the app in <YaamProvider> and read the
 // host through hooks; state pushes arrive ~3s apart, so re-rendering on every
 // push is cheap by design.
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { createYaamClient } from './bridge'
-import type { YaamClient } from './bridge'
-import type { AddonSnapshot, YaamApi } from './types'
+import { createYaamClient } from './bridge.js'
+import type { YaamClient } from './bridge.js'
+import type { AddonSnapshot, YaamApi } from './types.js'
 
 const YaamContext = createContext<YaamClient | null>(null)
 
 /** Provide the host bridge to the view. Pass `client` to inject a testing
- *  stub-bound client; otherwise one is created (and disposed on unmount). */
+ *  stub-bound client. An auto-created client is never disposed — it lives as
+ *  long as the view's document does (StrictMode remounts would otherwise be
+ *  handed a dead client). */
 export function YaamProvider({ client, children }: { client?: YaamClient; children: ReactNode }) {
   const owned = useRef<YaamClient | null>(null)
-  const value = useMemo(() => client ?? (owned.current ??= createYaamClient()), [client])
-  useEffect(() => () => { owned.current?.dispose(); owned.current = null }, [])
+  const value = client ?? (owned.current ??= createYaamClient())
   return <YaamContext.Provider value={value}>{children}</YaamContext.Provider>
 }
 

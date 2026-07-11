@@ -1,6 +1,6 @@
 // Runtime mirrors of the host's permission tables (app/src/core/addons.ts).
 // test/api-compat.test.ts deep-compares them against the app at test time.
-import type { AddonPermission } from './types'
+import type { AddonPermission } from './types.js'
 
 /** Every grantable scope, with the label the host shows next to it. */
 export const ALL_PERMISSIONS: { id: AddonPermission; label: string }[] = [
