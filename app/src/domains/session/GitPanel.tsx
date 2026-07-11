@@ -10,6 +10,8 @@ import { CodeEditor } from './lazy-editor'
 import { splitDiffRows } from './diff-split'
 import type { SplitCell } from './diff-split'
 import { repoLabel } from '../../shared/git-repos'
+import { highlight, langForFile } from '../../core/highlight'
+import type { HighlightLang } from '../../core/highlight'
 import { WorktreeMergeBar } from './WorktreeMergeBar'
 import { Divider } from './Divider'
 import { FolderExplorer } from './FilesPane'
@@ -174,23 +176,32 @@ const CELL_STYLE: Record<string, { color: string; bg: string }> = {
   meta: { color: 'var(--text)', bg: 'var(--panel2)' },
 }
 
-/** one side-by-side cell: gutter line number + text */
-function SplitCellView({ cell }: { cell: SplitCell }) {
+/** syntax-highlighted code content for a diff line (empty stays a blank line);
+ *  the add/del tint comes from the row, so highlight paints only the tokens */
+function hlHtml(text: string, lang: HighlightLang): { __html: string } {
+  return { __html: text ? highlight(text, lang) : ' ' }
+}
+
+/** one side-by-side cell: gutter line number + syntax-highlighted text */
+function SplitCellView({ cell, lang }: { cell: SplitCell; lang: HighlightLang }) {
   const st = CELL_STYLE[cell.kind]
+  const code = cell.kind === 'add' || cell.kind === 'del' || cell.kind === 'ctx'
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', background: st.bg }}>
       <span style={{ width: 40, flexShrink: 0, textAlign: 'right', paddingRight: 7, color: 'var(--faint)', userSelect: 'none' }}>
         {cell.n ?? ''}
       </span>
-      <span style={{ flex: 1, minWidth: 0, padding: '0 10px', color: st.color, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {cell.text || ' '}
-      </span>
+      {code
+        ? <span style={{ flex: 1, minWidth: 0, padding: '0 10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }} dangerouslySetInnerHTML={hlHtml(cell.text, lang)} />
+        : <span style={{ flex: 1, minWidth: 0, padding: '0 10px', color: st.color, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{cell.text || ' '}</span>}
     </div>
   )
 }
 
-/** colored diff body: unified, or side-by-side (old left, new right) */
-function DiffView({ diff, split }: { diff: string; split?: boolean }) {
+/** colored diff body: unified, or side-by-side (old left, new right).
+ *  `path` selects the syntax highlighter for the code content. */
+function DiffView({ diff, split, path }: { diff: string; split?: boolean; path?: string }) {
+  const lang = useMemo(() => (path ? langForFile(path) : 'text') as HighlightLang, [path])
   if (!diff.trim()) return <div style={{ padding: 16, fontSize: 12, color: 'var(--dim)' }}>no diff — select a file on the left</div>
   if (split) {
     const rows = splitDiffRows(diff)
@@ -202,9 +213,9 @@ function DiffView({ diff, split }: { diff: string; split?: boolean }) {
           </div>
         ) : (
           <div key={i} style={{ display: 'flex' }}>
-            <SplitCellView cell={row.left} />
+            <SplitCellView cell={row.left} lang={lang} />
             <div style={{ width: 1, flexShrink: 0, background: 'var(--line)' }} />
-            <SplitCellView cell={row.right} />
+            <SplitCellView cell={row.right} lang={lang} />
           </div>
         ))}
       </div>
@@ -213,15 +224,25 @@ function DiffView({ diff, split }: { diff: string; split?: boolean }) {
   return (
     <pre className="mono" style={{ margin: 0, padding: '8px 0', fontSize: 11.5, lineHeight: 1.55 }}>
       {diff.split('\n').map((line, i) => {
-        const color = line.startsWith('+++') || line.startsWith('---') ? 'var(--text)'
-          : line.startsWith('+') ? 'var(--green)'
-          : line.startsWith('-') ? 'var(--red-soft)'
-          : line.startsWith('@@') ? 'var(--accent)'
-          : 'var(--mut)'
-        const bg = line.startsWith('+') && !line.startsWith('+++') ? 'rgba(61,220,151,.06)'
-          : line.startsWith('-') && !line.startsWith('---') ? 'rgba(255,92,92,.06)'
-          : 'transparent'
-        return <div key={i} style={{ padding: '0 14px', color, background: bg, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{line || ' '}</div>
+        const isMeta = line.startsWith('+++') || line.startsWith('---')
+        const isAdd = line.startsWith('+') && !isMeta
+        const isDel = line.startsWith('-') && !isMeta
+        const isHunk = line.startsWith('@@')
+        const markColor = isMeta ? 'var(--text)' : isAdd ? 'var(--green)' : isDel ? 'var(--red-soft)' : isHunk ? 'var(--accent)' : 'var(--mut)'
+        const bg = isAdd ? 'rgba(61,220,151,.06)' : isDel ? 'rgba(255,92,92,.06)' : 'transparent'
+        // meta/hunk lines are diff chrome — literal, no highlight. code lines
+        // keep their +/-/space marker colored, with the tokens highlighted.
+        if (isMeta || isHunk || !line) {
+          return <div key={i} style={{ padding: '0 14px', color: markColor, background: bg, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{line || ' '}</div>
+        }
+        const mark = isAdd || isDel || line.startsWith(' ') ? line.slice(0, 1) : ''
+        const code = mark ? line.slice(1) : line
+        return (
+          <div key={i} style={{ padding: '0 14px', background: bg, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            <span style={{ color: markColor, userSelect: 'none' }}>{mark}</span>
+            <span dangerouslySetInnerHTML={hlHtml(code, lang)} />
+          </div>
+        )
       })}
     </pre>
   )
@@ -590,7 +611,7 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
                   onClose={() => { setEditing(false); setEditText(null); void refresh() }}
                 />
               ) : (
-                <DiffView diff={diff} split={sideBySide} />
+                <DiffView diff={diff} split={sideBySide} path={selected?.path} />
               )}
             </>
           ) : sections.length ? (
@@ -614,7 +635,7 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
                     · {worktree ? 'vs fork point' : sec.staged ? 'staged' : 'unstaged'}
                   </span>
                 </div>
-                <DiffView diff={sec.diff} split={sideBySide} />
+                <DiffView diff={sec.diff} split={sideBySide} path={sec.label} />
               </div>
             ))
           ) : (
