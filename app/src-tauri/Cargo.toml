@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.5.0"
+version = "0.6.0"
 description = "YAAM — Yet Another Agent Manager: a desktop manager for live coding-agent sessions"
 authors = ["xuancanh"]
 license = "MIT"
@@ -26,6 +26,7 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2.7.1"
 portable-pty = "0.9.0"
 base64 = "0.22.1"
+getrandom = "0.2"
 libc = "0.2"
 tauri-plugin-http = "2.5.9"
 aws-config = "1"
@@ -39,6 +40,9 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 if-addrs = "0.14"
 tokio-stream = { version = "0.1.18", features = ["sync"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 
 # dev-mode dock icon (bare binary, no .app bundle): set NSApplication's icon at runtime
 [target.'cfg(target_os = "macos")'.dependencies]

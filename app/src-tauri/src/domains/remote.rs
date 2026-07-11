@@ -7,7 +7,9 @@
 //! by the desktop frontend and a queue of commands, which the frontend drains
 //! and applies through its normal action paths.
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, Request, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::Html;
 use axum::routing::{get, post};
@@ -123,23 +125,17 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-pub(crate) fn rand_token(len: usize) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static CALLS: AtomicU64 = AtomicU64::new(0);
-    let mut seed = now_ms().wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((std::process::id() as u64) << 32);
-    // fold in ASLR entropy (fresh allocation address) and a call counter so
-    // two tokens minted in the same millisecond still differ
-    let probe = Box::new(0u8);
-    seed ^= (&*probe as *const u8) as u64;
-    seed = seed.wrapping_add(CALLS.fetch_add(1, Ordering::Relaxed).wrapping_mul(0xA24B_AED4_963E_E407));
-    let mut out = String::new();
-    for _ in 0..len {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        out.push(char::from_digit((seed % 36) as u32, 36).unwrap_or('x'));
-    }
-    out
+pub(crate) fn rand_token(len: usize) -> Result<String, String> {
+    // Remote tokens are bearer credentials capable of terminal input and
+    // approvals. Fill them from the OS CSPRNG rather than a predictable
+    // time/process-seeded generator.
+    let byte_len = len.saturating_mul(3).saturating_add(3) / 4;
+    let mut bytes = vec![0u8; byte_len];
+    getrandom::getrandom(&mut bytes)
+        .map_err(|e| format!("secure random source unavailable: {e}"))?;
+    let mut token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    token.truncate(len);
+    Ok(token)
 }
 
 /// Best-effort LAN address (UDP connect trick — nothing is actually sent).
@@ -219,17 +215,27 @@ struct AuthQuery {
     id: String,
 }
 
+fn token_eq(a: &str, b: &str) -> bool {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let mut difference = a.len() ^ b.len();
+    for i in 0..a.len().max(b.len()) {
+        difference |= usize::from(a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0));
+    }
+    difference == 0
+}
+
 /// URL token only (pairing endpoints — possession of the QR/link).
 fn check_base(shared: &RemoteShared, q: &AuthQuery) -> bool {
     let token = shared.token.lock().unwrap();
-    !token.is_empty() && q.t == *token
+    !token.is_empty() && token_eq(&q.t, &token)
 }
 
 /// URL token + paired-device token (everything else).
 fn check_device(shared: &RemoteShared, q: &AuthQuery) -> bool {
     let ok = check_base(shared, q)
         && !q.d.is_empty()
-        && shared.devices.lock().unwrap().values().any(|dev| dev.token == q.d);
+        && shared.devices.lock().unwrap().values().any(|dev| token_eq(&dev.token, &q.d));
     if ok {
         shared.last_seen.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
     }
@@ -240,6 +246,22 @@ type Shared = State<Arc<RemoteShared>>;
 
 async fn app_page() -> Html<&'static str> {
     Html(APP)
+}
+
+/// The companion carries bearer credentials in its URL and exposes powerful
+/// actions after pairing. Keep it self-contained, suppress referrers/caching,
+/// and deny framing so those credentials cannot leak to third-party resources.
+async fn security_headers(request: Request<axum::body::Body>, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+    );
+    headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 async fn ping(State(s): Shared, Query(q): Query<AuthQuery>) -> (StatusCode, Json<serde_json::Value>) {
@@ -350,7 +372,9 @@ async fn stream_term(
     if !check_device(&s, &q) || q.id.is_empty() {
         return Err(StatusCode::FORBIDDEN);
     }
-    let (backlog, rx) = crate::domains::session::tap_subscribe(&q.id);
+    let Some((backlog, rx)) = crate::domains::session::tap_subscribe(&q.id) else {
+        return Err(StatusCode::NOT_FOUND);
+    };
     let first = tokio_stream::once(Ok(Event::default().data(B64.encode(backlog))));
     let live = BroadcastStream::new(rx)
         .filter_map(|r| r.ok())
@@ -370,6 +394,7 @@ fn router(shared: Arc<RemoteShared>) -> Router {
         .route("/api/command", post(command))
         .route("/api/rpc", get(rpc_result))
         .fallback(get(app_page))
+        .layer(middleware::from_fn(security_headers))
         .with_state(shared)
 }
 
@@ -396,7 +421,7 @@ pub fn remote_start(state: tauri::State<'_, RemoteManager>, port: Option<u16>, t
     let mut stop_slot = state.stop.lock().unwrap();
     // the frontend passes its persisted token so connect links survive
     // restarts; None/short means "mint a fresh one" (first run or auto-rotate)
-    let wanted = token.filter(|t| t.len() >= 8);
+    let wanted = token.filter(|t| (24..=128).contains(&t.len()));
     let token = {
         let mut t = state.shared.token.lock().unwrap();
         match wanted {
@@ -406,7 +431,7 @@ pub fn remote_start(state: tauri::State<'_, RemoteManager>, port: Option<u16>, t
             }
             None if stop_slot.is_some() && !t.is_empty() => t.clone(), // already running
             None => {
-                *t = rand_token(24);
+                *t = rand_token(24)?;
                 t.clone()
             }
         }
@@ -507,7 +532,7 @@ pub fn remote_approve_pair(state: tauri::State<'_, RemoteManager>, device_id: St
     let mut pending = state.shared.pending.lock().unwrap();
     let idx = pending.iter().position(|p| p.id == device_id).ok_or("no such pairing request")?;
     let req = pending.remove(idx);
-    let dev = PairedDevice { id: req.id, name: req.name, token: rand_token(32), at: now_ms() };
+    let dev = PairedDevice { id: req.id, name: req.name, token: rand_token(32)?, at: now_ms() };
     state.shared.devices.lock().unwrap().insert(dev.id.clone(), dev.clone());
     Ok(dev)
 }
@@ -548,6 +573,7 @@ pub fn remote_set_devices(state: tauri::State<'_, RemoteManager>, devices: Vec<P
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tower::ServiceExt;
 
     fn shared_with(token: &str) -> Arc<RemoteShared> {
         let s = Arc::new(RemoteShared::default());
@@ -561,10 +587,30 @@ mod tests {
 
     #[test]
     fn tokens_are_long_and_unique() {
-        let a = rand_token(24);
-        let b = rand_token(24);
+        let a = rand_token(24).unwrap();
+        let b = rand_token(24).unwrap();
         assert_eq!(a.len(), 24);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn token_comparison_requires_exact_bytes_and_length() {
+        assert!(token_eq("same-token", "same-token"));
+        assert!(!token_eq("same-token", "same-tokee"));
+        assert!(!token_eq("same-token", "same-token-extra"));
+    }
+
+    #[tokio::test]
+    async fn every_remote_response_carries_security_and_privacy_headers() {
+        let response = router(shared_with("base"))
+            .oneshot(Request::builder().uri("/?t=base").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.headers().get(header::REFERRER_POLICY).unwrap(), "no-referrer");
+        assert_eq!(response.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
+        let csp = response.headers().get(header::CONTENT_SECURITY_POLICY).unwrap().to_str().unwrap();
+        assert!(csp.contains("default-src 'none'"));
+        assert!(csp.contains("frame-ancestors 'none'"));
     }
 
     #[test]
@@ -603,7 +649,7 @@ mod tests {
         assert_eq!(body.0["status"], "pending");
         // desktop approves → device minted, pending cleared
         let req = s.pending.lock().unwrap()[0].clone();
-        let dev = PairedDevice { id: req.id.clone(), name: req.name, token: rand_token(32), at: 1 };
+        let dev = PairedDevice { id: req.id.clone(), name: req.name, token: rand_token(32).unwrap(), at: 1 };
         s.pending.lock().unwrap().clear();
         s.devices.lock().unwrap().insert(dev.id.clone(), dev.clone());
         let (_, body) = pair_status(State(s.clone()), Query(q("base", "", "device-12345"))).await;

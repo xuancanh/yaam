@@ -1,7 +1,5 @@
-/* Companion styles — Conductor Mobile design language: Space Grotesk titles,
-   IBM Plex Sans body, JetBrains Mono labels; #08090C canvas with layered
-   panels, soft-tinted status pills, pill composer, bottom tab bar. */
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Companion styles — self-contained system typography keeps the LAN app fast,
+   offline-capable, and prevents the bearer-token URL leaking via referrers. */
 
 :root {
   --bg: #08090C;
@@ -30,9 +28,9 @@
   --red: #FF5C5C;
   --red-soft: #FF7A7A;
   --code-green: #9DE3C0;
-  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-  --font-title: 'Space Grotesk', 'IBM Plex Sans', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-title: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   color-scheme: dark;
 }
 * { box-sizing: border-box; margin: 0; }
