@@ -7,7 +7,7 @@ button{font-family:inherit;cursor:pointer}
 button:disabled{opacity:.45;cursor:default;pointer-events:none}
 input{font-family:inherit;outline:none}
 
-#topbar{height:46px;flex:none;background:var(--card);border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:12px;padding:0 18px}
+#topbar{height:46px;flex:none;background:linear-gradient(180deg,#13161E,#0C0E13);border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:12px;padding:0 18px}
 #topbar .title{font-weight:600;font-size:14px}
 .seg{display:flex;align-items:center;gap:3px;background:var(--panel);border:1px solid var(--line2);border-radius:9px;padding:3px}
 .seg button{border:1px solid transparent;background:transparent;color:var(--mut);font-size:12px;font-weight:600;padding:4px 12px;border-radius:7px}
@@ -25,10 +25,10 @@ input{font-family:inherit;outline:none}
 .spin{display:inline-block;animation:spin .8s linear infinite}
 
 /* ---------- issues page ---------- */
-#tabRow{flex:none;background:var(--bg2);border-bottom:1px solid var(--line2);padding:11px 18px;display:flex;align-items:center;gap:16px}
+#tabRow{flex:none;background:var(--bg2);border-bottom:1px solid var(--line2);padding:9px 18px;display:flex;align-items:center;gap:16px}
 .cattab{display:flex;align-items:center;gap:7px;border:1px solid transparent;background:transparent;color:var(--mut);font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:8px}
 .cattab:hover{color:var(--soft)}
-.cattab.on{background:var(--accsoft);color:var(--acc);border-color:var(--accbord)}
+.cattab.on{background:var(--accsoft);color:var(--acc);border-color:var(--accbord);box-shadow:0 0 14px rgba(245,196,81,.12)}
 .cattab .n{font-family:'JetBrains Mono',monospace;font-size:10.5px;background:var(--panel);color:var(--mut);border-radius:6px;padding:1px 6px}
 .cattab.on .n{background:rgba(245,196,81,.18);color:var(--acc)}
 #repoChips{display:flex;align-items:center;gap:7px;overflow-x:auto;min-width:0}
@@ -37,7 +37,7 @@ input{font-family:inherit;outline:none}
 .rchip:hover{border-color:#3a4150}
 .rchip.on{background:var(--accsoft);color:var(--acc);border-color:var(--accbord)}
 
-#filterRow{flex:none;background:var(--bg2);border-bottom:1px solid var(--line2);padding:10px 18px;display:flex;align-items:center;gap:10px}
+#filterRow{flex:none;background:var(--bg2);border-bottom:1px solid var(--line2);padding:8px 18px;display:flex;align-items:center;gap:10px}
 #search{display:flex;align-items:center;gap:8px;flex:1;max-width:320px;background:var(--panel);border:1px solid var(--line2);border-radius:9px;padding:7px 11px}
 #search input{flex:1;min-width:0;background:transparent;border:none;color:var(--text);font-size:12.5px}
 .drop{position:relative}
@@ -51,20 +51,26 @@ input{font-family:inherit;outline:none}
 .menu button.on{color:var(--acc)}
 .menu .sw{width:9px;height:9px;border-radius:3px;flex:none}
 
-#list{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
-.iss{background:var(--card);border:1px solid var(--line2);border-radius:13px;padding:15px 16px;display:flex;flex-direction:column;gap:12px;cursor:pointer}
-.iss:hover{border-color:var(--line3);background:#0f1218}
-.iss.dim{opacity:.58}
-.iss .top{display:flex;gap:12px;align-items:flex-start}
-.iss .ttl{font-size:14.5px;font-weight:600;line-height:1.4}
-.iss .meta{display:flex;align-items:center;gap:9px;margin-top:5px;font-size:11.5px;color:var(--mut);flex-wrap:wrap}
-.iss .meta .num{font-family:'JetBrains Mono',monospace;color:var(--dim)}
-.iss .meta .rp{font-family:'JetBrains Mono',monospace;color:var(--mut)}
+#list{flex:1;overflow-y:auto;padding:12px 18px 16px;display:flex;flex-direction:column;gap:7px}
+.iss{background:var(--card);border:1px solid var(--line2);border-radius:11px;padding:10px 14px 10px 12px;display:flex;gap:12px;align-items:center;cursor:pointer;position:relative;overflow:hidden;transition:border-color .12s,background .12s}
+.iss::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2.5px;background:var(--stripe,transparent);opacity:.85}
+.iss:hover{border-color:rgba(245,196,81,.35);background:#10131A}
+.iss:hover .tt{color:var(--acc)}
+.iss.dim{opacity:.55}
+.iss .stico{flex:none;display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px}
+.iss .ttl{font-size:13px;font-weight:600;line-height:1.35;display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0}
+.iss .tt{transition:color .12s}
+.iss .meta{display:flex;align-items:center;gap:8px;margin-top:3px;font-size:10.5px;color:var(--dim);flex-wrap:wrap;min-width:0}
+.iss .meta .num{font-family:'JetBrains Mono',monospace;color:var(--mut)}
+.iss .meta .rp{font-family:'JetBrains Mono',monospace}
+.iss .meta .lk{color:var(--mut);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.act{display:flex;align-items:center;gap:6px;flex:none;margin-left:auto}
+.btn.sm{padding:4px 10px;font-size:11px;border-radius:7px;gap:5px}
 .lblrow{display:flex;align-items:center;gap:6px;margin-top:9px;flex-wrap:wrap}
-.pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;border:1px solid;border-radius:20px;padding:2px 9px}
-.pill .d{width:6px;height:6px;border-radius:50%}
-.state{flex:none;display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;border-radius:7px;padding:4px 10px}
-.state .d{width:6px;height:6px;border-radius:50%}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;font-weight:500;border:1px solid;border-radius:20px;padding:1px 8px;flex:none}
+.pill .d{width:5px;height:5px;border-radius:50%}
+.state{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;border-radius:6px;padding:3px 9px}
+.state .d{width:5px;height:5px;border-radius:50%}
 .iss .foot{border-top:1px solid var(--line);padding-top:12px;display:flex;align-items:center;gap:10px;cursor:default;flex-wrap:wrap}
 .linkchip{display:flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:4px 10px;font-size:12px;font-weight:600;max-width:280px}
 .linkchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -548,23 +554,55 @@ function labelPills(it){
   }).join('')
 }
 
+// GitHub-style state glyph: green open circle-dot, purple closed check
+function stateIcon(it){
+  const closed = !!it.closed
+  const c = closed ? '#A371F7' : '#3DDC97'
+  const glyph = closed
+    ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="' + c + '" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.4-4.8"/></svg>'
+    : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="' + c + '" stroke-width="1.9"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.4" fill="' + c + '" stroke="none"/></svg>'
+  return '<span class="stico" style="background:color-mix(in srgb,' + c + ' 10%,transparent)">' + glyph + '</span>'
+}
 function issueCard(it){
   const d = document.createElement('div')
   d.className = 'iss' + (it.state === 'ignored' || it.state === 'archived' ? ' dim' : '')
+  d.style.setProperty('--stripe', it.closed ? '#A371F7' : it.state === 'ignored' || it.state === 'archived' ? '#3a4150' : '#3DDC97')
   d.onclick = () => openDetail(it.key)
-  const meta = '<span class="num">#' + it.number + '</span><span class="rp">' + esc(it.repo) + '</span><span style="color:#4a5262">·</span>'
-    + '<span>' + (it.author ? 'opened by ' + esc(it.author) + ' · ' : '') + ago(it.createdAt || it.at) + '</span>'
-    + '<span style="display:flex;align-items:center;gap:4px;color:var(--dim)">💬 ' + (it.comments || 0) + '</span>'
-  d.innerHTML = '<div class="top">'
-    + '<div style="flex:1;min-width:0"><div class="ttl">' + esc(it.title) + '</div>'
-    + '<div class="meta">' + meta + '</div>'
-    + '<div class="lblrow">' + labelPills(it) + '</div></div>'
-    + statePill(it) + '</div>'
-  const foot = document.createElement('div')
-  foot.className = 'foot'
-  foot.onclick = ev => ev.stopPropagation()
-  fillFoot(foot, it)
-  d.appendChild(foot)
+  const t = it.state === 'synced' ? taskOf(it) : null
+  const st = t ? (COLSTAT[t.col] || COLSTAT.backlog) : null
+  const meta = '<span class="num">#' + it.number + '</span><span class="rp">' + esc(it.repo.split('/')[1] || it.repo) + '</span>'
+    + '<span>' + (it.author ? esc(it.author) + ' · ' : '') + ago(it.createdAt || it.at) + '</span>'
+    + ((it.comments || 0) ? '<span>💬 ' + it.comments + '</span>' : '')
+    + (t ? '<span class="lk">→ ' + esc(t.title) + '</span>'
+      : it.state === 'synced' ? '<span class="lk">→ linked task is gone — unlink to triage again</span>' : '')
+    + (it.state === 'ignored' ? '<span>· ignored</span>' : it.state === 'archived' ? '<span>· archived</span>' : '')
+  d.innerHTML = stateIcon(it)
+    + '<div style="flex:1;min-width:0"><div class="ttl"><span class="tt">' + esc(it.title) + '</span>' + labelPills(it) + '</div>'
+    + '<div class="meta">' + meta + '</div></div>'
+  const act = document.createElement('div')
+  act.className = 'act'
+  act.onclick = ev => ev.stopPropagation()
+  const btn = (cls, label, fn, title) => { const b = document.createElement('button'); b.className = cls + ' sm'; b.innerHTML = label; b.onclick = fn; if (title) b.title = title; return b }
+  if (it.state === 'inbox') {
+    act.appendChild(btn('btn accent', '⇥ Spawn', ev => spawnTask(it.key, ev.currentTarget), 'Create a linked board task'))
+    act.appendChild(btn('btn quiet', 'Ignore', () => setIssueState(it.key, 'ignored', 'issue ignored')))
+    act.appendChild(btn('btn quiet', 'Archive', () => setIssueState(it.key, 'archived', 'issue archived')))
+  } else if (it.state === 'synced') {
+    if (st) {
+      const chip = document.createElement('span')
+      chip.className = 'state'
+      chip.style.color = st.c
+      chip.style.background = 'color-mix(in srgb,' + st.c + ' 14%,transparent)'
+      chip.innerHTML = '<span class="d" style="background:' + st.c + '"></span>' + st.l
+      act.appendChild(chip)
+      if (t.col === 'backlog') act.appendChild(btn('btn quiet', '▶', () => startLinked(it.taskId), 'Start the linked task'))
+      act.appendChild(btn('btn quiet', 'Board', () => openInBoard(it.taskId), 'Open the task on the board'))
+    }
+    act.appendChild(btn('btn quiet danger', 'Unlink', () => setIssueState(it.key, 'inbox', 'unlinked — back in the inbox')))
+  } else {
+    act.appendChild(btn('btn quiet', '<span style="color:var(--acc)">Restore</span>', () => setIssueState(it.key, 'inbox', 'restored to inbox')))
+  }
+  d.appendChild(act)
   return d
 }
 

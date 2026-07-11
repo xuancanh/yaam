@@ -38,7 +38,7 @@
     },
     {
       "name": "github-issues",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "icon": "🐙",
       "description": "A GitHub issue triage inbox — sync open issues from any number of repos on a schedule, spawn linked board tasks (or let the customizable triage agent decide), track their progress, and optionally close issues on GitHub when their task is done. Token stays in the OS keychain.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/github-issues.yaam.json"
