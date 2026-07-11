@@ -29,11 +29,18 @@ const agent = (over: Partial<Agent> = {}): Agent =>
 
 describe('createSessionSettle', () => {
   it('bumpSettle schedules a quiet-period check that clears a resolved "needs" prompt', () => {
-    const h = harness([agent({ status: 'needs', log: [{ t: 'out', x: 'plain output line' }] as Agent['log'] })])
+    const h = harness([agent({
+      status: 'needs',
+      actionNeeded: 'Approve the command',
+      suggestions: [{ id: 'sg1', label: 'Approve', send: 'yes' }],
+      log: [{ t: 'out', x: 'plain output line' }] as Agent['log'],
+    })])
     h.rt.bumpSettle('a1')
     expect(h.state.get().agents[0].status).toBe('needs') // not yet — waiting out the quiet period
     h.clock.advance(3000)
     expect(h.state.get().agents[0].status).toBe('running') // prompt gone → back to running
+    expect(h.state.get().agents[0].actionNeeded).toBeUndefined()
+    expect(h.state.get().agents[0].suggestions).toBeUndefined()
   })
 
   it('disposeSettle cancels a pending quiet-period timer (no late fire)', () => {

@@ -136,7 +136,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       lastFlagged.delete(id)
       state.update(s => ({
         ...s,
-        agents: s.agents.map(a => a.id === id ? { ...a, status: 'running' as const, escReason: undefined } : a),
+        agents: s.agents.map(a => a.id === id
+          ? { ...a, status: 'running' as const, escReason: undefined, actionNeeded: undefined, suggestions: undefined }
+          : a),
       }))
     }
 
@@ -255,7 +257,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
         lastFlagged.delete(a.id)
         state.update(s2 => ({
           ...s2,
-          agents: s2.agents.map(x => x.id === a.id ? { ...x, status: 'running' as const, escReason: undefined } : x),
+          agents: s2.agents.map(x => x.id === a.id
+            ? { ...x, status: 'running' as const, escReason: undefined, actionNeeded: undefined, suggestions: undefined }
+            : x),
         }))
       }
     }
