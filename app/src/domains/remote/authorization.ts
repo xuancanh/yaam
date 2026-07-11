@@ -26,6 +26,8 @@ export function remoteCommandAllowed(s: AppState, command: RemoteCommand): boole
   const agent = agents.find(a => a.id === command.id)
   const task = s.tasks.find(t => t.id === command.id && !t.archived)
   switch (command.kind) {
+    case 'workspace_switch':
+      return (s.workspaces ?? []).some(w => w.id === command.id)
     case 'chat_new':
       return (s.durableAgents ?? []).some(d => d.id === command.id && !d.archived)
     case 'chat_send':

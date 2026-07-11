@@ -39,6 +39,7 @@ describe('remote command authorization', () => {
     tasks: [{ id: 'task', archived: false }, { id: 'old-task', archived: true }],
     durableAgents: [{ id: 'durable' }, { id: 'old-durable', archived: true }],
     pendingToolApprovals: [{ id: 'master-approval' }],
+    workspaces: [{ id: 'active', name: 'Active' }, { id: 'background', name: 'Background' }],
   } as AppState
 
   it('allows visible targets and matching pending approvals', () => {
@@ -48,6 +49,8 @@ describe('remote command authorization', () => {
     expect(remoteCommandAllowed(scoped, command('chat_new', 'durable'))).toBe(true)
     expect(remoteCommandAllowed(scoped, command('approve_master', 'master-approval'))).toBe(true)
     expect(remoteCommandAllowed(scoped, command('approve_chat', 'approval', 'chat'))).toBe(true)
+    // any EXISTING workspace is switchable — that is the feature, not a leak
+    expect(remoteCommandAllowed(scoped, command('workspace_switch', 'background'))).toBe(true)
   })
 
   it('rejects background, archived, mismatched, and unknown targets', () => {
@@ -57,5 +60,6 @@ describe('remote command authorization', () => {
     expect(remoteCommandAllowed(scoped, command('chat_new', 'old-durable'))).toBe(false)
     expect(remoteCommandAllowed(scoped, command('approve_chat', 'approval', 'session'))).toBe(false)
     expect(remoteCommandAllowed(scoped, command('unknown', 'session'))).toBe(false)
+    expect(remoteCommandAllowed(scoped, command('workspace_switch', 'no-such-workspace'))).toBe(false)
   })
 })

@@ -198,6 +198,9 @@ export function RemoteCompanion() {
       const a = actionsRef.current
       switch (c.kind) {
         case 'master_send': return a.sendMessage(c.text)
+        // the desktop and the phone share ONE active workspace — switching
+        // from the phone switches the desktop too (by design, like the tabs)
+        case 'workspace_switch': return a.switchWorkspace(c.id)
         case 'chat_send': return a.sendChatMessage(c.id, c.text)
         // start a fresh conversation with a durable agent (c.id = agent id);
         // the phone spots the new chat in the next snapshot and opens it

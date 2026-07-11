@@ -16,7 +16,8 @@ export interface RemoteInfo {
 export interface RemoteCommand {
   /** master_send · chat_send · task_chat · task_move · task_start ·
    *  session_input · session_key · prompt_answer · prompt_approve · prompt_deny ·
-   *  session_stop · session_resume · approve_master · approve_chat */
+   *  session_stop · session_resume · approve_master · approve_chat ·
+   *  workspace_switch */
   kind: string
   id: string
   agent_id: string

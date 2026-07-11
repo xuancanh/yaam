@@ -51,6 +51,8 @@ describe('buildRemoteSnapshot', () => {
     const snap = buildRemoteSnapshot(s, id => (id === 'a1' ? { data: '\x1b[32m$ npm test\x1b[0m ok', cols: 190 } : { data: '', cols: 80 }))
 
     expect(snap.workspace).toBe('acme')
+    expect(snap.workspaceId).toBe('w1')
+    expect(snap.workspaces).toEqual([{ id: 'w1', name: 'acme' }])
     // sessions: real agents only, with their terminal tail; archived excluded
     expect(snap.sessions.map(x => x.id)).toEqual(['a1']) // archived + other-workspace excluded
     expect(snap.sessions[0]).toMatchObject({ task: 'auth refactor', cost: 1.25, cols: 190, attention: true })

@@ -628,6 +628,52 @@ function MasterView({ snap }: { snap: RemoteSnapshot }) {
   )
 }
 
+/** Workspace pill: shows the active workspace; with several workspaces it
+ *  opens a dropdown that switches the WHOLE app (desktop follows — the fleet,
+ *  board, and Master conversation are all per-workspace). */
+function WorkspaceSwitcher({ snap, onSwitched }: { snap: RemoteSnapshot; onSwitched?: () => void }) {
+  const [open, setOpen] = useState(false)
+  const list = snap.workspaces ?? []
+  const multi = list.length > 1
+  if (!snap.workspace) return null
+  return (
+    <div className="wswrap">
+      <button
+        className={`wsbtn${open ? ' on' : ''}`}
+        disabled={!multi}
+        title={multi ? 'Switch workspace — the desktop switches too' : 'Workspace'}
+        onClick={() => multi && setOpen(v => !v)}
+      >
+        <span className="wsglyph">▣</span>
+        <span className="wsname">{snap.workspace}</span>
+        {multi && <span className="wscaret">▾</span>}
+      </button>
+      {open && (
+        <>
+          <div className="keypop-veil" onClick={() => setOpen(false)} />
+          <div className="wsmenu">
+            {list.map(w => (
+              <button
+                key={w.id}
+                className={w.id === snap.workspaceId ? 'on' : ''}
+                onClick={() => {
+                  setOpen(false)
+                  if (w.id === snap.workspaceId) return
+                  void sendCommand({ kind: 'workspace_switch', id: w.id })
+                  onSwitched?.()
+                }}
+              >
+                <span className="wsdot" style={{ opacity: w.id === snap.workspaceId ? 1 : 0 }}>●</span>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 /** Top-bar stop control: first tap arms it, second tap within 3s confirms. */
 function StopButton({ onStop }: { onStop: () => void }) {
   const [armed, setArmed] = useState(false)
@@ -877,6 +923,12 @@ export function MobileApp() {
     setDetail(d)
   }
   const closeDetail = () => history.back()
+  // workspace switched: the open detail's entity lives in the OLD workspace —
+  // drop back to the list without touching the history stack direction
+  const leaveDetail = () => {
+    history.replaceState({ tab, d: null }, '')
+    setDetail(null)
+  }
 
   // "new conversation" is fire-and-forget over the command queue — remember
   // the chats we already know for that agent and open the one that appears
@@ -1001,7 +1053,8 @@ export function MobileApp() {
       <div className="shell">
         <div className="topbar">
           <span className="brand">YAAM REMOTE</span>
-          <h1>{snap?.workspace ?? ''}</h1>
+          {snap && <WorkspaceSwitcher snap={snap} onSwitched={leaveDetail} />}
+          <span style={{ flex: 1 }} />
           <span className={`dot${online ? '' : ' off'}`} />
         </div>
         <div className="cols">
@@ -1039,7 +1092,8 @@ export function MobileApp() {
           <div className="titlerow">
             <h1>{TABS.find(t => t.id === tab)?.label}</h1>
             {snap && <span className="sub">{HEAD_SUB[tab](snap)}</span>}
-            <span className={`dot${online ? '' : ' off'}`} />
+            {snap && <span style={{ marginLeft: 'auto', alignSelf: 'center' }}><WorkspaceSwitcher snap={snap} onSwitched={leaveDetail} /></span>}
+            <span className={`dot${online ? '' : ' off'}`} style={{ marginLeft: snap ? 8 : 'auto' }} />
           </div>
         </div>
       )}

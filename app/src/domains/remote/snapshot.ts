@@ -34,6 +34,10 @@ export interface RemoteMsg {
 export interface RemoteSnapshot {
   ts: number
   workspace: string
+  /** active workspace id + the full list, so the phone can switch (the
+   *  desktop and every paired device share ONE active workspace) */
+  workspaceId: string
+  workspaces: { id: string; name: string }[]
   sessions: {
     id: string
     name: string
@@ -161,6 +165,8 @@ export function buildRemoteSnapshot(
   return {
     ts: Date.now(),
     workspace: s.workspaces.find(w => w.id === s.activeWorkspace)?.name ?? 'yaam',
+    workspaceId: s.activeWorkspace,
+    workspaces: s.workspaces.map(w => ({ id: w.id, name: w.name })),
     sessions: live
       .filter(a => a.kind !== 'chat')
       .map(a => ({
