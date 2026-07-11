@@ -26,6 +26,7 @@
   @keyframes cslide{from{transform:translateX(26px);opacity:0}to{transform:none;opacity:1}}
   @keyframes cattn{0%,100%{box-shadow:0 0 0 0 rgba(255,176,32,0)}50%{box-shadow:0 0 0 3px rgba(255,176,32,.16)}}
   @keyframes cring{0%{box-shadow:0 0 0 0 rgba(61,220,151,.35)}70%,100%{box-shadow:0 0 0 7px rgba(61,220,151,0)}}
+  @keyframes cspin{to{transform:rotate(360deg)}}
 </style>
 </helmet>
 
@@ -680,6 +681,565 @@
         </div>
       </sc-if>
 
+      <!-- GITHUB ISSUES VIEW -->
+      <sc-if value="{{ isGithub }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="GitHub" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:12px;padding:0 18px;">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="#E7E9F0"><path d="M12 2C6.5 2 2 6.6 2 12.3c0 4.5 2.9 8.4 6.8 9.7.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.2-3.4-1.2-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.3 9.3 0 015 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5a10.3 10.3 0 006.8-9.7C22 6.6 17.5 2 12 2z"></path></svg>
+            <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;">GitHub Issues</span>
+            <div style="display:flex;align-items:center;gap:3px;background:#12151C;border:1px solid #23272F;border-radius:9px;padding:3px;margin-left:4px;">
+              <sc-for list="{{ ghModeTabs }}" as="m" hint-placeholder-count="2">
+                <button onClick="{{ m.onClick }}" style="border:none;background:{{ m.bg }};color:{{ m.color }};font-family:'IBM Plex Sans';font-size:12px;font-weight:600;padding:4px 12px;border-radius:7px;cursor:pointer;" style-hover="color:#C7CCD6;">{{ m.label }}</button>
+              </sc-for>
+            </div>
+            <div style="flex:1;"></div>
+            <span style="font-size:11.5px;color:#626B79;">Last synced {{ ghLastSync }}</span>
+            <button onClick="{{ onGhSync }}" style="display:flex;align-items:center;gap:7px;background:#171B23;border:1px solid #2C313B;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;color:#E7E9F0;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="animation:{{ ghSpinAnim }};"><path d="M20 11a8 8 0 00-14-4M4 5v3h3"></path><path d="M4 13a8 8 0 0014 4M20 19v-3h-3"></path></svg>
+              {{ ghSyncLabel }}
+            </button>
+          </div>
+
+          <!-- ISSUES MODE -->
+          <sc-if value="{{ ghIsIssues }}" hint-placeholder-val="{{ true }}">
+            <div data-screen-label="GitHub Issues" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+              <div style="flex-shrink:0;background:#0B0C10;border-bottom:1px solid #23272F;padding:11px 18px;display:flex;align-items:center;gap:16px;">
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <sc-for list="{{ ghTabs }}" as="t" hint-placeholder-count="4">
+                    <button onClick="{{ t.onClick }}" style="display:flex;align-items:center;gap:7px;border:1px solid {{ t.border }};background:{{ t.bg }};color:{{ t.color }};font-family:'IBM Plex Sans';font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:8px;cursor:pointer;" style-hover="color:#C7CCD6;">
+                      {{ t.label }}
+                      <span style="font-family:'JetBrains Mono';font-size:10.5px;background:{{ t.countBg }};color:{{ t.countColor }};border-radius:6px;padding:1px 6px;">{{ t.count }}</span>
+                    </button>
+                  </sc-for>
+                </div>
+                <div style="flex:1;"></div>
+                <div style="display:flex;align-items:center;gap:7px;overflow-x:auto;">
+                  <span style="font-size:11px;color:#626B79;font-family:'JetBrains Mono';flex-shrink:0;">repo</span>
+                  <sc-for list="{{ ghFilterRepos }}" as="r" hint-placeholder-count="3">
+                    <button onClick="{{ r.onClick }}" style="border:1px solid {{ r.border }};background:{{ r.bg }};color:{{ r.color }};font-family:'JetBrains Mono';font-size:11px;font-weight:500;padding:5px 10px;border-radius:7px;cursor:pointer;white-space:nowrap;flex-shrink:0;" style-hover="border-color:#3a4150;">{{ r.label }}</button>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="flex-shrink:0;background:#0B0C10;border-bottom:1px solid #23272F;padding:10px 18px;display:flex;align-items:center;gap:10px;">
+                <div style="display:flex;align-items:center;gap:8px;flex:1;max-width:320px;background:#12151C;border:1px solid #23272F;border-radius:9px;padding:7px 11px;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.2-3.2"></path></svg>
+                  <input value="{{ ghQuery }}" onInput="{{ onGhQuery }}" placeholder="Search issues, #number, repo, author…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;color:#E7E9F0;font-family:'IBM Plex Sans';font-size:12.5px;" />
+                </div>
+                <div style="flex:1;"></div>
+                <div style="position:relative;">
+                  <button onClick="{{ toggleGhLabelMenu }}" style="display:flex;align-items:center;gap:8px;background:#12151C;border:1px solid #23272F;border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;color:#C7CCD6;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8B93A1" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4l-7.2 7.2a1.5 1.5 0 01-2.1 0L3 12.3V3h9.3l8.3 8.3a1.5 1.5 0 010 2.1z"></path><circle cx="7.5" cy="7.5" r="1.3"></circle></svg>
+                    <span style="color:#8B93A1;">Label:</span> {{ ghLabelLabel }}
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+                  </button>
+                  <sc-if value="{{ ghMenuLabel }}" hint-placeholder-val="{{ false }}">
+                    <div style="position:absolute;top:38px;right:0;width:210px;max-height:300px;overflow-y:auto;background:#12151C;border:1px solid #2C313B;border-radius:11px;box-shadow:0 18px 50px rgba(0,0,0,.55);z-index:30;padding:5px;">
+                      <sc-for list="{{ ghLabelOpts }}" as="o" hint-placeholder-count="5">
+                        <button onClick="{{ o.onClick }}" style="width:100%;text-align:left;display:flex;align-items:center;gap:9px;background:{{ o.bg }};border:none;border-radius:7px;padding:8px 10px;cursor:pointer;color:#C7CCD6;font-family:'IBM Plex Sans';font-size:12.5px;" style-hover="background:#171B23;">
+                          <span style="width:9px;height:9px;border-radius:3px;background:{{ o.swatch }};flex-shrink:0;"></span>
+                          <span style="flex:1;color:{{ o.textColor }};">{{ o.label }}</span>
+                          <sc-if value="{{ o.active }}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{{ accent }}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 6"></path></svg></sc-if>
+                        </button>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+                </div>
+                <div style="position:relative;">
+                  <button onClick="{{ toggleGhSortMenu }}" style="display:flex;align-items:center;gap:8px;background:#12151C;border:1px solid #23272F;border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;color:#C7CCD6;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B93A1" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M7 20l-3-3M7 4l3 3"></path><path d="M17 20V4M17 4l3 3M17 20l-3-3"></path></svg>
+                    <span style="color:#8B93A1;">Sort:</span> {{ ghSortLabel }}
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+                  </button>
+                  <sc-if value="{{ ghMenuSort }}" hint-placeholder-val="{{ false }}">
+                    <div style="position:absolute;top:38px;right:0;width:180px;background:#12151C;border:1px solid #2C313B;border-radius:11px;box-shadow:0 18px 50px rgba(0,0,0,.55);z-index:30;padding:5px;">
+                      <sc-for list="{{ ghSortOpts }}" as="o" hint-placeholder-count="4">
+                        <button onClick="{{ o.onClick }}" style="width:100%;text-align:left;display:flex;align-items:center;gap:9px;background:{{ o.bg }};border:none;border-radius:7px;padding:8px 10px;cursor:pointer;color:#C7CCD6;font-family:'IBM Plex Sans';font-size:12.5px;" style-hover="background:#171B23;">
+                          <span style="flex:1;">{{ o.label }}</span>
+                          <sc-if value="{{ o.active }}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{{ accent }}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 6"></path></svg></sc-if>
+                        </button>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+                </div>
+              </div>
+
+              <div style="flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px;">
+                <sc-for list="{{ githubList }}" as="i" hint-placeholder-count="4">
+                  <div onClick="{{ i.onOpen }}" style="background:#0D0F14;border:1px solid #23272F;border-radius:13px;padding:15px 16px;display:flex;flex-direction:column;gap:12px;opacity:{{ i.cardOpacity }};cursor:pointer;" style-hover="border-color:#2C313B;background:#0f1218;">
+                    <div style="display:flex;gap:12px;align-items:flex-start;">
+                      <div style="flex-shrink:0;margin-top:1px;color:{{ i.stateColor }};">
+                        <sc-if value="{{ i.stateOpen }}" hint-placeholder-val="{{ true }}">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"></circle><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"></circle></svg>
+                        </sc-if>
+                        <sc-if value="{{ i.stateClosed }}" hint-placeholder-val="{{ false }}">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M8.5 12.2l2.4 2.4 4.4-4.8"></path></svg>
+                        </sc-if>
+                      </div>
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:14.5px;font-weight:600;color:#E7E9F0;line-height:1.4;">{{ i.title }}</div>
+                        <div style="display:flex;align-items:center;gap:9px;margin-top:5px;font-size:11.5px;color:#8B93A1;flex-wrap:wrap;">
+                          <span style="font-family:'JetBrains Mono';color:#626B79;">{{ i.number }}</span>
+                          <span style="font-family:'JetBrains Mono';color:#8B93A1;">{{ i.repo }}</span>
+                          <span style="color:#4a5262;">·</span>
+                          <span>{{ i.byline }}</span>
+                          <span style="display:flex;align-items:center;gap:4px;color:#626B79;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 15a2 2 0 01-2 2H8l-4 4V6a2 2 0 012-2h12a2 2 0 012 2z"></path></svg>
+                            {{ i.comments }}
+                          </span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;margin-top:9px;flex-wrap:wrap;">
+                          <sc-for list="{{ i.labels }}" as="l" hint-placeholder-count="2">
+                            <span style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;color:{{ l.color }};background:{{ l.soft }};border:1px solid {{ l.border }};border-radius:20px;padding:2px 9px;">
+                              <span style="width:6px;height:6px;border-radius:50%;background:{{ l.color }};"></span>{{ l.name }}
+                            </span>
+                          </sc-for>
+                        </div>
+                      </div>
+                      <span style="flex-shrink:0;display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:{{ i.stateColor }};background:{{ i.stateSoft }};border-radius:7px;padding:4px 10px;">
+                        <span style="width:6px;height:6px;border-radius:50%;background:{{ i.stateColor }};"></span>{{ i.stateLabel }}
+                      </span>
+                    </div>
+
+                    <div onClick="{{ stop }}" style="border-top:1px solid #1a1e26;padding-top:12px;display:flex;align-items:center;gap:10px;cursor:default;">
+                      <sc-if value="{{ i.isUnsynced }}" hint-placeholder-val="{{ true }}">
+                        <button onClick="{{ i.onSpawn }}" style="display:flex;align-items:center;gap:7px;background:{{ accent }};color:#1a1400;border:none;border-radius:8px;padding:7px 13px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="filter:brightness(1.08);">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9"></path><path d="M4 18h6"></path><path d="M13 6l3 3-3 3"></path><path d="M20 6v12"></path></svg>
+                          Spawn task
+                        </button>
+                        <div style="flex:1;"></div>
+                        <button onClick="{{ i.onIgnore }}" style="background:transparent;border:1px solid #2C313B;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;color:#9AA3B2;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;color:#E7E9F0;">Ignore</button>
+                        <button onClick="{{ i.onArchive }}" style="display:flex;align-items:center;gap:6px;background:transparent;border:1px solid #2C313B;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;color:#9AA3B2;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;color:#E7E9F0;">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v3H4z"></path><path d="M6 10v9h12v-9"></path><path d="M10 14h4"></path></svg>
+                          Archive
+                        </button>
+                      </sc-if>
+
+                      <sc-if value="{{ i.isSynced }}" hint-placeholder-val="{{ false }}">
+                        <div style="display:flex;align-items:center;gap:9px;min-width:0;flex-wrap:wrap;">
+                          <span style="font-size:11px;color:#626B79;font-family:'JetBrains Mono';">linked task</span>
+                          <span style="display:flex;align-items:center;gap:7px;background:#12151C;border:1px solid #23272F;border-radius:8px;padding:4px 10px;">
+                            <span style="width:20px;height:20px;border-radius:6px;background:{{ i.agentSoft }};border:1px solid {{ i.agentBorder }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:9px;font-weight:600;color:{{ i.agentColor }};">{{ i.agentInitials }}</span>
+                            <span style="font-size:12px;font-weight:600;color:#E7E9F0;white-space:nowrap;">{{ i.agentName }}</span>
+                          </span>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8h11l-3-3"></path><path d="M17 16H6l3 3"></path></svg>
+                          <span style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:{{ i.taskStatusColor }};background:{{ i.taskStatusSoft }};border-radius:7px;padding:4px 10px;white-space:nowrap;">
+                            <span style="width:6px;height:6px;border-radius:50%;background:{{ i.taskStatusColor }};"></span>{{ i.taskStatusLabel }}
+                          </span>
+                        </div>
+                        <div style="flex:1;"></div>
+                        <button onClick="{{ i.onViewTask }}" style="background:transparent;border:1px solid #2C313B;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;color:#9AA3B2;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;color:#E7E9F0;">Open in board</button>
+                        <button onClick="{{ i.onUnlink }}" style="background:transparent;border:1px solid #2C313B;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;color:#9AA3B2;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#FF5C5C;color:#FF7A7A;">Unlink</button>
+                      </sc-if>
+
+                      <sc-if value="{{ i.isDimmed }}" hint-placeholder-val="{{ false }}">
+                        <span style="font-size:11.5px;color:#8B93A1;">{{ i.dimNote }}</span>
+                        <div style="flex:1;"></div>
+                        <button onClick="{{ i.onRestore }}" style="background:transparent;border:1px solid #2C313B;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;color:{{ accent }};cursor:pointer;font-family:'IBM Plex Sans';" style-hover="background:#171B23;">Restore</button>
+                      </sc-if>
+                    </div>
+                  </div>
+                </sc-for>
+
+                <sc-if value="{{ ghEmpty }}" hint-placeholder-val="{{ false }}">
+                  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:60px 20px;color:#626B79;">
+                    <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#3a4150" stroke-width="1.5"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3" fill="#3a4150" stroke="none"></circle></svg>
+                    <span style="font-size:13px;color:#8B93A1;text-align:center;max-width:340px;line-height:1.5;">{{ ghEmptyMsg }}</span>
+                  </div>
+                </sc-if>
+              </div>
+
+              <sc-if value="{{ ghMultiPage }}" hint-placeholder-val="{{ false }}">
+                <div style="flex-shrink:0;background:#0B0C10;border-top:1px solid #23272F;padding:11px 18px;display:flex;align-items:center;gap:12px;">
+                  <span style="font-size:11.5px;color:#8B93A1;font-family:'JetBrains Mono';">{{ ghPageLabel }}</span>
+                  <div style="flex:1;"></div>
+                  <button onClick="{{ onGhPrev }}" disabled="{{ ghPrevDisabled }}" style="display:flex;align-items:center;gap:5px;background:#12151C;border:1px solid #23272F;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600;color:{{ ghPrevColor }};cursor:{{ ghPrevCursor }};font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>Prev
+                  </button>
+                  <div style="display:flex;align-items:center;gap:4px;">
+                    <sc-for list="{{ ghPageNums }}" as="p" hint-placeholder-count="2">
+                      <button onClick="{{ p.onClick }}" style="min-width:30px;height:30px;border:1px solid {{ p.border }};background:{{ p.bg }};color:{{ p.color }};border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:'JetBrains Mono';" style-hover="border-color:#3a4150;">{{ p.label }}</button>
+                    </sc-for>
+                  </div>
+                  <button onClick="{{ onGhNext }}" disabled="{{ ghNextDisabled }}" style="display:flex;align-items:center;gap:5px;background:#12151C;border:1px solid #23272F;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600;color:{{ ghNextColor }};cursor:{{ ghNextCursor }};font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">
+                    Next<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+                  </button>
+                </div>
+              </sc-if>
+            </div>
+          </sc-if>
+
+          <!-- SETTINGS MODE -->
+          <sc-if value="{{ ghIsSettings }}" hint-placeholder-val="{{ false }}">
+            <div data-screen-label="GitHub Settings" style="flex:1;overflow-y:auto;padding:22px;">
+              <div style="max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:22px;">
+
+                <div>
+                  <div style="font-family:'Space Grotesk';font-size:14px;font-weight:600;color:#E7E9F0;margin-bottom:3px;">Workspace</div>
+                  <div style="font-size:12px;color:#8B93A1;margin-bottom:12px;line-height:1.5;">Local checkout where spawned tasks run. Agents branch, edit, and push from here.</div>
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <sc-for list="{{ ghWsRows }}" as="w" hint-placeholder-count="3">
+                      <button onClick="{{ w.onClick }}" style="display:flex;align-items:center;gap:11px;background:{{ w.bg }};border:1px solid {{ w.border }};border-radius:10px;padding:11px 14px;cursor:pointer;text-align:left;" style-hover="border-color:#3a4150;">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="{{ w.color }}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a1 1 0 011-1h4l2 2h8a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1z"></path></svg>
+                        <span style="flex:1;font-family:'JetBrains Mono';font-size:12.5px;font-weight:500;color:{{ w.color }};">{{ w.label }}</span>
+                        <sc-if value="{{ w.check }}" hint-placeholder-val="{{ false }}">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ accent }}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 6"></path></svg>
+                        </sc-if>
+                      </button>
+                    </sc-for>
+                  </div>
+                </div>
+
+                <div>
+                  <div style="display:flex;align-items:center;gap:9px;margin-bottom:3px;">
+                    <span style="font-family:'Space Grotesk';font-size:14px;font-weight:600;color:#E7E9F0;">Repositories</span>
+                    <span style="font-size:10.5px;color:{{ accent }};background:{{ accentSoft }};border-radius:6px;padding:2px 8px;font-family:'JetBrains Mono';">{{ ghRepoCount }} syncing</span>
+                  </div>
+                  <div style="font-size:12px;color:#8B93A1;margin-bottom:12px;line-height:1.5;">Choose which repositories Conductor pulls issues from. Toggle any repo on or off.</div>
+                  <div style="background:#0D0F14;border:1px solid #23272F;border-radius:12px;overflow:hidden;">
+                    <sc-for list="{{ ghRepoRows }}" as="r" hint-placeholder-count="4">
+                      <div style="display:flex;align-items:center;gap:12px;padding:12px 15px;border-bottom:1px solid #1a1e26;">
+                        <span style="width:8px;height:8px;border-radius:50%;background:{{ r.dot }};flex-shrink:0;"></span>
+                        <div style="flex:1;min-width:0;">
+                          <div style="font-family:'JetBrains Mono';font-size:13px;font-weight:500;color:{{ r.nameColor }};">{{ r.name }}</div>
+                        </div>
+                        <span style="font-size:11px;color:#626B79;font-family:'JetBrains Mono';">{{ r.issueCount }}</span>
+                        <button onClick="{{ r.onToggle }}" style="width:38px;height:22px;border-radius:999px;border:1px solid #2C313B;background:{{ r.swBg }};position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;">
+                          <span style="position:absolute;top:2px;left:{{ r.knobX }};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                        </button>
+                      </div>
+                    </sc-for>
+                    <button style="width:100%;display:flex;align-items:center;gap:8px;padding:12px 15px;background:transparent;border:none;color:{{ accent }};font-size:12.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="background:#12151C;">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                      Add a repository
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div style="font-family:'Space Grotesk';font-size:14px;font-weight:600;color:#E7E9F0;margin-bottom:12px;">Sync behavior</div>
+                  <div style="background:#0D0F14;border:1px solid #23272F;border-radius:12px;overflow:hidden;">
+                    <div style="display:flex;align-items:center;gap:16px;padding:13px 15px;border-bottom:1px solid #1a1e26;">
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:13px;font-weight:600;color:#E7E9F0;">Sync frequency</div>
+                        <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;">How often Conductor polls GitHub for new and updated issues.</div>
+                      </div>
+                      <div style="display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
+                        <sc-for list="{{ ghFreqOpts }}" as="o" hint-placeholder-count="4">
+                          <button onClick="{{ o.onClick }}" style="border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.color }};font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:7px;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">{{ o.label }}</button>
+                        </sc-for>
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:16px;padding:13px 15px;border-bottom:1px solid #1a1e26;">
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:13px;font-weight:600;color:#E7E9F0;">Default agent for spawned tasks</div>
+                        <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;">Auto-route lets Master pick the best-matched session by repo.</div>
+                      </div>
+                      <div style="display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
+                        <sc-for list="{{ ghAgentOpts }}" as="o" hint-placeholder-count="3">
+                          <button onClick="{{ o.onClick }}" style="border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.color }};font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:7px;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">{{ o.name }}</button>
+                        </sc-for>
+                      </div>
+                    </div>
+                    <sc-for list="{{ ghToggles }}" as="t" hint-placeholder-count="5">
+                      <div style="display:flex;align-items:center;gap:16px;padding:13px 15px;border-bottom:1px solid #1a1e26;">
+                        <div style="flex:1;min-width:0;">
+                          <div style="font-size:13px;font-weight:600;color:#E7E9F0;">{{ t.label }}</div>
+                          <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;line-height:1.45;">{{ t.detail }}</div>
+                        </div>
+                        <button onClick="{{ t.onToggle }}" style="width:38px;height:22px;border-radius:999px;border:1px solid #2C313B;background:{{ t.swBg }};position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;">
+                          <span style="position:absolute;top:2px;left:{{ t.knobX }};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                        </button>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <!-- WORKFLOWS VIEW -->
+      <sc-if value="{{ isFlows }}" hint-placeholder-val="{{ false }}">
+
+        <!-- LIST / MANAGEMENT PAGE -->
+        <sc-if value="{{ flowIsList }}" hint-placeholder-val="{{ true }}">
+          <div data-screen-label="Workflows" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+            <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:10px;padding:0 18px;">
+              <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;">Workflows</span>
+              <span style="font-size:11.5px;color:#626B79;">Automations that chain agents into a DAG</span>
+              <div style="flex:1;"></div>
+              <button onClick="{{ newWorkflow }}" style="display:flex;align-items:center;gap:7px;background:{{ accent }};color:#1a1400;border:none;border-radius:8px;padding:6px 13px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="filter:brightness(1.08);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                New workflow
+              </button>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:20px;">
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+                <div style="background:#0D0F14;border:1px solid #23272F;border-radius:12px;padding:14px 16px;">
+                  <div style="font-family:'Space Grotesk';font-size:24px;font-weight:600;color:#E7E9F0;">{{ flowSummary.total }}</div>
+                  <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;">Workflows</div>
+                </div>
+                <div style="background:#0D0F14;border:1px solid #23272F;border-radius:12px;padding:14px 16px;">
+                  <div style="font-family:'Space Grotesk';font-size:24px;font-weight:600;color:#3DDC97;">{{ flowSummary.active }}</div>
+                  <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;">Active</div>
+                </div>
+                <div style="background:#0D0F14;border:1px solid #23272F;border-radius:12px;padding:14px 16px;">
+                  <div style="font-family:'Space Grotesk';font-size:24px;font-weight:600;color:#E7E9F0;">{{ flowSummary.runs }}</div>
+                  <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;">Recent runs</div>
+                </div>
+                <div style="background:#0D0F14;border:1px solid #23272F;border-radius:12px;padding:14px 16px;">
+                  <div style="font-family:'Space Grotesk';font-size:24px;font-weight:600;color:#A371F7;">{{ flowSummary.approvals }}</div>
+                  <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;">Awaiting approval</div>
+                </div>
+              </div>
+
+              <div style="display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));">
+                <sc-for list="{{ flowIndex }}" as="w" hint-placeholder-count="3">
+                  <div onClick="{{ w.onOpen }}" style="background:#0D0F14;border:1px solid #23272F;border-radius:14px;padding:16px;cursor:pointer;position:relative;" style-hover="border-color:#2C313B;background:#0f1218;">
+                    <div style="display:flex;align-items:flex-start;gap:11px;">
+                      <span style="width:36px;height:36px;flex-shrink:0;border-radius:10px;background:{{ w.trigSoft }};display:flex;align-items:center;justify-content:center;color:{{ w.trigColor }};">
+                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><sc-for list="{{ w.trigIcon }}" as="d" hint-placeholder-count="1"><path d="{{ d }}"></path></sc-for></svg>
+                      </span>
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-family:'Space Grotesk';font-size:15px;font-weight:600;color:#E7E9F0;line-height:1.3;">{{ w.name }}</div>
+                        <div style="font-size:11px;color:#8B93A1;font-family:'JetBrains Mono';margin-top:3px;">{{ w.trigLabel }}</div>
+                      </div>
+                      <div onClick="{{ stop }}" style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                        <button onClick="{{ w.onToggle }}" title="Enable / pause" style="width:38px;height:22px;border-radius:999px;border:1px solid #2C313B;background:{{ w.swBg }};position:relative;cursor:pointer;transition:background .15s;">
+                          <span style="position:absolute;top:2px;left:{{ w.knobX }};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                        </button>
+                        <div style="position:relative;">
+                          <button onClick="{{ w.onMenu }}" style="width:28px;height:28px;border-radius:7px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#171B23;color:#E7E9F0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="12" cy="19" r="1.6"></circle></svg>
+                          </button>
+                          <sc-if value="{{ w.menuOpen }}" hint-placeholder-val="{{ false }}">
+                            <div style="position:absolute;top:32px;right:0;width:170px;background:#12151C;border:1px solid #2C313B;border-radius:10px;box-shadow:0 16px 44px rgba(0,0,0,.55);z-index:31;padding:5px;">
+                              <button onClick="{{ w.onOpen }}" style="width:100%;text-align:left;background:transparent;border:none;border-radius:7px;padding:8px 10px;cursor:pointer;color:#C7CCD6;font-family:'IBM Plex Sans';font-size:12.5px;" style-hover="background:#171B23;">Open</button>
+                              <button onClick="{{ w.onDup }}" style="width:100%;text-align:left;background:transparent;border:none;border-radius:7px;padding:8px 10px;cursor:pointer;color:#C7CCD6;font-family:'IBM Plex Sans';font-size:12.5px;" style-hover="background:#171B23;">Duplicate</button>
+                              <button onClick="{{ w.onDelete }}" style="width:100%;text-align:left;background:transparent;border:none;border-radius:7px;padding:8px 10px;cursor:pointer;color:#FF7A7A;font-family:'IBM Plex Sans';font-size:12.5px;" style-hover="background:#171B23;">Delete</button>
+                            </div>
+                          </sc-if>
+                        </div>
+                      </div>
+                    </div>
+                    <div style="font-size:12.5px;color:#8B93A1;line-height:1.5;margin-top:12px;min-height:38px;">{{ w.desc }}</div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:13px;padding-top:13px;border-top:1px solid #1a1e26;">
+                      <span style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:{{ w.liveColor }};background:{{ w.liveSoft }};border-radius:6px;padding:3px 9px;">
+                        <span style="width:6px;height:6px;border-radius:50%;background:{{ w.liveColor }};"></span>{{ w.liveLabel }}
+                      </span>
+                      <span style="font-size:11px;color:#626B79;font-family:'JetBrains Mono';">{{ w.nodeCount }}</span>
+                      <span style="font-size:11px;color:#626B79;font-family:'JetBrains Mono';">{{ w.rate }}</span>
+                      <div style="flex:1;"></div>
+                      <span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8B93A1;">
+                        <span style="width:6px;height:6px;border-radius:50%;background:{{ w.lastDot }};"></span>{{ w.lastWhen }}
+                      </span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- DETAIL / CANVAS -->
+        <sc-if value="{{ flowIsDetail }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Workflow" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <div style="height:46px;flex-shrink:0;background:#0D0F14;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:12px;padding:0 16px;">
+            <button onClick="{{ backToFlowList }}" title="All workflows" style="width:30px;height:30px;border-radius:8px;border:1px solid #23272F;background:transparent;color:#9AA3B2;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-hover="background:#171B23;color:#E7E9F0;">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>
+            </button>
+            <div style="position:relative;">
+              <button onClick="{{ toggleFlowMenu }}" style="display:flex;align-items:center;gap:10px;background:#12151C;border:1px solid #23272F;border-radius:9px;padding:6px 12px;cursor:pointer;" style-hover="border-color:#3a4150;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ accent }}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="18" r="2.5"></circle><path d="M7.5 6H15a3 3 0 013 3v6.5"></path></svg>
+                <div style="text-align:left;">
+                  <div style="font-family:'Space Grotesk';font-size:13px;font-weight:600;color:#E7E9F0;line-height:1.1;">{{ flowActiveName }}</div>
+                  <div style="font-size:10px;color:#626B79;font-family:'JetBrains Mono';margin-top:1px;">{{ flowActiveTrig }}</div>
+                </div>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+              </button>
+              <sc-if value="{{ flowMenu }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;top:44px;left:0;width:280px;background:#12151C;border:1px solid #2C313B;border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);z-index:30;padding:6px;">
+                  <sc-for list="{{ flowWfList }}" as="w" hint-placeholder-count="3">
+                    <button onClick="{{ w.onClick }}" style="width:100%;text-align:left;display:flex;align-items:center;gap:10px;background:{{ w.bg }};border:none;border-radius:8px;padding:9px 11px;cursor:pointer;" style-hover="background:#171B23;">
+                      <span style="width:8px;height:8px;border-radius:50%;background:{{ w.dotColor }};flex-shrink:0;"></span>
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:12.5px;font-weight:600;color:#E7E9F0;">{{ w.name }}</div>
+                        <div style="font-size:10.5px;color:#8B93A1;font-family:'JetBrains Mono';margin-top:1px;">{{ w.trig }}</div>
+                      </div>
+                    </button>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+
+            <sc-if value="{{ flowReplaying }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:9px;background:{{ accentSoft }};border:1px solid rgba(245,196,81,.3);border-radius:8px;padding:5px 11px;">
+                <span style="width:6px;height:6px;border-radius:50%;background:{{ accent }};"></span>
+                <span style="font-size:11.5px;font-weight:600;color:{{ accent }};">{{ flowReplayLabel }}</span>
+                <button onClick="{{ backToLive }}" style="background:transparent;border:none;color:#9AA3B2;font-size:11.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';text-decoration:underline;">Back to live</button>
+              </div>
+            </sc-if>
+
+            <div style="flex:1;"></div>
+            <div style="display:flex;align-items:center;gap:3px;background:#12151C;border:1px solid #23272F;border-radius:9px;padding:3px;">
+              <sc-for list="{{ flowTabs }}" as="t" hint-placeholder-count="3">
+                <button onClick="{{ t.onClick }}" style="border:none;background:{{ t.bg }};color:{{ t.color }};font-family:'IBM Plex Sans';font-size:12px;font-weight:600;padding:5px 14px;border-radius:7px;cursor:pointer;" style-hover="color:#C7CCD6;">{{ t.label }}</button>
+              </sc-for>
+            </div>
+            <sc-if value="{{ flowShowRun }}" hint-placeholder-val="{{ true }}">
+            <button onClick="{{ runFlow }}" style="display:flex;align-items:center;gap:7px;background:{{ accent }};color:#1a1400;border:none;border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="filter:brightness(1.08);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7z"></path></svg>
+              Run
+            </button>
+            </sc-if>
+          </div>
+
+          <sc-if value="{{ flowShowCanvas }}" hint-placeholder-val="{{ true }}">
+          <div style="flex:1;display:flex;min-height:0;">
+            <div data-flow-canvas="1" style="flex:1;min-width:0;overflow:auto;position:relative;background-color:#08090C;background-image:{{ flowGrid }};background-size:{{ flowGridSize }};">
+              <div style="position:relative;width:{{ flowCanvasW }};height:{{ flowCanvasH }};">
+                <svg style="position:absolute;top:0;left:0;width:{{ flowCanvasW }};height:{{ flowCanvasH }};overflow:visible;pointer-events:none;">
+                  <defs><marker id="flowarrow" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="context-stroke"></path></marker></defs>
+                  <sc-for list="{{ flowEdges }}" as="e" hint-placeholder-count="4">
+                    <path d="{{ e.d }}" fill="none" stroke="{{ e.color }}" stroke-width="{{ e.width }}" stroke-dasharray="{{ e.dash }}" marker-end="url(#flowarrow)"></path>
+                  </sc-for>
+                </svg>
+                <sc-for list="{{ flowEdges }}" as="e" hint-placeholder-count="4">
+                  <sc-if value="{{ e.hasLabel }}" hint-placeholder-val="{{ true }}">
+                    <div style="position:absolute;left:{{ e.lx }};top:{{ e.ly }};transform:translateX(-50%);z-index:1;">
+                      <span style="font-size:10px;font-weight:600;color:{{ e.labelColor }};background:{{ e.labelBg }};border:1px solid {{ e.labelBorder }};border-radius:6px;padding:2px 8px;white-space:nowrap;">{{ e.label }}</span>
+                    </div>
+                  </sc-if>
+                </sc-for>
+                <sc-for list="{{ flowNodes }}" as="n" hint-placeholder-count="5">
+                  <div onPointerDown="{{ n.onDown }}" style="position:absolute;left:{{ n.left }};top:{{ n.top }};width:{{ n.width }};background:#0D0F14;border:1.5px solid {{ n.borderColor }};border-radius:12px;padding:11px 12px;box-shadow:{{ n.glow }};opacity:{{ n.cardOpacity }};cursor:{{ n.cursor }};user-select:none;z-index:2;" style-hover="border-color:{{ n.statusColor }};">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <sc-if value="{{ n.hasAgent }}" hint-placeholder-val="{{ true }}">
+                        <span style="width:24px;height:24px;flex-shrink:0;border-radius:7px;background:{{ n.agentSoft }};border:1px solid {{ n.agentBorder }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:9.5px;font-weight:600;color:{{ n.agentColor }};">{{ n.agentInitials }}</span>
+                      </sc-if>
+                      <sc-if value="{{ n.hasIcon }}" hint-placeholder-val="{{ false }}">
+                        <span style="width:24px;height:24px;flex-shrink:0;border-radius:7px;background:{{ n.typeSoft }};display:flex;align-items:center;justify-content:center;color:{{ n.typeColor }};">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><sc-for list="{{ n.typeIcon }}" as="d" hint-placeholder-count="1"><path d="{{ d }}"></path></sc-for></svg>
+                        </span>
+                      </sc-if>
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:13px;font-weight:600;color:#E7E9F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ n.label }}</div>
+                        <sc-if value="{{ n.hasSub }}" hint-placeholder-val="{{ false }}"><div style="font-size:10px;color:#626B79;font-family:'JetBrains Mono';margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ n.sub }}</div></sc-if>
+                      </div>
+                      <span style="font-size:8.5px;font-weight:700;letter-spacing:.5px;color:{{ n.typeColor }};flex-shrink:0;">{{ n.typeTag }}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:7px;margin-top:9px;">
+                      <span style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:{{ n.statusColor }};">
+                        <span style="width:7px;height:7px;border-radius:50%;background:{{ n.statusColor }};animation:{{ n.dotAnim }};"></span>{{ n.statusLabel }}
+                      </span>
+                      <sc-if value="{{ n.hasTrig }}" hint-placeholder-val="{{ false }}">
+                        <span style="font-size:9.5px;color:#8B93A1;font-family:'JetBrains Mono';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-left:auto;">{{ n.trigDetail }}</span>
+                      </sc-if>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <sc-if value="{{ flowIsHistory }}" hint-placeholder-val="{{ true }}">
+            <div style="width:304px;flex-shrink:0;background:#0D0F14;border-left:1px solid #23272F;display:flex;flex-direction:column;min-height:0;">
+              <div style="padding:13px 16px;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:8px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B93A1" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5 6 5-12 2.5 6h4"></path></svg>
+                <span style="font-family:'Space Grotesk';font-weight:600;font-size:13.5px;color:#E7E9F0;">Run history</span>
+                <span style="font-size:11px;color:#626B79;">click to replay</span>
+              </div>
+              <div style="flex:1;overflow-y:auto;padding:11px;display:flex;flex-direction:column;gap:8px;">
+                <sc-for list="{{ flowRunsList }}" as="r" hint-placeholder-count="5">
+                  <button onClick="{{ r.onClick }}" style="width:100%;text-align:left;display:flex;gap:11px;background:{{ r.bg }};border:1px solid {{ r.border }};border-radius:10px;padding:11px 12px;cursor:pointer;" style-hover="border-color:#3a4150;">
+                    <span style="width:8px;height:8px;border-radius:50%;background:{{ r.statusColor }};margin-top:4px;flex-shrink:0;"></span>
+                    <div style="flex:1;min-width:0;">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-family:'JetBrains Mono';font-size:12px;font-weight:600;color:#E7E9F0;">{{ r.num }}</span>
+                        <span style="font-size:10.5px;font-weight:600;color:{{ r.statusColor }};background:{{ r.statusSoft }};border-radius:5px;padding:1px 7px;">{{ r.statusLabel }}</span>
+                      </div>
+                      <div style="font-size:11.5px;color:#9AA3B2;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ r.trigger }}</div>
+                      <div style="font-size:10.5px;color:#626B79;font-family:'JetBrains Mono';margin-top:2px;">{{ r.when }} · {{ r.dur }}</div>
+                    </div>
+                  </button>
+                </sc-for>
+              </div>
+            </div>
+            </sc-if>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ flowIsSettings }}" hint-placeholder-val="{{ false }}">
+            <div style="flex:1;overflow-y:auto;padding:22px;">
+              <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:20px;">
+                <div style="background:#0D0F14;border:1px solid #23272F;border-radius:12px;padding:15px 16px;display:flex;align-items:center;gap:14px;">
+                  <div style="flex:1;min-width:0;">
+                    <div style="font-family:'Space Grotesk';font-size:14px;font-weight:600;color:#E7E9F0;">Enable this workflow</div>
+                    <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;">When paused, the trigger is ignored and no new runs start.</div>
+                  </div>
+                  <button onClick="{{ onToggleActiveEnabled }}" style="width:38px;height:22px;border-radius:999px;border:1px solid #2C313B;background:{{ flowActiveSwBg }};position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;">
+                    <span style="position:absolute;top:2px;left:{{ flowActiveKnobX }};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                  </button>
+                </div>
+
+                <div>
+                  <div style="font-family:'Space Grotesk';font-size:14px;font-weight:600;color:#E7E9F0;margin-bottom:12px;">Run behavior</div>
+                  <div style="background:#0D0F14;border:1px solid #23272F;border-radius:12px;overflow:hidden;">
+                    <div style="display:flex;align-items:center;gap:16px;padding:13px 15px;border-bottom:1px solid #1a1e26;">
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:13px;font-weight:600;color:#E7E9F0;">Max concurrent runs</div>
+                        <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;">How many runs of this workflow can execute at once.</div>
+                      </div>
+                      <div style="display:flex;gap:5px;flex-shrink:0;">
+                        <sc-for list="{{ flowConc }}" as="o" hint-placeholder-count="4">
+                          <button onClick="{{ o.onClick }}" style="min-width:38px;border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.color }};font-size:12px;font-weight:600;padding:6px 0;border-radius:7px;cursor:pointer;font-family:'JetBrains Mono';" style-hover="border-color:#3a4150;">{{ o.label }}</button>
+                        </sc-for>
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:16px;padding:13px 15px;border-bottom:1px solid #1a1e26;">
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-size:13px;font-weight:600;color:#E7E9F0;">Default agent for new steps</div>
+                        <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;">Auto-route lets Master pick the best-matched session per step.</div>
+                      </div>
+                      <div style="display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
+                        <sc-for list="{{ flowDefAgent }}" as="o" hint-placeholder-count="3">
+                          <button onClick="{{ o.onClick }}" style="border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.color }};font-size:11.5px;font-weight:600;padding:6px 11px;border-radius:7px;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">{{ o.name }}</button>
+                        </sc-for>
+                      </div>
+                    </div>
+                    <sc-for list="{{ flowSettingToggles }}" as="t" hint-placeholder-count="3">
+                      <div style="display:flex;align-items:center;gap:16px;padding:13px 15px;border-bottom:1px solid #1a1e26;">
+                        <div style="flex:1;min-width:0;">
+                          <div style="font-size:13px;font-weight:600;color:#E7E9F0;">{{ t.label }}</div>
+                          <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;line-height:1.45;">{{ t.detail }}</div>
+                        </div>
+                        <button onClick="{{ t.onToggle }}" style="width:38px;height:22px;border-radius:999px;border:1px solid #2C313B;background:{{ t.swBg }};position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;">
+                          <span style="position:absolute;top:2px;left:{{ t.knobX }};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;"></span>
+                        </button>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+
+                <div>
+                  <div style="font-size:11px;font-weight:600;letter-spacing:.4px;color:#FF7A7A;font-family:'JetBrains Mono';margin-bottom:9px;">DANGER ZONE</div>
+                  <div style="background:#0D0F14;border:1px solid rgba(255,92,92,.25);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:14px;">
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-size:13px;font-weight:600;color:#E7E9F0;">Delete workflow</div>
+                      <div style="font-size:11.5px;color:#8B93A1;margin-top:2px;">Permanently remove this workflow and its run history.</div>
+                    </div>
+                    <button onClick="{{ onDeleteActive }}" style="background:transparent;border:1px solid rgba(255,92,92,.4);border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:600;color:#FF7A7A;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="background:rgba(255,92,92,.12);">Delete workflow</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+        </sc-if>
+      </sc-if>
+
       <!-- SCHEDULES VIEW -->
       <sc-if value="{{ isCrons }}" hint-placeholder-val="{{ false }}">
         <div data-screen-label="Schedules" style="flex:1;display:flex;flex-direction:column;min-height:0;">
@@ -1045,6 +1605,229 @@
     </div>
   </sc-if>
 
+  <!-- GH DROPDOWN BACKDROP -->
+  <sc-if value="{{ ghMenuOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeGhMenu }}" style="position:fixed;inset:0;z-index:20;"></div>
+  </sc-if>
+
+  <!-- GH ISSUE DETAIL DRAWER -->
+  <sc-if value="{{ ghDetailOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeGhDetail }}" style="position:fixed;inset:0;background:rgba(4,5,8,.55);z-index:42;"></div>
+    <div style="position:fixed;top:0;right:0;bottom:0;width:560px;max-width:94vw;background:#0D0F14;border-left:1px solid #2C313B;z-index:43;display:flex;flex-direction:column;box-shadow:-24px 0 60px rgba(0,0,0,.5);animation:cslide .18s ease;">
+      <div style="padding:15px 18px;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:11px;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="#8B93A1"><path d="M12 2C6.5 2 2 6.6 2 12.3c0 4.5 2.9 8.4 6.8 9.7.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.2-3.4-1.2-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.3 9.3 0 015 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5a10.3 10.3 0 006.8-9.7C22 6.6 17.5 2 12 2z"></path></svg>
+        <div style="flex:1;min-width:0;">
+          <div style="font-family:'Space Grotesk';font-size:13.5px;font-weight:600;color:#E7E9F0;">Issue detail</div>
+          <div style="font-family:'JetBrains Mono';font-size:10.5px;color:#626B79;">{{ ghDetail.repo }} · {{ ghDetail.number }}</div>
+        </div>
+        <a href="{{ ghDetail.ghUrl }}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:6px;text-decoration:none;background:#171B23;border:1px solid #2C313B;border-radius:8px;padding:6px 11px;font-size:11.5px;font-weight:600;color:#C7CCD6;" style-hover="border-color:#3a4150;">
+          Open on GitHub
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5h5v5"></path><path d="M19 5l-8 8"></path><path d="M18 14v4a1 1 0 01-1 1H6a1 1 0 01-1-1V7a1 1 0 011-1h4"></path></svg>
+        </a>
+        <button onClick="{{ closeGhDetail }}" style="width:28px;height:28px;border-radius:7px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-hover="background:#171B23;color:#E7E9F0;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </button>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding:18px;">
+        <div style="display:flex;align-items:flex-start;gap:11px;">
+          <div style="flex-shrink:0;margin-top:2px;color:{{ ghDetail.stateColor }};">
+            <sc-if value="{{ ghDetail.stateOpen }}" hint-placeholder-val="{{ true }}">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"></circle><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"></circle></svg>
+            </sc-if>
+            <sc-if value="{{ ghDetail.stateClosed }}" hint-placeholder-val="{{ false }}">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M8.5 12.2l2.4 2.4 4.4-4.8"></path></svg>
+            </sc-if>
+          </div>
+          <h2 style="margin:0;font-family:'Space Grotesk';font-size:19px;font-weight:600;color:#E7E9F0;line-height:1.35;">{{ ghDetail.title }}</h2>
+        </div>
+        <div style="display:flex;align-items:center;gap:9px;margin-top:11px;flex-wrap:wrap;">
+          <span style="display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:{{ ghDetail.stateColor }};background:{{ ghDetail.stateSoft }};border-radius:7px;padding:4px 11px;">
+            <span style="width:6px;height:6px;border-radius:50%;background:{{ ghDetail.stateColor }};"></span>{{ ghDetail.stateLabel }}
+          </span>
+          <span style="font-size:11.5px;color:#8B93A1;">{{ ghDetail.byline }}</span>
+          <span style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:#626B79;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 15a2 2 0 01-2 2H8l-4 4V6a2 2 0 012-2h12a2 2 0 012 2z"></path></svg>
+            {{ ghDetail.comments }}
+          </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:11px;flex-wrap:wrap;">
+          <sc-for list="{{ ghDetail.labels }}" as="l" hint-placeholder-count="2">
+            <span style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;color:{{ l.color }};background:{{ l.soft }};border:1px solid {{ l.border }};border-radius:20px;padding:2px 9px;">
+              <span style="width:6px;height:6px;border-radius:50%;background:{{ l.color }};"></span>{{ l.name }}
+            </span>
+          </sc-for>
+        </div>
+
+        <div style="margin-top:16px;background:#0A0B0F;border:1px solid #1a1e26;border-radius:12px;padding:14px 16px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <span style="width:22px;height:22px;border-radius:6px;background:#20242d;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:9px;font-weight:600;color:#C7CCD6;">{{ ghDetail.authorInitials }}</span>
+            <span style="font-size:12px;font-weight:600;color:#C7CCD6;">{{ ghDetail.author }}</span>
+            <span style="font-size:11px;color:#626B79;">· {{ ghDetail.opened }}</span>
+          </div>
+          <sc-for list="{{ ghDetail.bodyLines }}" as="line" hint-placeholder-count="3">
+            <p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#B4BCC8;white-space:pre-wrap;">{{ line }}</p>
+          </sc-for>
+        </div>
+
+        <!-- LINK TO TASK -->
+        <sc-if value="{{ ghDetail.isSynced }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:16px;background:#12151C;border:1px solid #23272F;border-radius:12px;padding:14px 16px;">
+            <div style="font-size:10.5px;font-weight:600;letter-spacing:.4px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:11px;">LINKED TASK · TWO-WAY SYNC</div>
+            <div style="display:flex;align-items:center;gap:11px;">
+              <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:{{ ghDetail.stateColor }};background:{{ ghDetail.stateSoft }};border-radius:7px;padding:5px 11px;">
+                <span style="width:6px;height:6px;border-radius:50%;background:{{ ghDetail.stateColor }};"></span>Issue {{ ghDetail.stateLabel }}
+              </span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8h11l-3-3"></path><path d="M17 16H6l3 3"></path></svg>
+              <span style="display:flex;align-items:center;gap:7px;background:#0A0B0F;border:1px solid #23272F;border-radius:8px;padding:5px 11px;">
+                <span style="width:20px;height:20px;border-radius:6px;background:{{ ghDetail.agentSoft }};border:1px solid {{ ghDetail.agentBorder }};display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:9px;font-weight:600;color:{{ ghDetail.agentColor }};">{{ ghDetail.agentInitials }}</span>
+                <span style="font-size:12px;font-weight:600;color:#E7E9F0;">{{ ghDetail.agentName }}</span>
+              </span>
+              <span style="display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:{{ ghDetail.taskStatusColor }};background:{{ ghDetail.taskStatusSoft }};border-radius:7px;padding:5px 11px;">
+                <span style="width:6px;height:6px;border-radius:50%;background:{{ ghDetail.taskStatusColor }};"></span>{{ ghDetail.taskStatusLabel }}
+              </span>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- COMMENT THREAD -->
+        <sc-if value="{{ ghDetail.hasThread }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:18px;">
+            <div style="font-size:10.5px;font-weight:600;letter-spacing:.4px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:11px;">{{ ghDetail.threadCount }} COMMENTS</div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <sc-for list="{{ ghDetail.thread }}" as="c" hint-placeholder-count="2">
+                <div style="display:flex;gap:10px;">
+                  <span style="width:26px;height:26px;flex-shrink:0;border-radius:7px;background:#20242d;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:9.5px;font-weight:600;color:#C7CCD6;">{{ c.initials }}</span>
+                  <div style="flex:1;min-width:0;background:#12151C;border:1px solid #23272F;border-radius:10px;padding:10px 12px;">
+                    <div style="display:flex;align-items:center;gap:7px;margin-bottom:4px;">
+                      <span style="font-size:12px;font-weight:600;color:#E7E9F0;">{{ c.author }}</span>
+                      <span style="font-size:10.5px;color:#626B79;font-family:'JetBrains Mono';">{{ c.time }}</span>
+                    </div>
+                    <div style="font-size:12.5px;line-height:1.5;color:#B4BCC8;">{{ c.text }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- ACTION FOOTER -->
+      <div style="border-top:1px solid #23272F;padding:13px 18px;display:flex;gap:10px;">
+        <sc-if value="{{ ghDetail.isUnsynced }}" hint-placeholder-val="{{ true }}">
+          <button onClick="{{ ghDetail.onSpawn }}" style="flex:1;display:flex;align-items:center;justify-content:center;gap:7px;background:{{ accent }};color:#1a1400;border:none;border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="filter:brightness(1.08);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9"></path><path d="M4 18h6"></path><path d="M13 6l3 3-3 3"></path><path d="M20 6v12"></path></svg>
+            Spawn task
+          </button>
+          <button onClick="{{ ghDetail.onIgnore }}" style="background:transparent;border:1px solid #2C313B;border-radius:9px;padding:10px 15px;font-size:13px;font-weight:600;color:#9AA3B2;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;color:#E7E9F0;">Ignore</button>
+          <button onClick="{{ ghDetail.onArchive }}" style="background:transparent;border:1px solid #2C313B;border-radius:9px;padding:10px 15px;font-size:13px;font-weight:600;color:#9AA3B2;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;color:#E7E9F0;">Archive</button>
+        </sc-if>
+        <sc-if value="{{ ghDetail.isSynced }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ ghDetail.onViewTask }}" style="flex:1;background:#171B23;color:#E7E9F0;border:1px solid #2C313B;border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">Open in board</button>
+          <button onClick="{{ ghDetail.onUnlink }}" style="background:transparent;color:#9AA3B2;border:1px solid #2C313B;border-radius:9px;padding:10px 15px;font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#FF5C5C;color:#FF7A7A;">Unlink</button>
+        </sc-if>
+        <sc-if value="{{ ghDetail.isDimmed }}" hint-placeholder-val="{{ false }}">
+          <span style="flex:1;display:flex;align-items:center;font-size:12.5px;color:#8B93A1;">{{ ghDetail.dimNote }}</span>
+          <button onClick="{{ ghDetail.onRestore }}" style="background:transparent;color:{{ accent }};border:1px solid #2C313B;border-radius:9px;padding:10px 15px;font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="background:#171B23;">Restore to inbox</button>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- FLOW MENU BACKDROP -->
+  <sc-if value="{{ flowMenu }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeFlowMenu }}" style="position:fixed;inset:0;z-index:20;"></div>
+  </sc-if>
+
+  <sc-if value="{{ flowCardMenuOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeFlowCardMenu }}" style="position:fixed;inset:0;z-index:25;"></div>
+  </sc-if>
+
+  <!-- FLOW NODE DETAIL DRAWER -->
+  <sc-if value="{{ flowNodeOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeFlowNode }}" style="position:fixed;inset:0;background:rgba(4,5,8,.5);z-index:42;"></div>
+    <div style="position:fixed;top:0;right:0;bottom:0;width:452px;max-width:92vw;background:#0D0F14;border-left:1px solid #2C313B;z-index:43;display:flex;flex-direction:column;box-shadow:-24px 0 60px rgba(0,0,0,.5);animation:cslide .18s ease;">
+      <div style="padding:15px 18px;border-bottom:1px solid #23272F;display:flex;align-items:center;gap:11px;">
+        <div style="width:30px;height:30px;border-radius:8px;background:{{ flowNode.typeSoft }};display:flex;align-items:center;justify-content:center;color:{{ flowNode.typeColor }};flex-shrink:0;">
+          <sc-if value="{{ flowNode.hasIcon }}" hint-placeholder-val="{{ false }}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><sc-for list="{{ flowNode.typeIcon }}" as="d" hint-placeholder-count="1"><path d="{{ d }}"></path></sc-for></svg>
+          </sc-if>
+          <sc-if value="{{ flowNode.isTask }}" hint-placeholder-val="{{ true }}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M4 9h16"></path></svg>
+          </sc-if>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-family:'Space Grotesk';font-size:14px;font-weight:600;color:#E7E9F0;">{{ flowNode.label }}</div>
+          <div style="font-size:10px;font-weight:700;letter-spacing:.5px;color:{{ flowNode.typeColor }};margin-top:1px;">{{ flowNode.typeTag }}</div>
+        </div>
+        <button onClick="{{ closeFlowNode }}" style="width:28px;height:28px;border-radius:7px;border:1px solid #23272F;background:transparent;color:#8B93A1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" style-hover="background:#171B23;color:#E7E9F0;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </button>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding:18px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+          <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:{{ flowNode.statusColor }};background:{{ flowNode.statusSoft }};border-radius:7px;padding:5px 11px;">
+            <span style="width:7px;height:7px;border-radius:50%;background:{{ flowNode.statusColor }};"></span>{{ flowNode.statusLabel }}
+          </span>
+          <span style="font-size:12px;color:#8B93A1;">{{ flowNode.lastResult }}</span>
+        </div>
+
+        <sc-if value="{{ flowNode.isWaiting }}" hint-placeholder-val="{{ false }}">
+          <div style="background:rgba(163,113,255,.07);border:1px solid rgba(163,113,255,.35);border-radius:11px;padding:13px;margin-bottom:16px;">
+            <div style="font-size:11px;font-weight:600;letter-spacing:.4px;color:#A371F7;font-family:'JetBrains Mono';margin-bottom:10px;">MANUAL APPROVAL REQUIRED</div>
+            <div style="display:flex;gap:9px;">
+              <button onClick="{{ flowNode.onApprove }}" style="flex:1;background:#3DDC97;color:#04240F;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="filter:brightness(1.08);">Approve &amp; continue</button>
+              <button onClick="{{ flowNode.onReject }}" style="flex:1;background:transparent;color:#9AA3B2;border:1px solid #2C313B;border-radius:8px;padding:9px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#FF5C5C;color:#FF7A7A;">Request changes</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ flowNode.isTrigger }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.4px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:9px;">TRIGGER TYPE</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:11px;">
+            <sc-for list="{{ flowNode.trigOpts }}" as="o" hint-placeholder-count="5">
+              <button onClick="{{ o.onClick }}" style="border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.color }};font-size:11.5px;font-weight:600;padding:6px 12px;border-radius:8px;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">{{ o.label }}</button>
+            </sc-for>
+          </div>
+          <div style="background:#0A0B0F;border:1px solid #1a1e26;border-radius:9px;padding:10px 12px;font-family:'JetBrains Mono';font-size:12px;color:#C7CCD6;">{{ flowNode.trigDetail }}</div>
+        </sc-if>
+
+        <sc-if value="{{ flowNode.isTask }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.4px;color:#8B93A1;font-family:'JetBrains Mono';margin-bottom:9px;">ASSIGNED AGENT</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <sc-for list="{{ flowNode.agentOpts }}" as="o" hint-placeholder-count="4">
+              <button onClick="{{ o.onClick }}" style="border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.color }};font-size:11.5px;font-weight:600;padding:6px 12px;border-radius:8px;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">{{ o.name }}</button>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ flowNode.hasBranches }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.4px;color:#8B93A1;font-family:'JetBrains Mono';margin:18px 0 9px;">OUTGOING BRANCHES · {{ flowNode.branchCount }}</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <sc-for list="{{ flowNode.branches }}" as="b" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;gap:10px;background:#12151C;border:1px solid #23272F;border-radius:10px;padding:10px 12px;">
+                <span style="font-size:10.5px;font-weight:600;color:{{ b.color }};background:{{ b.soft }};border:1px solid {{ b.border }};border-radius:6px;padding:3px 9px;white-space:nowrap;">{{ b.label }}</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#626B79" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
+                <span style="font-size:12.5px;font-weight:600;color:#E7E9F0;">{{ b.to }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="border-top:1px solid #23272F;padding:13px 18px;display:flex;gap:10px;">
+        <button onClick="{{ flowNode.onAddStep }}" style="flex:1;display:flex;align-items:center;justify-content:center;gap:7px;background:#171B23;color:#E7E9F0;border:1px solid #2C313B;border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#3a4150;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+          Add step after
+        </button>
+        <sc-if value="{{ flowNode.canDelete }}" hint-placeholder-val="{{ true }}">
+          <button onClick="{{ flowNode.onDelete }}" style="background:transparent;color:#9AA3B2;border:1px solid #2C313B;border-radius:9px;padding:10px 15px;font-size:13px;font-weight:600;cursor:pointer;font-family:'IBM Plex Sans';" style-hover="border-color:#FF5C5C;color:#FF7A7A;">Delete</button>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
   <!-- COMMAND PALETTE -->
   <sc-if value="{{ paletteOpen }}" hint-placeholder-val="{{ false }}">
     <div onClick="{{ closePalette }}" style="position:fixed;inset:0;background:rgba(4,5,8,.55);z-index:46;display:flex;justify-content:center;align-items:flex-start;padding-top:12vh;">
@@ -1372,6 +2155,127 @@ class Component extends DCLogic {
         {id:'t8',title:'Weekly dependency audit',col:'done',agentId:'a-codex'},
         {id:'t9',title:'Stabilize flaky auth e2e tests',col:'done',agentId:'a-claude'},
       ],
+      githubMode:'issues',
+      githubTab:'inbox',
+      githubRepo:'all',
+      githubSort:'newest',
+      githubLabel:'all',
+      githubQuery:'',
+      githubPage:1,
+      githubMenu:null,
+      githubDetail:null,
+      githubSyncing:false,
+      githubLastSync:'2m ago',
+      githubWorkspace:'~/dev/platform',
+      githubWorkspaces:['~/dev/platform','~/dev/web-apps','~/work/acme-core'],
+      githubSettings:{autoClose:true,autoSpawn:false,syncStatus:true,syncLabels:true,onlyAssigned:false,syncFreq:'5m',defaultAgent:'auto'},
+      githubRepoList:[
+        {id:'api-gateway',owner:'acme',synced:true},
+        {id:'web-dashboard',owner:'acme',synced:true},
+        {id:'data-pipeline',owner:'acme',synced:true},
+        {id:'billing-service',owner:'acme',synced:true},
+        {id:'infra-terraform',owner:'acme',synced:false},
+        {id:'marketing-site',owner:'acme',synced:false},
+        {id:'mobile-app',owner:'acme',synced:false},
+      ],
+      githubIssues:[
+        {id:'gh1',number:412,title:'Rate-limit responses are missing the Retry-After header',repo:'api-gateway',author:'dsalas',opened:'2h ago',ageMin:120,comments:4,sync:'unsynced',taskId:null,agentId:null,labels:[{name:'bug',color:'#F5515F'},{name:'p1',color:'#FF5C5C'}],body:'When a client is throttled we return 429 but never set a Retry-After header, so SDKs fall back to a fixed backoff and hammer the gateway.\n\nExpected: emit Retry-After (seconds) computed from the token-bucket refill window on every 429.',thread:[{author:'mira',text:'Confirmed against staging — the header is absent on all 429s.',time:'1h ago'},{author:'dsalas',text:'Should be a small change in the rate-limit middleware once the bucket lands.',time:'40m ago'}]},
+        {id:'gh2',number:408,title:'OAuth callback drops the next param on Safari',repo:'web-dashboard',author:'mira',opened:'5h ago',ageMin:300,comments:2,sync:'unsynced',taskId:null,agentId:null,labels:[{name:'bug',color:'#F5515F'}],body:'On Safari the `next` query param is stripped during the OAuth round-trip, so users always land on the dashboard root instead of their intended page.\n\nLikely an ITP / sessionStorage timing issue on the callback route.',thread:[{author:'jkerr',text:'Repro is Safari-only; Chrome and Firefox are fine.',time:'3h ago'}]},
+        {id:'gh3',number:405,title:'Config UI for rate-limit tiers',repo:'api-gateway',author:'dsalas',opened:'1d ago',ageMin:1440,comments:1,sync:'unsynced',taskId:null,agentId:null,labels:[{name:'enhancement',color:'#A371F7'}],body:'Ops wants to edit per-tier rate limits without a redeploy. Add a small config surface (free / pro / enterprise) backed by the gateway config store.',thread:[{author:'oanders',text:'Nice-to-have: an audit log of who changed which tier.',time:'20h ago'}]},
+        {id:'gh4',number:401,title:'ETL dedupe drops rows with a null join key',repo:'data-pipeline',author:'wenli',opened:'1d ago',ageMin:1450,comments:6,sync:'synced',taskId:'t4',agentId:'a-gemini',labels:[{name:'bug',color:'#F5515F'},{name:'data',color:'#7FD1FF'}],body:'The dedupe stage inner-joins on the natural key, so any row whose key is null is silently discarded. We are losing ~0.4% of events per run.\n\nFix: coalesce the join key or route null-key rows to a quarantine table.',thread:[{author:'wenli',text:'Quarantine table is the safer option — we can backfill later.',time:'22h ago'},{author:'dsalas',text:'Agreed. Gemini is on it.',time:'18h ago'}]},
+        {id:'gh5',number:395,title:'Stripe webhook events not persisted after a retry',repo:'billing-service',author:'oanders',opened:'2d ago',ageMin:2880,comments:3,sync:'synced',taskId:'t3',agentId:'a-aider',labels:[{name:'bug',color:'#F5515F'},{name:'payments',color:'#3DDC97'}],body:'When Stripe retries a webhook, our handler 200s but the event never lands in the events table — the upsert is keyed on the wrong idempotency column.',thread:[{author:'oanders',text:'This needs the new events table migration first.',time:'1d ago'}]},
+        {id:'gh6',number:390,title:'Flaky auth e2e — intermittent redirect timeout',repo:'web-dashboard',author:'mira',opened:'3d ago',ageMin:4320,comments:8,sync:'synced',taskId:'t9',agentId:'a-claude',labels:[{name:'test',color:'#FFB020'},{name:'flaky',color:'#D9B778'}],body:'The auth redirect e2e times out roughly 1 in 6 runs in CI. Looks like a race between the session cookie write and the client-side redirect.',thread:[{author:'jkerr',text:'Added a wait-for-cookie assertion — green for 40 runs straight.',time:'1d ago'},{author:'mira',text:'Merged. Closing once CI confirms.',time:'20h ago'}]},
+        {id:'gh7',number:385,title:'Typo in the quickstart section of the README',repo:'web-dashboard',author:'jkerr',opened:'3d ago',ageMin:4330,comments:0,sync:'unsynced',taskId:null,agentId:null,labels:[{name:'docs',color:'#6C8EF5'},{name:'good first issue',color:'#3DDC97'}],body:'The quickstart says `npm run dev:start` but the actual script is `npm run dev`. Minor, but it trips up new contributors.',thread:[]},
+        {id:'gh8',number:380,title:'Bump vulnerable transitive dependencies',repo:'api-gateway',author:'dependabot',opened:'4d ago',ageMin:5760,comments:1,sync:'ignored',taskId:null,agentId:null,labels:[{name:'security',color:'#FF7A7A'},{name:'dependencies',color:'#8B93A1'}],body:'Two transitive deps have moderate advisories. Dependabot opened a bump PR; grouped update recommended.',thread:[{author:'dsalas',text:'Ignoring for now — covered by the weekly dependency audit cron.',time:'3d ago'}]},
+        {id:'gh9',number:372,title:'Investigate memory growth in the ETL worker',repo:'data-pipeline',author:'wenli',opened:'1w ago',ageMin:10080,comments:5,sync:'archived',taskId:null,agentId:null,labels:[{name:'needs-repro',color:'#8B93A1'}],body:'Worker RSS climbs ~2% per hour under steady load. Could not reproduce locally; archived pending a heap snapshot from prod.',thread:[{author:'wenli',text:'No repro after the streaming refactor. Archiving.',time:'5d ago'}]},
+        {id:'gh10',number:369,title:'Gateway 502s under burst traffic during deploys',repo:'api-gateway',author:'oanders',opened:'6h ago',ageMin:360,comments:3,sync:'unsynced',taskId:null,agentId:null,labels:[{name:'bug',color:'#F5515F'},{name:'p1',color:'#FF5C5C'}],body:'During rolling deploys the gateway briefly returns 502 as old pods drain. Need connection draining + readiness gate.',thread:[{author:'dsalas',text:'Draining timeout is set to 0 in the chart — that is the culprit.',time:'4h ago'}]},
+        {id:'gh11',number:366,title:'Dashboard charts flicker on theme switch',repo:'web-dashboard',author:'jkerr',opened:'8h ago',ageMin:480,comments:1,sync:'unsynced',taskId:null,agentId:null,labels:[{name:'enhancement',color:'#A371F7'}],body:'Switching between light and dark themes re-mounts every chart, causing a visible flicker. Memoize the theme provider.',thread:[]},
+        {id:'gh12',number:361,title:'Add pagination to the invoices API',repo:'billing-service',author:'oanders',opened:'1d ago',ageMin:1500,comments:2,sync:'unsynced',taskId:null,agentId:null,labels:[{name:'enhancement',color:'#A371F7'},{name:'payments',color:'#3DDC97'}],body:'The invoices endpoint returns the full history in one response. Add cursor-based pagination before the next billing cycle.',thread:[{author:'wenli',text:'Cursor pagination preferred over offset for large accounts.',time:'20h ago'}]},
+        {id:'gh13',number:358,title:'Backfill script skips soft-deleted records',repo:'data-pipeline',author:'wenli',opened:'2d ago',ageMin:2900,comments:4,sync:'unsynced',taskId:null,agentId:null,labels:[{name:'bug',color:'#F5515F'},{name:'data',color:'#7FD1FF'}],body:'The nightly backfill filters out soft-deleted rows, so historical restores are incomplete. Include tombstoned rows when the flag is set.',thread:[{author:'dsalas',text:'Confirmed — restores after a purge are missing ~3% of rows.',time:'1d ago'}]},
+        {id:'gh14',number:354,title:'Rotate the signing key used for session cookies',repo:'web-dashboard',author:'mira',opened:'2d ago',ageMin:2950,comments:2,sync:'unsynced',taskId:null,agentId:null,labels:[{name:'security',color:'#FF7A7A'}],body:'The current session signing key is over a year old. Add support for key rotation with an overlap window so existing sessions stay valid.',thread:[{author:'oanders',text:'Please coordinate with the mobile team before rotating.',time:'1d ago'}]},
+      ],
+      flowActiveId:'wf1',
+      flowRun:'live',
+      flowMenu:false,
+      flowNodeSel:null,
+      flowPage:'list',
+      flowTab:'editor',
+      flowCardMenu:null,
+      flowWorkflows:[
+        {id:'wf1',name:'Issue → merge pipeline',trigLabel:'On GitHub issue',enabled:true,desc:'Triage new bug reports, route a fix to the right agent, gate on tests and review, then merge.',demo:['n1','n2','n3','n4','n6','n7'],settings:{maxConcurrent:'3',notifyFailure:true,autoRetry:false,requireApproval:true,defaultAgent:'auto'},
+          nodes:[
+            {id:'n1',type:'trigger',label:'Issue opened',sub:'GitHub webhook',trig:{kind:'event',detail:'issues.opened · label:bug'},x:40,y:250,status:'done'},
+            {id:'n2',type:'task',label:'Triage & classify',agentId:'a-codex',x:290,y:250,status:'done'},
+            {id:'n3',type:'gate',label:'Severity?',sub:'multi-way branch',x:540,y:250,status:'done'},
+            {id:'n4',type:'task',label:'Hotfix',agentId:'a-claude',x:800,y:110,status:'running'},
+            {id:'n5',type:'task',label:'Standard fix',agentId:'a-aider',x:800,y:400,status:'skipped'},
+            {id:'n6',type:'task',label:'Run tests',agentId:'a-codex',x:1060,y:250,status:'idle'},
+            {id:'n7',type:'approval',label:'Code review',sub:'manual approval',x:1320,y:130,status:'idle'},
+            {id:'n8',type:'terminal',label:'Merge & deploy',x:1580,y:130,status:'idle'},
+            {id:'n9',type:'task',label:'Notify on-call',agentId:'a-codex',sub:'Slack alert',x:1320,y:400,status:'idle'},
+          ],
+          edges:[
+            {from:'n1',to:'n2',kind:'default'},
+            {from:'n2',to:'n3',kind:'default'},
+            {from:'n3',to:'n4',label:'severity: high',kind:'cond'},
+            {from:'n3',to:'n5',label:'severity: normal',kind:'cond'},
+            {from:'n4',to:'n6',label:'success',kind:'success'},
+            {from:'n5',to:'n6',label:'success',kind:'success'},
+            {from:'n6',to:'n7',label:'tests pass',kind:'success'},
+            {from:'n6',to:'n9',label:'tests fail',kind:'failure'},
+            {from:'n7',to:'n8',label:'approved',kind:'approve'},
+            {from:'n7',to:'n5',label:'changes requested',kind:'failure'},
+          ],
+          runs:[
+            {id:'r128',num:128,status:'success',dur:'4m 12s',trigger:'Issue #412 opened',when:'2h ago',ns:{n1:'done',n2:'done',n3:'done',n4:'done',n5:'skipped',n6:'done',n7:'done',n8:'done',n9:'skipped'}},
+            {id:'r127',num:127,status:'failed',dur:'3m 02s',trigger:'Issue #408 opened',when:'5h ago',ns:{n1:'done',n2:'done',n3:'done',n4:'skipped',n5:'done',n6:'failed',n7:'idle',n8:'idle',n9:'done'}},
+            {id:'r126',num:126,status:'success',dur:'5m 30s',trigger:'Issue #405 opened',when:'1d ago',ns:{n1:'done',n2:'done',n3:'done',n4:'skipped',n5:'done',n6:'done',n7:'done',n8:'done',n9:'skipped'}},
+            {id:'r125',num:125,status:'waiting',dur:'1m 48s',trigger:'Issue #401 opened',when:'1d ago',ns:{n1:'done',n2:'done',n3:'done',n4:'done',n5:'skipped',n6:'done',n7:'waiting',n8:'idle',n9:'idle'}},
+            {id:'r124',num:124,status:'success',dur:'4m 55s',trigger:'Manual run · dsalas',when:'2d ago',ns:{n1:'done',n2:'done',n3:'done',n4:'done',n5:'skipped',n6:'done',n7:'done',n8:'done',n9:'skipped'}},
+          ]},
+        {id:'wf2',name:'Nightly regression',trigLabel:'On cron 0 3 * * *',enabled:true,desc:'Build every service at 3 AM, run the full suite, publish a report, and open an issue on failure.',demo:['m1','m2','m3','m4','m5'],settings:{maxConcurrent:'1',notifyFailure:true,autoRetry:true,requireApproval:false,defaultAgent:'a-codex'},
+          nodes:[
+            {id:'m1',type:'trigger',label:'Nightly 3:00 AM',sub:'cron',trig:{kind:'cron',detail:'0 3 * * *'},x:40,y:230,status:'done'},
+            {id:'m2',type:'task',label:'Build all services',agentId:'a-claude',x:300,y:230,status:'done'},
+            {id:'m3',type:'task',label:'Full test suite',agentId:'a-codex',x:560,y:230,status:'done'},
+            {id:'m4',type:'gate',label:'All green?',sub:'success / failure',x:820,y:230,status:'done'},
+            {id:'m5',type:'terminal',label:'Publish report',x:1080,y:110,status:'done'},
+            {id:'m6',type:'task',label:'Open bug issue',agentId:'a-aider',x:1080,y:360,status:'skipped'},
+          ],
+          edges:[
+            {from:'m1',to:'m2',kind:'default'},
+            {from:'m2',to:'m3',kind:'default'},
+            {from:'m3',to:'m4',kind:'default'},
+            {from:'m4',to:'m5',label:'0 failures',kind:'success'},
+            {from:'m4',to:'m6',label:'failures > 0',kind:'failure'},
+          ],
+          runs:[
+            {id:'q54',num:54,status:'success',dur:'11m 20s',trigger:'Cron · 3:00 AM',when:'6h ago',ns:{m1:'done',m2:'done',m3:'done',m4:'done',m5:'done',m6:'skipped'}},
+            {id:'q53',num:53,status:'failed',dur:'9m 03s',trigger:'Cron · 3:00 AM',when:'1d ago',ns:{m1:'done',m2:'done',m3:'done',m4:'done',m5:'skipped',m6:'done'}},
+            {id:'q52',num:52,status:'success',dur:'10m 48s',trigger:'Cron · 3:00 AM',when:'2d ago',ns:{m1:'done',m2:'done',m3:'done',m4:'done',m5:'done',m6:'skipped'}},
+          ]},
+        {id:'wf3',name:'PR merged → deploy',trigLabel:'On PR merged',enabled:false,desc:'Build and ship to staging on every merge, hold for manual promotion, then deploy prod and smoke-test.',demo:['k1','k2','k3','k4'],settings:{maxConcurrent:'2',notifyFailure:true,autoRetry:false,requireApproval:true,defaultAgent:'auto'},
+          nodes:[
+            {id:'k1',type:'trigger',label:'PR merged',sub:'GitHub webhook',trig:{kind:'event',detail:'pull_request.closed · merged'},x:40,y:230,status:'done'},
+            {id:'k2',type:'task',label:'Build image',agentId:'a-claude',x:300,y:230,status:'done'},
+            {id:'k3',type:'task',label:'Deploy staging',agentId:'a-codex',x:560,y:230,status:'done'},
+            {id:'k4',type:'approval',label:'Promote to prod?',sub:'manual approval',x:820,y:230,status:'waiting'},
+            {id:'k5',type:'terminal',label:'Deploy prod',x:1080,y:110,status:'idle'},
+            {id:'k6',type:'task',label:'Smoke tests',agentId:'a-codex',x:1080,y:360,status:'idle'},
+          ],
+          edges:[
+            {from:'k1',to:'k2',kind:'default'},
+            {from:'k2',to:'k3',kind:'default'},
+            {from:'k3',to:'k4',kind:'default'},
+            {from:'k4',to:'k5',label:'approved',kind:'approve'},
+            {from:'k5',to:'k6',label:'post-deploy',kind:'default'},
+          ],
+          runs:[
+            {id:'p88',num:88,status:'waiting',dur:'2m 10s',trigger:'PR #240 merged',when:'20m ago',ns:{k1:'done',k2:'done',k3:'done',k4:'waiting',k5:'idle',k6:'idle'}},
+            {id:'p87',num:87,status:'success',dur:'6m 40s',trigger:'PR #238 merged',when:'3h ago',ns:{k1:'done',k2:'done',k3:'done',k4:'done',k5:'done',k6:'done'}},
+            {id:'p86',num:86,status:'success',dur:'6m 12s',trigger:'PR #235 merged',when:'1d ago',ns:{k1:'done',k2:'done',k3:'done',k4:'done',k5:'done',k6:'done'}},
+          ]},
+      ],
       messages:[
         {id:'m1',role:'you',kind:'text',text:'Add token-bucket rate limiting to the API gateway and fix the auth redirect bug on the dashboard.'},
         {id:'m2',role:'master',kind:'route',text:'Parsed 2 tasks — routing each to the right session:',routes:[
@@ -1400,7 +2304,7 @@ class Component extends DCLogic {
   }
 
   componentDidMount(){ this.timer=setInterval(this.tick,1500); window.addEventListener('keydown',this.onGlobalKey); }
-  componentWillUnmount(){ clearInterval(this.timer); if(this._t) clearTimeout(this._t); window.removeEventListener('keydown',this.onGlobalKey); }
+  componentWillUnmount(){ clearInterval(this.timer); if(this._t) clearTimeout(this._t); if(this._gs) clearTimeout(this._gs); if(this._flowT) clearTimeout(this._flowT); window.removeEventListener('keydown',this.onGlobalKey); }
   componentDidUpdate(){ document.querySelectorAll('[data-auto]').forEach(el=>{ el.scrollTop=el.scrollHeight; }); }
 
   tick=()=>{
@@ -1511,11 +2415,143 @@ class Component extends DCLogic {
   dropTo=(col)=>{ const id=this._drag; this._drag=null; if(!id){ this.setState({dragOverCol:null}); return; } this.setState(s=>({tasks:s.tasks.map(t=>t.id===id?{...t,col}:t),dragOverCol:null})); };
   addTask=()=>this.setState(s=>({tasks:s.tasks.concat([{id:'t'+Date.now(),title:'New task',col:'backlog',agentId:null}])}));
 
+  // GitHub Issues
+  ghSetMode=(m)=>this.setState({githubMode:m});
+  ghSetTab=(t)=>this.setState({githubTab:t,githubPage:1});
+  ghSetRepo=(r)=>this.setState({githubRepo:r,githubPage:1});
+  ghSetSort=(v)=>this.setState({githubSort:v,githubMenu:null,githubPage:1});
+  ghSetLabel=(v)=>this.setState({githubLabel:v,githubMenu:null,githubPage:1});
+  onGhQuery=(e)=>this.setState({githubQuery:e.target.value,githubPage:1});
+  ghToggleMenu=(m)=>this.setState(s=>({githubMenu:s.githubMenu===m?null:m}));
+  ghCloseMenu=()=>this.setState({githubMenu:null});
+  ghGoPage=(p)=>this.setState({githubPage:p});
+  ghPrevPage=()=>this.setState(s=>({githubPage:Math.max(1,s.githubPage-1)}));
+  ghNextPage=()=>this.setState(s=>({githubPage:s.githubPage+1}));
+  ghOpenDetail=(id)=>this.setState({githubDetail:id});
+  ghCloseDetail=()=>this.setState({githubDetail:null});
+  ghSetWorkspace=(w)=>this.setState({githubWorkspace:w});
+  ghToggleRepo=(id)=>this.setState(s=>({githubRepoList:s.githubRepoList.map(r=>r.id===id?{...r,synced:!r.synced}:r)}));
+  ghSetSetting=(k,v)=>this.setState(s=>({githubSettings:{...s.githubSettings,[k]:v}}));
+  ghToggleSetting=(k)=>this.setState(s=>({githubSettings:{...s.githubSettings,[k]:!s.githubSettings[k]}}));
+  ghSyncNow=()=>{ if(this.state.githubSyncing) return; this.setState({githubSyncing:true}); if(this._gs) clearTimeout(this._gs); this._gs=setTimeout(()=>{ this.setState({githubSyncing:false,githubLastSync:'just now'}); this.flash('GitHub synced · up to date'); },1300); };
+  ghSetSync=(id,val)=>this.setState(s=>({githubIssues:s.githubIssues.map(i=>i.id===id?{...i,sync:val}:i)}));
+  ghIgnore=(id)=>{ this.ghSetSync(id,'ignored'); this.flash('Issue ignored'); };
+  ghArchive=(id)=>{ this.ghSetSync(id,'archived'); this.flash('Issue archived'); };
+  ghRestore=(id)=>{ this.ghSetSync(id,'unsynced'); this.flash('Restored to inbox'); };
+  ghUnlink=(id)=>{ this.setState(s=>{ const iss=s.githubIssues.find(i=>i.id===id); const tid=iss&&iss.taskId; return {githubIssues:s.githubIssues.map(i=>i.id===id?{...i,sync:'unsynced',taskId:null,agentId:null}:i), tasks:s.tasks.map(t=>t.id===tid?{...t,issueId:null}:t)}; }); this.flash('Unlinked from task'); };
+  ghSpawn=(id)=>{
+    const s=this.state, iss=s.githubIssues.find(i=>i.id===id); if(!iss) return;
+    const pref=s.githubSettings.defaultAgent;
+    let ag=(pref&&pref!=='auto')?s.agents.find(a=>a.id===pref):null;
+    if(!ag) ag=s.agents.find(a=>a.repo===iss.repo)||s.agents.find(a=>a.status!=='needs')||s.agents[0];
+    const taskId='t'+Date.now();
+    const task={id:taskId,title:iss.title,col:'routed',agentId:ag.id,issueId:iss.id,number:iss.number};
+    this.setState(st=>({
+      githubIssues:st.githubIssues.map(i=>i.id===id?{...i,sync:'synced',taskId,agentId:ag.id}:i),
+      tasks:st.tasks.concat([task]),
+      messages:st.messages.concat([{id:'m'+Date.now()+Math.random(),role:'master',kind:'route',text:'Spawned a task from GitHub #'+iss.number+' — routed it to the right session:',routes:[{name:ag.name,color:ag.color,repo:ag.repo+' · '+ag.branch,task:iss.title,action:'assigned'}]}]),
+    }));
+    this.logEvent('route',ag.id,'Spawned task from #'+iss.number+' — '+iss.title);
+    this.flash('Task spawned · routed to '+ag.name);
+  };
+
+  // Workflows
+  activeWf=()=>this.state.flowWorkflows.find(w=>w.id===this.state.flowActiveId)||this.state.flowWorkflows[0];
+  patchWf=(fn)=>this.setState(s=>({flowWorkflows:s.flowWorkflows.map(w=>w.id===s.flowActiveId?fn(w):w)}));
+  patchNode=(id,status)=>this.patchWf(w=>({...w,nodes:w.nodes.map(n=>n.id===id?{...n,status}:n)}));
+  setFlowTab=(t)=>{ if(t==='history'){ const wf=this.activeWf(); const first=wf.runs&&wf.runs[0]; this.setState({flowTab:t,flowRun:first?first.id:'live',flowNodeSel:null}); } else if(t==='editor'){ this.setState({flowTab:t,flowRun:'live',flowNodeSel:null}); } else { this.setState({flowTab:t,flowNodeSel:null}); } };
+  selectFlow=(id)=>this.setState({flowActiveId:id,flowRun:'live',flowMenu:null,flowNodeSel:null,flowTab:'editor'});
+  toggleFlowMenu=()=>this.setState(s=>({flowMenu:!s.flowMenu}));
+  closeFlowMenu=()=>this.setState({flowMenu:false});
+  selectRun=(id)=>this.setState({flowRun:id,flowNodeSel:null});
+  openFlowNode=(id)=>this.setState({flowNodeSel:id});
+  closeFlowNode=()=>this.setState({flowNodeSel:null});
+  setNodeAgent=(id,agentId)=>this.patchNode2(id,{agentId});
+  setNodeTrigger=(id,kind)=>{ const D={event:'issues.opened',cron:'0 3 * * *',scheduled:'2026-07-15 09:00',manual:'Run button',webhook:'POST /hooks/flow'}; this.patchWf(w=>({...w,nodes:w.nodes.map(n=>n.id===id?{...n,trig:{kind,detail:D[kind]||''}}:n)})); };
+  patchNode2=(id,patch)=>this.patchWf(w=>({...w,nodes:w.nodes.map(n=>n.id===id?{...n,...patch}:n)}));
+  addStepAfter=(id)=>{ const wf=this.activeWf(); const src=wf.nodes.find(n=>n.id===id); if(!src) return; const nid='x'+Date.now(); const nn={id:nid,type:'task',label:'New step',agentId:'a-claude',x:src.x+260,y:src.y,status:'idle'}; this.patchWf(w=>({...w,nodes:w.nodes.concat([nn]),edges:w.edges.concat([{from:id,to:nid,kind:'default'}])})); this.setState({flowNodeSel:nid,flowMode:'edit'}); this.flash('Step added'); };
+  deleteNode=(id)=>{ const wf=this.activeWf(); const n=wf.nodes.find(x=>x.id===id); if(!n||n.type==='trigger'){ this.flash('Cannot delete the trigger'); return; } this.patchWf(w=>({...w,nodes:w.nodes.filter(x=>x.id!==id),edges:w.edges.filter(e=>e.from!==id&&e.to!==id)})); this.setState({flowNodeSel:null}); this.flash('Step deleted'); };
+  approveFlowNode=(id)=>{ const wf=this.activeWf(); this.patchNode(id,'done'); wf.edges.filter(e=>e.from===id&&e.kind==='approve').forEach(e=>{ const t=wf.nodes.find(n=>n.id===e.to); this.patchNode(e.to,t&&t.type==='terminal'?'done':'running'); }); this.setState({flowRun:'live'}); this.flash('Approved · workflow resumed'); };
+  rejectFlowNode=(id)=>{ const wf=this.activeWf(); this.patchNode(id,'failed'); wf.edges.filter(e=>e.from===id&&e.kind==='failure').forEach(e=>this.patchNode(e.to,'running')); this.setState({flowRun:'live'}); this.flash('Changes requested · looped back'); };
+  runFlow=()=>{
+    const wf=this.activeWf(); if(!wf) return;
+    if(this._flowT){ clearTimeout(this._flowT); this._flowT=null; }
+    const path=wf.demo||wf.nodes.map(n=>n.id);
+    this.patchWf(w=>({...w,nodes:w.nodes.map(n=>({...n,status:'idle'}))}));
+    this.setState({flowRun:'live'});
+    let i=0;
+    const step=()=>{
+      if(i>0) this.patchNode(path[i-1],'done');
+      if(i>=path.length){ this._flowT=null; this.flash('Workflow run complete'); return; }
+      const node=wf.nodes.find(n=>n.id===path[i]);
+      const isAppr=node&&node.type==='approval';
+      this.patchNode(path[i],isAppr?'waiting':'running');
+      if(isAppr){ this._flowT=null; this.flash('Waiting for manual approval'); return; }
+      i++;
+      this._flowT=setTimeout(step,780);
+    };
+    this.flash('Workflow run started');
+    this._flowT=setTimeout(step,300);
+  };
+  flowNodeDown=(id,e)=>{
+    if(e&&e.button===2) return;
+    if(this.state.flowTab!=='editor'){ this.openFlowNode(id); return; }
+    const canvas=document.querySelector('[data-flow-canvas]'); if(!canvas) return;
+    const node=this.activeWf().nodes.find(n=>n.id===id); if(!node) return;
+    const rect=canvas.getBoundingClientRect();
+    this._drag={id,sx:e.clientX,sy:e.clientY,offX:e.clientX-rect.left+canvas.scrollLeft-node.x,offY:e.clientY-rect.top+canvas.scrollTop-node.y,moved:false};
+    window.addEventListener('pointermove',this.flowNodeMove);
+    window.addEventListener('pointerup',this.flowNodeUp);
+  };
+  flowNodeMove=(e)=>{
+    const d=this._drag; if(!d) return;
+    if(!d.moved && Math.abs(e.clientX-d.sx)+Math.abs(e.clientY-d.sy)<4) return;
+    d.moved=true;
+    const canvas=document.querySelector('[data-flow-canvas]'); if(!canvas) return;
+    const rect=canvas.getBoundingClientRect();
+    const x=Math.max(0,e.clientX-rect.left+canvas.scrollLeft-d.offX);
+    const y=Math.max(0,e.clientY-rect.top+canvas.scrollTop-d.offY);
+    this.patchNode2(d.id,{x,y});
+  };
+  flowNodeUp=()=>{
+    window.removeEventListener('pointermove',this.flowNodeMove);
+    window.removeEventListener('pointerup',this.flowNodeUp);
+    const d=this._drag; this._drag=null;
+    if(d&&!d.moved) this.openFlowNode(d.id);
+  };
+  openWorkflow=(id)=>this.setState({flowActiveId:id,flowPage:'detail',flowRun:'live',flowNodeSel:null,flowTab:'editor',flowCardMenu:null});
+  backToFlowList=()=>this.setState({flowPage:'list',flowNodeSel:null,flowMenu:false});
+  toggleActiveEnabled=()=>this.toggleWorkflowEnabled(this.state.flowActiveId);
+  deleteActiveWorkflow=()=>{ const id=this.state.flowActiveId; this.setState({flowPage:'list',flowNodeSel:null}); this.deleteWorkflow(id); };
+  toggleWorkflowEnabled=(id)=>this.setState(s=>({flowWorkflows:s.flowWorkflows.map(w=>w.id===id?{...w,enabled:!w.enabled}:w)}));
+  toggleFlowCardMenu=(id)=>this.setState(s=>({flowCardMenu:s.flowCardMenu===id?null:id}));
+  closeFlowCardMenu=()=>this.setState({flowCardMenu:null});
+  setFlowSetting=(k,v)=>this.patchWf(w=>({...w,settings:{...(w.settings||{}),[k]:v}}));
+  toggleFlowSetting=(k)=>this.patchWf(w=>({...w,settings:{...(w.settings||{}),[k]:!(w.settings||{})[k]}}));
+  newWorkflow=()=>{
+    const id='wf'+Date.now(); const t='t'+Date.now();
+    const nn={id:t,type:'trigger',label:'When…',sub:'choose a trigger',trig:{kind:'event',detail:'issues.opened'},x:60,y:240,status:'idle'};
+    const wf={id,name:'Untitled workflow',trigLabel:'No trigger yet',enabled:false,desc:'A new workflow. Add steps and connect them on the canvas.',demo:[t],settings:{maxConcurrent:'3',notifyFailure:true,autoRetry:false,requireApproval:true,defaultAgent:'auto'},nodes:[nn],edges:[],runs:[]};
+    this.setState(s=>({flowWorkflows:s.flowWorkflows.concat([wf]),flowActiveId:id,flowPage:'detail',flowTab:'editor',flowRun:'live',flowNodeSel:null}));
+    this.flash('New workflow created');
+  };
+  duplicateWorkflow=(id)=>{
+    const s=this.state; const src=s.flowWorkflows.find(w=>w.id===id); if(!src) return;
+    const nid='wf'+Date.now();
+    const copy={...src,id:nid,name:src.name+' (copy)',enabled:false,runs:[],settings:{...(src.settings||{})},nodes:src.nodes.map(n=>({...n})),edges:src.edges.map(e=>({...e}))};
+    this.setState(st=>({flowWorkflows:st.flowWorkflows.concat([copy]),flowCardMenu:null}));
+    this.flash('Workflow duplicated');
+  };
+  deleteWorkflow=(id)=>{
+    this.setState(s=>{ const list=s.flowWorkflows.filter(w=>w.id!==id); return {flowWorkflows:list, flowCardMenu:null, flowActiveId:(s.flowActiveId===id&&list[0])?list[0].id:s.flowActiveId}; });
+    this.flash('Workflow deleted');
+  };
+
   logEvent=(type,agentId,text)=>this.setState(s=>({events:[{id:'e'+Date.now()+Math.random(),type,agentId,text,time:'just now'}].concat(s.events)}));
 
   onGlobalKey=(e)=>{
     if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){ e.preventDefault(); this.setState(s=>({paletteOpen:!s.paletteOpen,paletteQuery:''})); }
-    else if(e.key==='Escape'){ this.setState({paletteOpen:false,notifOpen:false,drawer:null}); }
+    else if(e.key==='Escape'){ this.setState({paletteOpen:false,notifOpen:false,drawer:null,githubDetail:null,githubMenu:null,flowNodeSel:null,flowMenu:false,flowCardMenu:null,flowSettingsOpen:false}); }
   };
   openPalette=()=>this.setState({paletteOpen:true,paletteQuery:''});
   closePalette=()=>this.setState({paletteOpen:false});
@@ -1712,6 +2748,8 @@ class Component extends DCLogic {
       {id:'assistant',label:'Chat',paths:['M21 11.5a8.5 8.5 0 01-11.7 7.9L4 21l1.6-4.9A8.5 8.5 0 1121 11.5z']},
       {id:'overview',label:'Agents',paths:['M4 4h6.5v6.5H4z','M13.5 4H20v6.5h-6.5z','M4 13.5h6.5V20H4z','M13.5 13.5H20V20h-6.5z']},
       {id:'board',label:'Board',paths:['M4 5h4v14H4z','M10 5h4v9h-4z','M16 5h4v12h-4z']},
+      {id:'flows',label:'Flows',paths:['M5 6m-2.5 0a2.5 2.5 0 105 0 2.5 2.5 0 10-5 0','M19 18m-2.5 0a2.5 2.5 0 105 0 2.5 2.5 0 10-5 0','M7.5 6H15a3 3 0 013 3v6.5']},
+      {id:'github',label:'Issues',paths:['M12 3.5a8.5 8.5 0 100 17 8.5 8.5 0 000-17z','M12 9.4a2.6 2.6 0 100 5.2 2.6 2.6 0 000-5.2z']},
       {id:'timeline',label:'Activity',paths:['M3 12h4l2.5 6 5-12 2.5 6h4']},
       {id:'usage',label:'Usage',paths:['M4 20V11','M10 20V4','M16 20v-6','M3 20h18']},
       {id:'crons',label:'Cron',paths:['M12 3.6a8.4 8.4 0 100 16.8 8.4 8.4 0 000-16.8z','M12 8v4.3l2.9 1.7']},
@@ -1756,6 +2794,211 @@ class Component extends DCLogic {
         borderColor:s.dragOverCol===c.id?accent:'#1a1e26',
         onDrop:()=>this.dropTo(c.id), onEnter:()=>this.enterCol(c.id)};
     });
+
+    // GitHub Issues
+    const ghBorder=this.hexToRgba(accent,.4);
+    const ghS=s.githubSettings;
+    const taskById={}; s.tasks.forEach(t=>taskById[t.id]=t);
+    const syncedRepos=s.githubRepoList.filter(r=>r.synced).map(r=>r.id);
+    const openByRepo={}; s.githubIssues.forEach(i=>{ if(i.sync!=='archived') openByRepo[i.repo]=(openByRepo[i.repo]||0)+1; });
+
+    const ghModeTabs=[{id:'issues',label:'Issues'},{id:'settings',label:'Settings'}].map(m=>({...m,active:m.id===s.githubMode, bg:m.id===s.githubMode?accentSoft:'transparent', color:m.id===s.githubMode?accent:'#8B93A1', border:m.id===s.githubMode?ghBorder:'#23272F', onClick:()=>this.ghSetMode(m.id)}));
+
+    const COL2ISS={backlog:{label:'Queued',color:'#6B7280'},routed:{label:'Routing',color:'#6C8EF5'},progress:{label:'In progress',color:'#3DDC97'},review:{label:'In review',color:'#FFB020'},done:{label:'Done · closing',color:'#A371F7'}};
+    const mkIssue=(i)=>{
+      const lt=i.taskId?taskById[i.taskId]:null;
+      const col=lt?lt.col:null;
+      const closed=col==='done'&&ghS.autoClose;
+      const ag=i.agentId?byId[i.agentId]:null;
+      const iss=col?COL2ISS[col]:null;
+      const stColor=closed?'#A371F7':'#3DDC97';
+      return {
+        id:i.id, number:'#'+i.number, title:i.title, repo:i.repo, author:i.author, opened:i.opened, byline:'opened by '+i.author+' · '+i.opened, comments:''+i.comments,
+        labels:i.labels.map(l=>({name:l.name,color:l.color,soft:this.hexToRgba(l.color,.13),border:this.hexToRgba(l.color,.3)})),
+        stateLabel:closed?'Closed':'Open', stateColor:stColor, stateSoft:this.hexToRgba(stColor,.14),
+        stateOpen:!closed, stateClosed:closed,
+        isUnsynced:i.sync==='unsynced', isSynced:i.sync==='synced', isDimmed:(i.sync==='ignored'||i.sync==='archived'),
+        isIgnored:i.sync==='ignored', isArchived:i.sync==='archived',
+        cardOpacity:(i.sync==='ignored'||i.sync==='archived')?'0.58':'1',
+        dimNote:i.sync==='ignored'?'Ignored — hidden from inbox and sync':'Archived — no longer tracked',
+        agentName:ag?ag.name:'', agentColor:ag?ag.color:'#626B79', agentSoft:ag?this.hexToRgba(ag.color,.16):'#12151C', agentBorder:ag?this.hexToRgba(ag.color,.4):'#23272F', agentInitials:ag?(ag.short||ag.name.slice(0,2)):'',
+        taskStatusLabel:iss?iss.label:'', taskStatusColor:iss?iss.color:'#8B93A1', taskStatusSoft:iss?this.hexToRgba(iss.color,.14):'#12151C',
+        ghUrl:'https://github.com/acme/'+i.repo+'/issues/'+i.number, ghUrlLabel:'acme/'+i.repo+' #'+i.number,
+        onSpawn:()=>this.ghSpawn(i.id), onIgnore:()=>this.ghIgnore(i.id), onArchive:()=>this.ghArchive(i.id), onRestore:()=>this.ghRestore(i.id), onUnlink:()=>this.ghUnlink(i.id), onViewTask:()=>this.setView('board'), onOpen:()=>this.ghOpenDetail(i.id),
+      };
+    };
+
+    // Filter pipeline: repo scope → search/label → tab → sort → paginate
+    const q=(s.githubQuery||'').trim().toLowerCase();
+    const ghBase=s.githubIssues
+      .filter(i=>syncedRepos.indexOf(i.repo)>=0)
+      .filter(i=>s.githubRepo==='all'||i.repo===s.githubRepo)
+      .filter(i=>!q || i.title.toLowerCase().indexOf(q)>=0 || (''+i.number).indexOf(q)>=0 || i.repo.indexOf(q)>=0 || i.author.toLowerCase().indexOf(q)>=0)
+      .filter(i=>s.githubLabel==='all' || i.labels.some(l=>l.name===s.githubLabel));
+    const ghCount={inbox:0,synced:0,ignored:0,archived:0};
+    ghBase.forEach(i=>{ const k=i.sync==='unsynced'?'inbox':i.sync; if(ghCount[k]!=null) ghCount[k]++; });
+    const ghTabs=[{id:'inbox',label:'Inbox'},{id:'synced',label:'Synced'},{id:'ignored',label:'Ignored'},{id:'archived',label:'Archived'}].map(t=>({...t,count:''+ghCount[t.id], active:t.id===s.githubTab, bg:t.id===s.githubTab?accentSoft:'transparent', color:t.id===s.githubTab?accent:'#8B93A1', border:t.id===s.githubTab?ghBorder:'transparent', countBg:t.id===s.githubTab?this.hexToRgba(accent,.18):'#12151C', countColor:t.id===s.githubTab?accent:'#8B93A1', onClick:()=>this.ghSetTab(t.id)}));
+
+    const ghFilterRepos=[{id:'all',label:'All repos'}].concat(syncedRepos.map(r=>({id:r,label:r}))).map(r=>({...r,active:r.id===s.githubRepo, bg:r.id===s.githubRepo?accentSoft:'#12151C', color:r.id===s.githubRepo?accent:'#9AA3B2', border:r.id===s.githubRepo?ghBorder:'#23272F', onClick:()=>this.ghSetRepo(r.id)}));
+
+    const catKey=s.githubTab;
+    const SORTS={newest:{label:'Newest',fn:(a,b)=>a.ageMin-b.ageMin},oldest:{label:'Oldest',fn:(a,b)=>b.ageMin-a.ageMin},comments:{label:'Most comments',fn:(a,b)=>b.comments-a.comments},number:{label:'Issue number',fn:(a,b)=>b.number-a.number}};
+    const sortKey=SORTS[s.githubSort]?s.githubSort:'newest';
+    const ghSorted=ghBase.filter(i=> catKey==='inbox'? i.sync==='unsynced' : i.sync===catKey).slice().sort(SORTS[sortKey].fn);
+    const ghSortOpts=Object.keys(SORTS).map(k=>({id:k,label:SORTS[k].label,active:k===sortKey,onClick:()=>this.ghSetSort(k)}));
+    const ghSortLabel=SORTS[sortKey].label;
+
+    // Label filter options
+    const labelSet={}; s.githubIssues.forEach(i=>i.labels.forEach(l=>{labelSet[l.name]=l.color;}));
+    const ghLabelOpts=[{id:'all',label:'All labels',color:null}].concat(Object.keys(labelSet).sort().map(n=>({id:n,label:n,color:labelSet[n]}))).map(o=>({...o,active:o.id===s.githubLabel,swatch:o.color||'#3a4150',textColor:o.id===s.githubLabel?accent:'#C7CCD6',onClick:()=>this.ghSetLabel(o.id)}));
+    const ghLabelLabel=s.githubLabel==='all'?'All labels':s.githubLabel;
+
+    // Pagination
+    const PAGE=5;
+    const ghTotal=ghSorted.length;
+    const ghPages=Math.max(1,Math.ceil(ghTotal/PAGE));
+    const ghPage=Math.min(Math.max(1,s.githubPage||1),ghPages);
+    const ghStart=(ghPage-1)*PAGE;
+    const githubList=ghSorted.slice(ghStart,ghStart+PAGE).map(mkIssue);
+    const ghPageLabel=ghTotal?((ghStart+1)+'–'+Math.min(ghStart+PAGE,ghTotal)+' of '+ghTotal):'0 issues';
+    const ghPageNums=[]; for(let p=1;p<=ghPages;p++) ghPageNums.push({n:p,label:''+p,active:p===ghPage,bg:p===ghPage?accentSoft:'transparent',color:p===ghPage?accent:'#8B93A1',border:p===ghPage?ghBorder:'#23272F',onClick:()=>this.ghGoPage(p)});
+    const ghMenuLabel=s.githubMenu==='label', ghMenuSort=s.githubMenu==='sort';
+    const ghEmptyMsg=catKey==='inbox'?'No new issues to triage. Everything in scope is synced or filed away.':(catKey==='synced'?'No issues are linked to a task yet. Spawn one from the Inbox.':(catKey==='ignored'?'Nothing ignored.':'Nothing archived.'));
+
+    // Issue detail
+    let ghDetail=null;
+    if(s.githubDetail){
+      const raw=s.githubIssues.find(x=>x.id===s.githubDetail);
+      if(raw){
+        ghDetail={...mkIssue(raw), body:raw.body||'No description provided.', bodyLines:(raw.body||'No description provided.').split('\n'), authorInitials:raw.author.slice(0,2).toUpperCase(), thread:(raw.thread||[]).map(c=>({author:c.author,text:c.text,time:c.time,initials:c.author.slice(0,2).toUpperCase()})), threadCount:''+((raw.thread||[]).length), hasThread:(raw.thread||[]).length>0};
+      }
+    }
+
+    // GitHub settings
+    const ghRepoRows=s.githubRepoList.map(r=>({id:r.id, name:r.owner+'/'+r.id, synced:r.synced, issueCount:(openByRepo[r.id]||0)+' open', onToggle:()=>this.ghToggleRepo(r.id), swBg:r.synced?'#3DDC97':'#2C313B', knobX:r.synced?'18px':'2px', dot:r.synced?'#3DDC97':'#3a4150', nameColor:r.synced?'#E7E9F0':'#8B93A1'}));
+    const ghWsRows=s.githubWorkspaces.map(w=>({label:w, active:w===s.githubWorkspace, onClick:()=>this.ghSetWorkspace(w), bg:w===s.githubWorkspace?accentSoft:'#12151C', color:w===s.githubWorkspace?accent:'#C7CCD6', border:w===s.githubWorkspace?ghBorder:'#23272F', check:w===s.githubWorkspace}));
+    const ghAgentOpts=[{id:'auto',name:'Auto-route'}].concat(s.agents.slice(0,4).map(a=>({id:a.id,name:a.name}))).map(o=>({...o,active:o.id===ghS.defaultAgent, bg:o.id===ghS.defaultAgent?accentSoft:'#12151C', color:o.id===ghS.defaultAgent?accent:'#9AA3B2', border:o.id===ghS.defaultAgent?ghBorder:'#23272F', onClick:()=>this.ghSetSetting('defaultAgent',o.id)}));
+    const ghFreqOpts=[{id:'manual',label:'Manual'},{id:'5m',label:'Every 5 min'},{id:'15m',label:'Every 15 min'},{id:'1h',label:'Hourly'}].map(o=>({...o,active:o.id===ghS.syncFreq, bg:o.id===ghS.syncFreq?accentSoft:'#12151C', color:o.id===ghS.syncFreq?accent:'#9AA3B2', border:o.id===ghS.syncFreq?ghBorder:'#23272F', onClick:()=>this.ghSetSetting('syncFreq',o.id)}));
+    const ghToggles=[
+      {id:'autoClose',label:'Close the issue when its task is done',detail:'When a linked task reaches Done, Conductor closes the GitHub issue and comments the merged branch.'},
+      {id:'autoSpawn',label:'Auto-spawn tasks for new issues',detail:'Master routes each newly-synced issue to an agent without waiting for you.'},
+      {id:'syncStatus',label:'Two-way status sync',detail:'Task progress pushes to the issue as labels and comments; reopening an issue pulls its task back to review.'},
+      {id:'syncLabels',label:'Sync labels & assignees',detail:'Mirror GitHub labels onto spawned tasks and keep assignees in step.'},
+      {id:'onlyAssigned',label:'Only sync issues assigned to me',detail:'Skip issues that aren’t assigned to your GitHub account.'},
+    ].map(t=>({...t,on:!!ghS[t.id], onToggle:()=>this.ghToggleSetting(t.id), swBg:ghS[t.id]?'#3DDC97':'#2C313B', knobX:ghS[t.id]?'18px':'2px'}));
+
+    // Workflows (DAG canvas)
+    const wf=this.activeWf();
+    const NW=196,NH=70;
+    const STC={done:{c:'#3DDC97',l:'Done'},running:{c:accent,l:'Running'},waiting:{c:'#A371F7',l:'Waiting'},failed:{c:'#FF5C5C',l:'Failed'},idle:{c:'#6B7280',l:'Idle'},skipped:{c:'#3a4150',l:'Skipped'}};
+    const TYPE={
+      trigger:{icon:['M13 3L4 14h6l-1 7 9-11h-6z'],color:accent,tag:'TRIGGER'},
+      task:{color:'#7FD1FF',tag:'TASK'},
+      gate:{icon:['M12 3l9 9-9 9-9-9z'],color:'#6C8EF5',tag:'GATE'},
+      approval:{icon:['M12 3l7 3v5c0 4.4-3 7.4-7 8-4-.6-7-3.6-7-8V6z','M9 12l2 2 4-4'],color:'#A371F7',tag:'APPROVAL'},
+      terminal:{icon:['M6 4v16','M6 5h11l-2 3.5 2 3.5H6'],color:'#3DDC97',tag:'OUTPUT'},
+    };
+    const TRIG={event:'Event',cron:'Cron',scheduled:'Scheduled',manual:'Manual',webhook:'Webhook'};
+    const EKC={success:'#3DDC97',failure:'#FF5C5C',cond:'#6C8EF5',approve:'#A371F7',default:'#4a5262'};
+    const liveNS={}; wf.nodes.forEach(n=>liveNS[n.id]=n.status);
+    const flowLiveSel=s.flowRun==='live';
+    const replRun=flowLiveSel?null:wf.runs.find(r=>r.id===s.flowRun);
+    const ns=replRun?replRun.ns:liveNS;
+    const nById={}; wf.nodes.forEach(n=>nById[n.id]=n);
+
+    const flowNodes=wf.nodes.map(n=>{
+      const stk=ns[n.id]||'idle'; const st=STC[stk]; const ty=TYPE[n.type]||TYPE.task; const ag=n.agentId?byId[n.agentId]:null;
+      const isActive=(stk==='running'||stk==='waiting');
+      const dim=((stk==='skipped'||stk==='idle')&&replRun);
+      return {
+        id:n.id, isTrigger:n.type==='trigger', isTask:n.type==='task', isGate:n.type==='gate', isApproval:n.type==='approval', isTerminal:n.type==='terminal',
+        label:n.label, sub:n.sub||'', hasSub:!!n.sub,
+        left:n.x+'px', top:n.y+'px', width:NW+'px',
+        borderColor:n.id===s.flowNodeSel?accent:st.c, statusColor:st.c, statusLabel:st.l,
+        glow:n.id===s.flowNodeSel?('0 0 0 2px '+this.hexToRgba(accent,.5)):(isActive?('0 0 0 3px '+this.hexToRgba(st.c,.18)):'none'),
+        dotAnim:isActive?'cpulse 1.3s ease-in-out infinite':'none',
+        cardOpacity:dim?'0.5':'1',
+        typeColor:ty.color, typeSoft:this.hexToRgba(ty.color,.16), typeTag:ty.tag, typeIcon:ty.icon||[], hasIcon:!!ty.icon,
+        hasAgent:!!ag, agentInitials:ag?(ag.short||ag.name.slice(0,2)):'', agentColor:ag?ag.color:'#8B93A1', agentSoft:ag?this.hexToRgba(ag.color,.16):'#12151C', agentBorder:ag?this.hexToRgba(ag.color,.4):'#23272F',
+        hasTrig:!!n.trig, trigLabel:n.trig?TRIG[n.trig.kind]:'', trigDetail:n.trig?n.trig.detail:'',
+        cursor:s.flowTab==='editor'?'grab':'pointer',
+        onDown:(e)=>this.flowNodeDown(n.id,e),
+      };
+    });
+    const flowEdges=wf.edges.map((e,idx)=>{
+      const a=nById[e.from], b=nById[e.to]; if(!a||!b) return null;
+      const x1=a.x+NW, y1=a.y+NH/2, x2=b.x, y2=b.y+NH/2;
+      const dx=Math.max(48,Math.abs(x2-x1)/2);
+      const d='M'+x1+' '+y1+' C '+(x1+dx)+' '+y1+' '+(x2-dx)+' '+y2+' '+x2+' '+y2;
+      const on=ns[e.from]&&ns[e.from]!=='idle'&&ns[e.from]!=='skipped'&&ns[e.to]&&ns[e.to]!=='idle'&&ns[e.to]!=='skipped';
+      const col=EKC[e.kind]||'#4a5262';
+      return {id:'fe'+idx, d, color:on?col:'#2a2f39', width:on?2.2:1.4, dash:e.kind==='failure'?'6 5':'0', hasLabel:!!e.label, label:e.label||'', labelColor:on?col:'#8B93A1', labelBg:on?this.hexToRgba(col,.16):'#12151C', labelBorder:on?this.hexToRgba(col,.4):'#23272F', lx:((x1+x2)/2)+'px', ly:((y1+y2)/2-11)+'px'};
+    }).filter(Boolean);
+    const fMaxX=Math.max.apply(null,wf.nodes.map(n=>n.x+NW));
+    const fMaxY=Math.max.apply(null,wf.nodes.map(n=>n.y+NH));
+    const flowCanvasW=Math.max(1360,fMaxX+280)+'px', flowCanvasH=Math.max(600,fMaxY+150)+'px';
+
+    const flowWfList=s.flowWorkflows.map(w=>({id:w.id,name:w.name,trig:w.trigLabel,active:w.id===s.flowActiveId, running:w.nodes.some(n=>n.status==='running'||n.status==='waiting'), dotColor:w.nodes.some(n=>n.status==='running')?accent:(w.nodes.some(n=>n.status==='waiting')?'#A371F7':'#3DDC97'), bg:w.id===s.flowActiveId?accentSoft:'transparent', onClick:()=>this.selectFlow(w.id)}));
+    const flowTabs=[{id:'editor',label:'Editor'},{id:'history',label:'History'},{id:'settings',label:'Settings'}].map(t=>({...t,active:t.id===s.flowTab, bg:t.id===s.flowTab?accentSoft:'transparent', color:t.id===s.flowTab?accent:'#8B93A1', onClick:()=>this.setFlowTab(t.id)}));
+
+    const RST={success:{c:'#3DDC97',l:'Success'},failed:{c:'#FF5C5C',l:'Failed'},waiting:{c:'#A371F7',l:'Waiting'},running:{c:accent,l:'Running'}};
+    const flowRunsList=[{id:'live',isLive:true,num:'LIVE',statusLabel:'Live state',statusColor:accent,statusSoft:accentSoft,dur:'now',trigger:'Current run',when:'',selected:flowLiveSel,bg:flowLiveSel?accentSoft:'transparent',border:flowLiveSel?ghBorder:'#23272F',onClick:()=>this.selectRun('live')}]
+      .concat(wf.runs.map(r=>{ const st=RST[r.status]||RST.success; const sel=s.flowRun===r.id; return {id:r.id,isLive:false,num:'#'+r.num,statusLabel:st.l,statusColor:st.c,statusSoft:this.hexToRgba(st.c,.14),dur:r.dur,trigger:r.trigger,when:r.when,selected:sel,bg:sel?accentSoft:'transparent',border:sel?ghBorder:'#23272F',onClick:()=>this.selectRun(r.id)}; }));
+
+    // Workflow index (list page)
+    const TRIGICON={event:['M13 3L4 14h6l-1 7 9-11h-6z'],cron:['M12 3.6a8.4 8.4 0 100 16.8 8.4 8.4 0 000-16.8z','M12 8v4.3l2.9 1.7'],scheduled:['M7 3v3M17 3v3','M4 8h16','M5 8v11a1 1 0 001 1h12a1 1 0 001-1V8'],manual:['M7 5l12 7-12 7z'],webhook:['M12 3a5 5 0 00-4.5 7.2','M8 21l4-7 4 7','M12 9a1 1 0 100 2 1 1 0 000-2']};
+    const flowIndex=s.flowWorkflows.map(w=>{
+      const tn=w.nodes.find(n=>n.type==='trigger'); const tk=tn&&tn.trig?tn.trig.kind:'manual';
+      const total=w.runs.length, succ=w.runs.filter(r=>r.status==='success').length;
+      const last=w.runs[0]; const lst=last?(RST[last.status]||RST.success):null;
+      const running=w.nodes.some(n=>n.status==='running'), waiting=w.nodes.some(n=>n.status==='waiting');
+      const lc=!w.enabled?'#6B7280':(running?accent:(waiting?'#A371F7':'#3DDC97'));
+      const tc=tk==='cron'?'#7FD1FF':(tk==='event'?accent:(tk==='scheduled'?'#A371F7':(tk==='webhook'?'#6C8EF5':'#3DDC97')));
+      return {
+        id:w.id, name:w.name, desc:w.desc||'',
+        trigLabel:w.trigLabel, trigIcon:TRIGICON[tk]||TRIGICON.manual, trigColor:tc, trigSoft:this.hexToRgba(tc,.15),
+        enabled:w.enabled, swBg:w.enabled?'#3DDC97':'#2C313B', knobX:w.enabled?'18px':'2px',
+        liveColor:lc, liveSoft:this.hexToRgba(lc,.14), liveLabel:!w.enabled?'Paused':(running?'Running':(waiting?'Awaiting approval':'Active')),
+        nodeCount:w.nodes.length+' steps', runCount:total+(total===1?' run':' runs'), rate:total?Math.round(succ/total*100)+'% pass':'—',
+        lastLabel:lst?('Last run '+lst.l.toLowerCase()):'No runs yet', lastColor:lst?lst.c:'#6B7280', lastDot:lst?lst.c:'#3a4150', lastWhen:last?last.when:'',
+        menuOpen:s.flowCardMenu===w.id,
+        onOpen:()=>this.openWorkflow(w.id), onToggle:()=>this.toggleWorkflowEnabled(w.id), onMenu:()=>this.toggleFlowCardMenu(w.id), onDup:()=>this.duplicateWorkflow(w.id), onDelete:()=>this.deleteWorkflow(w.id),
+      };
+    });
+    const flowSummary={total:''+s.flowWorkflows.length, active:''+s.flowWorkflows.filter(w=>w.enabled).length, runs:''+s.flowWorkflows.reduce((n,w)=>n+w.runs.length,0), approvals:''+s.flowWorkflows.reduce((n,w)=>n+w.nodes.filter(nd=>nd.status==='waiting').length,0)};
+    const fs=wf.settings||{};
+    const flowConc=['1','3','5','10'].map(v=>({v,label:v,active:fs.maxConcurrent===v, bg:fs.maxConcurrent===v?accentSoft:'#12151C', color:fs.maxConcurrent===v?accent:'#9AA3B2', border:fs.maxConcurrent===v?ghBorder:'#23272F', onClick:()=>this.setFlowSetting('maxConcurrent',v)}));
+    const flowDefAgent=[{id:'auto',name:'Auto-route'}].concat(s.agents.slice(0,4).map(a=>({id:a.id,name:a.name}))).map(o=>({...o,active:o.id===fs.defaultAgent, bg:o.id===fs.defaultAgent?accentSoft:'#12151C', color:o.id===fs.defaultAgent?accent:'#9AA3B2', border:o.id===fs.defaultAgent?ghBorder:'#23272F', onClick:()=>this.setFlowSetting('defaultAgent',o.id)}));
+    const flowSettingToggles=[
+      {id:'notifyFailure',label:'Notify on failed runs',detail:'Post to Slack and the notification center whenever any workflow run fails.'},
+      {id:'autoRetry',label:'Auto-retry failed steps once',detail:'Retry a failed task a single time before failing the whole run.'},
+      {id:'requireApproval',label:'Require approval for production steps',detail:'Any step that deploys to prod pauses for a manual approval gate.'},
+    ].map(t=>({...t,on:!!fs[t.id],onToggle:()=>this.toggleFlowSetting(t.id), swBg:fs[t.id]?'#3DDC97':'#2C313B', knobX:fs[t.id]?'18px':'2px'}));
+
+    // Node detail drawer
+    let flowNode=null;
+    if(s.flowNodeSel){
+      const n=wf.nodes.find(x=>x.id===s.flowNodeSel);
+      if(n){
+        const stk=liveNS[n.id]||'idle'; const st=STC[stk]; const ty=TYPE[n.type]||TYPE.task; const ag=n.agentId?byId[n.agentId]:null;
+        const outs=wf.edges.filter(e=>e.from===n.id).map(e=>{ const t=nById[e.to]; const col=EKC[e.kind]||'#4a5262'; return {label:e.label||'always',to:t?t.label:e.to,color:col,soft:this.hexToRgba(col,.14),border:this.hexToRgba(col,.4)}; });
+        const RES={done:'Completed successfully',running:'Running now…',waiting:'Paused — awaiting approval',failed:'Exited with a non-zero status',idle:'Has not run in this execution',skipped:'Skipped on this path'};
+        flowNode={
+          id:n.id, typeTag:ty.tag, typeColor:ty.color, typeSoft:this.hexToRgba(ty.color,.16), typeIcon:ty.icon||[], hasIcon:!!ty.icon,
+          label:n.label, sub:n.sub||'', hasSub:!!n.sub,
+          statusColor:st.c, statusLabel:st.l, statusSoft:this.hexToRgba(st.c,.14), lastResult:RES[stk]||'',
+          isTrigger:n.type==='trigger', isTask:n.type==='task', isGate:n.type==='gate', isApproval:n.type==='approval', isTerminal:n.type==='terminal',
+          hasAgent:!!ag, agentName:ag?ag.name:'Unassigned', agentInitials:ag?(ag.short||ag.name.slice(0,2)):'', agentColor:ag?ag.color:'#8B93A1', agentSoft:ag?this.hexToRgba(ag.color,.16):'#12151C', agentBorder:ag?this.hexToRgba(ag.color,.4):'#23272F',
+          trigLabel:n.trig?TRIG[n.trig.kind]:'', trigDetail:n.trig?n.trig.detail:'',
+          trigOpts:['event','cron','scheduled','manual','webhook'].map(k=>({k,label:TRIG[k],active:n.trig&&n.trig.kind===k, bg:(n.trig&&n.trig.kind===k)?accentSoft:'#12151C', color:(n.trig&&n.trig.kind===k)?accent:'#9AA3B2', border:(n.trig&&n.trig.kind===k)?ghBorder:'#23272F', onClick:()=>this.setNodeTrigger(n.id,k)})),
+          agentOpts:s.agents.slice(0,4).map(a=>({id:a.id,name:a.name,active:n.agentId===a.id, bg:n.agentId===a.id?accentSoft:'#12151C', color:n.agentId===a.id?accent:'#9AA3B2', border:n.agentId===a.id?ghBorder:'#23272F', onClick:()=>this.setNodeAgent(n.id,a.id)})),
+          branches:outs, hasBranches:outs.length>0, branchCount:''+outs.length,
+          isWaiting:stk==='waiting',
+          onApprove:()=>this.approveFlowNode(n.id), onReject:()=>this.rejectFlowNode(n.id),
+          onAddStep:()=>this.addStepAfter(n.id), onDelete:()=>this.deleteNode(n.id), canDelete:n.type!=='trigger',
+        };
+      }
+    }
 
     const runningCount=A.filter(a=>a.status==='running').length;
     const needsCount=A.filter(a=>a.status==='needs').length;
@@ -1827,6 +3070,28 @@ class Component extends DCLogic {
       settingsTypes, settingsIntegrations, settingsToggles,
       graphNodes, spokes, dep, hasDep:!!dep, openSettings:()=>this.setView('settings'), settingsIconColor:s.view==='settings'?accent:'#626B79',
       board, allowDrop:this.allowDrop, addTask:this.addTask,
+      isFlows:s.view==='flows', flowNodes, flowEdges, flowCanvasW, flowCanvasH,
+      flowIsList:s.flowPage==='list', flowIsDetail:s.flowPage==='detail',
+      flowIndex, flowSummary, flowConc, flowDefAgent, flowSettingToggles,
+      newWorkflow:this.newWorkflow, backToFlowList:this.backToFlowList,
+      flowCardMenuOpen:!!s.flowCardMenu, closeFlowCardMenu:this.closeFlowCardMenu,
+      flowWfList, flowMenu:s.flowMenu, toggleFlowMenu:this.toggleFlowMenu, closeFlowMenu:this.closeFlowMenu, flowActiveName:wf.name, flowActiveTrig:wf.trigLabel,
+      flowRunsList, runFlow:this.runFlow, setFlowTab:this.setFlowTab, flowTabs,
+      flowTab:s.flowTab, flowIsEditor:s.flowTab==='editor', flowIsHistory:s.flowTab==='history', flowIsSettings:s.flowTab==='settings',
+      flowGrid:s.flowTab==='editor'?'radial-gradient(#1a1e26 1.2px, transparent 1.2px)':'none', flowGridSize:s.flowTab==='editor'?'26px 26px':'0',
+      flowShowRun:s.flowTab!=='settings', flowShowCanvas:s.flowTab==='editor'||s.flowTab==='history',
+      flowActiveEnabled:wf.enabled, flowActiveSwBg:wf.enabled?'#3DDC97':'#2C313B', flowActiveKnobX:wf.enabled?'18px':'2px', onToggleActiveEnabled:this.toggleActiveEnabled, onDeleteActive:this.deleteActiveWorkflow,
+      flowReplaying:s.flowTab==='history'&&!!replRun, flowReplayLabel:replRun?('Replaying run #'+replRun.num+' · '+replRun.when):'', backToLive:()=>this.selectRun('live'),
+      flowNodeOpen:!!flowNode, flowNode, closeFlowNode:this.closeFlowNode,
+      isGithub:s.view==='github', ghIsIssues:s.githubMode==='issues', ghIsSettings:s.githubMode==='settings', ghModeTabs,
+      ghTabs, ghFilterRepos, githubList, ghEmpty:githubList.length===0, ghEmptyMsg,
+      ghSortOpts, ghSortLabel, ghLabelOpts, ghLabelLabel, ghQuery:s.githubQuery, onGhQuery:this.onGhQuery,
+      ghMenuLabel, ghMenuSort, toggleGhSortMenu:()=>this.ghToggleMenu('sort'), toggleGhLabelMenu:()=>this.ghToggleMenu('label'), ghMenuOpen:!!s.githubMenu, closeGhMenu:this.ghCloseMenu,
+      ghPageLabel, ghPageNums, ghHasPrev:ghPage>1, ghHasNext:ghPage<ghPages, ghMultiPage:ghPages>1, onGhPrev:this.ghPrevPage, onGhNext:this.ghNextPage,
+      ghPrevDisabled:ghPage<=1, ghNextDisabled:ghPage>=ghPages, ghPrevColor:ghPage<=1?'#4a5262':'#C7CCD6', ghNextColor:ghPage>=ghPages?'#4a5262':'#C7CCD6', ghPrevCursor:ghPage<=1?'default':'pointer', ghNextCursor:ghPage>=ghPages?'default':'pointer',
+      ghDetailOpen:!!ghDetail, ghDetail, closeGhDetail:this.ghCloseDetail,
+      ghSyncing:s.githubSyncing, ghLastSync:s.githubLastSync, ghSyncLabel:s.githubSyncing?'Syncing…':'Sync now', ghSpinAnim:s.githubSyncing?'cspin .8s linear infinite':'none', onGhSync:this.ghSyncNow,
+      ghRepoCount:syncedRepos.length, ghRepoRows, ghWsRows, ghAgentOpts, ghFreqOpts, ghToggles, ghWorkspace:s.githubWorkspace,
       nav, panes, tabs, splitCount:s.splitCount,
       splitBtnBg:s.splitCount>1?accentSoft:'transparent', splitBtnColor:s.splitCount>1?accent:'#9AA3B2',
       messages, composer:s.composer,
