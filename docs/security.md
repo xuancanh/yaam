@@ -130,7 +130,11 @@ Git repository, those brain paths may also be committed automatically. This is
 the intentional self-learning path. Other home-folder edits, including edits
 requested by scheduled maintenance loops, still follow the conversation's
 Ask/Auto tool policy. Imported `AGENT.json` profiles bound text fields, sanitize
-colors, validate cron loops, and never execute package code.
+colors, validate cron loops, and cap dashboards/apps. Marketplace installs show
+the fetched charter, enabled token-spending loops, and mini-app list for explicit
+review. A profile's mini-app HTML can execute script only after the user opens
+the app, in an opaque-origin `allow-scripts` iframe with a network-denying CSP;
+it receives no YAAM RPC bridge.
 
 ### Monitors, watchers, and addon agents
 

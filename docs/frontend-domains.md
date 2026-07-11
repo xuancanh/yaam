@@ -379,15 +379,19 @@ Provide in-app LLM agents that operate on files and applications without a PTY.
 - `durable-brain.ts` loads, searches, serializes, bounds, reflects, and optionally
   Git-versions each durable agent's transparent file brain.
 - `agent-templates.ts`, `HireAgentDialog.tsx`, and `DurableAgentDialog.tsx` own
-  role scaffolds, defensive `AGENT.json` sharing, profiles, stats, and loops.
+  role scaffolds, defensive `AGENT.json` sharing, registry install review,
+  profiles, stats, and loops. `agent-market.ts` loads portable profiles from the
+  configured addon registries.
 - `log.ts` appends bounded visible transcript entries and updates streaming
   messages.
 - `turns.ts` manages structured replay/rewind records and builds bounded
   extractive context for older turns.
 - `search-indexer.ts` subscribes only to transcript-reference changes and
   debounces Tantivy reindexing.
-- `ChatView.tsx` provides chat selection, pin/tag organization, recoverable
-  archive management, and full-text search.
+- `ChatView.tsx` provides durable-agent grouping, chat selection, pin/tag
+  organization, recoverable archive management, and full-text search.
+- `AgentHome.tsx` renders an agent-maintained markdown dashboard, sandboxed mini
+  apps, active-workspace conversation history, and the agent's schedules.
 - `ChatPane.tsx` renders messages, attachments, files panel, tool traces,
   approval bubbles, slash menu, retry/copy/export, and stop/send controls.
 

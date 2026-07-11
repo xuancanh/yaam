@@ -351,15 +351,22 @@ restart, provider history is rebuilt from the summary plus only messages newer
 than the cutoff; transcript display remains unchanged. Compaction and normal
 turns share the per-chat busy lock so neither can rewrite history concurrently.
 
-Durable agents add a persistent identity above chat sessions. Each profile owns
-a charter, provider/model defaults, optional home folder, and scheduled prompts.
+Durable agents add a global persistent identity above workspace-scoped chat
+sessions. Each profile owns a charter, provider/model defaults, optional home
+folder, scheduled prompts, a markdown home dashboard, and up to 12 self-built
+HTML mini apps. The home page shows only conversations from the active workspace
+even though the identity/dashboard/apps are global.
 The home folder is a transparent file brain: `LESSONS.md`, `JOURNAL.md`, and
 user/agent-maintained files under `knowledge/`. Conversations load bounded tails
 of the brain into the system prompt, expose ranked home-folder search, and can
 distill completed work into serialized, size-bounded brain appends. Git-backed
-brains auto-commit only the brain paths. `AGENT.json` exports/imports the profile
-and validated loops; built-in role templates scaffold casual and professional
-agents without changing the underlying runtime.
+brains auto-commit only the brain paths. `AGENT.json` exports/imports the profile,
+validated loops, dashboard, and size-bounded mini apps. Mini apps execute only
+when opened, inside an opaque-origin, network-denied iframe. Registry profiles
+receive a capability review before installation because imported loops are
+enabled immediately and spend tokens when they fire. Built-in role templates
+scaffold casual and professional agents without changing the underlying runtime;
+legacy Personas migrate into durable profiles during hydration.
 
 ## Board and schedule flow
 
