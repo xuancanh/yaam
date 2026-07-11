@@ -56,6 +56,26 @@ pub struct PairRequest {
 }
 
 const MAX_PENDING_PAIRS: usize = 5;
+const MAX_COMMANDS: usize = 128;
+const MAX_COMMAND_TEXT_BYTES: usize = 128 * 1024;
+const MAX_COMMAND_ID_BYTES: usize = 256;
+const MAX_RESPONSES: usize = 16;
+const MAX_RESPONSE_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+
+fn valid_command(cmd: &RemoteCommand) -> bool {
+    const KINDS: &[&str] = &[
+        "master_send", "chat_send", "chat_new", "task_chat", "task_start",
+        "session_input", "session_key", "session_focus", "session_blur",
+        "prompt_answer", "prompt_approve", "prompt_deny", "session_stop",
+        "session_resume", "approve_master", "approve_chat", "rpc_fs_list",
+        "rpc_fs_read", "rpc_fs_b64", "rpc_git_status", "rpc_git_diff",
+    ];
+    KINDS.contains(&cmd.kind.as_str())
+        && cmd.kind.len() <= 32
+        && cmd.id.len() <= MAX_COMMAND_ID_BYTES
+        && cmd.agent_id.len() <= MAX_COMMAND_ID_BYTES
+        && cmd.text.len() <= MAX_COMMAND_TEXT_BYTES
+}
 
 pub struct RemoteShared {
     token: Mutex<String>,
@@ -292,7 +312,14 @@ async fn command(State(s): Shared, Query(q): Query<AuthQuery>, Json(cmd): Json<R
     if !check_device(&s, &q) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "not paired" })));
     }
-    s.commands.lock().unwrap().push(cmd);
+    if !valid_command(&cmd) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "invalid or oversized command" })));
+    }
+    let mut commands = s.commands.lock().unwrap();
+    if commands.len() >= MAX_COMMANDS {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({ "error": "command queue is full" })));
+    }
+    commands.push(cmd);
     (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
 }
 
@@ -490,14 +517,18 @@ pub fn remote_deny_pair(state: tauri::State<'_, RemoteManager>, device_id: Strin
     state.shared.pending.lock().unwrap().retain(|p| p.id != device_id);
 }
 
-const MAX_RESPONSES: usize = 50;
-
 /// Desktop answers an rpc request (fs/git browsing computed via its native
 /// adapters); the phone picks it up from /api/rpc. `json` must be valid JSON.
 #[tauri::command]
 pub fn remote_respond(state: tauri::State<'_, RemoteManager>, id: String, json: String) {
     let mut map = state.shared.responses.lock().unwrap();
-    if map.len() >= MAX_RESPONSES {
+    let json = if json.len() > MAX_RESPONSE_TOTAL_BYTES {
+        "{\"error\":\"remote response too large\"}".to_string()
+    } else {
+        json
+    };
+    let total = map.values().map(String::len).sum::<usize>();
+    if map.len() >= MAX_RESPONSES || total.saturating_add(json.len()) > MAX_RESPONSE_TOTAL_BYTES {
         map.clear(); // stale pile-up — rpc answers are ephemeral by design
     }
     map.insert(id, json);
@@ -598,6 +629,35 @@ mod tests {
         .await;
         assert_eq!(code, StatusCode::FORBIDDEN);
         assert!(s.commands.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn command_queue_rejects_oversized_unknown_and_excess_commands() {
+        let s = shared_with("base");
+        s.devices.lock().unwrap().insert(
+            "dev1".into(),
+            PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
+        );
+        let auth = || Query(q("base", "devtok", ""));
+        let make = |kind: &str, text: String| RemoteCommand {
+            kind: kind.into(), id: "master".into(), agent_id: String::new(), text, ok: false,
+        };
+
+        let (code, _) = command(State(s.clone()), auth(), Json(make("unknown", String::new()))).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST);
+        let (code, _) = command(
+            State(s.clone()), auth(),
+            Json(make("master_send", "x".repeat(MAX_COMMAND_TEXT_BYTES + 1))),
+        ).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST);
+
+        for _ in 0..MAX_COMMANDS {
+            let (code, _) = command(State(s.clone()), auth(), Json(make("master_send", "hi".into()))).await;
+            assert_eq!(code, StatusCode::OK);
+        }
+        let (code, _) = command(State(s.clone()), auth(), Json(make("master_send", "overflow".into()))).await;
+        assert_eq!(code, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(s.commands.lock().unwrap().len(), MAX_COMMANDS);
     }
 
     #[tokio::test]
