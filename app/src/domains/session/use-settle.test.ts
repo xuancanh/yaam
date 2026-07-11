@@ -52,6 +52,57 @@ describe('createSessionSettle', () => {
     expect(h.clock.pending).toBe(0)
   })
 
+  it('keeps refreshing the status card as one running session produces more output', () => {
+    const h = harness([agent({ log: [{ t: 'out', x: 'starting up' }] as Agent['log'] })])
+    const push = (line: string) => h.state.update(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === 'a1' ? { ...a, log: [...a.log, { t: 'out', x: line }] } : a),
+    }))
+
+    // one arm (as a launch / user submit would) then a first burst of output
+    h.rt.armResponseWatch('a1')
+    push('compiling module A')
+    h.rt.bumpSettle('a1')
+    h.clock.advance(10_000)
+    expect(h.state.get().agents[0].summary).toBe('compiling module A')
+
+    // a SECOND burst on the same run must update the card again — the settle
+    // loop re-arms an active session, so status no longer freezes after step 1
+    push('running tests · 12 passed')
+    h.rt.bumpSettle('a1')
+    h.clock.advance(10_000)
+    expect(h.state.get().agents[0].summary).toBe('running tests · 12 passed')
+
+    // but the user is only pinged once (the fresh arm); the re-armed
+    // continuation refreshes silently unless the output needs attention
+    expect(h.deps.notify).toHaveBeenCalledTimes(1)
+  })
+
+  it('live-updates the status line from output while the session is still streaming', () => {
+    const h = harness([agent({ log: [{ t: 'out', x: 'starting up' }] as Agent['log'] })])
+    const push = (line: string) => h.state.update(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === 'a1' ? { ...a, log: [...a.log, { t: 'out', x: line }] } : a),
+    }))
+
+    // no settle timer has fired — this is the mid-stream card refresh
+    push('resolving dependencies')
+    h.rt.bumpSettle('a1')
+    expect(h.state.get().agents[0].summary).toBe('resolving dependencies')
+    expect(h.state.get().agents[0].responding).toBe(true)
+
+    // further chunks within the throttle window don't churn the card…
+    push('linking')
+    h.rt.bumpSettle('a1')
+    expect(h.state.get().agents[0].summary).toBe('resolving dependencies')
+
+    // …but once the throttle elapses the newest line shows through
+    h.clock.advance(1300)
+    push('bundling assets')
+    h.rt.bumpSettle('a1')
+    expect(h.state.get().agents[0].summary).toBe('bundling assets')
+  })
+
   it('start() arms the TUI scan and dispose() stops it and cancels timers', () => {
     const h = harness([agent()])
     h.rt.start()

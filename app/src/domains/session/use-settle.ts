@@ -53,8 +53,11 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   const { state, clock, notify, setNeedsInput, runMonitor, taskForSession, masterEventRef, monitorEventRef, runWatcherRef } = deps
 
   // armed watch: snapshot of the screen/tail at arm time — we only relay once
-  // the content has actually changed AND the TUI is no longer busy
-  const armed = new Map<string, { snapshot: string; at: number }>()
+  // the content has actually changed AND the TUI is no longer busy. `continuation`
+  // marks an arm the settle loop re-set to keep tracking a still-running session
+  // (vs. a fresh arm from user input / launch), so we can refresh the card on
+  // each new burst without re-pinging the user at every quiet point.
+  const armed = new Map<string, { snapshot: string; at: number; continuation?: boolean }>()
   const settle = new Map<string, { since: number; timer: Disposable }>()
   const lastFlagged = new Map<string, string>()
   let scan: Disposable | undefined
@@ -64,6 +67,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   // store is only touched on the false→true / true→false edges — bumpSettle runs
   // at PTY speed, and dispatching per chunk would defeat the output batching.
   const streaming = new Set<string>()
+  // throttle for the live status refresh below — bumpSettle runs at PTY speed
+  const lastLive = new Map<string, number>()
+  const LIVE_STATUS_MS = 1200
   const setResponding = (id: string, on: boolean) => {
     if (on === streaming.has(id)) return
     if (on) streaming.add(id)
@@ -180,7 +186,11 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
                 }
               : a)),
           }))
-          if (!watching) {
+          // Ping the user when a response settles — but on a re-armed
+          // continuation (the same run producing more output) only if the
+          // output now needs attention, so a long autonomous run refreshes its
+          // card silently instead of ringing the bell at every quiet point.
+          if (!watching && (!arm.continuation || digest?.actionNeeded)) {
             notify(digest?.actionNeeded ? 'escalate' : 'done',
               `${agent.name} ${digest?.actionNeeded ? 'may need attention' : 'finished responding'}`,
               (digest?.actionNeeded ?? lastLine).slice(0, 90), id)
@@ -192,6 +202,14 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
           void runMonitor(id,
             `The session finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
             'It was given a task by Master or the user, so a completed response IS noteworthy — update the status and report a digest to Master.')
+        }
+        // Keep an actively-running session under watch: re-arm with the screen
+        // we just reported as the new baseline, so the NEXT meaningful change
+        // refreshes its status too. Arming otherwise only happens on user input,
+        // which froze the card for sessions that work many steps on one prompt.
+        const still = state.get().agents.find(a => a.id === id)
+        if (still && (still.status === 'running' || still.status === 'needs')) {
+          armed.set(id, { snapshot: joined, at: clock.now(), continuation: true })
         }
       }
     }
@@ -213,10 +231,39 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     const prev = settle.get(id)
     if (prev) prev.timer.dispose()
     const agent = state.get().agents.find(a => a.id === id)
-    if (agent?.status === 'running') setResponding(id, true)
+    if (agent?.status === 'running') {
+      setResponding(id, true)
+      liveStatus(id, agent)
+    }
     const since = prev?.since ?? Math.max(0, (agent?.log.length ?? 1) - 1)
     const timer = clock.setTimeout(() => onSettle(id, since), 3000)
     settle.set(id, { since, timer })
+  }
+
+  // While a session streams, keep its status line tracking the latest output in
+  // real time instead of only refreshing at quiet points — a deterministic,
+  // throttled read of the current screen/tail. The settle monitor still
+  // overwrites this with a richer, considered summary once output stabilizes;
+  // action_needed is left untouched here so transient mid-stream error text
+  // never raises a false "needs attention" flag.
+  const liveStatus = (id: string, agent: AppState['agents'][number]) => {
+    const now = clock.now()
+    const last = lastLive.get(id)
+    if (last !== undefined && now - last < LIVE_STATUS_MS) return
+    const alt = isAltScreen(id)
+    const content = alt ? readScreen(id) : agent.log.slice(-14).map(l => l.x).filter(Boolean)
+    if (!content.length) return
+    // never surface half-drawn prompt text while the TUI busy marker is up
+    const { busy, promptDetected } = detectPrompt(content, alt)
+    if (busy || promptDetected) return
+    const { summary } = deterministicStatus(content)
+    if (!summary || summary === agent.summary) return
+    lastLive.set(id, now)
+    const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    state.update(s => ({
+      ...s,
+      agents: s.agents.map(a => (a.id === id ? { ...a, summary, summaryAt: at } : a)),
+    }))
   }
 
   const clearFlagged = (id: string) => { lastFlagged.delete(id) }
@@ -225,6 +272,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     settle.delete(id)
     armed.delete(id)
     lastFlagged.delete(id)
+    lastLive.delete(id)
     setResponding(id, false)
   }
 
@@ -271,7 +319,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     dispose() {
       scan?.dispose(); scan = undefined
       for (const { timer } of settle.values()) timer.dispose()
-      settle.clear(); armed.clear(); lastFlagged.clear(); streaming.clear()
+      settle.clear(); armed.clear(); lastFlagged.clear(); streaming.clear(); lastLive.clear()
     },
   }
 }
