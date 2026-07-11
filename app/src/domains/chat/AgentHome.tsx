@@ -4,12 +4,13 @@
 // recent conversations. The profile dialog stays the place to edit identity.
 import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import type { Agent, AgentApp, DurableAgent } from '../../core/types'
+import type { AgentApp, DurableAgent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
 import { confirmAction } from '../../components/Confirm'
 import { artifactSrcDoc } from './artifacts'
 import { AgentSchedules } from './DurableAgentDialog'
+import { homeConversations } from './agent-home-state'
 
 const CARD = {
   background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13,
@@ -58,12 +59,10 @@ export function AgentHome({ agent, onEditProfile, onNewConversation, onOpenChat 
   onNewConversation: () => void
   onOpenChat: (chatId: string) => void
 }) {
-  const s = useConductorSelector(x => ({ agents: x.agents, crons: x.crons }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, crons: x.crons, activeWorkspace: x.activeWorkspace }), shallowEqual)
   const { updateDurableAgent } = useActions()
   const [openApp, setOpenApp] = useState<AgentApp | null>(null)
-  const conversations = s.agents
-    .filter((a): a is Agent => a.kind === 'chat' && a.durableAgentId === agent.id && !a.archived)
-    .sort((a, b) => ((b.chatLog ?? []).at(-1)?.at ?? 0) - ((a.chatLog ?? []).at(-1)?.at ?? 0))
+  const conversations = homeConversations(s.agents, agent.id, s.activeWorkspace)
   const loops = s.crons.filter(c => c.durableAgentId === agent.id)
   const apps = agent.apps ?? []
 
