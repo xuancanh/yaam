@@ -24,7 +24,7 @@ export interface ChatActionsCtx {
   retryChatMessage: (agentId: string) => void
   replayChatMessage: (agentId: string, turnId: string, text: string, atts?: ChatAttachment[]) => void
   resetChatRuntime: (agentId: string) => void
-  resolveChatApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
+  resolveChatApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'always-tool' | 'deny') => void
   compactChatContext: (agentId: string) => Promise<string>
   skillCatalogs: MutableRefObject<Map<string, CatalogSkill[]>>
 }
@@ -61,7 +61,7 @@ export interface ChatActions {
   restoreChat: (agentId: string) => void
   setChatTokenBudget: (agentId: string, tokens: number) => void
   /** answer a pending ask-mode tool approval */
-  approveChatTool: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
+  approveChatTool: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'always-tool' | 'deny') => void
   /** flip a chat between ask (approve risky tools) and auto */
   setChatPermMode: (agentId: string, mode: 'ask' | 'auto') => void
   /** replace one workspace's durable chat memory (Memory editor) */

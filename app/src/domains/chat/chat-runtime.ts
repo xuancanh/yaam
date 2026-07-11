@@ -32,8 +32,9 @@ export interface ChatRuntime {
   /** re-run the last user message: drop everything after it and send it again */
   retry: (agentId: string) => void
   replay: (agentId: string, turnId: string, text: string, atts?: ChatAttachment[]) => void
-  /** answer a pending ask-mode tool approval (by its chat-message id) */
-  resolveApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
+  /** answer a pending ask-mode tool approval (by its chat-message id);
+   *  'always-tool' grants the whole tool for this chat, not just this call */
+  resolveApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'always-tool' | 'deny') => void
   /** manually compact the conversation's API context into a summary */
   compact: (agentId: string) => Promise<string>
   dispose: (id: string) => void
@@ -129,8 +130,17 @@ export function createChatRuntime(ports: ChatPorts): ChatRuntime {
             ? { ...a, approvedToolCalls: [...(a.approvedToolCalls ?? []), pending.key].slice(-100) }
             : a),
         }))
+      } else if (decision === 'always-tool') {
+        // blanket grant for the whole tool in this chat (key = tool\0preview)
+        const tool = pending.key.split('\u0000')[0]
+        ports.dispatch(s => ({
+          ...s,
+          agents: s.agents.map(a => a.id === agentId && !(a.approvedTools ?? []).includes(tool)
+            ? { ...a, approvedTools: [...(a.approvedTools ?? []), tool].slice(-30) }
+            : a),
+        }))
       }
-      pending.resolve(decision)
+      pending.resolve(decision === 'always-tool' ? 'always' : decision)
     },
     dispose: (id) => {
       aborts.abort(id) // cancel any in-flight chat reply for this session

@@ -49,7 +49,7 @@ export interface ConductorActionsDeps {
   retryChatMessage: (agentId: string) => void
   replayChatMessage: (agentId: string, turnId: string, text: string, atts?: import('../domains/chat/runner').ChatAttachment[]) => void
   resetChatRuntime: (agentId: string) => void
-  resolveChatApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'deny') => void
+  resolveChatApproval: (agentId: string, msgId: string, decision: boolean | 'once' | 'always' | 'always-tool' | 'deny') => void
   compactChatContext: (agentId: string) => Promise<string>
   // addons
   installPackage: (json: string, source: import('../core/types').Addon['source']) => void

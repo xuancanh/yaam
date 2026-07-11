@@ -213,6 +213,9 @@ export interface SessionRecord {
   permMode?: 'ask' | 'auto'
   /** exact tool+preview approvals remembered for this chat */
   approvedToolCalls?: string[]
+  /** whole tools granted blanket approval in this chat ("Always allow tool") —
+   *  earned autonomy; self-modification tools are never eligible */
+  approvedTools?: string[]
   chatPinned?: boolean
   chatTags?: string[]
   /** provider-reported total-token ceiling; zero disables the limit */

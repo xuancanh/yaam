@@ -12,6 +12,7 @@ import type { CatalogSkill } from '../../core/skills'
 import type { Agent, ChatAttachmentRecord, ChatMsg, ChatTurn } from '../../core/types'
 import type { ChatAttachment } from './runner'
 import { onAttachRequest } from './attach-bus'
+import { ALWAYS_ASK_TOOLS } from './agent'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
 import { artifactSrcDoc, extractArtifact } from './artifacts'
@@ -100,10 +101,14 @@ function HoverBtn({ title, paths, onClick }: { title: string; paths: string[]; o
   )
 }
 
-/** Ask-mode approval prompt: Allow / Deny while the turn is paused on it. */
-function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDecide: (decision: 'once' | 'always' | 'deny') => void }) {
+/** Ask-mode approval prompt: Allow / Deny while the turn is paused on it.
+ *  "Always allow <tool>" grants the whole tool for this chat — earned autonomy;
+ *  self-modification never gets the blanket option. */
+function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDecide: (decision: 'once' | 'always' | 'always-tool' | 'deny') => void }) {
   const pending = m.approval === 'pending'
   const verdict = m.approval === 'approved' ? '✓ allowed' : m.approval === 'denied' ? '✕ denied' : busy ? null : 'expired'
+  const toolName = m.text.split(' → ')[0]?.trim() ?? ''
+  const blanketOk = !!toolName && !toolName.includes(' ') && !ALWAYS_ASK_TOOLS.has(toolName)
   return (
     <div style={{
       alignSelf: 'stretch', flexShrink: 0, margin: '0 4px', padding: '8px 12px', borderRadius: 10,
@@ -113,9 +118,14 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', flexShrink: 0 }}>agent wants to run</span>
         {verdict && <span style={{ fontSize: 11, color: m.approval === 'approved' ? 'var(--green)' : 'var(--dim)', marginLeft: 'auto' }}>{verdict}</span>}
         {pending && busy && (
-          <span style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+          <span style={{ display: 'flex', gap: 6, marginLeft: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <button className="approve-btn" style={{ padding: '3px 12px', fontSize: 11 }} onClick={() => onDecide('once')}>Allow once</button>
-            <button className="open-btn" style={{ padding: '3px 12px', fontSize: 11 }} onClick={() => onDecide('always')}>Always allow</button>
+            <button className="open-btn" title="Remember this exact call — identical future calls run without asking" style={{ padding: '3px 12px', fontSize: 11 }} onClick={() => onDecide('always')}>Always this</button>
+            {blanketOk && (
+              <button className="open-btn" title={`Grant ${toolName} for this whole chat — it stops asking for ANY ${toolName} call`} style={{ padding: '3px 12px', fontSize: 11 }} onClick={() => onDecide('always-tool')}>
+                Always {toolName}
+              </button>
+            )}
             <button className="open-btn" style={{ padding: '3px 12px', fontSize: 11 }} onClick={() => onDecide('deny')}>Deny</button>
           </span>
         )}
@@ -127,7 +137,7 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
   )
 }
 
-function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork, onQuickReply, onRate }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void; onQuickReply?: (msgId: string, reply: string) => void; onRate?: (msgId: string, rating: 'up' | 'down', note?: string) => void }) {
+function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork, onQuickReply, onRate }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'always-tool' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void; onQuickReply?: (msgId: string, reply: string) => void; onRate?: (msgId: string, rating: 'up' | 'down', note?: string) => void }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)

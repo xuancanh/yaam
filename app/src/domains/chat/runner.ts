@@ -8,7 +8,7 @@ import type { McpSession } from '../../core/mcp'
 import type { CatalogSkill } from '../../core/skills'
 import { buildChatCfg, callApi, chatTypeHasCreds } from '../../llm/client'
 import type { ApiContentBlock } from '../../llm/client'
-import { runChatTurn } from './agent'
+import { ALWAYS_ASK_TOOLS, runChatTurn } from './agent'
 import type { ChatAppPort } from './agent'
 import { mkId } from '../../shared/id'
 import type { AbortRegistry } from '../../core/abort-registry'
@@ -91,6 +91,9 @@ function makeAppPort(ctx: ChatCtx, agentId: string, turnId: string): ChatAppPort
     requestApproval: (tool, preview) => {
       const key = `${tool}\u0000${preview}`
       const agent = ctx.stateRef.current.agents.find(a => a.id === agentId)
+      // blanket tool grants ("Always allow tool") skip the prompt — but never
+      // for self-modification, whose review is unconditional by design
+      if (!ALWAYS_ASK_TOOLS.has(tool) && agent?.approvedTools?.includes(tool)) return Promise.resolve('always')
       if (agent?.approvedToolCalls?.includes(key)) return Promise.resolve('always')
       const msgId = ctx.pushChatLog(agentId, { role: 'tool', text: `${tool} → ${preview}`, approval: 'pending', turnId })
       return new Promise<'once' | 'always' | 'deny'>(resolve => {
