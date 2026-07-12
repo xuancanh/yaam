@@ -81,7 +81,7 @@ export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeW
       ...(opts?.ephemeral ? [{ t: 'sys' as const, x: 'one-shot run — output appears when the turn completes; this can take a while' }] : []),
       ...(!dir ? [{ t: 'warn' as const, x: 'no working folder set — running in your home directory' }] : []),
       ...(opts?.sandbox && !opts?.terminalShell
-        ? [{ t: 'sys' as const, x: `sandboxed — file writes limited to the working folder, temp, and agent config dirs${opts.sandbox.denyNetwork ? ' · network denied' : ''}` }]
+        ? [{ t: 'sys' as const, x: `sandboxed — file writes limited to the working folder, temp, and built-in agent state dirs${opts.sandbox.denyNetwork ? ' · network denied' : ''}` }]
         : []),
     ],
     ...defaultDetail(), usageVersion: 1,

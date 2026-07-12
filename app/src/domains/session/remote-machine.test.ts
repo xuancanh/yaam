@@ -83,6 +83,7 @@ describe('testCommand', () => {
     expect(t).toContain('base64 -d')
     expect(t).toContain('command -v git')
     expect(t).toContain('command -v bwrap')
+    expect(t).toContain('bwrap --ro-bind / /')
     expect(t).toContain(`'/srv'`)
   })
 })

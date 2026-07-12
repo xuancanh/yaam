@@ -20,7 +20,7 @@ function summarizeTest(output: string): { ok: boolean; text: string } {
   if (!has('GIT_OK')) miss.push('no git')
   if (has('NO_DIR')) miss.push('working dir not found')
   // bwrap only matters for Sandbox sessions — warn without failing the test
-  const warn = has('NO_BWRAP') ? ' · no bwrap: “Sandbox” sessions will fail here (apt install bubblewrap)' : ''
+  const warn = has('NO_BWRAP') ? ' · bwrap unavailable or unusable: “Sandbox” sessions will fail (install bubblewrap and enable unprivileged user namespaces)' : ''
   return miss.length
     ? { ok: false, text: `Connected, but: ${miss.join(', ')}${warn}` }
     : { ok: true, text: `Connected · tmux, base64, git all present${warn}` }

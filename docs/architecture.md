@@ -464,9 +464,9 @@ same mirror so work-in-progress survives relaunches.
 
 Orthogonal to worktrees, sessions and templates can also opt into an
 OS-enforced **write sandbox**: the spawn command is prefixed with
-`sandbox-exec -f <generated Seatbelt profile>` on macOS or a `bwrap` wrap on
+`sandbox-exec -p <inline Seatbelt profile>` on macOS or a `bwrap` wrap on
 Linux/remote SSH hosts, limiting file writes to the working folder (worktree
-workdir when combined), temp, and the agent's config dot-dirs, with an
+workdir when combined), temp, and the built-in agents' state directories, with an
 optional deny-network knob. The wrapper is a plain command-string prefix
 (mirroring the env prefix), so local, detached, resume, and remote launches
 all carry it; failures are fail-closed. See docs/security.md → "Session write

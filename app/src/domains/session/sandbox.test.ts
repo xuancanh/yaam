@@ -39,6 +39,12 @@ describe('sandboxRemoteWrap', () => {
     expect(wrap).toContain('agent state path is a symlink')
   })
 
+  it('masks privileged container-engine sockets after writable binds', () => {
+    expect(wrap).toContain('--ro-bind-try /dev/null /var/run/docker.sock')
+    expect(wrap).toContain('--ro-bind-try /dev/null "$HOME/.docker/run/docker.sock"')
+    expect(wrap.indexOf('--ro-bind-try /dev/null /var/run/docker.sock')).toBeGreaterThan(wrap.indexOf("--bind '/home/u/proj'"))
+  })
+
   it('unshares the network only when denyNetwork is set', () => {
     expect(wrap).not.toContain('--unshare-net')
     expect(sandboxRemoteWrap('x', '/d', { denyNetwork: true })).toContain('--unshare-net sh -c')

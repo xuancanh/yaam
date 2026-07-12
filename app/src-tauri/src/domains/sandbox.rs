@@ -126,8 +126,10 @@ fn writable_roots(cwd: &str, extra_paths: &[String]) -> Result<Vec<String>, Stri
 /// Render the allow-default SBPL profile: everything permitted except file
 /// writes, which are limited to the given roots (+ /dev for PTYs).
 fn render_profile(roots: &[String], deny_network: bool) -> String {
-    let mut p =
-        String::from("(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n");
+    let mut p = String::from(
+        "(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n(deny lsopen)\n\
+         (deny network-outbound (remote unix-socket (path-regex #\".*/(docker|podman)(/podman)?\\.sock$\")))\n",
+    );
     p.push_str(
         "(allow file-write* (literal \"/dev/null\") (literal \"/dev/ptmx\") \
          (literal \"/dev/stdout\") (literal \"/dev/stderr\") \
@@ -177,9 +179,27 @@ fn linux_wrapper(roots: &[String], deny_network: bool) -> Result<String, String>
         .iter()
         .map(|r| format!("--bind {} {}", shq(r), shq(r)))
         .collect();
+    let mut socket_paths = vec![
+        PathBuf::from("/run/docker.sock"),
+        PathBuf::from("/var/run/docker.sock"),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        socket_paths.push(Path::new(&home).join(".docker/run/docker.sock"));
+        socket_paths.push(Path::new(&home).join(".docker/desktop/docker.sock"));
+    }
+    if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+        socket_paths.push(Path::new(&runtime).join("docker.sock"));
+        socket_paths.push(Path::new(&runtime).join("podman/podman.sock"));
+    }
+    let socket_masks: Vec<String> = socket_paths
+        .into_iter()
+        .filter(|path| path.exists())
+        .map(|path| format!("--ro-bind /dev/null {}", shq(&path.to_string_lossy())))
+        .collect();
     Ok(format!(
-        "bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent {}{}",
+        "bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent {} {}{}",
         binds.join(" "),
+        socket_masks.join(" "),
         if deny_network { " --unshare-net" } else { "" },
     ))
 }
@@ -213,14 +233,15 @@ mod tests {
     fn renders_allow_default_profile() {
         let p = render_profile(&["/Users/x/proj".into(), "/private/tmp".into()], false);
         assert!(p.starts_with(
-            "(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n"
+            "(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n(deny lsopen)\n"
         ));
+        assert!(p.contains("docker|podman"));
         assert!(p.contains("(literal \"/dev/null\")"));
         assert!(p.contains("(regex #\"^/dev/ttys[0-9]+$\")"));
         assert!(!p.contains("(subpath \"/dev\")"));
         assert!(p.contains("(allow file-write* (subpath \"/Users/x/proj\"))"));
         assert!(p.contains("(allow file-write* (subpath \"/private/tmp\"))"));
-        assert!(!p.contains("network"));
+        assert!(!p.contains("(deny network*)"));
     }
 
     #[test]
@@ -348,6 +369,65 @@ mod tests {
         assert!(result.success());
         assert_eq!(std::fs::read_to_string(allowed.join("ok")).unwrap(), "ok");
         assert!(!blocked.join("bad").exists());
+        std::fs::remove_dir_all(base).ok();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_profile_blocks_launch_services_escape() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+
+        let base = std::env::temp_dir().join(format!(
+            "yaam-sandbox-lsopen-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let app = base.join("Escape.app");
+        let executable = app.join("Contents/MacOS/escape");
+        let blocked = base.join("blocked");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&blocked).unwrap();
+        std::fs::write(
+            app.join("Contents/Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>escape</string>
+<key>CFBundleIdentifier</key><string>dev.yaam.sandbox-test</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>LSBackgroundOnly</key><true/>
+</dict></plist>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\nprintf escaped > {}\n",
+                shq(&blocked.join("escaped").to_string_lossy())
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let baseline = Command::new("/usr/bin/open")
+            .args(["-W", "-n"])
+            .arg(&app)
+            .status()
+            .unwrap();
+        assert!(baseline.success());
+        assert!(blocked.join("escaped").exists());
+        std::fs::remove_file(blocked.join("escaped")).unwrap();
+
+        let allowed = std::fs::canonicalize(executable.parent().unwrap()).unwrap();
+        let profile = render_profile(&[allowed.to_string_lossy().into_owned()], false);
+        let result = Command::new("/usr/bin/sandbox-exec")
+            .args(["-p", &profile, "/usr/bin/open", "-W", "-n"])
+            .arg(&app)
+            .status()
+            .unwrap();
+        assert!(!result.success());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!blocked.join("escaped").exists());
         std::fs::remove_dir_all(base).ok();
     }
 }

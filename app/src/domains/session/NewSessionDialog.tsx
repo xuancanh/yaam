@@ -213,12 +213,12 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
           {/* plain terminals spawn `shell -l -i` with no command string, so the
               OS wrapper has nothing to wrap — the option only applies to commands */}
           {!(isShell && !tpl) && (
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none', marginTop: 10 }} title="OS-level write sandbox (sandbox-exec on macOS, bwrap on Linux — locally or on the remote host). The agent reads everything but can only write inside the working folder, temp, and its own config dirs. Network stays available; templates can add writable paths or deny network.">
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none', marginTop: 10 }} title="OS-level write sandbox (sandbox-exec on macOS, bwrap on Linux — locally or on the remote host). The agent reads everything but can only write inside the working folder, temp, and built-in agent state dirs. Network stays available; templates can add writable paths or deny network.">
               <input type="checkbox" checked={sandbox} onChange={e => setSandbox(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
               <span>
                 <span style={{ fontSize: 12.5, fontWeight: 600 }}>Sandbox (block writes outside the working folder)</span>
                 <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
-                  OS-enforced: file writes limited to this folder, temp, and agent config dirs. If the sandbox can't be applied, the launch fails instead of running unprotected.
+                  OS-enforced: file writes limited to this folder, temp, and built-in agent state dirs. If the sandbox can't be applied, the launch fails instead of running unprotected.
                 </span>
               </span>
             </label>

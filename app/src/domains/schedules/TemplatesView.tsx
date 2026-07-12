@@ -137,7 +137,7 @@ function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => v
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ flex: 1, fontSize: 12, color: 'var(--mut)', lineHeight: 1.5 }}>
               <b style={{ color: 'var(--text)' }}>Sandbox (OS-level write protection)</b><br />
-              <span style={{ color: 'var(--dim)' }}>file writes limited to the working folder, temp, and agent config dirs — sandbox-exec on macOS, bwrap on Linux / remote hosts</span>
+              <span style={{ color: 'var(--dim)' }}>file writes limited to the working folder, temp, and built-in agent state dirs — sandbox-exec on macOS, bwrap on Linux / remote hosts</span>
             </div>
             <Switch on={!!tpl.sandbox} onToggle={() => upd({ sandbox: tpl.sandbox ? undefined : {} })} />
           </div>

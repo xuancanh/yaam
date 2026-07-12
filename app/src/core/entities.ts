@@ -241,7 +241,7 @@ export interface SessionRecord {
 }
 
 /** Session/template sandbox policy. Presence enables the sandbox: file writes
- *  are limited to the session cwd, temp, and agent config dirs; the fields are
+ *  are limited to the session cwd, temp, and built-in agent state dirs; the fields are
  *  additive knobs on top of that baseline. */
 export interface SandboxConfig {
   /** additionally deny all network access */

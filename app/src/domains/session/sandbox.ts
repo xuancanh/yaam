@@ -34,7 +34,7 @@ export function sandboxLocalWrap(wrapper: string, command: string): string {
 
 /** Wrap a remote agent command in a bwrap sandbox, applied BEFORE wrapLaunch
  *  (which adds `cd <cwd> &&` and the base64 transport): reads everywhere,
- *  writes only in the cwd + temp + agent config dirs + extras. `"$HOME"` is
+ *  writes only in the cwd + temp + built-in agent state dirs + extras. `"$HOME"` is
  *  left for the REMOTE shell to expand; `--bind-try` skips missing dot-dirs.
  *  Fails closed with a clear message when the host has no bwrap. */
 export function sandboxRemoteWrap(command: string, cwd: string | undefined, cfg: SandboxConfig): string {
@@ -52,11 +52,20 @@ export function sandboxRemoteWrap(command: string, cwd: string | undefined, cfg:
   const stateGuards = REMOTE_HOME_WRITE_DIRS
     .map(d => `if [ -L "$HOME/${d}" ]; then echo "yaam: sandbox agent state path is a symlink: ~/${d}" >&2; exit 98; fi;`)
     .join(' ')
+  // Container-engine sockets are equivalent to host write/exec access. These
+  // masks come last so a broad cwd/extra bind cannot expose them again.
+  const socketMasks = [
+    '/run/docker.sock', '/var/run/docker.sock',
+    '"$HOME/.docker/run/docker.sock"', '"$HOME/.docker/desktop/docker.sock"',
+    '"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/docker.sock"',
+    '"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"',
+  ].map(path => `--ro-bind-try /dev/null ${path}`)
   return (
     'command -v bwrap >/dev/null 2>&1 || { echo "yaam: sandbox requested but bwrap is not installed on this machine (apt install bubblewrap)" >&2; exit 97; }; '
     + stateGuards + ' '
     + 'exec bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent '
     + [...binds, ...homeBinds].join(' ')
+    + ' ' + socketMasks.join(' ')
     + (cfg.denyNetwork ? ' --unshare-net' : '')
     + ` sh -c ${shq(command)}`
   )
