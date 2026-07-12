@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { APP_VERSION } from '../../core/addons'
 import { NOTIF_COLORS, hexToRgba } from '../../core/data'
 import { EditableName, IC, Icon, MasterMark } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
@@ -155,7 +156,7 @@ export function TitleBar() {
       <div data-tauri-drag-region style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
         <MasterMark size={24} />
         <span className="grotesk" style={{ fontWeight: 600, fontSize: 15, letterSpacing: 0.2, pointerEvents: 'none' }}>YAAM</span>
-        <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', border: '1px solid var(--line)', borderRadius: 5, padding: '2px 6px', pointerEvents: 'none' }}>v0.6.0</span>
+        <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', border: '1px solid var(--line)', borderRadius: 5, padding: '2px 6px', pointerEvents: 'none' }}>v{APP_VERSION}</span>
       </div>
       <WorkspaceSwitcher />
       <button className="cmdk-btn" onClick={openPalette} style={{ margin: '0 auto' }}>

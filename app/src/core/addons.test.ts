@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hostAllowed, inlineIncludes, parseAddonPackage, resolveSecretRefs } from './addons'
+import { appCompat, cmpSemver, hostAllowed, inlineIncludes, parseAddonPackage, resolveSecretRefs } from './addons'
 
 describe('hostAllowed', () => {
   const hosts = ['api.github.com', '*.example.com']
@@ -94,5 +94,38 @@ describe('parseAddonPackage — hosts / secrets / agent.every', () => {
       .toThrow(/agent\.every/)
     expect(() => parseAddonPackage(JSON.stringify({ ...base, agent: { system: 'watch', every: '99 25 * * *' } })))
       .toThrow(/agent\.every/)
+  })
+
+  it('parses a valid minAppVersion and drops a malformed one', () => {
+    expect(parseAddonPackage(JSON.stringify({ ...base, minAppVersion: '0.7.0' })).minAppVersion).toBe('0.7.0')
+    expect(parseAddonPackage(JSON.stringify({ ...base, minAppVersion: 'next' })).minAppVersion).toBeUndefined()
+    expect(parseAddonPackage(JSON.stringify(base)).minAppVersion).toBeUndefined()
+  })
+})
+
+describe('cmpSemver', () => {
+  it('orders dotted numeric versions', () => {
+    expect(cmpSemver('0.6.0', '0.7.0')).toBeLessThan(0)
+    expect(cmpSemver('0.7.0', '0.6.9')).toBeGreaterThan(0)
+    expect(cmpSemver('1.0.0', '1.0.0')).toBe(0)
+    expect(cmpSemver('0.10.0', '0.9.0')).toBeGreaterThan(0) // numeric, not lexical
+    expect(cmpSemver('0.6', '0.6.0')).toBe(0) // missing parts default to 0
+    expect(cmpSemver('0.7.0-beta', '0.7.0')).toBe(0) // pre-release suffix ignored
+  })
+})
+
+describe('appCompat', () => {
+  it('is compatible when the app meets or exceeds minAppVersion', () => {
+    expect(appCompat('0.6.0', '0.6.0').ok).toBe(true)
+    expect(appCompat('0.6.0', '0.7.1').ok).toBe(true)
+    expect(appCompat(undefined, '0.6.0').ok).toBe(true) // no requirement
+    expect(appCompat('garbage', '0.6.0').ok).toBe(true) // unparseable requirement ignored
+  })
+
+  it('blocks when the app is older than minAppVersion, with a reason', () => {
+    const r = appCompat('0.7.0', '0.6.0')
+    expect(r.ok).toBe(false)
+    expect(r.reason).toMatch(/0\.7\.0/)
+    expect(r.reason).toMatch(/0\.6\.0/)
   })
 })

@@ -127,6 +127,36 @@ export const DANGEROUS_PERMISSIONS: AddonPermission[] = [
   'sessions:send', 'sessions:launch', 'tasks', 'schedules', 'agent', 'master:prompt', 'http', 'secrets', 'exec',
 ]
 
+// Injected by Vite `define` (app/vite.config.ts) from app/package.json. Declared
+// module-locally so this file typechecks anywhere it is imported (incl. the SDK
+// tests); undefined under the unit-test runner, where APP_VERSION falls back.
+declare const __APP_VERSION__: string | undefined
+/** The running app version (injected by Vite; '0.0.0' under the test runner). */
+export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0'
+
+/** Compare two dotted numeric versions. Returns <0, 0, or >0 like a comparator.
+ *  Non-numeric / pre-release suffixes are ignored (compared on the numeric core). */
+export function cmpSemver(a: string, b: string): number {
+  const parts = (v: string) => v.split('-')[0].split('.').map(n => parseInt(n, 10) || 0)
+  const pa = parts(a), pb = parts(b)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d) return d < 0 ? -1 : 1
+  }
+  return 0
+}
+
+/** Whether the running app satisfies an addon's `minAppVersion` requirement.
+ *  No requirement (or an unparseable one) is always compatible. */
+export function appCompat(minAppVersion: string | undefined, appVersion = APP_VERSION): { ok: boolean; reason?: string } {
+  const min = (minAppVersion ?? '').trim()
+  if (!min || !/^\d+(\.\d+)*/.test(min)) return { ok: true }
+  if (cmpSemver(appVersion, min) < 0) {
+    return { ok: false, reason: `requires app ≥ ${min} — this build is v${appVersion}. Update YAAM to install it.` }
+  }
+  return { ok: true }
+}
+
 /** Which permission each API method requires. */
 export const METHOD_PERMISSION: Record<string, AddonPermission> = {
   getState: 'state:read',
@@ -484,6 +514,8 @@ export function parseAddonPackage(json: string): Omit<Addon, 'id' | 'enabled' | 
   const name = typeof raw.name === 'string' ? raw.name.trim() : ''
   if (!name) throw new Error('package needs a "name"')
   const version = typeof raw.version === 'string' ? raw.version : '0.0.0'
+  const minAppVersion = typeof raw.minAppVersion === 'string' && /^\d+(\.\d+)*/.test(raw.minAppVersion.trim())
+    ? raw.minAppVersion.trim() : undefined
   const icon = typeof raw.icon === 'string' && raw.icon ? String(raw.icon).slice(0, 2) : '◆'
   const html = typeof raw.html === 'string' && raw.html.trim() ? raw.html : undefined
   const tools: AddonTool[] = Array.isArray(raw.tools)
@@ -545,7 +577,7 @@ export function parseAddonPackage(json: string): Omit<Addon, 'id' | 'enabled' | 
     ? (raw.permissions as unknown[]).filter((x): x is AddonPermission => allIds.includes(x as AddonPermission))
     : allIds // legacy packages request everything; visible and revocable in Settings
   return {
-    name, version, icon, html, tools: tools.length ? tools : undefined,
+    name, version, minAppVersion, icon, html, tools: tools.length ? tools : undefined,
     hooks: hasHooks ? hooks : undefined,
     agent,
     hosts: hosts?.length ? hosts : undefined,
@@ -562,6 +594,7 @@ export function exportAddonPackage(a: Addon): string {
     manifest: 2,
     name: a.name,
     version: a.version,
+    minAppVersion: a.minAppVersion,
     icon: a.icon,
     description: a.desc,
     author: a.author,

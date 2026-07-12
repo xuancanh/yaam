@@ -22,6 +22,9 @@ export interface AddonConfigTool {
 export interface AddonConfig {
   name: string
   version: string
+  /** minimum YAAM app version this addon needs (semver); the host blocks
+   *  installing it on older builds. Omit for no lower bound. */
+  minAppVersion?: string
   icon?: string
   description?: string
   author?: string

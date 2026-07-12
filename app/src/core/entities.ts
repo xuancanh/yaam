@@ -810,6 +810,8 @@ export interface Addon {
   id: string
   name: string
   version: string
+  /** minimum app version this addon needs; install is blocked on older builds */
+  minAppVersion?: string
   /** single char / emoji shown in the icon rail */
   icon: string
   desc?: string

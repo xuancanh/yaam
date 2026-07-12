@@ -69,6 +69,7 @@ export async function buildAddon(projectDir: string, opts: { outDir?: string; mi
     manifest: 3,
     name: cfg.name,
     version: cfg.version,
+    ...(cfg.minAppVersion ? { minAppVersion: cfg.minAppVersion } : {}),
     ...(cfg.icon ? { icon: cfg.icon } : {}),
     ...(cfg.description ? { description: cfg.description } : {}),
     ...(cfg.author ? { author: cfg.author } : {}),

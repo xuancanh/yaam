@@ -23,6 +23,9 @@ export function validateConfig(cfg: AddonConfig): ValidationIssue[] {
   if (!cfg.name?.trim()) err('config needs a "name"')
   if (!cfg.version?.trim()) err('config needs a "version"')
   else if (!/^\d+\.\d+\.\d+/.test(cfg.version)) warn(`version "${cfg.version}" is not semver (the registry sorts by it)`)
+  if (cfg.minAppVersion !== undefined && !/^\d+(\.\d+){0,2}$/.test(cfg.minAppVersion.trim())) {
+    err(`minAppVersion "${cfg.minAppVersion}" must be a dotted version like "0.6.0"`)
+  }
   if (cfg.icon && [...cfg.icon].length > 2) warn(`icon "${cfg.icon}" is truncated to 2 characters by the host`)
   if (!cfg.description?.trim()) warn('no description — it is the install-time pitch and the registry card text')
 

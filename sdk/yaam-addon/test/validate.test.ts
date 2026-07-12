@@ -15,6 +15,12 @@ describe('validateConfig', () => {
     expect(issues.filter(i => i.level === 'error')).toEqual([])
   })
 
+  it('accepts a dotted minAppVersion and rejects a malformed one', () => {
+    expect(validateConfig({ ...base, minAppVersion: '0.7.0' }).filter(i => i.level === 'error')).toEqual([])
+    const bad = validateConfig({ ...base, minAppVersion: 'next' }).filter(i => i.level === 'error')
+    expect(bad.some(i => i.message.includes('minAppVersion'))).toBe(true)
+  })
+
   it('requires name, version, and some capability', () => {
     const issues = validateConfig({ name: '', version: '' })
     const msgs = issues.filter(i => i.level === 'error').map(i => i.message)

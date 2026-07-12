@@ -7,7 +7,7 @@ import type { Addon, AppState, EventType } from '../../core/types'
 import type { ApiMessage } from '../../master'
 import { buildCfg, hasCreds } from '../../master'
 import { dispatch } from '../../core/store'
-import { DANGEROUS_PERMISSIONS, exportAddonPackage, parseAddonPackage } from '../../core/addons'
+import { DANGEROUS_PERMISSIONS, appCompat, exportAddonPackage, parseAddonPackage } from '../../core/addons'
 import { runAddonEditorTurn } from './addon-editor'
 import { mkId } from '../../shared/id'
 
@@ -86,6 +86,14 @@ export function createAddonRuntime(ctx: AddonRuntimeCtx): AddonRuntime {
 
     installPackage: (json, source) => {
       const parsed = parseAddonPackage(json) // throws readable errors
+      // final compatibility gate — guards every path (dev/master included), not
+      // just the previewed ones. The UI blocks incompatible installs earlier.
+      const compat = appCompat(parsed.minAppVersion)
+      if (!compat.ok) {
+        logEvent('build', null, `Blocked addon “${parsed.name}” v${parsed.version} — ${compat.reason}`)
+        flash(`Can’t install ${parsed.name}: ${compat.reason}`)
+        return
+      }
       const existing = stateRef.current.addons.find(a => a.name === parsed.name)
       const addon: Addon = {
         ...parsed,

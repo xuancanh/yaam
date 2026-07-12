@@ -213,6 +213,9 @@ export interface AddonManifest {
   manifest: number
   name: string
   version: string
+  /** minimum host app version required (semver); the host blocks install on
+   *  older builds. Omit for no lower bound. */
+  minAppVersion?: string
   /** up to 2 chars, usually an emoji */
   icon?: string
   description?: string
