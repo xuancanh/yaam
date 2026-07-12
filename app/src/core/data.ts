@@ -63,6 +63,12 @@ export const NOTIF_COLORS: Record<string, string> = {
   cron: '#8B93A1',
 }
 
+/** Accent swatches a workspace can pick from; the first (yellow) is the default. */
+export const WORKSPACE_COLORS = ['#F5C451', '#3DDC97', '#7FD1FF', '#A371F7', '#FF7A7A', '#FFB020', '#8B93A1'] as const
+
+/** The default workspace accent (matches --accent). */
+export const DEFAULT_WORKSPACE_COLOR = WORKSPACE_COLORS[0]
+
 export const DIFF_COLORS: Record<string, string> = {
   add: '#7FE3B0',
   del: '#FF9B9B',

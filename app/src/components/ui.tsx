@@ -163,14 +163,17 @@ export function ViewHeader({ title, children }: { title: string; children?: Reac
 }
 
 /** Render the compact YAAM three-bar brand mark. */
-export function MasterMark({ size = 24, glow = true }: { size?: number; glow?: boolean }) {
-  const accent = 'var(--accent)'
+export function MasterMark({ size = 24, glow = true, color }: { size?: number; glow?: boolean; color?: string }) {
+  // `color` (a workspace accent) tints the logo; default is the yellow accent.
+  const accent = color ?? 'var(--accent)'
+  const soft = color ? hexToRgba(color, 0.72) : 'rgba(245,196,81,.72)'
+  const glowColor = color ? hexToRgba(color, 0.5) : 'rgba(245,196,81,.5)'
   return (
     <div style={{
       width: size, height: size, borderRadius: Math.round(size * 0.29),
-      background: `linear-gradient(145deg, ${accent}, rgba(245,196,81,.72))`,
+      background: `linear-gradient(145deg, ${accent}, ${soft})`,
       display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-      boxShadow: glow ? '0 0 14px rgba(245,196,81,.5)' : 'none',
+      boxShadow: glow ? `0 0 14px ${glowColor}` : 'none',
     }}>
       <svg width={size * 0.54} height={size * 0.54} viewBox="0 0 24 24" fill="none" stroke="#0D0F14" strokeWidth="2.2" strokeLinecap="round">
         <path d="M5 18V7" /><path d="M12 18V4" /><path d="M19 18v-8" />
