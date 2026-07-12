@@ -326,7 +326,7 @@ mod tests {
     /// with the session; network is unshared only when asked. Quoting keeps
     /// spaced/quoted paths as single bwrap arguments.
     fn builds_linux_prefix() {
-        let roots = vec!["/home/u/my proj".to_string(), "/tmp".to_string()];
+        let roots = ["/home/u/my proj".to_string(), "/tmp".to_string()];
         let binds: Vec<String> = roots
             .iter()
             .map(|r| format!("--bind {} {}", shq(r), shq(r)))

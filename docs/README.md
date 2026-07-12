@@ -13,6 +13,8 @@ planning document disagree, the implementation documents below are canonical.
   boundary.
 - [Security model](security.md) — trust zones, authorization layers, secret and
   filesystem handling, addon isolation, and known limitations.
+- [Session sandbox audit (2026-07)](sandbox-audit-2026-07.md) — threat model,
+  findings, executed hardening, lifecycle coverage, and residual limitations.
 - [Addon architecture and authoring](addons.md) — package format, permissions,
   view bridge, handlers, hooks, agents, and registry format.
 
