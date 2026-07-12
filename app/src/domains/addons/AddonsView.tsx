@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { httpGetText, readTextFile } from '../../core/native'
 import type { Addon } from '../../core/types'
+import { ALL_PERMISSIONS, APP_VERSION, DANGEROUS_PERMISSIONS } from '../../core/addons'
 import { IC, Icon, ViewHeader } from '../../components/ui'
 import { AddonDetail } from './AddonDetail'
+
+const PERM_LABEL = new Map(ALL_PERMISSIONS.map(p => [p.id, p.label]))
 
 // VS-Code-marketplace-style addon manager: sidebar (installed + market from
 // every configured registry + registry management), detail pane, AI generator.
@@ -63,8 +66,8 @@ function GenerateDialog({ onClose }: { onClose: () => void }) {
         <div className="grotesk" style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>✦ Generate an addon</div>
         <div style={{ fontSize: 12, color: 'var(--mut)', marginBottom: 12, lineHeight: 1.55 }}>
           Describe what you want — a tab, Master tools, lifecycle hooks, even the addon's own agent. The generator knows the full
-          addon API (tasks with criteria and watcher chat, session output, templates, schedules, storage) and installs the result
-          immediately; permissions stay visible and revocable.
+          addon API (tasks with criteria and watcher chat, session output, templates, schedules, storage); you’ll review its
+          permissions before it installs.
         </div>
         <textarea
           autoFocus
@@ -109,7 +112,90 @@ function MarketDetail({ e, installed }: { e: RegistryEntry; installed?: Addon })
         {installed && <span className="mono" style={{ alignSelf: 'center', fontSize: 11, color: 'var(--green)' }}>✓ installed</span>}
       </div>
       <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.5, marginTop: 18 }}>
-        Permissions are shown and adjustable after install; upgrades keep your grant choices.
+        You’ll review the permissions and app-version compatibility before it installs; upgrades keep your grant choices.
+      </div>
+    </div>
+  )
+}
+
+/** Permission-preview / consent modal shown before any user-initiated install
+ *  commits. Lists the scopes, hosts, and secrets the package requests and the
+ *  app-version compatibility verdict; Install is blocked when incompatible. */
+function InstallPreview() {
+  const pending = useConductorSelector(x => x.addonInstall, shallowEqual)
+  const { confirmAddonInstall, cancelAddonInstall } = useActions()
+  if (!pending) return null
+  const { compat } = pending
+  const caps = [
+    pending.hasView && 'a view tab',
+    pending.toolCount ? `${pending.toolCount} Master tool${pending.toolCount > 1 ? 's' : ''}` : null,
+    pending.hookNames.length ? `${pending.hookNames.length} hook${pending.hookNames.length > 1 ? 's' : ''}` : null,
+    pending.hasAgent && 'its own agent',
+  ].filter(Boolean) as string[]
+  return (
+    <div onClick={cancelAddonInstall} style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,8,.6)', zIndex: 47, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '9vh' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 560, maxWidth: '92vw', maxHeight: '82vh', overflowY: 'auto', background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 15, boxShadow: '0 26px 70px rgba(0,0,0,.6)', padding: 22 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+          <span style={{ fontSize: 30 }}>{pending.icon || '◆'}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="grotesk" style={{ fontSize: 17, fontWeight: 600 }}>{pending.name}</div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+              v{pending.version}{pending.author ? ` · ${pending.author}` : ''} · {pending.source}
+              {pending.update ? ` · updates installed v${pending.update.fromVersion}` : ''}
+            </div>
+          </div>
+        </div>
+
+        {pending.desc && <div style={{ fontSize: 12.5, color: 'var(--text2)', lineHeight: 1.55, marginTop: 12 }}>{pending.desc}</div>}
+        {caps.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--mut)', marginTop: 10 }}>Adds {caps.join(' · ')}.</div>}
+
+        {/* app-version compatibility */}
+        {!compat.ok
+          ? <div style={{ marginTop: 14, padding: '9px 12px', borderRadius: 9, background: 'rgba(255,92,92,.08)', border: '1px solid rgba(255,92,92,.3)', color: 'var(--red-soft)', fontSize: 11.5, lineHeight: 1.5 }}>
+              ✕ Incompatible — {compat.reason}
+            </div>
+          : pending.minAppVersion
+            ? <div className="mono" style={{ marginTop: 12, fontSize: 10.5, color: 'var(--green)' }}>✓ compatible — needs app ≥ {pending.minAppVersion} (this build v{APP_VERSION})</div>
+            : null}
+
+        {/* permissions */}
+        <div className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)', margin: '18px 0 8px' }}>
+          PERMISSIONS · {pending.permissions.length}
+        </div>
+        {pending.permissions.length === 0
+          ? <div style={{ fontSize: 11.5, color: 'var(--dim)' }}>Requests no capabilities.</div>
+          : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {pending.permissions.map(perm => {
+                const dangerous = DANGEROUS_PERMISSIONS.includes(perm)
+                return (
+                  <div key={perm} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 11.5 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', marginTop: 4, flex: 'none', background: dangerous ? 'var(--amber)' : 'var(--green)' }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span className="mono" style={{ color: 'var(--text)' }}>{perm}</span>
+                      <span style={{ color: 'var(--mut)' }}> — {PERM_LABEL.get(perm) ?? ''}</span>
+                      {dangerous && <span style={{ color: 'var(--amber)', fontSize: 10.5 }}> · off by default, grant in Settings</span>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>}
+
+        {pending.hosts?.length ? <div style={{ marginTop: 12, fontSize: 11.5, color: 'var(--mut)' }}>
+          <span className="mono" style={{ color: 'var(--dim)' }}>network hosts: </span>{pending.hosts.map(h => <span key={h} className="mono" style={{ color: 'var(--text)' }}>{h} </span>)}
+        </div> : null}
+        {pending.secrets?.length ? <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--mut)' }}>
+          <span className="mono" style={{ color: 'var(--dim)' }}>keychain secrets: </span>{pending.secrets.map(sc => <span key={sc.name} className="mono" style={{ color: 'var(--text)' }}>{sc.name} </span>)}
+        </div> : null}
+
+        <div style={{ fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5, marginTop: 16 }}>
+          Green scopes are granted on install; amber (dangerous) scopes stay off until you enable them per-addon in Settings → Addons.
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <button className="approve-btn" style={{ flex: 1, padding: 9, opacity: compat.ok ? 1 : 0.4 }} disabled={!compat.ok} onClick={confirmAddonInstall}>
+            {pending.update ? `Update to v${pending.version}` : 'Install'}
+          </button>
+          <button className="deny-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={cancelAddonInstall}>Cancel</button>
+        </div>
       </div>
     </div>
   )
@@ -286,6 +372,7 @@ export function AddonsView() {
         </div>
       </div>
       {generating && <GenerateDialog onClose={() => setGenerating(false)} />}
+      <InstallPreview />
     </div>
   )
 }

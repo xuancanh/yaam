@@ -18,9 +18,12 @@ function fakeIo(over: Partial<PackageIoPort> = {}): PackageIoPort {
 }
 
 function ctx(io: PackageIoPort, over: Partial<AddonsActionsCtx> = {}): AddonsActionsCtx {
+  // live dispatch so staging writes addonInstall onto stateRef and a later
+  // confirmAddonInstall can read it back
+  const stateRef = { current: { addons: [], settings: {}, addonInstall: null } as unknown as AppState } as MutableRefObject<AppState>
   return {
-    dispatch: vi.fn(),
-    stateRef: { current: { addons: [], settings: {} } as unknown as AppState } as MutableRefObject<AppState>,
+    dispatch: vi.fn((f: (s: AppState) => AppState) => { stateRef.current = f(stateRef.current) }),
+    stateRef,
     flash: vi.fn(),
     installPackage: vi.fn(),
     sendAddonChat: vi.fn(),
@@ -32,12 +35,32 @@ function ctx(io: PackageIoPort, over: Partial<AddonsActionsCtx> = {}): AddonsAct
 }
 
 describe('createAddonsActions install flows', () => {
-  it('installAddonFromFile reads the picked file and installs it as a file source', async () => {
-    const io = fakeIo({ pickFile: vi.fn(async () => '/pkg.yaam.json'), readTextFile: vi.fn(async () => '{"name":"x"}') })
+  it('installAddonFromFile stages a preview, then confirm commits it as a file source', async () => {
+    const pkg = '{"name":"x","html":"<b>hi</b>"}'
+    const io = fakeIo({ pickFile: vi.fn(async () => '/pkg.yaam.json'), readTextFile: vi.fn(async () => pkg) })
     const c = ctx(io)
-    createAddonsActions(c).installAddonFromFile()
-    await vi.waitFor(() => expect(c.installPackage).toHaveBeenCalledWith('{"name":"x"}', 'file'))
+    const actions = createAddonsActions(c)
+    actions.installAddonFromFile()
+    // the picked package is staged for the permission preview — not installed yet
+    await vi.waitFor(() => expect(c.stateRef.current.addonInstall).toMatchObject({ json: pkg, source: 'file', name: 'x' }))
     expect(io.readTextFile).toHaveBeenCalledWith('/pkg.yaam.json')
+    expect(c.installPackage).not.toHaveBeenCalled()
+    // confirming commits it
+    actions.confirmAddonInstall()
+    expect(c.installPackage).toHaveBeenCalledWith(pkg, 'file')
+    expect(c.stateRef.current.addonInstall).toBeNull()
+  })
+
+  it('cancelAddonInstall drops the staged install without committing', async () => {
+    const pkg = '{"name":"x","html":"<b>hi</b>"}'
+    const io = fakeIo({ pickFile: vi.fn(async () => '/pkg.yaam.json'), readTextFile: vi.fn(async () => pkg) })
+    const c = ctx(io)
+    const actions = createAddonsActions(c)
+    actions.installAddonFromFile()
+    await vi.waitFor(() => expect(c.stateRef.current.addonInstall).not.toBeNull())
+    actions.cancelAddonInstall()
+    expect(c.stateRef.current.addonInstall).toBeNull()
+    expect(c.installPackage).not.toHaveBeenCalled()
   })
 
   it('installAddonFromFile is a no-op when the picker is cancelled', async () => {
@@ -66,20 +89,24 @@ describe('createAddonsActions install flows', () => {
 
     createAddonsActions(c).installAddonFromFolder()
 
-    await vi.waitFor(() => expect(c.installPackage).toHaveBeenCalled())
+    await vi.waitFor(() => expect(c.stateRef.current.addonInstall).not.toBeNull())
+    expect(c.stateRef.current.addonInstall).toMatchObject({ name: 'scoped', source: 'file' })
     expect(readTextFile).toHaveBeenCalledWith('/addons/scoped/addon.yaml', '/addons/scoped')
     expect(readTextFile).toHaveBeenCalledWith('/addons/scoped/view.html', '/addons/scoped')
   })
 
   it('installAddonFromUrl fetches http URLs but reads non-http entries as files', async () => {
-    const httpIo = fakeIo({ httpGetText: vi.fn(async () => '{"http":1}') })
-    createAddonsActions(ctx(httpIo, { installPackage: vi.fn() })).installAddonFromUrl('https://x.dev/a.json')
+    const httpIo = fakeIo({ httpGetText: vi.fn(async () => '{"name":"h","html":"<b>h</b>"}') })
+    const httpCtx = ctx(httpIo)
+    createAddonsActions(httpCtx).installAddonFromUrl('https://x.dev/a.json')
     await vi.waitFor(() => expect(httpIo.httpGetText).toHaveBeenCalledWith('https://x.dev/a.json'))
+    await vi.waitFor(() => expect(httpCtx.stateRef.current.addonInstall).toMatchObject({ source: 'url' }))
 
-    const fileIo = fakeIo({ readTextFile: vi.fn(async () => '{"file":1}') })
+    const filePkg = '{"name":"f","html":"<b>f</b>"}'
+    const fileIo = fakeIo({ readTextFile: vi.fn(async () => filePkg) })
     const c = ctx(fileIo)
     createAddonsActions(c).installAddonFromUrl('/local/a.json')
-    await vi.waitFor(() => expect(c.installPackage).toHaveBeenCalledWith('{"file":1}', 'file'))
+    await vi.waitFor(() => expect(c.stateRef.current.addonInstall).toMatchObject({ json: filePkg, source: 'file' }))
     expect(fileIo.httpGetText).not.toHaveBeenCalled()
   })
 

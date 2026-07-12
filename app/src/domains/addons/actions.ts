@@ -7,8 +7,9 @@ import type { Addon, AddonPermission, AppState } from '../../core/types'
 import { buildCfg, hasCreds } from '../../master'
 import { realPackageIoPort } from './ports'
 import type { PackageIoPort } from './ports'
-import { dispatchAddonRpc, exportAddonPackage, loadAddonFolder } from '../../core/addons'
+import { appCompat, dispatchAddonRpc, exportAddonPackage, loadAddonFolder, parseAddonPackage } from '../../core/addons'
 import type { AddonApi } from '../../core/addons'
+import type { AddonInstallPreview } from './slice'
 import { generateAddonPackage } from './addon-gen'
 
 export interface AddonsActionsCtx {
@@ -39,6 +40,10 @@ export interface AddonsActions {
   setAddonDevPath: (id: string, devPath: string | null) => void
   generateAddon: (prompt: string) => Promise<string>
   installAddonFromUrl: (url: string) => void
+  /** commit the currently-staged install (after the permission preview) */
+  confirmAddonInstall: () => void
+  /** dismiss the permission preview without installing */
+  cancelAddonInstall: () => void
   exportAddon: (id: string) => void
   sendAddonChat: (id: string, text: string) => void
   addonRpc: (addonId: string, method: string, args: unknown[]) => Promise<unknown>
@@ -79,7 +84,7 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
           const path = await io.pickFile()
           if (!path) return
           const json = await io.readTextFile(path)
-          installPackage(json, 'file')
+          stagePreview(ctx, json, 'file')
         } catch (e) {
           flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
         }
@@ -90,6 +95,14 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
 
     installAddonForDev: () => { void installFolder(ctx, io, true) },
 
+    confirmAddonInstall: () => {
+      const pending = stateRef.current.addonInstall
+      dispatch(s => ({ ...s, addonInstall: null }))
+      if (pending) installPackage(pending.json, pending.source)
+    },
+
+    cancelAddonInstall: () => dispatch(s => ({ ...s, addonInstall: null })),
+
     setAddonDevPath: (id, devPath) => dispatch(s => ({
       ...s,
       addons: s.addons.map(a => (a.id === id ? { ...a, devPath: devPath ?? undefined } : a)),
@@ -99,8 +112,9 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
       void (async () => {
         try {
           // registries can be local: non-http entries are filesystem paths
-          const json = /^https?:\/\//.test(url) ? await io.httpGetText(url) : await io.readTextFile(url)
-          installPackage(json, /^https?:\/\//.test(url) ? 'url' : 'file')
+          const isHttp = /^https?:\/\//.test(url)
+          const json = isHttp ? await io.httpGetText(url) : await io.readTextFile(url)
+          stagePreview(ctx, json, isHttp ? 'url' : 'file')
         } catch (e) {
           flash(`Install failed: ${e instanceof Error ? e.message : String(e)}`)
         }
@@ -112,7 +126,7 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
       if (!(st.masterEnabled && hasCreds(st))) return 'No brain configured — enable LLM Master in Settings first.'
       try {
         const json = await generateAddonPackage(buildCfg(st), prompt)
-        installPackage(json, 'master')
+        stagePreview(ctx, json, 'master')
         return ''
       } catch (e) {
         return e instanceof Error ? e.message : String(e)
@@ -161,7 +175,34 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
   }
 }
 
-/** Pick + load + install a folder-format addon; `dev` keeps the folder watched. */
+/** Stage a package for the permission-preview modal. Parses the JSON (reporting
+ *  a readable error on failure) and records the metadata the modal renders plus
+ *  the app-version compatibility verdict; the raw JSON is committed on confirm. */
+function stagePreview(ctx: AddonsActionsCtx, json: string, source: Addon['source']): void {
+  let parsed: ReturnType<typeof parseAddonPackage>
+  try { parsed = parseAddonPackage(json) } catch (e) {
+    ctx.flash(`Invalid package: ${e instanceof Error ? e.message : String(e)}`)
+    return
+  }
+  const existing = ctx.stateRef.current.addons.find(a => a.name === parsed.name)
+  const preview: AddonInstallPreview = {
+    json, source,
+    name: parsed.name, version: parsed.version, icon: parsed.icon,
+    desc: parsed.desc, author: parsed.author, minAppVersion: parsed.minAppVersion,
+    permissions: parsed.permissions,
+    hosts: parsed.hosts, secrets: parsed.secrets,
+    hasView: !!parsed.html, toolCount: parsed.tools?.length ?? 0,
+    hookNames: parsed.hooks ? Object.entries(parsed.hooks).filter(([, v]) => v).map(([k]) => k) : [],
+    hasAgent: !!parsed.agent,
+    update: existing ? { fromVersion: existing.version } : undefined,
+    compat: appCompat(parsed.minAppVersion),
+  }
+  ctx.dispatch(s => ({ ...s, addonInstall: preview }))
+}
+
+/** Pick + load + install a folder-format addon; `dev` keeps the folder watched.
+ *  Dev installs commit straight away (tight edit loop, still version-checked);
+ *  a plain folder install goes through the permission-preview modal. */
 async function installFolder(ctx: AddonsActionsCtx, io: PackageIoPort, dev: boolean): Promise<void> {
   const { dispatch, stateRef, flash, installPackage } = ctx
   try {
@@ -176,6 +217,7 @@ async function installFolder(ctx: AddonsActionsCtx, io: PackageIoPort, dev: bool
     }
     if (!manifest) throw new Error('no addon.yaml / addon.yml / addon.json in that folder')
     const json = await loadAddonFolder(manifest, rel => io.readTextFile(`${dir}/${rel}`, dir))
+    if (!dev) { stagePreview(ctx, json, 'file'); return }
     installPackage(json, 'file')
     if (dev) {
       // installPackage upserts by package name — pin the watched folder on it
