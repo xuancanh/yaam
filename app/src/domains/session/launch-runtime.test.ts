@@ -149,6 +149,27 @@ describe('createLaunchRuntime.launchSession', () => {
 })
 
 describe('sandboxed launches', () => {
+  it('refuses a sandbox without a working folder before creating a session', () => {
+    const port = fakePort()
+    const c = ctx(port)
+    const rt = createLaunchRuntime(c)
+    expect(rt.launchSession('mycli run', '', 'Sbx', 'cli', undefined, { sandbox: {} })).toBeNull()
+    expect(c.flash).toHaveBeenCalledWith('Sandboxed sessions need a working folder')
+    expect(port.attachTerminal).not.toHaveBeenCalled()
+    expect(useAppStore.getState().agents).toEqual([])
+  })
+
+  it('uses a remote machine default as the sandbox working folder', () => {
+    const machine = { id: 'm1', label: 'Box', host: 'box.test', user: 'u', remoteDir: '~/project' } as Machine
+    useAppStore.setState({ settings: { shell: 'zsh', machines: [machine] } as AppState['settings'] } as Partial<AppState> as AppState)
+    const port = fakePort()
+    const rt = createLaunchRuntime(ctx(port))
+    expect(rt.launchSession('mycli run', '', 'Sbx', 'cli', undefined, { machineId: 'm1', sandbox: {} })).not.toBeNull()
+    const cmd = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    const b64 = /printf %s (\S+) \| base64 -d/.exec(cmd)?.[1]
+    expect(atob(b64!)).toContain('--bind "$HOME"/\'project\' "$HOME"/\'project\'')
+  })
+
   it('wraps a local spawn in the backend sandbox wrapper', async () => {
     const port = fakePort()
     const rt = createLaunchRuntime(ctx(port))
@@ -229,6 +250,26 @@ describe('detached launches', () => {
 })
 
 describe('task template launches', () => {
+  it('uses a template machine default directory before the local default', () => {
+    const machine = { id: 'remote', label: 'Remote', host: 'remote.test', user: 'u', remoteDir: '~/remote-project' } as Machine
+    const template = {
+      id: 'tpl', name: 'Worker', typeId: 'cli', mode: 'ephemeral', prompt: '{task}', systemPrompt: '',
+      model: '', approval: 'edits', cwd: '', extraArgs: '', autoArchive: false, machineId: machine.id, sandbox: {},
+    } as AgentTemplate
+    useAppStore.setState({
+      templates: [template],
+      settings: { shell: 'zsh', defaultCwd: '/local-only', machines: [machine] } as AppState['settings'],
+    } as Partial<AppState> as AppState)
+    const port = fakePort()
+    const id = createLaunchRuntime(ctx(port)).launchFromTemplate(template.id)
+    expect(id).toBeTruthy()
+    expect(useAppStore.getState().agents.find(a => a.id === id)?.cwd).toBe('~/remote-project')
+    const cmd = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    const b64 = /printf %s (\S+) \| base64 -d/.exec(cmd)?.[1]
+    expect(atob(b64!)).toContain('cd "$HOME"/\'remote-project\'')
+    expect(atob(b64!)).not.toContain('/local-only')
+  })
+
   it('uses the task-specific machine instead of the template default', () => {
     const templateMachine = { id: 'template-host', label: 'Template host', host: 'template.test', user: 'tpl' } as Machine
     const taskMachine = { id: 'task-host', label: 'Task host', host: 'task.test', user: 'task' } as Machine

@@ -182,16 +182,37 @@ describe('createSessionActions', () => {
     expect(get('a1')?.log.at(-1)?.x).toContain('bwrap')
   })
 
-  it('resume of a sandboxed machine session re-enters the remote bwrap wrap', () => {
+  it('resume of a sandboxed machine session re-enters the remote bwrap wrap', async () => {
     const machine = { id: 'm1', label: 'Box', host: 'box.test', user: 'u' } as unknown as Agent['machine']
     seed([agent({ status: 'idle', machineId: 'm1', machine, sandbox: {}, cwd: '/home/u/proj' })])
     const port = fakePort()
     createSessionActions(ctx(port)).resume('a1')
     expect(port.sandboxWrapper).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(port.spawnSession).toHaveBeenCalled())
     const cmd = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
     const b64 = /printf %s (\S+) \| base64 -d/.exec(cmd)?.[1]
     expect(b64).toBeTruthy()
     expect(atob(b64!)).toContain('exec bwrap --ro-bind / /')
+  })
+
+  it('surfaces an invalid remote sandbox policy instead of throwing or spawning', async () => {
+    const machine = { id: 'm1', label: 'Box', host: 'box.test', user: 'u' } as unknown as Agent['machine']
+    seed([agent({ status: 'idle', machineId: 'm1', machine, sandbox: {}, cwd: 'relative/path' })])
+    const port = fakePort()
+    expect(() => createSessionActions(ctx(port)).resume('a1')).not.toThrow()
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    expect(port.spawnSession).not.toHaveBeenCalled()
+    expect(get('a1')?.status).toBe('error')
+    expect(get('a1')?.log.at(-1)?.x).toContain('absolute path')
+  })
+
+  it('surfaces a remote sandbox spawn failure on the session', async () => {
+    const machine = { id: 'm1', label: 'Box', host: 'box.test', user: 'u' } as unknown as Agent['machine']
+    seed([agent({ status: 'idle', machineId: 'm1', machine, sandbox: {}, cwd: '/repo' })])
+    const port = fakePort({ spawnSession: vi.fn(async () => { throw new Error('ssh unavailable') }) })
+    createSessionActions(ctx(port)).resume('a1')
+    await vi.waitFor(() => expect(get('a1')?.status).toBe('error'))
+    expect(get('a1')?.log.at(-1)?.x).toContain('ssh unavailable')
   })
 
   // resume NEVER wipes the scrollback automatically — the regression was an

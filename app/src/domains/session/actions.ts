@@ -229,16 +229,25 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         // resume, so nothing would ever correct the backend's 24×80 default
         // and the CLI would keep rendering for the wrong terminal
         const size = port.terminalSize(id)
+        const failResume = (err: unknown) => {
+          dispatch(s => ({
+            ...s,
+            agents: s.agents.map(a => a.id === id
+              ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err' as const, x: String(err) }]) }
+              : a),
+          }))
+        }
         if (machine) {
           // rebuild the same ssh wrap around the resume command resolved above
           // (resume-by-id for claude, else the plain command); a sandboxed
           // session re-enters its bwrap sandbox on the host
-          const base = `${envPrefix(type?.env)}${cmd}`.trim()
-          const inner = agent.sandbox ? sandboxRemoteWrap(base, agent.cwd, agent.sandbox) : base
-          const commandShell = stateRef.current.settings?.shell || 'zsh'
-          port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd, agent.detached), undefined, size?.rows, size?.cols, undefined, commandShell)
-            .then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
-            .catch(() => {})
+          Promise.resolve().then(() => {
+            const base = `${envPrefix(type?.env)}${cmd}`.trim()
+            const inner = agent.sandbox ? sandboxRemoteWrap(base, agent.cwd || machine.remoteDir, agent.sandbox) : base
+            const commandShell = stateRef.current.settings?.shell || 'zsh'
+            return port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd, agent.detached), undefined, size?.rows, size?.cols, undefined, commandShell)
+          }).then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
+            .catch(failResume)
           // best-effort: (re)capture codex's session id from the host so a future
           // resume can `codex resume <id>`. Recovers the id if it wasn't caught at
           // launch (e.g. app closed early) or after a clean restart; no-op for
@@ -251,14 +260,6 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           // (which kept the real command) is reused instead.
           const hostBase = cmd.includes('--yaam-attach') ? '' : `${envPrefix(type?.env)}${cmd}`.trim()
           const hostShell = terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
-          const failResume = (err: unknown) => {
-            dispatch(s => ({
-              ...s,
-              agents: s.agents.map(a => a.id === id
-                ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err' as const, x: String(err) }]) }
-                : a),
-            }))
-          }
           const spawnHost = (hostCmd: string) => port.detachedSpawn(id, hostCmd, agent.cwd || undefined, hostShell, size?.rows, size?.cols)
             .then(attachCmd => port.spawnSession(id, attachCmd, agent.cwd || undefined, size?.rows, size?.cols, undefined, undefined))
             .then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
@@ -266,21 +267,13 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           // a sandboxed relaunch rebuilds its wrapper first (fail closed); ''
           // reuses the host's on-disk spec, which kept the wrap from launch
           if (agent.sandbox && hostBase) {
-            port.sandboxWrapper(id, agent.cwd || '~', agent.sandbox.extraPaths ?? [], !!agent.sandbox.denyNetwork)
+            port.sandboxWrapper(id, agent.cwd || '', agent.sandbox.extraPaths ?? [], !!agent.sandbox.denyNetwork)
               .then(w => spawnHost(sandboxLocalWrap(w, hostBase)))
               .catch(failResume)
           } else void spawnHost(hostBase)
         } else {
           const base = `${envPrefix(type?.env)}${cmd}`.trim()
           const commandShell = terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
-          const failResume = (err: unknown) => {
-            dispatch(s => ({
-              ...s,
-              agents: s.agents.map(a => a.id === id
-                ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err' as const, x: String(err) }]) }
-                : a),
-            }))
-          }
           const spawnLocal = (spawnCommand: string) => port.spawnSession(id, spawnCommand, agent.cwd || undefined, size?.rows, size?.cols, terminalShell, commandShell)
             .then(() => {
               // …and nudge a repaint once the CLI has booted, so resumed TUIs
@@ -291,7 +284,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           // fail closed: a sandboxed session that can't rebuild its wrapper
           // errors instead of resuming unsandboxed
           if (agent.sandbox && !terminalShell) {
-            port.sandboxWrapper(id, agent.cwd || '~', agent.sandbox.extraPaths ?? [], !!agent.sandbox.denyNetwork)
+            port.sandboxWrapper(id, agent.cwd || '', agent.sandbox.extraPaths ?? [], !!agent.sandbox.denyNetwork)
               .then(w => spawnLocal(sandboxLocalWrap(w, base)))
               .catch(failResume)
           } else void spawnLocal(base)

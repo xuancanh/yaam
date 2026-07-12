@@ -11,8 +11,10 @@ use std::path::{Path, PathBuf};
 const MAX_EXTRA_PATHS: usize = 32;
 const MAX_PATH_BYTES: usize = 4_096;
 
-/// Home dot-dirs agent CLIs need to write (state, caches, config).
-const HOME_WRITE_DIRS: &[&str] = &[".claude", ".codex", ".config", ".cache", ".local", ".yaam"];
+/// State roots used by the built-in coding-agent CLIs. Do not grant generic
+/// config/cache/local-data roots: they contain executable startup config and
+/// PATH entries that turn a write guardrail into trivial persistence.
+const HOME_WRITE_DIRS: &[&str] = &[".claude", ".codex", ".gemini", ".aider"];
 
 /// Escape a path for an SBPL double-quoted string literal.
 fn sbpl_escape(path: &str) -> String {
@@ -102,7 +104,8 @@ fn writable_roots(cwd: &str, extra_paths: &[String]) -> Result<Vec<String>, Stri
 /// Render the allow-default SBPL profile: everything permitted except file
 /// writes, which are limited to the given roots (+ /dev for PTYs).
 fn render_profile(roots: &[String], deny_network: bool) -> String {
-    let mut p = String::from("(version 1)\n(allow default)\n(deny file-write*)\n");
+    let mut p =
+        String::from("(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n");
     p.push_str("(allow file-write* (subpath \"/dev\"))\n");
     for root in roots {
         p.push_str(&format!(
@@ -149,7 +152,7 @@ fn linux_wrapper(roots: &[String], deny_network: bool) -> Result<String, String>
         .map(|r| format!("--bind {} {}", shq(r), shq(r)))
         .collect();
     Ok(format!(
-        "bwrap --ro-bind / / --dev-bind /dev /dev --unshare-pid --proc /proc --die-with-parent {}{}",
+        "bwrap --ro-bind / / --dev-bind /dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent {}{}",
         binds.join(" "),
         if deny_network { " --unshare-net" } else { "" },
     ))
@@ -183,7 +186,9 @@ mod tests {
     /// The profile allows by default, denies writes, and re-allows each root.
     fn renders_allow_default_profile() {
         let p = render_profile(&["/Users/x/proj".into(), "/private/tmp".into()], false);
-        assert!(p.starts_with("(version 1)\n(allow default)\n(deny file-write*)\n"));
+        assert!(p.starts_with(
+            "(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n"
+        ));
         assert!(p.contains("(allow file-write* (subpath \"/dev\"))"));
         assert!(p.contains("(allow file-write* (subpath \"/Users/x/proj\"))"));
         assert!(p.contains("(allow file-write* (subpath \"/private/tmp\"))"));
@@ -215,7 +220,7 @@ mod tests {
             .map(|r| format!("--bind {} {}", shq(r), shq(r)))
             .collect();
         let p = format!(
-            "bwrap --ro-bind / / --dev-bind /dev /dev --proc /proc --die-with-parent {}",
+            "bwrap --ro-bind / / --dev-bind /dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent {}",
             binds.join(" "),
         );
         assert!(p.contains("--bind '/home/u/my proj' '/home/u/my proj'"));
@@ -265,5 +270,37 @@ mod tests {
         let w = sandbox_wrapper("test–profile/1".into(), "/tmp".into(), vec![], true).unwrap();
         assert!(w.starts_with("sandbox-exec -p '"));
         assert!(w.contains("(deny network*)"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_profile_allows_only_declared_write_roots() {
+        use std::process::Command;
+
+        let base = std::env::temp_dir().join(format!(
+            "yaam-sandbox-policy-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let allowed = base.join("allowed");
+        let blocked = base.join("blocked");
+        std::fs::create_dir_all(&allowed).unwrap();
+        std::fs::create_dir_all(&blocked).unwrap();
+        let allowed = std::fs::canonicalize(&allowed).unwrap();
+        let blocked = std::fs::canonicalize(&blocked).unwrap();
+        let profile = render_profile(&[allowed.to_string_lossy().into_owned()], false);
+        let script = format!(
+            "printf ok > {}; ! printf blocked > {} 2>/dev/null",
+            shq(&allowed.join("ok").to_string_lossy()),
+            shq(&blocked.join("bad").to_string_lossy())
+        );
+        let result = Command::new("/usr/bin/sandbox-exec")
+            .args(["-p", &profile, "/bin/sh", "-c", &script])
+            .status()
+            .unwrap();
+        assert!(result.success());
+        assert_eq!(std::fs::read_to_string(allowed.join("ok")).unwrap(), "ok");
+        assert!(!blocked.join("bad").exists());
+        std::fs::remove_dir_all(base).ok();
     }
 }

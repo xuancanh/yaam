@@ -64,6 +64,10 @@ describe('wrapLaunch / killRemote', () => {
     const b64 = wrapLaunch(m({ remoteDir: '/def' }), 'claude', 'a1', '/repo-b').match(/printf %s ([A-Za-z0-9+/=]+) /)?.[1]
     expect(atob(b64!)).toBe(`cd '/repo-b' && claude`)
   })
+  it('expands a home-relative cwd on the remote host', () => {
+    const b64 = wrapLaunch(m({ remoteDir: '~/work' }), 'claude', 'a1').match(/printf %s ([A-Za-z0-9+/=]+) /)?.[1]
+    expect(atob(b64!)).toBe(`cd "$HOME"/'work' && claude`)
+  })
   it('kill targets the same tmux session over batch ssh', () => {
     const k = killRemote(m(), 'a1')
     expect(k).toContain('BatchMode=yes')

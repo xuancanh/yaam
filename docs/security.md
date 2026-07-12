@@ -207,15 +207,19 @@ including everything the agent spawns, inherits the restriction.
 Policy (allow-default): reads are unrestricted; **file writes are limited to**
 the session working directory (the worktree workdir when combined with
 worktree isolation), `/tmp` + `TMPDIR`, `/dev` (PTYs), the agent config
-dot-dirs (`~/.claude`, `~/.codex`, `~/.config`, `~/.cache`, `~/.local`,
-`~/.yaam`), and any template-configured extra paths. Network is allowed by
+state directories for the built-in CLIs (`~/.claude`, `~/.codex`, `~/.gemini`,
+`~/.aider`), and any template-configured extra paths. Generic `~/.config`,
+`~/.cache`, `~/.local`, and `~/.yaam` access is deliberately not granted because
+those trees contain startup configuration, executable PATH entries, and YAAM's
+own state. Network is allowed by
 default so agent CLIs keep working; a template can additionally deny all
 network (`(deny network*)` / `--unshare-net`). Local wrappers are built by the
 `sandbox_wrapper` backend command, which validates and canonicalizes every root
 (symlinks, `/tmp` → `/private/tmp`). macOS profiles are passed inline rather
 than written beneath a sandbox-writable directory. Linux also gets a separate
 PID namespace, preventing `/proc/<host-pid>/root` from bypassing the mount
-policy.
+policy; its System V/POSIX IPC namespace is isolated too. Seatbelt denies Apple
+Events so an agent cannot ask another GUI process to perform an outside write.
 
 The feature is **fail-closed**: if the wrapper can't be built (unsupported OS,
 missing `sandbox-exec`/`bwrap`, bad cwd) the launch or resume errors instead of

@@ -11,6 +11,15 @@ export function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
 }
 
+/** Quote a remote path while preserving the two home shorthands the UI and
+ * Master explicitly support. A quoted literal `~/x` does not expand remotely. */
+export function remotePathExpr(path: string): string {
+  const value = path.trim()
+  if (value === '~') return '"$HOME"'
+  if (value.startsWith('~/')) return `"$HOME"/${shq(value.slice(2))}`
+  return shq(value)
+}
+
 /** tmux session name for a YAAM session id (tmux names can't contain . or :). */
 export function tmuxName(id: string): string {
   return `yaam-${id.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24) || 'session'}`
@@ -67,7 +76,7 @@ function toB64(s: string): string {
  *  survives both shells without a nested-quoting minefield. */
 export function wrapLaunch(m: Machine, innerCommand: string, id: string, cwd?: string, detached?: boolean): string {
   const dir = (cwd || m.remoteDir || '').trim()
-  const inner = dir ? `cd ${shq(dir)} && ${innerCommand}` : innerCommand
+  const inner = dir ? `cd ${remotePathExpr(dir)} && ${innerCommand}` : innerCommand
   const decode = `"$(printf %s ${toB64(inner)} | base64 -d)"`
   const remote = detached
     ? `tmux new-session -A -s ${tmuxName(id)} ${decode}`

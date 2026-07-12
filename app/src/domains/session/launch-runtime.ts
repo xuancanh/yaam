@@ -92,6 +92,10 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
     // Create optimistic session state, spawn its PTY, and attach lifecycle tracking.
     const launchSession = (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string; sandbox?: SandboxConfig }): string | null => {
       const machine = findMachine(stateRef.current.settings?.machines, opts?.machineId)
+      if (opts?.sandbox && !cwd.trim() && !machine?.remoteDir?.trim()) {
+        flash('Sandboxed sessions need a working folder')
+        return null
+      }
       const plan = buildLaunch({ command, cwd, nameHint, typeId, workspaceId, opts }, stateRef.current.agentTypes, stateRef.current.activeWorkspace, machine)
       if (!plan) return null
       const { agent, spawnCommand, knownSessionId, launchType } = plan
@@ -137,7 +141,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         // local sandbox: the backend builds the OS wrapper (sandbox-exec/bwrap);
         // a rejection fails the launch instead of running unsandboxed
         const cmd = sandbox
-          ? sandboxLocalWrap(await port.sandboxWrapper(id, spawnCwd || agent.cwd || '~', sandbox.extraPaths ?? [], !!sandbox.denyNetwork), base)
+          ? sandboxLocalWrap(await port.sandboxWrapper(id, spawnCwd || agent.cwd || '', sandbox.extraPaths ?? [], !!sandbox.denyNetwork), base)
           : base
         // Claude's id is known up front; only codex/opencode need file detection.
         if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', spawnCwd ?? '', false)
@@ -194,9 +198,12 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       const tpl = forceEphemeral && stored.mode !== 'ephemeral' ? { ...stored, mode: 'ephemeral' as const } : stored
       const type = st.agentTypes.find(t => t.id === tpl.typeId)
       const command = buildTemplateCommand(tpl, type, task, contract)
-      const id = launchSession(command, cwdOverride || tpl.cwd || st.settings.defaultCwd || '', tpl.name, type?.id, workspaceId, {
+      const machineId = machineIdOverride ?? tpl.machineId
+      const machine = findMachine(st.settings?.machines, machineId)
+      const cwd = cwdOverride || tpl.cwd || machine?.remoteDir || (!machine ? st.settings.defaultCwd : '') || ''
+      const id = launchSession(command, cwd, tpl.name, type?.id, workspaceId, {
         ephemeral: tpl.mode === 'ephemeral', autoArchive: tpl.autoArchive, templateId: tpl.id, isolate,
-        machineId: machineIdOverride ?? tpl.machineId,
+        machineId,
         // false = explicitly off (dialog unchecked); undefined = inherit template
         sandbox: sandboxOverride === false ? undefined : (sandboxOverride ?? tpl.sandbox),
       })
