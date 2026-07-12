@@ -6,6 +6,7 @@ import type { RemoteSnapshot } from '../domains/remote/snapshot'
 
 const DEVICE_ID_KEY = 'yaam-remote-device-id'
 const DEVICE_TOKEN_KEY = 'yaam-remote-device-token'
+const URL_TOKEN_KEY = 'yaam-remote-url-token'
 
 // localStorage can be missing or throw (Safari private mode, test envs) —
 // fall back to in-memory so the app still works for the session
@@ -24,6 +25,37 @@ const store: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = (() => {
 /** URL token from the connect link (?t=…). */
 export function urlToken(search = window.location.search): string {
   return new URLSearchParams(search).get('t') ?? ''
+}
+
+/** Remember the URL token from a link that authenticated. Every API call needs
+ *  it (it is the "possession of the link" factor), and the desktop persists the
+ *  same token across restarts — so a remembered one is almost always still
+ *  valid, letting a bare bookmark reconnect. */
+export function rememberUrlToken(token: string): void {
+  if (token) store.setItem(URL_TOKEN_KEY, token)
+}
+
+/** The URL token last seen on a working link, if any. */
+export function lastUrlToken(): string {
+  return store.getItem(URL_TOKEN_KEY) ?? ''
+}
+
+/** Resolve the effective URL token. If the address bar has one, use it. If it is
+ *  blank (a home-screen shortcut that dropped the query, a bare host), re-apply
+ *  the remembered token to the URL WITHOUT reloading, so the app reconnects
+ *  instead of dead-ending on the "link out of date" screen. Returns '' only when
+ *  no token is available anywhere. */
+export function ensureUrlToken(): string {
+  const current = urlToken()
+  if (current) return current
+  const remembered = lastUrlToken()
+  if (remembered && typeof window !== 'undefined' && window.history) {
+    const url = new URL(window.location.href)
+    url.searchParams.set('t', remembered)
+    window.history.replaceState(window.history.state, '', url.toString())
+    return remembered
+  }
+  return ''
 }
 
 function randId(): string {

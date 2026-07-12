@@ -8,7 +8,7 @@ import { TerminalView } from './TerminalView'
 import { FilesBrowser, GitReview } from './FilesGit'
 import type { RemoteSnapshot } from '../domains/remote/snapshot'
 import {
-  deviceToken, fetchState, forgetPairing, pairingStatus, ping, requestPairing, sendCommand, streamUrl, urlToken,
+  deviceToken, ensureUrlToken, fetchState, forgetPairing, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl,
 } from './api'
 
 const POLL_MS = 2000
@@ -982,8 +982,12 @@ export function MobileApp() {
 
   useEffect(() => {
     void (async () => {
-      if (!urlToken()) { setPairing('bad-token'); return }
+      // no token on the URL → fall back to the last one that worked (a bare
+      // bookmark reconnects instead of dead-ending on "link out of date")
+      const token = ensureUrlToken()
+      if (!token) { setPairing('bad-token'); return }
       if (!(await ping())) { setPairing('bad-token'); return }
+      rememberUrlToken(token) // known-good — reuse it if the URL is ever blank
       setPairing(deviceToken() ? 'paired' : 'unpaired')
     })()
   }, [])
