@@ -77,15 +77,20 @@ defense-in-depth, or user-experience work.
 
 ## Verification record
 
-Focused verification completed so far:
+Final verification completed:
 
-- TypeScript typecheck and production desktop build.
-- Frontend tests for ZIP/file extraction/workbook rendering, remote secrets,
-  addon sandbox, and mobile API.
+- TypeScript typecheck, oxlint, and production desktop build.
+- All 94 frontend test files: 525 tests passed.
+- All 90 Rust library tests passed; `cargo check` and strict all-target,
+  all-feature clippy passed.
 - `npm audit --omit=dev`: zero vulnerabilities.
-- Rust tests for remote, filesystem/process execution, and detached sessions.
-- `cargo check` and strict all-target/all-feature clippy.
 - Mobile single-file rebuild; confirmed no `fonts.googleapis.com` reference.
+- Production initial application chunk is 380 KB / 110 KB gzip (the exact
+  content hash and size vary slightly as features change), down from the
+  original 1.42 MB monolith. The 803 KB shared UI/xterm chunk remains the main
+  bundle-performance target.
 
-The full frontend/backend gates are rerun after each remediation batch and once
-more before this audit is marked complete.
+The remaining “Next” items in the tables are deliberately retained as the
+prioritized follow-up backlog. They are mostly integration/load testing,
+cross-platform fault injection, maintainability splits, and additional
+defense-in-depth; no known P0 issue remains open from this audit.
