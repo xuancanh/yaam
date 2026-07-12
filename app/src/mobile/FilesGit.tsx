@@ -4,7 +4,9 @@
 // renders here. Markdown files render rich; diffs get the usual +/- coloring.
 import { useCallback, useEffect, useState } from 'react'
 import { Markdown } from '../components/Markdown'
-import { CodeLines, IMG_MIME, isMarkdown, viewKind } from '../shared/file-preview'
+import { CodeLines, DiffLines, IMG_MIME, isMarkdown, isWorkbook, viewKind } from '../shared/file-preview'
+import { renderWorkbook } from '../shared/office-render'
+import type { OfficeRender } from '../shared/office-render'
 import { rpc } from './api'
 
 interface FsEntry { name: string; path: string; isDir: boolean }
@@ -34,7 +36,35 @@ function RichText({ name, text }: { name: string; text: string }) {
   return <pre className="filetext">{text ? <CodeLines name={name} text={text} /> : '(empty file)'}</pre>
 }
 
-interface Loaded { path: string; text?: string; b64?: string; kind: FileKind }
+interface Loaded { path: string; text?: string; b64?: string; office?: OfficeRender; kind: FileKind }
+
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
+/** Rich workbook view: one scrollable HTML table per sheet, sheet tabs on top.
+ *  Mirrors the desktop file viewer's `.sheet-html` rendering. */
+function WorkbookView({ office }: { office: OfficeRender }) {
+  const [ix, setIx] = useState(0)
+  const sheets = office.sheets ?? []
+  if (!sheets.length) return <div className="empty">Empty workbook.</div>
+  const cur = sheets[Math.min(ix, sheets.length - 1)]
+  return (
+    <div>
+      {sheets.length > 1 && (
+        <div className="subtabs bar" style={{ marginBottom: 8, overflowX: 'auto' }}>
+          {sheets.map((sh, i) => (
+            <button key={i} className={i === ix ? 'on' : ''} onClick={() => setIx(i)}>{sh.name}</button>
+          ))}
+        </div>
+      )}
+      <div className="sheet-html" style={{ overflowX: 'auto' }} dangerouslySetInnerHTML={{ __html: cur.html }} />
+    </div>
+  )
+}
 
 export function FilesBrowser({ root, onAttach }: {
   root: string
@@ -63,9 +93,20 @@ export function FilesBrowser({ root, onAttach }: {
     setBusy(true)
     setErr('')
     const kind = viewKind(p)
-    const req = kind === 'image' || kind === 'pdf'
-      ? rpc<{ b64: string }>('rpc_fs_b64', p).then(r => setFile({ path: p, b64: r.b64, kind }))
-      : rpc<{ text: string }>('rpc_fs_read', p).then(r => setFile({ path: p, text: r.text, kind }))
+    const name = p.slice(p.lastIndexOf('/') + 1)
+    let req: Promise<void>
+    if (kind === 'image' || kind === 'pdf') {
+      req = rpc<{ b64: string }>('rpc_fs_b64', p).then(r => setFile({ path: p, b64: r.b64, kind }))
+    } else if (kind === 'office' && isWorkbook(name)) {
+      // rich workbook: fetch raw bytes and render sheet tables (dependency-free
+      // parser); if that fails, fall back to the extracted-text view
+      req = rpc<{ b64: string }>('rpc_fs_b64', p).then(async r => {
+        try { setFile({ path: p, office: await renderWorkbook(b64ToBytes(r.b64)), kind }) }
+        catch { const t = await rpc<{ text: string }>('rpc_fs_read', p); setFile({ path: p, text: t.text, kind }) }
+      })
+    } else {
+      req = rpc<{ text: string }>('rpc_fs_read', p).then(r => setFile({ path: p, text: r.text, kind }))
+    }
     req.catch(e => setErr(e instanceof Error ? e.message : String(e))).finally(() => setBusy(false))
   }
 
@@ -100,8 +141,10 @@ export function FilesBrowser({ root, onAttach }: {
             </button>
           </div>
         )}
-        {(file.kind === 'text' || file.kind === 'office' || file.kind === 'html') && <RichText name={name} text={file.text ?? ''} />}
-        {onAttach && file.kind !== 'image' && file.kind !== 'pdf' && (
+        {file.office
+          ? <WorkbookView office={file.office} />
+          : (file.kind === 'text' || file.kind === 'office' || file.kind === 'html') && <RichText name={name} text={file.text ?? ''} />}
+        {onAttach && file.text !== undefined && (
           <div className="btnrow">
             <button
               className="btn accent"
@@ -135,25 +178,6 @@ export function FilesBrowser({ root, onAttach }: {
 
 const STATUS_COLOR: Record<string, string> = { '??': 'var(--green)', A: 'var(--green)', M: 'var(--amber)', D: 'var(--red-soft)' }
 
-function DiffText({ diff }: { diff: string }) {
-  return (
-    <pre className="filetext mono">
-      {diff.split('\n').map((l, i) => (
-        <div
-          key={i}
-          style={{
-            color: l.startsWith('+') && !l.startsWith('+++') ? 'var(--green)'
-              : l.startsWith('-') && !l.startsWith('---') ? 'var(--red-soft)'
-              : l.startsWith('@@') ? 'var(--accent)' : undefined,
-          }}
-        >
-          {l || ' '}
-        </div>
-      ))}
-    </pre>
-  )
-}
-
 export function GitReview({ root }: { root: string }) {
   const [status, setStatus] = useState<{ root: string; branch: string; files: GitFile[] } | null>(null)
   const [diff, setDiff] = useState<{ path: string; text: string } | null>(null)
@@ -183,7 +207,7 @@ export function GitReview({ root }: { root: string }) {
           <button className="back" onClick={() => setDiff(null)}>‹ Changes</button>
           <span className="name mono" style={{ fontSize: 12 }}>{diff.path}</span>
         </div>
-        <DiffText diff={diff.text} />
+        <DiffLines diff={diff.text} name={diff.path} />
       </div>
     )
   }

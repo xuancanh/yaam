@@ -371,6 +371,15 @@ button.card.slim:active { background: var(--panel2); }
 }
 .back { background: none; border: none; color: var(--text2); font-size: 14px; padding: 4px 6px 4px 0; }
 
+/* rich workbook tables (file viewer .xlsx mode) — mirrors desktop .sheet-html */
+.sheet-html { border: 1px solid var(--line-soft); border-radius: 12px; padding: 10px; }
+.sheet-html table { border-collapse: collapse; font-size: 11.5px; font-family: var(--font-mono); }
+.sheet-html td, .sheet-html th {
+  border: 1px solid var(--line2); padding: 3px 8px; color: var(--text2);
+  white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+}
+.sheet-html tr:first-child td { background: var(--panel2); font-weight: 600; color: var(--text); }
+
 /* session sub-tabs + terminal */
 .subtabs { display: flex; gap: 6px; margin: 13px 0 11px; }
 .subtabs.bar { margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0; background: var(--bg); }
