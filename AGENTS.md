@@ -153,6 +153,19 @@ When you add a new persisted top-level field, you MUST:
    that predate your field. (The templates crash was exactly this: a saved state
    without `templates` made `s.templates.find` throw. See commit 7edf98a.)
 
+**Multi-window: one state owner, satellites are runtime-lite.** A workspace can
+be spun out into its own OS window (`core/window-role.ts`: `?win=ws&ws=<id>`).
+All windows share one Tauri backend (PTYs/`invoke`/`session-*` broadcasts are
+global), but only the **main** window runs persistence, Master/scheduler, addon
+hooks, and integrations — a `workspace` satellite gates those off
+(`role.kind === 'main'` checks in `conductor-runtime.ts`/`chat.ts`) and instead
+forwards its slice to main via `ws:sync`/`ws:reattach` events
+(`infrastructure/native/windows.ts`), so there is never a second writer of
+`conductor-state.json`. Never start persistence or the autonomous loops in a
+satellite. `detachedWorkspaces` is runtime-only (NOT in `selectMainState`) and
+hides spun-out workspaces from that window's switcher. See
+`docs/architecture.md` § Multi-window workspace satellites.
+
 **Terminals are a module-level registry, not React state.** `terminals.ts` owns
 xterm instances keyed by session id. Panes attach/detach the DOM element on
 mount/unmount; live PTYs get **zero** replayed scrollback (replaying into an

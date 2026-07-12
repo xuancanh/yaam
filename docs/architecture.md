@@ -265,6 +265,62 @@ host cleans up socket/spec and the attach client's EOF fires the normal
 session-exit flow. `detached_list` probes sockets for liveness and prunes
 stale leftovers.
 
+## Multi-window workspace satellites
+
+A workspace can be **spun out into its own OS window** (switcher → the ⧉ split
+button). The satellite is the detachable-session idea applied to a whole
+workspace: one Tauri backend process is shared by every window, so PTYs,
+managed state, and `invoke` commands are global — the hard part is not creating
+the window (a few lines of `WebviewWindow`) but keeping **one owner of durable
+state** so two webviews never clobber the single `conductor-state.json`.
+
+The window's **role** is read from its URL on boot (`core/window-role.ts`):
+`index.html` is the `main` window; `index.html?win=ws&ws=<id>` is a `workspace`
+satellite pinned to one workspace. `store.tsx` passes the role into
+`createAppRuntime`, which gates the runtime:
+
+- **Main** runs everything: persistence (the sole writer), Master + scheduler,
+  addon hooks, integrations, plus a listener for the satellite protocol.
+- **A satellite** hydrates from disk and runs session I/O (terminals render live
+  off the global `session-data` broadcast) and its own workspace's watchers, but
+  **does not start** persistence, Master/scheduler, addon hooks, or integrations
+  (`chat.ts` gates these on `role.kind === 'main'`; `conductor-runtime.ts` skips
+  `master.start()`/`addon.start()`). It pins its active workspace once
+  `bootStatus === 'ready'`, then debounce-forwards its workspace slice
+  (`scopedFromState`) plus that workspace's sessions to main via a `ws:sync`
+  event. Main merges the slice into the background `workspaceData[id]` and
+  persists it — so a satellite's edits round-trip to disk through the single
+  writer, never a second one.
+
+```mermaid
+flowchart LR
+  subgraph Main[main window — owns state]
+    PS[persistence writer] --- WD[workspaceData store]
+    MS[Master / scheduler / addons]
+  end
+  subgraph Sat[workspace satellite ws-<id>]
+    UI[renders + drives workspace X] --- SR[session I/O + watchers]
+  end
+  Sat -- "ws:sync (slice + X's agents)" --> Main
+  Sat -- "ws:reattach on close" --> Main
+  Main -- "shared backend: PTYs, invoke, session-data broadcast" --- Sat
+```
+
+**Exclusivity + restore.** A spun-out workspace is added to the runtime-only
+`detachedWorkspaces` set (never persisted, so a restart comes back fully
+reattached) and **hidden from the main switcher**; if it was active, main
+switches away first, guaranteeing one window per workspace. Closing the
+satellite emits `ws:reattach` with its final slice — main merges it, clears the
+detached flag, and the workspace reappears in the switcher.
+
+**Why no double autonomous actions.** The task watcher/monitor act on the
+*active* workspace's flat `tasks`; main is showing a different workspace than
+the satellite, so their autonomous work does not overlap. (Residual: main still
+does minor per-session monitor work for a detached workspace's sessions since
+`session-*` events broadcast to all windows — harmless, gate by `workspaceId` if
+it ever matters.) Capabilities: `capabilities/default.json` allows
+`create-webview-window`, `emit`/`emit-to`/`listen`, and the `ws-*` window label.
+
 ## Remote machines
 
 A session bound to a saved machine (`settings.machines`, keys/ssh-agent auth)
