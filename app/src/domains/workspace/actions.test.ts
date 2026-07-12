@@ -47,8 +47,9 @@ function harness(initial: AppState, port: SessionProcessPort, over: Partial<Work
 
 const baseState = (over: Partial<AppState> = {}): AppState => ({
   workspaces: [{ id: 'ws-a', name: 'A' }, { id: 'ws-b', name: 'B' }],
-  activeWorkspace: 'ws-a', workspaceData: { 'ws-b': {} },
+  activeWorkspace: 'ws-a', workspaceData: { 'ws-b': {} }, detachedWorkspaces: [],
   agents: [], messages: [], events: [], notifications: [],
+  groups: [], activeGroup: null, minimizedIds: [], crons: [], tasks: [],
   ...over,
 } as unknown as AppState)
 
@@ -82,5 +83,49 @@ describe('createWorkspaceActions.deleteWorkspace', () => {
     expect(h.ctx.flash).toHaveBeenCalledWith('Cannot delete the last workspace')
     expect(port.killSession).not.toHaveBeenCalled()
     expect(h.state().workspaces).toHaveLength(1)
+  })
+})
+
+describe('createWorkspaceActions spin-out / restore', () => {
+  it('detaching a non-active workspace hides it here without switching', () => {
+    const h = harness(baseState(), fakePort())
+    h.actions.openWorkspaceInWindow('ws-b')
+    const s = h.state()
+    expect(s.detachedWorkspaces).toContain('ws-b')
+    expect(s.activeWorkspace).toBe('ws-a') // unchanged
+  })
+
+  it('detaching the active workspace switches this window away first', () => {
+    const h = harness(baseState(), fakePort())
+    h.actions.openWorkspaceInWindow('ws-a')
+    const s = h.state()
+    expect(s.detachedWorkspaces).toContain('ws-a')
+    expect(s.activeWorkspace).toBe('ws-b') // main moved off the spun-out one
+  })
+
+  it('refuses to spin out when no other workspace would remain here', () => {
+    const h = harness(baseState({ workspaces: [{ id: 'ws-a', name: 'A' }] }), fakePort())
+    h.actions.openWorkspaceInWindow('ws-a')
+    expect(h.ctx.flash).toHaveBeenCalledWith('Keep at least one workspace in this window')
+    expect(h.state().detachedWorkspaces).not.toContain('ws-a')
+  })
+
+  it('reattach (satellite closed) restores it and merges its final slice', () => {
+    const h = harness(baseState({ detachedWorkspaces: ['ws-b'] }), fakePort())
+    const data = { tasks: [{ id: 't1' }] } as unknown as Parameters<typeof h.actions.reattachWorkspace>[1]
+    h.actions.reattachWorkspace('ws-b', data, [agent('remote', 'ws-b')])
+    const s = h.state()
+    expect(s.detachedWorkspaces).not.toContain('ws-b') // selectable again
+    expect(s.workspaceData['ws-b']).toBe(data)
+    expect(s.agents.map(a => a.id)).toContain('remote')
+  })
+
+  it('periodic merge keeps the workspace detached', () => {
+    const h = harness(baseState({ detachedWorkspaces: ['ws-b'] }), fakePort())
+    const data = { tasks: [] } as unknown as Parameters<typeof h.actions.mergeDetachedWorkspace>[1]
+    h.actions.mergeDetachedWorkspace('ws-b', data, [agent('remote', 'ws-b')])
+    const s = h.state()
+    expect(s.detachedWorkspaces).toContain('ws-b') // still in its own window
+    expect(s.workspaceData['ws-b']).toBe(data)
   })
 })

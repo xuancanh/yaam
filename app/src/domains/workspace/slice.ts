@@ -14,6 +14,10 @@ export interface WorkspaceSlice {
   activeGroup: string | null
   /** sessions minimized to the dock strip */
   minimizedIds: string[]
+  /** workspaces spun out into their own OS window — hidden from this window's
+   *  switcher until the satellite closes. Runtime-only (never persisted), so a
+   *  restart starts with everything reattached. */
+  detachedWorkspaces: string[]
 }
 
 /** Initial workspace slice: one default workspace, empty layout. */
@@ -25,5 +29,6 @@ export function freshWorkspaceSlice(): WorkspaceSlice {
     groups: [],
     activeGroup: null,
     minimizedIds: [],
+    detachedWorkspaces: [],
   }
 }
