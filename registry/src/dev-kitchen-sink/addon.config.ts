@@ -2,7 +2,7 @@ import { defineAddon } from 'yaam-addon'
 
 export default defineAddon({
   name: 'Dev Kitchen Sink',
-  version: '1.0.1',
+  version: '1.1.0',
   icon: '🧪',
   description: "Developer reference — a tab that exercises every addon capability (state, sessions, tasks incl. review verbs, templates, schedules, storage, allowlisted HTTP, keychain secrets, the addon's own agent, UI calls), plus all four hooks, a Master tool, and a masterPromptAppend.",
   author: 'yaam',
