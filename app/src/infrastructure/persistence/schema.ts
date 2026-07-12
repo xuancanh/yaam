@@ -33,6 +33,7 @@ export function selectMainState(s: AppState): MainPartition {
     workspaces: s.workspaces,
     activeWorkspace: s.activeWorkspace,
     workspaceData: s.workspaceData,
+    archivedWorkspaces: s.archivedWorkspaces ?? [],
     groups: s.groups,
     activeGroup: s.activeGroup,
     minimizedIds: s.minimizedIds,

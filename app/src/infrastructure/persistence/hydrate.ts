@@ -156,6 +156,7 @@ export function buildHydration(p: Partial<PersistedState>, seed: AppState): Hydr
     workspaces,
     activeWorkspace,
     workspaceData,
+    archivedWorkspaces: p.archivedWorkspaces ?? [],
     addonStorage: p.addonStorage ?? {},
     chatMemory: p.chatMemory ?? {},
     // the built-in assistant survives even snapshots from before durable agents

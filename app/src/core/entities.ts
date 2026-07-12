@@ -849,6 +849,7 @@ export type View =
   | 'addon'
   | 'addons'
   | 'chat'
+  | 'archived-workspaces'
 
 export interface Panel {
   agentId: string
@@ -908,6 +909,8 @@ export interface PersistedState {
   workspaces?: Workspace[]
   activeWorkspace?: string
   workspaceData?: Record<string, WorkspaceData>
+  /** workspaces the user closed (archived); restorable or permanently deletable */
+  archivedWorkspaces?: ArchivedWorkspace[]
   addonStorage?: Record<string, Record<string, unknown>>
   chatMemory?: Record<string, string>
   /** persistent chat identities that outlive conversations */
@@ -943,6 +946,21 @@ export type SessionsPartition = Pick<PersistedState, 'schemaVersion' | 'agents'>
 export interface Workspace {
   id: string
   name: string
+  /** accent color (hex) for this workspace — tints the app logo and the
+   *  switcher dot. Absent = the default yellow accent. */
+  color?: string
+}
+
+/** A workspace closed by the user: its full state (board, chats, schedules, and
+ *  the session records) is preserved here so it can be restored later or deleted
+ *  for good. The live processes are killed at archive time; the stored agents are
+ *  paused snapshots that resume on restore. */
+export interface ArchivedWorkspace {
+  workspace: Workspace
+  data: WorkspaceData
+  /** the workspace's session records, snapshotted as paused (processes killed) */
+  agents: Agent[]
+  archivedAt: number
 }
 
 /** A Chrome-style tab group: one or more pane slots with their own layout.

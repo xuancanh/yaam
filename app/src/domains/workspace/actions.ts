@@ -4,12 +4,14 @@
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AppState } from '../../core/types'
-import type { Agent, WorkspaceData } from '../../core/entities'
+import type { Agent, ArchivedWorkspace, WorkspaceData } from '../../core/entities'
 import { mkId } from '../../shared/id'
-import { switchWorkspaceIn } from './state'
+import { scopedFromState, switchWorkspaceIn } from './state'
 import { MASTER_GREETING } from '../../core/data'
 import { realSessionProcessPort } from '../session/ports'
 import type { SessionProcessPort } from '../session/ports'
+import { killRemote } from '../session/remote-machine'
+import { execCommand } from '../../core/native'
 import { openWorkspaceWindow, closeWorkspaceWindow } from '../../infrastructure/native/windows'
 
 export interface WorkspaceActionsCtx {
@@ -30,7 +32,16 @@ export interface WorkspaceActions {
   switchWorkspace: (id: string) => void
   createWorkspace: (name: string) => void
   renameWorkspace: (id: string, name: string) => void
+  /** set a workspace's accent color (hex); tints the logo + switcher dot */
+  setWorkspaceColor: (id: string, color: string) => void
   deleteWorkspace: (id: string) => void
+  /** close a workspace: kill its sessions (incl. detached) and preserve its
+   *  full state under Archived Workspaces for restore or later deletion */
+  archiveWorkspace: (id: string) => void
+  /** bring an archived workspace back (its sessions return paused/resumable) */
+  restoreWorkspace: (id: string) => void
+  /** permanently drop an archived workspace — only reachable from its page */
+  deleteArchivedWorkspace: (id: string) => void
   /** spin a workspace out into its own OS window; hides it from this switcher */
   openWorkspaceInWindow: (id: string) => void
   /** satellite closed — merge its final slice back and re-enable it here */
@@ -48,6 +59,25 @@ export function useWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActions 
 export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActions {
   const { dispatch, stateRef, later, flash } = ctx
   const port = ctx.port ?? realSessionProcessPort
+
+  // Stop and fully dispose every session in a workspace (used by both archive
+  // and permanent delete): kill the child process and drop all runtime state.
+  const killWorkspaceSessions = (agents: Agent[]) => {
+    for (const a of agents) {
+      ctx.markUserStopped(a.id)
+      // Detached sessions keep a real process alive BEYOND the managed PTY, so a
+      // plain killSession would only drop the attach client and orphan it:
+      //  - LOCAL detached: the PTY lives in a separate host process
+      //  - MACHINE detached: the agent lives in a remote tmux (killing the ssh
+      //    PTY alone just detaches it), so end it over ssh
+      if (a.detached && !a.machine) port.detachedKill(a.id).catch(() => {})
+      else if (a.detached && a.machine) void execCommand(killRemote(a.machine, a.id))
+      port.killSession(a.id).catch(() => {})
+      ctx.disposeSessionRuntime(a.id)
+      port.removeSession(a.id).catch(() => {})
+    }
+  }
+
   return {
     switchWorkspace: id => {
       // Master events that queued while this workspace was inactive
@@ -74,6 +104,11 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
     renameWorkspace: (id, name) => dispatch(s => ({
       ...s,
       workspaces: s.workspaces.map(w => (w.id === id ? { ...w, name: name.trim() || w.name } : w)),
+    })),
+
+    setWorkspaceColor: (id, color) => dispatch(s => ({
+      ...s,
+      workspaces: s.workspaces.map(w => (w.id === id ? { ...w, color } : w)),
     })),
 
     openWorkspaceInWindow: id => {
@@ -113,13 +148,7 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
       // a spun-out workspace closes its window first, then tears down
       if ((s0.detachedWorkspaces ?? []).includes(id)) void closeWorkspaceWindow(id)
       ctx.abortMaster() // cancel any in-flight Master turn tied to this teardown
-      // kill the workspace's sessions and tear down all their runtime state
-      for (const a of s0.agents.filter(a => a.workspaceId === id)) {
-        ctx.markUserStopped(a.id)
-        port.killSession(a.id).catch(() => {})
-        ctx.disposeSessionRuntime(a.id)
-        port.removeSession(a.id).catch(() => {})
-      }
+      killWorkspaceSessions(s0.agents.filter(a => a.workspaceId === id))
       dispatch(s => {
         let next = s
         if (s.activeWorkspace === id) {
@@ -137,6 +166,69 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
         }
       })
       flash('Workspace deleted')
+    },
+
+    archiveWorkspace: id => {
+      const s0 = stateRef.current
+      if (s0.workspaces.length <= 1) {
+        flash('Cannot archive the last workspace')
+        return
+      }
+      // close its window (if spun out), cancel any Master turn, then kill every
+      // session — running AND detached — before stashing the state
+      if ((s0.detachedWorkspaces ?? []).includes(id)) void closeWorkspaceWindow(id)
+      ctx.abortMaster()
+      killWorkspaceSessions(s0.agents.filter(a => a.workspaceId === id))
+      dispatch(s => {
+        const ws = s.workspaces.find(w => w.id === id)
+        if (!ws) return s
+        // the active workspace's slice is flat on state; an inactive one is
+        // already stashed in workspaceData
+        const data = s.activeWorkspace === id ? scopedFromState(s) : (s.workspaceData[id] ?? scopedFromState(s))
+        // stored sessions are paused snapshots — their processes are now dead
+        const agents = s.agents.filter(a => a.workspaceId === id).map(a => ({ ...a, status: 'idle' as const, responding: false }))
+        let next = s
+        if (s.activeWorkspace === id) {
+          const fallback = s.workspaces.find(w => w.id !== id && !(s.detachedWorkspaces ?? []).includes(w.id))
+            ?? s.workspaces.find(w => w.id !== id)!
+          next = switchWorkspaceIn(s, fallback.id, MASTER_GREETING)
+        }
+        const workspaceData = { ...next.workspaceData }
+        delete workspaceData[id]
+        const entry: ArchivedWorkspace = { workspace: ws, data, agents, archivedAt: Date.now() }
+        return {
+          ...next,
+          workspaces: next.workspaces.filter(w => w.id !== id),
+          workspaceData,
+          agents: next.agents.filter(a => a.workspaceId !== id),
+          detachedWorkspaces: (next.detachedWorkspaces ?? []).filter(w => w !== id),
+          archivedWorkspaces: [entry, ...(next.archivedWorkspaces ?? [])],
+        }
+      })
+      flash('Workspace archived')
+    },
+
+    restoreWorkspace: id => {
+      const entry = (stateRef.current.archivedWorkspaces ?? []).find(a => a.workspace.id === id)
+      if (!entry) return
+      // bring it back as an inactive workspace (the user switches to it); its
+      // sessions return paused and resume on demand
+      dispatch(s => ({
+        ...s,
+        workspaces: s.workspaces.some(w => w.id === id) ? s.workspaces : [...s.workspaces, entry.workspace],
+        workspaceData: { ...s.workspaceData, [id]: entry.data },
+        agents: [...s.agents.filter(a => a.workspaceId !== id), ...entry.agents],
+        archivedWorkspaces: (s.archivedWorkspaces ?? []).filter(a => a.workspace.id !== id),
+      }))
+      flash(`Workspace “${entry.workspace.name.slice(0, 40)}” restored`)
+    },
+
+    deleteArchivedWorkspace: id => {
+      dispatch(s => ({
+        ...s,
+        archivedWorkspaces: (s.archivedWorkspaces ?? []).filter(a => a.workspace.id !== id),
+      }))
+      flash('Archived workspace deleted')
     },
   }
 }

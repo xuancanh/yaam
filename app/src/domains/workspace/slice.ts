@@ -1,7 +1,7 @@
 // Workspace domain AppState slice. Imports only entity types (never core/types),
 // distinct from workspace/state.ts (which operates on the whole AppState), so
 // core/types can compose this slice without an import cycle.
-import type { Workspace, WorkspaceData, TabGroup } from '../../core/entities'
+import type { Workspace, WorkspaceData, TabGroup, ArchivedWorkspace } from '../../core/entities'
 
 /** Workspaces, tab groups, and the active pane layout. */
 export interface WorkspaceSlice {
@@ -18,6 +18,9 @@ export interface WorkspaceSlice {
    *  switcher until the satellite closes. Runtime-only (never persisted), so a
    *  restart starts with everything reattached. */
   detachedWorkspaces: string[]
+  /** workspaces the user closed — their state is preserved for restore/delete
+   *  from the Archived Workspaces page. Persisted. */
+  archivedWorkspaces: ArchivedWorkspace[]
 }
 
 /** Initial workspace slice: one default workspace, empty layout. */
@@ -30,5 +33,6 @@ export function freshWorkspaceSlice(): WorkspaceSlice {
     activeGroup: null,
     minimizedIds: [],
     detachedWorkspaces: [],
+    archivedWorkspaces: [],
   }
 }

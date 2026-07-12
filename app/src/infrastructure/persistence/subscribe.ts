@@ -14,6 +14,7 @@ const MAIN_SLICES: readonly (keyof AppState)[] = [
   'groups', 'activeGroup', 'minimizedIds', 'addons', 'addonStorage',
   'chatMemory', 'durableAgents', 'assistantMemory', 'harnessLog',
   'messages', 'events', 'notifications', 'workspaces', 'activeWorkspace', 'workspaceData',
+  'archivedWorkspaces',
 ]
 
 /** True when any durable main-partition slice changed reference. */

@@ -22,6 +22,7 @@ const AddonsView = lazy(() => import('./domains/addons/AddonsView').then(m => ({
 const ChatView = lazy(() => import('./domains/chat/ChatView').then(m => ({ default: m.ChatView })))
 const SettingsView = lazy(() => import('./domains/settings/SettingsView').then(m => ({ default: m.SettingsView })))
 const AddonView = lazy(() => import('./domains/addons/AddonView').then(m => ({ default: m.AddonView })))
+const ArchivedWorkspacesView = lazy(() => import('./domains/workspace/ArchivedWorkspacesView').then(m => ({ default: m.ArchivedWorkspacesView })))
 
 function ViewFallback() {
   return <div style={{ padding: 24, color: 'var(--dim)', fontSize: 13 }}>Loading view…</div>
@@ -45,6 +46,7 @@ function MainArea() {
           {view === 'chat' && <ChatView />}
           {view === 'settings' && <SettingsView />}
           {view === 'addon' && <AddonView />}
+          {view === 'archived-workspaces' && <ArchivedWorkspacesView />}
         </Suspense>
       )}
     </div>

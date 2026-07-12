@@ -86,6 +86,101 @@ describe('createWorkspaceActions.deleteWorkspace', () => {
   })
 })
 
+describe('createWorkspaceActions.archiveWorkspace', () => {
+  it('closes every session (including a detached workspace) and stores the state', () => {
+    const port = fakePort()
+    const h = harness(baseState({
+      agents: [agent('a1', 'ws-b'), agent('a2', 'ws-b'), agent('keep', 'ws-a')],
+      detachedWorkspaces: ['ws-b'],
+      workspaceData: { 'ws-b': { tasks: [{ id: 't1' }] } as unknown as AppState['workspaceData'][string] },
+    }), port)
+    h.actions.archiveWorkspace('ws-b')
+
+    expect(h.ctx.abortMaster).toHaveBeenCalledOnce()
+    for (const id of ['a1', 'a2']) {
+      expect(port.killSession).toHaveBeenCalledWith(id)
+      expect(h.ctx.disposeSessionRuntime).toHaveBeenCalledWith(id)
+      expect(port.removeSession).toHaveBeenCalledWith(id)
+    }
+    expect(port.killSession).not.toHaveBeenCalledWith('keep')
+    const s = h.state()
+    expect(s.workspaces.map(w => w.id)).toEqual(['ws-a'])
+    expect(s.workspaceData['ws-b']).toBeUndefined()
+    expect(s.detachedWorkspaces).not.toContain('ws-b')
+    expect(s.agents.map(a => a.id)).toEqual(['keep'])
+    // preserved under archive: the workspace, its slice, and paused sessions
+    expect(s.archivedWorkspaces).toHaveLength(1)
+    const entry = s.archivedWorkspaces[0]
+    expect(entry.workspace).toEqual({ id: 'ws-b', name: 'B' })
+    expect(entry.agents.map(a => a.id)).toEqual(['a1', 'a2'])
+    expect(entry.agents.every(a => a.status === 'idle')).toBe(true) // processes killed
+    expect(entry.data.tasks).toEqual([{ id: 't1' }])
+  })
+
+  it('ends a LOCAL detached session for real (detachedKill), not just the attach client', () => {
+    const port = fakePort()
+    const detached = { ...agent('det', 'ws-b'), detached: true } as Agent
+    const h = harness(baseState({ agents: [detached] }), port)
+    h.actions.archiveWorkspace('ws-b')
+    expect(port.detachedKill).toHaveBeenCalledWith('det') // orphan host process ended
+    expect(port.killSession).toHaveBeenCalledWith('det')
+  })
+
+  it('archiving the ACTIVE workspace switches this window away, snapshotting its live slice', () => {
+    const port = fakePort()
+    const h = harness(baseState({
+      activeWorkspace: 'ws-a',
+      tasks: [{ id: 'flat-task' }] as unknown as AppState['tasks'], // the flat = active (ws-a) slice
+      agents: [agent('a1', 'ws-a')],
+    }), port)
+    h.actions.archiveWorkspace('ws-a')
+    const s = h.state()
+    expect(s.activeWorkspace).toBe('ws-b')
+    expect(s.workspaces.map(w => w.id)).toEqual(['ws-b'])
+    expect(port.killSession).toHaveBeenCalledWith('a1')
+    const entry = s.archivedWorkspaces[0]
+    expect(entry.workspace.id).toBe('ws-a')
+    expect(entry.data.tasks).toEqual([{ id: 'flat-task' }]) // captured from the flat state
+  })
+
+  it('refuses to archive the last workspace and tears down nothing', () => {
+    const port = fakePort()
+    const h = harness(baseState({ workspaces: [{ id: 'ws-a', name: 'A' }], agents: [agent('a1', 'ws-a')] }), port)
+    h.actions.archiveWorkspace('ws-a')
+    expect(h.ctx.flash).toHaveBeenCalledWith('Cannot archive the last workspace')
+    expect(port.killSession).not.toHaveBeenCalled()
+    expect(h.state().workspaces).toHaveLength(1)
+  })
+})
+
+describe('createWorkspaceActions restore / delete archived', () => {
+  const archivedEntry = {
+    workspace: { id: 'ws-x', name: 'X' },
+    data: { tasks: [{ id: 't1' }], messages: [], crons: [] },
+    agents: [agent('old', 'ws-x')],
+    archivedAt: 123,
+  } as unknown as NonNullable<AppState['archivedWorkspaces']>[number]
+
+  it('restore brings the workspace back (inactive) with its paused sessions', () => {
+    const h = harness(baseState({ archivedWorkspaces: [archivedEntry] }), fakePort())
+    h.actions.restoreWorkspace('ws-x')
+    const s = h.state()
+    expect(s.workspaces.map(w => w.id)).toContain('ws-x')
+    expect(s.activeWorkspace).toBe('ws-a') // stays inactive; the user switches to it
+    expect(s.workspaceData['ws-x'].tasks).toEqual([{ id: 't1' }])
+    expect(s.agents.map(a => a.id)).toContain('old')
+    expect(s.archivedWorkspaces).toHaveLength(0)
+  })
+
+  it('deleteArchivedWorkspace drops it permanently and touches no sessions', () => {
+    const port = fakePort()
+    const h = harness(baseState({ archivedWorkspaces: [archivedEntry] }), port)
+    h.actions.deleteArchivedWorkspace('ws-x')
+    expect(h.state().archivedWorkspaces).toHaveLength(0)
+    expect(port.killSession).not.toHaveBeenCalled()
+  })
+})
+
 describe('createWorkspaceActions spin-out / restore', () => {
   it('detaching a non-active workspace hides it here without switching', () => {
     const h = harness(baseState(), fakePort())
