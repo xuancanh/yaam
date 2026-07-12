@@ -35,6 +35,7 @@ export const IC = {
   plus: ['M12 5v14', 'M5 12h14'],
   split: ['M12 5v14'],
   send: ['M12 20V5', 'M6 11l6-6 6 6'],
+  newWindow: ['M14 4h6v6', 'M20 4l-8 8', 'M18 13v5a1 1 0 01-1 1H6a1 1 0 01-1-1V7a1 1 0 011-1h5'],
 }
 
 /** Render an agent lifecycle label using the shared status colors. */
