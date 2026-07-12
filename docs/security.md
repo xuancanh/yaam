@@ -200,7 +200,7 @@ access unless the session opts into the write sandbox below.
 
 Command sessions (and templates) can opt into an OS-enforced write sandbox.
 The spawn command is wrapped in a platform wrapper —
-`sandbox-exec -f <profile>` (Seatbelt) on macOS, `bwrap --ro-bind / / …`
+`sandbox-exec -p <profile>` (Seatbelt) on macOS, `bwrap --ro-bind / / …`
 (bubblewrap) on Linux and on remote SSH machines — so the whole process tree,
 including everything the agent spawns, inherits the restriction.
 
@@ -211,8 +211,11 @@ dot-dirs (`~/.claude`, `~/.codex`, `~/.config`, `~/.cache`, `~/.local`,
 `~/.yaam`), and any template-configured extra paths. Network is allowed by
 default so agent CLIs keep working; a template can additionally deny all
 network (`(deny network*)` / `--unshare-net`). Local wrappers are built by the
-`sandbox_wrapper` backend command, which canonicalizes every root (symlinks,
-`/tmp` → `/private/tmp`) and writes macOS profiles to `~/.yaam/sandbox/<id>.sb`.
+`sandbox_wrapper` backend command, which validates and canonicalizes every root
+(symlinks, `/tmp` → `/private/tmp`). macOS profiles are passed inline rather
+than written beneath a sandbox-writable directory. Linux also gets a separate
+PID namespace, preventing `/proc/<host-pid>/root` from bypassing the mount
+policy.
 
 The feature is **fail-closed**: if the wrapper can't be built (unsupported OS,
 missing `sandbox-exec`/`bwrap`, bad cwd) the launch or resume errors instead of

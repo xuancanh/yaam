@@ -22,7 +22,7 @@ describe('sandboxRemoteWrap', () => {
   })
 
   it('read-only-binds the root, write-binds the cwd/tmp, and dies with the session', () => {
-    expect(wrap).toContain('exec bwrap --ro-bind / / --dev-bind /dev /dev --proc /proc --die-with-parent')
+    expect(wrap).toContain('exec bwrap --ro-bind / / --dev-bind /dev /dev --unshare-pid --proc /proc --die-with-parent')
     expect(wrap).toContain("--bind '/home/u/proj' '/home/u/proj'")
     expect(wrap).toContain("--bind '/tmp' '/tmp'")
     expect(wrap).toContain(`sh -c 'claude -p "task"'`)
@@ -44,5 +44,18 @@ describe('sandboxRemoteWrap', () => {
     expect(w).toContain("--bind '/data/out' '/data/out'")
     expect(w).not.toContain("--bind '' ''")
     expect(w).not.toContain("--bind ' ' ' '")
+  })
+
+  it('expands remote home paths without treating the tilde literally', () => {
+    const w = sandboxRemoteWrap('x', '~/project', { extraPaths: ['~/output'] })
+    expect(w).toContain('--bind "$HOME"/\'project\' "$HOME"/\'project\'')
+    expect(w).toContain('--bind "$HOME"/\'output\' "$HOME"/\'output\'')
+    expect(w).not.toContain("'~/project'")
+  })
+
+  it('rejects relative, control-character, and excessive path policies', () => {
+    expect(() => sandboxRemoteWrap('x', 'relative', {})).toThrow(/absolute path/)
+    expect(() => sandboxRemoteWrap('x', '/repo\n--bind / /', {})).toThrow(/control characters/)
+    expect(() => sandboxRemoteWrap('x', '/repo', { extraPaths: Array.from({ length: 33 }, () => '/tmp') })).toThrow(/at most 32/)
   })
 })
