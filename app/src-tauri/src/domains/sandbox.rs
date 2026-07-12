@@ -146,7 +146,10 @@ fn writable_roots(cwd: &str, extra_paths: &[String]) -> Result<Vec<String>, Stri
 fn render_profile(roots: &[String], deny_network: bool) -> String {
     let mut p = String::from(
         "(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n(deny lsopen)\n\
-         (deny network-outbound (remote unix-socket (path-regex #\".*/(docker|podman)(/podman)?\\.sock$\")))\n",
+         (deny file-write* (regex #\".*/\\.git/config$\") (regex #\".*/\\.git/hooks(/.*)?$\"))\n\
+         (deny network-outbound (remote unix-socket \
+           (path-regex #\".*/(docker|podman)(/podman)?\\.sock$\") \
+           (path-regex #\".*/\\.yaam/detached/.*\\.sock$\")))\n",
     );
     p.push_str(
         "(allow file-write* (literal \"/dev/null\") (literal \"/dev/ptmx\") \
@@ -209,14 +212,54 @@ fn linux_wrapper(roots: &[String], deny_network: bool) -> Result<String, String>
         socket_paths.push(Path::new(&runtime).join("docker.sock"));
         socket_paths.push(Path::new(&runtime).join("podman/podman.sock"));
     }
+    if let Ok(home) = std::env::var("HOME") {
+        let detached = Path::new(&home).join(".yaam/detached");
+        if let Ok(entries) = std::fs::read_dir(detached) {
+            socket_paths.extend(
+                entries
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("sock")),
+            );
+        }
+    }
+    let mut readonly_paths = Vec::new();
+    if let Some(cwd) = roots.first() {
+        let cwd = Path::new(cwd);
+        let mut git_dirs = vec![cwd.join(".git")];
+        if let Ok(entries) = std::fs::read_dir(cwd) {
+            git_dirs.extend(entries.flatten().filter_map(|entry| {
+                entry
+                    .file_type()
+                    .ok()
+                    .filter(|kind| kind.is_dir())
+                    .map(|_| entry.path().join(".git"))
+            }));
+        }
+        for git in git_dirs {
+            for path in [git.join("config"), git.join("hooks")] {
+                if path.exists() {
+                    readonly_paths.push(path);
+                }
+            }
+        }
+    }
     let socket_masks: Vec<String> = socket_paths
         .into_iter()
         .filter(|path| path.exists())
         .map(|path| format!("--ro-bind /dev/null {}", shq(&path.to_string_lossy())))
         .collect();
+    let readonly_masks: Vec<String> = readonly_paths
+        .into_iter()
+        .map(|path| {
+            let path = shq(&path.to_string_lossy());
+            format!("--ro-bind {path} {path}")
+        })
+        .collect();
     Ok(format!(
-        "bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent {} {}{}",
+        "bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent {} {} {}{}",
         binds.join(" "),
+        readonly_masks.join(" "),
         socket_masks.join(" "),
         if deny_network { " --unshare-net" } else { "" },
     ))
@@ -254,6 +297,8 @@ mod tests {
             "(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n(deny lsopen)\n"
         ));
         assert!(p.contains("docker|podman"));
+        assert!(p.contains("\\.git/hooks"));
+        assert!(p.contains("\\.yaam/detached"));
         assert!(p.contains("(literal \"/dev/null\")"));
         assert!(p.contains("(regex #\"^/dev/ttys[0-9]+$\")"));
         assert!(!p.contains("(subpath \"/dev\")"));
@@ -395,6 +440,8 @@ mod tests {
         );
         let result = Command::new("/usr/bin/sandbox-exec")
             .args(["-p", &profile, "/bin/sh", "-c", &script])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
             .unwrap();
         assert!(result.success());
@@ -454,11 +501,43 @@ mod tests {
         let result = Command::new("/usr/bin/sandbox-exec")
             .args(["-p", &profile, "/usr/bin/open", "-W", "-n"])
             .arg(&app)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
             .unwrap();
         assert!(!result.success());
         std::thread::sleep(std::time::Duration::from_millis(200));
         assert!(!blocked.join("escaped").exists());
         std::fs::remove_dir_all(base).ok();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_profile_enforces_network_toggle() {
+        use std::net::TcpListener;
+        use std::process::Command;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port().to_string();
+        let run = |deny_network| {
+            Command::new("/usr/bin/sandbox-exec")
+                .args([
+                    "-p",
+                    &render_profile(&[], deny_network),
+                    "/usr/bin/nc",
+                    "-z",
+                    "-w",
+                    "1",
+                    "127.0.0.1",
+                    &port,
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        };
+        assert!(run(false));
+        assert!(!run(true));
     }
 }

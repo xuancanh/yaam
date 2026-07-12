@@ -222,6 +222,9 @@ policy; its System V/POSIX IPC namespace is isolated too. Seatbelt denies Apple
 Events and LaunchServices `open` requests so an agent cannot ask another GUI
 process to perform an outside write. Known Docker/Podman control sockets are
 also denied/masked because daemon access is equivalent to host write/exec access.
+Each working repo's `.git/config` and `.git/hooks` stay read-only so an agent cannot turn a
+later Git invocation into execution outside the sandbox; local YAAM detached-host
+sockets are hidden for the same reason.
 Built-in agent-state roots must be real directories rather than symlinks, and
 device access is limited to a fresh minimal `/dev` on Linux and PTY/standard-I/O
 nodes on macOS.

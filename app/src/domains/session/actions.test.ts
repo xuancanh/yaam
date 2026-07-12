@@ -192,7 +192,8 @@ describe('createSessionActions', () => {
     const cmd = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
     const b64 = /printf %s (\S+) \| base64 -d/.exec(cmd)?.[1]
     expect(b64).toBeTruthy()
-    expect(atob(b64!)).toContain('exec bwrap --ro-bind / /')
+    expect(atob(b64!)).toContain('set -- bwrap --ro-bind / /')
+    expect(atob(b64!)).toContain('exec "$@" sh -c')
   })
 
   it('surfaces an invalid remote sandbox policy instead of throwing or spawning', async () => {

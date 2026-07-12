@@ -67,13 +67,20 @@ export function sandboxRemoteWrap(command: string, cwd: string | undefined, cfg:
     '"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/docker.sock"',
     '"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"',
   ].map(path => `--ro-bind-try /dev/null ${path}`)
+  const cwdArg = cwd?.trim() ? pathArgs[0] : undefined
+  const bwrapArgs = [
+    '--ro-bind / /', '--dev /dev', '--unshare-pid', '--unshare-ipc', '--proc /proc', '--die-with-parent',
+    ...binds, ...homeBinds, ...socketMasks,
+    ...(cfg.denyNetwork ? ['--unshare-net'] : []),
+  ].join(' ')
+  const gitGuards = cwdArg
+    ? `root=${cwdArg}; for git in "$root/.git" "$root"/*/.git; do [ -d "$git" ] || continue; for target in "$git/config" "$git/hooks"; do [ -e "$target" ] && set -- "$@" --ro-bind "$target" "$target"; done; done; `
+    : ''
   return (
     'command -v bwrap >/dev/null 2>&1 || { echo "yaam: sandbox requested but bwrap is not installed on this machine (apt install bubblewrap)" >&2; exit 97; }; '
     + stateGuards + ' ' + pathGuards + ' '
-    + 'exec bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent '
-    + [...binds, ...homeBinds].join(' ')
-    + ' ' + socketMasks.join(' ')
-    + (cfg.denyNetwork ? ' --unshare-net' : '')
-    + ` sh -c ${shq(command)}`
+    + `set -- bwrap ${bwrapArgs}; `
+    + gitGuards
+    + `exec "$@" sh -c ${shq(command)}`
   )
 }

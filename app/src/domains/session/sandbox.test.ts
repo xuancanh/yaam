@@ -22,7 +22,7 @@ describe('sandboxRemoteWrap', () => {
   })
 
   it('read-only-binds the root, write-binds the cwd/tmp, and dies with the session', () => {
-    expect(wrap).toContain('exec bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent')
+    expect(wrap).toContain('set -- bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent')
     expect(wrap).toContain("--bind '/home/u/proj' '/home/u/proj'")
     expect(wrap).toContain("--bind '/tmp' '/tmp'")
     expect(wrap).toContain(`sh -c 'claude -p "task"'`)
@@ -45,9 +45,17 @@ describe('sandboxRemoteWrap', () => {
     expect(wrap.indexOf('--ro-bind-try /dev/null /var/run/docker.sock')).toBeGreaterThan(wrap.indexOf("--bind '/home/u/proj'"))
   })
 
+  it('keeps git startup configuration and hooks read-only', () => {
+    expect(wrap).toContain('for git in "$root/.git" "$root"/*/.git')
+    expect(wrap).toContain('for target in "$git/config" "$git/hooks"')
+    expect(wrap).toContain('set -- "$@" --ro-bind "$target" "$target"')
+  })
+
   it('unshares the network only when denyNetwork is set', () => {
     expect(wrap).not.toContain('--unshare-net')
-    expect(sandboxRemoteWrap('x', '/d', { denyNetwork: true })).toContain('--unshare-net sh -c')
+    const denied = sandboxRemoteWrap('x', '/d', { denyNetwork: true })
+    expect(denied).toContain('--unshare-net;')
+    expect(denied).toContain('exec "$@" sh -c')
   })
 
   it('binds extra writable paths and skips a missing cwd', () => {
