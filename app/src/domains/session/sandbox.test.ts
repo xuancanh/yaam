@@ -22,7 +22,7 @@ describe('sandboxRemoteWrap', () => {
   })
 
   it('read-only-binds the root, write-binds the cwd/tmp, and dies with the session', () => {
-    expect(wrap).toContain('exec bwrap --ro-bind / / --dev-bind /dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent')
+    expect(wrap).toContain('exec bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent')
     expect(wrap).toContain("--bind '/home/u/proj' '/home/u/proj'")
     expect(wrap).toContain("--bind '/tmp' '/tmp'")
     expect(wrap).toContain(`sh -c 'claude -p "task"'`)
@@ -35,6 +35,8 @@ describe('sandboxRemoteWrap', () => {
     expect(wrap).not.toContain('$HOME/.config')
     expect(wrap).not.toContain('$HOME/.local')
     expect(wrap).not.toContain('$HOME/.yaam')
+    expect(wrap).toContain('if [ -L "$HOME/.claude" ]')
+    expect(wrap).toContain('agent state path is a symlink')
   })
 
   it('unshares the network only when denyNetwork is set', () => {

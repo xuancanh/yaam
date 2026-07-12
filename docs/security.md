@@ -220,6 +220,9 @@ than written beneath a sandbox-writable directory. Linux also gets a separate
 PID namespace, preventing `/proc/<host-pid>/root` from bypassing the mount
 policy; its System V/POSIX IPC namespace is isolated too. Seatbelt denies Apple
 Events so an agent cannot ask another GUI process to perform an outside write.
+Built-in agent-state roots must be real directories rather than symlinks, and
+device access is limited to a fresh minimal `/dev` on Linux and PTY/standard-I/O
+nodes on macOS.
 
 The feature is **fail-closed**: if the wrapper can't be built (unsupported OS,
 missing `sandbox-exec`/`bwrap`, bad cwd) the launch or resume errors instead of

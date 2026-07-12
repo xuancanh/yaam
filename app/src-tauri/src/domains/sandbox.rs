@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 const MAX_EXTRA_PATHS: usize = 32;
 const MAX_PATH_BYTES: usize = 4_096;
+const MAX_POLICY_PATH_BYTES: usize = 64 * 1_024;
 
 /// State roots used by the built-in coding-agent CLIs. Do not grant generic
 /// config/cache/local-data roots: they contain executable startup config and
@@ -56,6 +57,23 @@ fn canonical_dir(label: &str, path: &str) -> Result<PathBuf, String> {
     Ok(real)
 }
 
+fn append_agent_state_roots(home: &Path, roots: &mut Vec<PathBuf>) -> Result<(), String> {
+    for dir in HOME_WRITE_DIRS {
+        let path = home.join(dir);
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(format!(
+                    "sandbox: agent state directory must not be a symlink: {}",
+                    path.display()
+                ));
+            }
+            Ok(meta) if meta.is_dir() => roots.push(path),
+            Ok(_) | Err(_) => {}
+        }
+    }
+    Ok(())
+}
+
 /// Resolve the writable roots: the (required) cwd plus temp and agent config
 /// dirs and extras. Paths are canonicalized so filters match the kernel's
 /// post-symlink view (`/tmp` → `/private/tmp` on macOS). Missing built-in config
@@ -66,13 +84,17 @@ fn writable_roots(cwd: &str, extra_paths: &[String]) -> Result<Vec<String>, Stri
             "sandbox: at most {MAX_EXTRA_PATHS} extra writable paths are allowed"
         ));
     }
+    let policy_path_bytes = cwd.len() + extra_paths.iter().map(String::len).sum::<usize>();
+    if policy_path_bytes > MAX_POLICY_PATH_BYTES {
+        return Err(format!(
+            "sandbox: writable path policy exceeds {MAX_POLICY_PATH_BYTES} bytes"
+        ));
+    }
     let cwd = canonical_dir("working directory", cwd)?;
 
     let mut roots: Vec<PathBuf> = vec![cwd, PathBuf::from("/tmp"), std::env::temp_dir()];
     if let Ok(home) = std::env::var("HOME") {
-        for dir in HOME_WRITE_DIRS {
-            roots.push(Path::new(&home).join(dir));
-        }
+        append_agent_state_roots(Path::new(&home), &mut roots)?;
     }
     for (index, path) in extra_paths.iter().enumerate() {
         if path.trim().is_empty() {
@@ -106,7 +128,11 @@ fn writable_roots(cwd: &str, extra_paths: &[String]) -> Result<Vec<String>, Stri
 fn render_profile(roots: &[String], deny_network: bool) -> String {
     let mut p =
         String::from("(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n");
-    p.push_str("(allow file-write* (subpath \"/dev\"))\n");
+    p.push_str(
+        "(allow file-write* (literal \"/dev/null\") (literal \"/dev/ptmx\") \
+         (literal \"/dev/stdout\") (literal \"/dev/stderr\") \
+         (regex #\"^/dev/ttys[0-9]+$\"))\n",
+    );
     for root in roots {
         p.push_str(&format!(
             "(allow file-write* (subpath \"{}\"))\n",
@@ -152,7 +178,7 @@ fn linux_wrapper(roots: &[String], deny_network: bool) -> Result<String, String>
         .map(|r| format!("--bind {} {}", shq(r), shq(r)))
         .collect();
     Ok(format!(
-        "bwrap --ro-bind / / --dev-bind /dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent {}{}",
+        "bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent {}{}",
         binds.join(" "),
         if deny_network { " --unshare-net" } else { "" },
     ))
@@ -189,7 +215,9 @@ mod tests {
         assert!(p.starts_with(
             "(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n"
         ));
-        assert!(p.contains("(allow file-write* (subpath \"/dev\"))"));
+        assert!(p.contains("(literal \"/dev/null\")"));
+        assert!(p.contains("(regex #\"^/dev/ttys[0-9]+$\")"));
+        assert!(!p.contains("(subpath \"/dev\")"));
         assert!(p.contains("(allow file-write* (subpath \"/Users/x/proj\"))"));
         assert!(p.contains("(allow file-write* (subpath \"/private/tmp\"))"));
         assert!(!p.contains("network"));
@@ -220,7 +248,7 @@ mod tests {
             .map(|r| format!("--bind {} {}", shq(r), shq(r)))
             .collect();
         let p = format!(
-            "bwrap --ro-bind / / --dev-bind /dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent {}",
+            "bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent {}",
             binds.join(" "),
         );
         assert!(p.contains("--bind '/home/u/my proj' '/home/u/my proj'"));
@@ -250,6 +278,25 @@ mod tests {
     fn rejects_control_characters_in_paths() {
         assert!(writable_roots("/tmp\n(allow default)", &[]).is_err());
         assert!(writable_roots("/tmp", &["/tmp\n(allow default)".into()]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_agent_state_roots() {
+        use std::os::unix::fs::symlink;
+
+        let home = std::env::temp_dir().join(format!(
+            "yaam-sandbox-home-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+        symlink("/tmp", home.join(".claude")).unwrap();
+        let mut roots = Vec::new();
+        assert!(append_agent_state_roots(&home, &mut roots)
+            .unwrap_err()
+            .contains("must not be a symlink"));
+        std::fs::remove_dir_all(home).ok();
     }
 
     #[cfg(target_os = "macos")]

@@ -12,6 +12,7 @@ import { remotePathExpr, shq } from './remote-machine'
 const REMOTE_HOME_WRITE_DIRS = ['.claude', '.codex', '.gemini', '.aider']
 const MAX_EXTRA_PATHS = 32
 const MAX_PATH_BYTES = 4096
+const MAX_POLICY_PATH_BYTES = 64 * 1024
 
 function remotePath(path: string, label: string): string {
   const value = path.trim()
@@ -40,14 +41,21 @@ export function sandboxRemoteWrap(command: string, cwd: string | undefined, cfg:
   const extras = (cfg.extraPaths ?? []).filter(p => p.trim())
   if (extras.length > MAX_EXTRA_PATHS) throw new Error(`sandbox: at most ${MAX_EXTRA_PATHS} extra writable paths are allowed`)
   const dirs = [...(cwd?.trim() ? [cwd] : []), '/tmp', ...extras]
+  if (dirs.reduce((bytes, path) => bytes + new TextEncoder().encode(path).length, 0) > MAX_POLICY_PATH_BYTES) {
+    throw new Error(`sandbox: writable path policy exceeds ${MAX_POLICY_PATH_BYTES} bytes`)
+  }
   const binds = dirs.map((path, index) => {
     const arg = remotePath(path, index === 0 && cwd?.trim() ? 'working directory' : 'extra writable path')
     return `--bind ${arg} ${arg}`
   })
   const homeBinds = REMOTE_HOME_WRITE_DIRS.map(d => `--bind-try "$HOME/${d}" "$HOME/${d}"`)
+  const stateGuards = REMOTE_HOME_WRITE_DIRS
+    .map(d => `if [ -L "$HOME/${d}" ]; then echo "yaam: sandbox agent state path is a symlink: ~/${d}" >&2; exit 98; fi;`)
+    .join(' ')
   return (
     'command -v bwrap >/dev/null 2>&1 || { echo "yaam: sandbox requested but bwrap is not installed on this machine (apt install bubblewrap)" >&2; exit 97; }; '
-    + 'exec bwrap --ro-bind / / --dev-bind /dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent '
+    + stateGuards + ' '
+    + 'exec bwrap --ro-bind / / --dev /dev --unshare-pid --unshare-ipc --proc /proc --die-with-parent '
     + [...binds, ...homeBinds].join(' ')
     + (cfg.denyNetwork ? ' --unshare-net' : '')
     + ` sh -c ${shq(command)}`
