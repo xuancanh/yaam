@@ -5,6 +5,7 @@ import { ActionsCtx } from './core/context'
 import { createAppRuntime } from './app/conductor-runtime'
 import type { AppRuntime } from './app/conductor-runtime'
 import { useGlobalEffects } from './app/global-effects'
+import { windowRole } from './core/window-role'
 
 export { cronMatches, humanizeCron } from './domains/schedules/cron'
 
@@ -17,7 +18,7 @@ export { cronMatches, humanizeCron } from './domains/schedules/cron'
 export function ConductorProvider({ children }: { children: ReactNode }) {
   // create-once (survives StrictMode's double render); start/dispose bound to mount
   const ref = useRef<AppRuntime>(undefined)
-  if (!ref.current) ref.current = createAppRuntime()
+  if (!ref.current) ref.current = createAppRuntime(windowRole())
   const runtime = ref.current
   useEffect(() => {
     runtime.start()

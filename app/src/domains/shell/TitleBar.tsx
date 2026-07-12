@@ -1,18 +1,36 @@
 import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { APP_VERSION } from '../../core/addons'
+import { isSatelliteWindow } from '../../core/window-role'
 import { NOTIF_COLORS, hexToRgba } from '../../core/data'
 import { EditableName, IC, Icon, MasterMark } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
 
-/** Switch, create, rename, and delete workspace-scoped state pools. */
+/** Switch, create, rename, delete, and spin workspace-scoped state pools out
+ *  into their own OS window. In a spun-out (satellite) window this collapses to a
+ *  pinned label — a satellite shows exactly one workspace and cannot switch. */
 function WorkspaceSwitcher() {
-  const s = useConductorSelector(x => ({ workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, agents: x.agents }), shallowEqual)
-  const { switchWorkspace, createWorkspace, renameWorkspace, deleteWorkspace } = useActions()
+  const s = useConductorSelector(x => ({ workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, agents: x.agents, detachedWorkspaces: x.detachedWorkspaces }), shallowEqual)
+  const { switchWorkspace, createWorkspace, renameWorkspace, deleteWorkspace, openWorkspaceInWindow } = useActions()
   const [open, setOpen] = useState(false)
   const active = s.workspaces.find(w => w.id === s.activeWorkspace)
   // Count visible sessions assigned to one workspace for its switcher badge.
   const countFor = (id: string) => s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === id).length
+
+  // Satellite window: pinned to one workspace — render a static badge, no switching.
+  if (isSatelliteWindow()) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: 8, padding: '5px 11px', color: 'var(--text)', fontSize: 12.5, fontWeight: 600 }}>
+        <span style={{ color: 'var(--accent)', fontSize: 11 }}>⧉</span>
+        {active?.name ?? 'Workspace'}
+        <span className="mono" style={{ fontSize: 9, color: 'var(--dim)' }}>window</span>
+      </div>
+    )
+  }
+
+  // Detached workspaces live in their own window — hide from this switcher.
+  const detached = s.detachedWorkspaces ?? []
+  const visible = s.workspaces.filter(w => !detached.includes(w.id))
 
   return (
     <div style={{ position: 'relative' }}>
@@ -36,7 +54,7 @@ function WorkspaceSwitcher() {
             border: '1px solid var(--line2)', borderRadius: 12, boxShadow: '0 18px 50px rgba(0,0,0,.55)',
             zIndex: 45, overflow: 'hidden', padding: 6,
           }}>
-            {s.workspaces.map(w => (
+            {visible.map(w => (
               <div
                 key={w.id}
                 onClick={() => { if (w.id !== s.activeWorkspace) { switchWorkspace(w.id); setOpen(false) } }}
@@ -54,6 +72,16 @@ function WorkspaceSwitcher() {
                     : <span style={{ fontWeight: 600 }}>{w.name}</span>}
                 </div>
                 <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{countFor(w.id)}</span>
+                {s.workspaces.length > 1 && (
+                  <button
+                    className="icon-btn"
+                    title="Open workspace in a new window"
+                    style={{ width: 20, height: 20, borderRadius: 5 }}
+                    onClick={e => { e.stopPropagation(); openWorkspaceInWindow(w.id); setOpen(false) }}
+                  >
+                    <Icon paths={IC.split} size={10} stroke={2} />
+                  </button>
+                )}
                 {s.workspaces.length > 1 && (
                   <button
                     className="icon-btn danger"

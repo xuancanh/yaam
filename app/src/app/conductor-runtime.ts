@@ -7,9 +7,13 @@
 // lifecycle; the React provider is just glue. useConductorRuntime remains for the
 // existing hook composition path.
 import type { MutableRefObject } from 'react'
-import type { AppState, EventType, NotifKind } from './../core/types'
+import type { AppState, EventType, NotifKind, WorkspaceData, Agent } from './../core/types'
 import { useAppStore, dispatch } from '../core/store'
 import { browserClock, createStorePort, type Disposable } from '../core/ports'
+import type { WindowRole } from '../core/window-role'
+import { MASTER_GREETING } from '../core/data'
+import { scopedFromState, switchWorkspaceIn } from '../domains/workspace/state'
+import { emitWsSync, emitWsReattach, onWsEvent, onWindowClose, destroyThisWindow, type WsSyncPayload } from '../infrastructure/native/windows'
 import { createActivityService } from '../domains/activity/service'
 import { createRuntimeRefs } from './runtime/refs'
 import type { RuntimeRefs } from './runtime/refs'
@@ -83,7 +87,7 @@ export interface AppRuntime {
   dispose: () => void
 }
 
-export function createAppRuntime(): AppRuntime {
+export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntime {
   // ── foundation kernel (no React) ─────────────────────────────────────────
   const stateRef: MutableRefObject<AppState> = { current: useAppStore.getState() }
   // The store→stateRef mirror is (un)subscribed in start/dispose, not here, so a
@@ -140,7 +144,7 @@ export function createAppRuntime(): AppRuntime {
 
   const session = createSessionRuntime(kernel, refs)
   const addon = createAddonSubsystem(kernel, refs, session, addonExec)
-  const chat = createChatBoot(kernel, refs, session)
+  const chat = createChatBoot(kernel, refs, session, role)
   const master = createMasterSubsystem(kernel, refs, session, addon, chat.runChatMessage, masterSendLine, masterStopLine)
 
   const actions = createConductorActions({
@@ -151,16 +155,62 @@ export function createAppRuntime(): AppRuntime {
   // close the cycle: addons (built earlier) reach the board review verbs here
   refs.taskReviewRef.current = { approve: actions.approveTaskReview, reject: actions.rejectTaskReview }
 
+  // teardown for the multi-window wiring (satellite sync / main listeners)
+  const windowDisposers: Array<() => void> = []
+  let syncTimer: Disposable | undefined
+
   return {
     actions,
     start() {
       // refresh + (re)arm the store mirror in case state moved between build and start
       stateRef.current = useAppStore.getState()
       unsubMirror ??= useAppStore.subscribe(next => { stateRef.current = next })
-      session.start(); chat.start(); master.start(); addon.start()
+      session.start(); chat.start()
+
+      if (role.kind === 'main') {
+        master.start(); addon.start()
+        // main is the sole persistence writer: absorb each satellite's workspace
+        // slice into the background copy so its edits round-trip to disk.
+        windowDisposers.push(onWsEvent<WsSyncPayload>('ws:sync', p =>
+          actions.mergeDetachedWorkspace(p.workspaceId, p.data as WorkspaceData, p.agents as Agent[])))
+        windowDisposers.push(onWsEvent<WsSyncPayload>('ws:reattach', p =>
+          actions.reattachWorkspace(p.workspaceId, p.data as WorkspaceData, p.agents as Agent[])))
+      } else {
+        // satellite: pin to its workspace once hydration is ready, then keep main
+        // in sync with a debounced forward of the workspace slice + its sessions.
+        const wsId = role.workspaceId
+        const slice = (): WsSyncPayload => ({
+          workspaceId: wsId,
+          data: scopedFromState(stateRef.current),
+          agents: stateRef.current.agents.filter(a => a.workspaceId === wsId),
+        })
+        let pinned = false
+        const armSync = () => {
+          syncTimer?.dispose()
+          syncTimer = browserClock.setTimeout(() => { void emitWsSync(slice()) }, 1500)
+        }
+        windowDisposers.push(useAppStore.subscribe(() => {
+          const st = stateRef.current
+          if (!pinned && st.bootStatus === 'ready') {
+            pinned = true
+            if (st.activeWorkspace !== wsId) dispatch(s => switchWorkspaceIn(s, wsId, MASTER_GREETING))
+          }
+          if (pinned && st.activeWorkspace === wsId) armSync()
+        }))
+        // final handoff on close, then let the window go
+        windowDisposers.push(onWindowClose(async () => {
+          syncTimer?.dispose()
+          await emitWsReattach(slice())
+          await destroyThisWindow()
+        }))
+      }
     },
     dispose() {
-      session.dispose(); chat.dispose(); master.dispose(); addon.dispose()
+      session.dispose(); chat.dispose()
+      if (role.kind === 'main') { master.dispose(); addon.dispose() }
+      syncTimer?.dispose()
+      for (const d of windowDisposers) d()
+      windowDisposers.length = 0
       toastTimer?.dispose()
       for (const d of timers) d.dispose()
       timers.clear()

@@ -18,6 +18,7 @@ import { createPersistenceRuntime } from '../../infrastructure/persistence/runti
 import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
 import type { SessionRuntime } from './session'
+import type { WindowRole } from '../../core/window-role'
 
 export interface ChatBoot {
   connectMcp: IntegrationRuntime['connectMcp']
@@ -38,7 +39,8 @@ export interface ChatBoot {
   dispose: () => void
 }
 
-export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime): ChatBoot {
+export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, role: WindowRole = { kind: 'main' }): ChatBoot {
+  const isMain = role.kind === 'main'
   const { stateRef, flash, notify } = k
   const { startIntegrationsRef, taskSessionsRef } = refs
   const state: StatePort = { get: () => stateRef.current, update: dispatch, subscribe: l => useAppStore.subscribe(l) }
@@ -78,17 +80,19 @@ export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: S
     compactChatContext: chat.compact,
     disposeSessionRuntime,
     start() {
-      persistence.start()
-      searchIndexer.start()
+      // Satellite windows never own persistence, the search index, or the
+      // integration (MCP/skill) starts — the main window is the single owner.
+      // They still hydrate so the pinned workspace renders from disk.
+      if (isMain) { persistence.start(); searchIndexer.start() }
       if (!booted) {
         booted = true
         runHydration({
-          stateRef, persistence, startIntegrations: () => startIntegrationsRef.current(),
+          stateRef, persistence, startIntegrations: isMain ? () => startIntegrationsRef.current() : () => {},
           appendTail: session.appendTail, clearNeeds: session.clearNeeds,
           bumpSettle: session.bumpSettle, armResponseWatch: session.armResponseWatch,
         })
       }
     },
-    dispose() { persistence.dispose(); searchIndexer.dispose() },
+    dispose() { if (isMain) { persistence.dispose(); searchIndexer.dispose() } },
   }
 }
