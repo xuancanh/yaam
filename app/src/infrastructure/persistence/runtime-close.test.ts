@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-// Tauri context: the backend vetoes the OS close and emits close-requested; the
-// runtime must flush persisted state and only then destroy the window.
-let closeHandler: (() => void) | undefined
+// The Tauri close→flush→destroy handshake is now owned by the role-aware app
+// runtime (main flushes + closes its satellites; satellites hand off), NOT by
+// the persistence runtime. Persistence must therefore register NO close handler
+// under Tauri — it only keeps the plain-browser beforeunload fallback.
 vi.mock('../../core/native', () => ({
   isTauri: true,
   saveStateFile: vi.fn(() => Promise.resolve()),
@@ -11,7 +12,7 @@ vi.mock('../../core/native', () => ({
   removeSession: vi.fn(() => Promise.resolve()),
   secretSet: vi.fn(() => Promise.resolve()),
   secretDelete: vi.fn(() => Promise.resolve()),
-  onCloseRequested: vi.fn((cb: () => void) => { closeHandler = cb; return () => { closeHandler = undefined } }),
+  onCloseRequested: vi.fn(() => () => {}),
   destroyWindow: vi.fn(() => Promise.resolve()),
 }))
 
@@ -28,29 +29,22 @@ const state = {
 } as unknown as AppState
 const store = { getState: () => state, subscribe: () => () => {} }
 
-beforeEach(() => { vi.clearAllMocks(); closeHandler = undefined })
+beforeEach(() => { vi.clearAllMocks() })
 
-describe('persistence runtime — Tauri close handshake', () => {
-  it('registers a close handler that flushes then destroys the window', async () => {
+describe('persistence runtime — no longer owns the Tauri close', () => {
+  it('does not register a close handler under Tauri (the app runtime does)', () => {
     const rt = createPersistenceRuntime(store, { onToast: vi.fn() })
     rt.markReady()
     rt.start()
-
-    expect(native.onCloseRequested).toHaveBeenCalledOnce()
-    expect(closeHandler).toBeTypeOf('function')
-    // no beforeunload fallback in the Tauri path
+    expect(native.onCloseRequested).not.toHaveBeenCalled()
     expect(native.destroyWindow).not.toHaveBeenCalled()
-
-    closeHandler!() // simulate the backend's vetoed close
-    await vi.waitFor(() => expect(native.destroyWindow).toHaveBeenCalledOnce())
-    expect(native.saveStateFile).toHaveBeenCalled() // state was flushed before destroy
   })
 
-  it('unsubscribes the close handler on dispose', () => {
+  it('still exposes flush() for the app runtime to call on close', async () => {
     const rt = createPersistenceRuntime(store, { onToast: vi.fn() })
+    rt.markReady()
     rt.start()
-    expect(closeHandler).toBeTypeOf('function')
-    rt.dispose()
-    expect(closeHandler).toBeUndefined()
+    await rt.flush()
+    expect(native.saveStateFile).toHaveBeenCalled()
   })
 })

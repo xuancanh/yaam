@@ -3,6 +3,7 @@
 // Tauri modules are lazy-imported so the browser build stays a no-op. See
 // core/window-role.ts for how a satellite reads its role on boot.
 import { isTauri } from './base'
+import { onCloseRequested, currentWindowLabel } from './session'
 import { workspaceWindowLabel } from '../../core/window-role'
 
 export const MAIN_WINDOW_LABEL = 'main'
@@ -63,14 +64,22 @@ export function onWsEvent<T>(event: 'ws:sync' | 'ws:reattach', cb: (payload: T) 
   return () => { alive = false; unlisten() }
 }
 
-/** Subscribe to this window's own close-request (satellite flushes then closes). */
-export function onWindowClose(cb: () => void | Promise<void>): () => void {
+/** Run `cb` only when THIS window is the one being asked to close (the backend
+ *  broadcasts the closing window's label; we compare it to our own). The OS
+ *  close is already vetoed in Rust, so `cb` should finish its teardown and then
+ *  call `destroyThisWindow()`. Returns an unsubscribe fn. */
+export function onThisWindowClose(cb: () => void | Promise<void>): () => void {
   if (!isTauri) return () => {}
-  let alive = true
-  let unlisten = () => {}
-  void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
-    getCurrentWindow().onCloseRequested(async e => { e.preventDefault(); await cb() }).then(fn => { if (alive) unlisten = fn; else fn() }))
-  return () => { alive = false; unlisten() }
+  return onCloseRequested(label => { if (label === currentWindowLabel()) void cb() })
+}
+
+/** Destroy every workspace-satellite window (main quitting closes the app). */
+export async function closeAllSatellites(): Promise<void> {
+  if (!isTauri) return
+  const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+  for (const w of await WebviewWindow.getAll()) {
+    if (w.label !== MAIN_WINDOW_LABEL) await w.destroy().catch(() => {})
+  }
 }
 
 /** Destroy this window (bypasses the close-request veto after a flush). */

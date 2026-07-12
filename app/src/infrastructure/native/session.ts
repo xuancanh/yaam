@@ -90,16 +90,23 @@ export function onSessionExit(cb: (e: SessionExit) => void): () => void {
 }
 
 /** Subscribe to the backend's close-requested event (the OS close was vetoed so
- *  the app can flush first). No-op outside Tauri. Returns an unsubscribe fn. */
-export function onCloseRequested(cb: () => void): () => void {
+ *  the app can flush first). The payload is the LABEL of the window that was
+ *  asked to close — it broadcasts to every window, so callers compare it to
+ *  their own label. No-op outside Tauri. Returns an unsubscribe fn. */
+export function onCloseRequested(cb: (label: string) => void): () => void {
   if (!isTauri) return () => {}
   let alive = true
   let unlisten = () => {}
-  listen('close-requested', () => cb()).then(fn => {
+  listen<string>('close-requested', e => cb(e.payload)).then(fn => {
     if (alive) unlisten = fn
     else fn()
   })
   return () => { alive = false; unlisten() }
+}
+
+/** This window's Tauri label ('main' in the browser build / main window). */
+export function currentWindowLabel(): string {
+  return isTauri ? getCurrentWindow().label : 'main'
 }
 
 /** Force-close the app window (bypasses the CloseRequested veto). */

@@ -29,8 +29,13 @@ pub fn run() {
         // can't wedge the close). destroy() bypasses this event, so no loop.
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                // veto, then tell the frontend WHICH window was asked to close.
+                // The event broadcasts to every window, so each one compares the
+                // label to its own and only the closing window tears itself down
+                // (main also closes its workspace satellites; satellites don't
+                // touch main). See infrastructure/native/windows.ts.
                 api.prevent_close();
-                let _ = window.emit("close-requested", ());
+                let _ = window.emit("close-requested", window.label());
             }
         })
         .manage(SessionManager::default())

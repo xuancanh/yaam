@@ -13,7 +13,7 @@ import { browserClock, createStorePort, type Disposable } from '../core/ports'
 import type { WindowRole } from '../core/window-role'
 import { MASTER_GREETING } from '../core/data'
 import { scopedFromState, switchWorkspaceIn } from '../domains/workspace/state'
-import { emitWsSync, emitWsReattach, onWsEvent, onWindowClose, destroyThisWindow, type WsSyncPayload } from '../infrastructure/native/windows'
+import { emitWsSync, emitWsReattach, onWsEvent, onThisWindowClose, closeAllSatellites, destroyThisWindow, type WsSyncPayload } from '../infrastructure/native/windows'
 import { createActivityService } from '../domains/activity/service'
 import { createRuntimeRefs } from './runtime/refs'
 import type { RuntimeRefs } from './runtime/refs'
@@ -175,6 +175,13 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
           actions.mergeDetachedWorkspace(p.workspaceId, p.data as WorkspaceData, p.agents as Agent[])))
         windowDisposers.push(onWsEvent<WsSyncPayload>('ws:reattach', p =>
           actions.reattachWorkspace(p.workspaceId, p.data as WorkspaceData, p.agents as Agent[])))
+        // closing the main window quits the app: flush (bounded), then close the
+        // workspace satellites and destroy main so no orphan window survives.
+        windowDisposers.push(onThisWindowClose(async () => {
+          await Promise.race([chat.flush(), new Promise<void>(r => browserClock.setTimeout(() => r(), 3000))])
+          await closeAllSatellites()
+          await destroyThisWindow()
+        }))
       } else {
         // satellite: pin to its workspace once hydration is ready, then keep main
         // in sync with a debounced forward of the workspace slice + its sessions.
@@ -197,8 +204,9 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
           }
           if (pinned && st.activeWorkspace === wsId) armSync()
         }))
-        // final handoff on close, then let the window go
-        windowDisposers.push(onWindowClose(async () => {
+        // closing only this satellite: hand its final slice back to main, then
+        // destroy just this window (the app and main keep running).
+        windowDisposers.push(onThisWindowClose(async () => {
           syncTimer?.dispose()
           await emitWsReattach(slice())
           await destroyThisWindow()

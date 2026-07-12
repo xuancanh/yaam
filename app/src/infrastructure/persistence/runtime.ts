@@ -171,7 +171,6 @@ export function createPersistenceRuntime(
   // Fallback flush for a plain-browser dev context, where there is no Tauri
   // close lifecycle to coordinate with (best-effort, can't be awaited).
   const onBeforeUnload = () => { void flush() }
-  let closeOff: (() => void) | undefined
 
   return {
     keychainReady,
@@ -188,19 +187,10 @@ export function createPersistenceRuntime(
         } else armSession()
       }))
       unsubs.push(store.subscribe((s, prev) => { if (secretsChanged(s, prev)) armSecret() }))
-      // In Tauri the OS close is vetoed backend-side; flush (bounded so a stuck
-      // write can't wedge the close), then destroy the window. In a plain
-      // browser fall back to the best-effort beforeunload flush.
-      if (native.isTauri) {
-        closeOff = native.onCloseRequested(() => {
-          void (async () => {
-            await Promise.race([flush(), new Promise(r => window.setTimeout(r, 3000))])
-            await native.destroyWindow().catch(() => {})
-          })()
-        })
-      } else {
-        window.addEventListener('beforeunload', onBeforeUnload)
-      }
+      // The Tauri close→flush→destroy handshake is owned by the (role-aware)
+      // app runtime, which flushes only for the main window and also closes its
+      // workspace satellites. Here we keep just the plain-browser fallback.
+      if (!native.isTauri) window.addEventListener('beforeunload', onBeforeUnload)
     },
     flush,
     dispose() {
@@ -211,7 +201,6 @@ export function createPersistenceRuntime(
       for (const u of unsubs) u()
       unsubs.length = 0
       mainTimer = undefined; sessionTimer = undefined; secretTimer = undefined
-      closeOff?.(); closeOff = undefined
       window.removeEventListener('beforeunload', onBeforeUnload)
     },
   }

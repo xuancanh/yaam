@@ -33,6 +33,8 @@ export interface ChatBoot {
   resolveChatApproval: ChatRuntime['resolveApproval']
   compactChatContext: ChatRuntime['compact']
   disposeSessionRuntime: (id: string) => void
+  /** flush persisted state now (main window only; a no-op in a satellite) */
+  flush: () => Promise<void>
   /** start persistence + search indexing + the one-shot hydration boot */
   start: () => void
   /** stop persistence + search indexing */
@@ -79,6 +81,7 @@ export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: S
     resolveChatApproval: chat.resolveApproval,
     compactChatContext: chat.compact,
     disposeSessionRuntime,
+    flush: isMain ? persistence.flush : async () => {},
     start() {
       // Satellite windows never own persistence, the search index, or the
       // integration (MCP/skill) starts — the main window is the single owner.
