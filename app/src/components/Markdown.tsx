@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import type { ReactNode } from 'react'
 
 // Minimal dependency-free markdown renderer for chat bubbles: fenced code,
@@ -53,7 +54,10 @@ function withBreaks(lines: string[], keyBase: string): ReactNode[] {
   return lines.flatMap((l, i) => (i ? [<br key={`${keyBase}-br${i}`} />, ...inline(l, `${keyBase}-l${i}`)] : inline(l, `${keyBase}-l${i}`)))
 }
 
-export function Markdown({ text }: { text: string }) {
+/** Parse markdown text into React blocks. Pure — memoized by the component so a
+ *  re-render from unrelated state (e.g. a live snapshot push driving the whole
+ *  mobile tree) doesn't re-parse every chat bubble. */
+function parseMarkdown(text: string): ReactNode[] {
   const blocks: ReactNode[] = []
   const lines = text.split('\n')
   let i = 0
@@ -180,5 +184,10 @@ export function Markdown({ text }: { text: string }) {
     blocks.push(<div key={`b${k++}`} style={{ margin: '3px 0' }}>{withBreaks(buf, `p${k}`)}</div>)
   }
 
-  return <>{blocks}</>
+  return blocks
 }
+
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
+  const blocks = useMemo(() => parseMarkdown(text), [text])
+  return <>{blocks}</>
+})

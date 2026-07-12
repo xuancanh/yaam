@@ -3,7 +3,7 @@
 // the Rust PTY reader; fallback is replaying the serialized snapshot buffer.
 // The terminal FITS its container (FitAddon + ResizeObserver) so lines wrap to
 // the phone's width and the PTY-side layout reflows readably.
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -28,7 +28,9 @@ function b64Bytes(data: string): Uint8Array {
   return bytes
 }
 
-export function TerminalView({ sessionId, data }: { sessionId: string; data: string }) {
+// Memoized: in live mode the terminal drives itself from its own /api/term SSE,
+// so a whole-tree re-render on every state snapshot must not re-run this body.
+export const TerminalView = memo(function TerminalView({ sessionId, data }: { sessionId: string; data: string }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const lastRef = useRef<string>('')
@@ -214,4 +216,4 @@ export function TerminalView({ sessionId, data }: { sessionId: string; data: str
   }, [data, live])
 
   return <div ref={hostRef} className="termfill" />
-}
+})
