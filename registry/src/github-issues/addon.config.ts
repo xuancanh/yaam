@@ -2,7 +2,7 @@ import { defineAddon } from 'yaam-addon'
 
 export default defineAddon({
   name: 'GitHub Issues',
-  version: '2.1.1',
+  version: '2.2.0',
   icon: '🐙',
   description: 'A GitHub issue triage inbox — sync open issues from any number of repos on a schedule, spawn linked board tasks (or let the addon\'s customizable triage agent decide), track their progress, and optionally close the issue on GitHub when the task is done. Token stays in the OS keychain.',
   author: 'yaam',
