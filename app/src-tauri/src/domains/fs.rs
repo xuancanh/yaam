@@ -7,6 +7,9 @@ use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+const MAX_DIR_ENTRIES: usize = 10_000;
+const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
+
 /// Authorize a workspace-scoped path at the privileged boundary. Lexical checks
 /// in the frontend are advisory only: a symlink under the workspace can point
 /// outside it while the lexical path still looks local. Here we canonicalize the
@@ -89,12 +92,17 @@ pub struct ExecResult {
 
 /// List a directory with folders first and case-insensitive name ordering.
 fn list_dir_impl(root: Option<&str>, path: &str) -> Result<Vec<DirEntryInfo>, String> {
+    list_dir_with_limit(root, path, MAX_DIR_ENTRIES)
+}
+
+fn list_dir_with_limit(root: Option<&str>, path: &str, max_entries: usize) -> Result<Vec<DirEntryInfo>, String> {
     let dir = scoped_path(root, path)?;
     let mut out: Vec<DirEntryInfo> = Vec::new();
-    for entry in std::fs::read_dir(&dir)
-        .map_err(|e| e.to_string())?
-        .flatten()
-    {
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if out.len() >= max_entries {
+            return Err(format!("directory contains more than {max_entries} entries"));
+        }
         let name = entry.file_name().to_string_lossy().to_string();
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
         out.push(DirEntryInfo {
@@ -113,7 +121,12 @@ fn list_dir_impl(root: Option<&str>, path: &str) -> Result<Vec<DirEntryInfo>, St
 
 /// Read one UTF-8 text file, authorized against an optional workspace root.
 fn read_text_impl(root: Option<&str>, path: &str) -> Result<String, String> {
-    std::fs::read_to_string(scoped_path(root, path)?).map_err(|e| e.to_string())
+    let full = scoped_path(root, path)?;
+    let size = std::fs::metadata(&full).map_err(|e| e.to_string())?.len();
+    if size > MAX_TEXT_BYTES {
+        return Err(format!("text file is {size} bytes — over the {MAX_TEXT_BYTES} byte limit"));
+    }
+    std::fs::read_to_string(full).map_err(|e| e.to_string())
 }
 
 /// A ranged text read: the requested 1-based line window plus the file's total
@@ -222,6 +235,9 @@ fn read_file_b64_impl(root: Option<&str>, path: &str, max_bytes: u64) -> Result<
 /// Create or replace one file with UTF-8 text, creating parent directories,
 /// authorized against an optional workspace root.
 fn write_text_impl(root: Option<&str>, path: &str, contents: &str) -> Result<(), String> {
+    if contents.len() as u64 > MAX_TEXT_BYTES {
+        return Err(format!("text is {} bytes — over the {MAX_TEXT_BYTES} byte limit", contents.len()));
+    }
     let full = scoped_path(root, path)?;
     if let Some(parent) = full.parent() {
         if !parent.as_os_str().is_empty() {
@@ -526,6 +542,7 @@ pub async fn exec_command(
 mod tests {
     use super::{
         copy_path_impl, create_dir_impl, delete_path_impl, exec_command_impl, list_dir_impl,
+        list_dir_with_limit,
         move_path_impl, read_text_impl, read_text_range_impl, resolve_in_root,
         run_credential_command_impl, run_credential_command_with_limits, write_text_impl,
     };
@@ -593,6 +610,31 @@ mod tests {
         assert!(entries
             .iter()
             .all(|entry| Path::new(&entry.path).is_absolute()));
+    }
+
+    #[test]
+    fn list_dir_rejects_results_over_the_entry_budget() {
+        let dir = TestDir::new("listing-cap");
+        for name in ["a", "b", "c"] {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        let error = match list_dir_with_limit(None, &dir.path().to_string_lossy(), 2) {
+            Err(error) => error,
+            Ok(_) => panic!("oversized listing should be rejected"),
+        };
+        assert!(error.contains("more than 2 entries"));
+    }
+
+    #[test]
+    fn text_reads_and_writes_reject_oversized_content() {
+        let dir = TestDir::new("text-cap");
+        let path = dir.path().join("large.txt");
+        let oversized = vec![b'x'; super::MAX_TEXT_BYTES as usize + 1];
+        let text = std::str::from_utf8(&oversized).unwrap();
+        assert!(write_text_impl(None, &path.to_string_lossy(), text).unwrap_err().contains("over the"));
+
+        std::fs::write(&path, &oversized).unwrap();
+        assert!(read_text_impl(None, &path.to_string_lossy()).unwrap_err().contains("over the"));
     }
 
     #[test]
