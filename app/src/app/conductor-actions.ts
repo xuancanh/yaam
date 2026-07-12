@@ -4,7 +4,7 @@
 // single ConductorActions surface. Pulled out of the provider so the composition
 // root just wires runtimes → these deps → actions.
 import type { MutableRefObject } from 'react'
-import type { AppState, EventType, NotifKind } from '../core/types'
+import type { AppState, EventType, NotifKind, SandboxConfig } from '../core/types'
 import type { McpSession } from '../core/mcp'
 import type { CatalogSkill } from '../core/skills'
 import type { AddonApi } from '../core/addons'
@@ -43,7 +43,7 @@ export interface ConductorActionsDeps {
   markUserStopped: (id: string) => void
   disposeWatcher: (taskId: string) => void
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
-  launchFromTemplate: (templateId: string, task?: string, isolate?: boolean) => string | null
+  launchFromTemplate: (templateId: string, task?: string, isolate?: boolean, sandbox?: SandboxConfig | false) => string | null
   runChatMessage: (agentId: string, text: string, atts?: import('../domains/chat/runner').ChatAttachment[]) => void
   stopChatMessage: (agentId: string) => void
   retryChatMessage: (agentId: string) => void

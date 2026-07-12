@@ -7,7 +7,7 @@
 // lifecycle; the React provider is just glue. useConductorRuntime remains for the
 // existing hook composition path.
 import type { MutableRefObject } from 'react'
-import type { AppState, EventType, NotifKind, WorkspaceData, Agent } from './../core/types'
+import type { AppState, EventType, NotifKind, SandboxConfig, WorkspaceData, Agent } from './../core/types'
 import { useAppStore, dispatch } from '../core/store'
 import { browserClock, createStorePort, type Disposable } from '../core/ports'
 import type { WindowRole } from '../core/window-role'
@@ -62,7 +62,7 @@ function assembleRuntimeDeps(
     runWatcher: session.runWatcher, pushTaskChat: session.pushTaskChat,
     markUserStopped: (id: string) => refs.userStoppedRef.current.add(id),
     disposeWatcher: session.disposeWatcher, taskSessions: refs.taskSessionsRef,
-    launchFromTemplate: (templateId: string, task?: string, isolate?: boolean) => session.launchFromTemplate(templateId, task, undefined, undefined, undefined, undefined, isolate),
+    launchFromTemplate: (templateId: string, task?: string, isolate?: boolean, sandbox?: SandboxConfig | false) => session.launchFromTemplate(templateId, task, undefined, undefined, undefined, undefined, isolate, undefined, sandbox),
     runChatMessage: chat.runChatMessage, stopChatMessage: chat.stopChatMessage,
     retryChatMessage: chat.retryChatMessage, resetChatRuntime: chat.resetChatRuntime,
     replayChatMessage: chat.replayChatMessage,

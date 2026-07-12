@@ -7,6 +7,7 @@ pub mod mcp;
 pub mod detach;
 pub mod icons;
 pub mod remote;
+pub mod sandbox;
 pub mod search;
 pub mod secrets;
 pub mod session;

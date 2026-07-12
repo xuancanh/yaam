@@ -5,11 +5,12 @@
 // Composed into the provider's action surface.
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
-import type { AppState, EventType } from '../../core/types'
+import type { AppState, EventType, SandboxConfig } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { focusSessionIn, removeFromGroups } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
 import { killRemote, tmuxName, wrapLaunch } from './remote-machine'
+import { sandboxLocalWrap, sandboxRemoteWrap } from './sandbox'
 import { probeRemoteCliSession } from './remote-probe'
 import { execCommand, worktreeMerge, worktreeRemove } from '../../core/native'
 import { realSessionProcessPort } from './ports'
@@ -22,7 +23,7 @@ export interface SessionActionsCtx {
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   markUserStopped: (id: string) => void
   disposeSessionRuntime: (id: string) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string }) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string; sandbox?: SandboxConfig }) => string | null
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
   armResponseWatch: (id: string) => void
   appendTail: (id: string, line: string) => void
@@ -49,7 +50,7 @@ export interface SessionActions {
   /** user-initiated full terminal reset (modes + scrollback) — the manual fix
    *  for a corrupted pane; never triggered automatically */
   refreshTerminal: (id: string) => void
-  newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean, detached?: boolean, machineId?: string) => void
+  newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean, detached?: boolean, machineId?: string, sandbox?: SandboxConfig) => void
   sendInput: (id: string, text: string) => void
   stopSession: (id: string) => void
 }
@@ -230,8 +231,10 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         const size = port.terminalSize(id)
         if (machine) {
           // rebuild the same ssh wrap around the resume command resolved above
-          // (resume-by-id for claude, else the plain command)
-          const inner = `${envPrefix(type?.env)}${cmd}`.trim()
+          // (resume-by-id for claude, else the plain command); a sandboxed
+          // session re-enters its bwrap sandbox on the host
+          const base = `${envPrefix(type?.env)}${cmd}`.trim()
+          const inner = agent.sandbox ? sandboxRemoteWrap(base, agent.cwd, agent.sandbox) : base
           const commandShell = stateRef.current.settings?.shell || 'zsh'
           port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd, agent.detached), undefined, size?.rows, size?.cols, undefined, commandShell)
             .then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
@@ -246,29 +249,52 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           // is relaunched from the stored command. Legacy agents persisted the
           // attach wrapper as their cmd — pass '' so the host's on-disk spec
           // (which kept the real command) is reused instead.
-          const hostCmd = cmd.includes('--yaam-attach') ? '' : `${envPrefix(type?.env)}${cmd}`.trim()
+          const hostBase = cmd.includes('--yaam-attach') ? '' : `${envPrefix(type?.env)}${cmd}`.trim()
           const hostShell = terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
-          port.detachedSpawn(id, hostCmd, agent.cwd || undefined, hostShell, size?.rows, size?.cols)
+          const failResume = (err: unknown) => {
+            dispatch(s => ({
+              ...s,
+              agents: s.agents.map(a => a.id === id
+                ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err' as const, x: String(err) }]) }
+                : a),
+            }))
+          }
+          const spawnHost = (hostCmd: string) => port.detachedSpawn(id, hostCmd, agent.cwd || undefined, hostShell, size?.rows, size?.cols)
             .then(attachCmd => port.spawnSession(id, attachCmd, agent.cwd || undefined, size?.rows, size?.cols, undefined, undefined))
             .then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
-            .catch(err => {
-              dispatch(s => ({
-                ...s,
-                agents: s.agents.map(a => a.id === id
-                  ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err' as const, x: String(err) }]) }
-                  : a),
-              }))
-            })
+            .catch(failResume)
+          // a sandboxed relaunch rebuilds its wrapper first (fail closed); ''
+          // reuses the host's on-disk spec, which kept the wrap from launch
+          if (agent.sandbox && hostBase) {
+            port.sandboxWrapper(id, agent.cwd || '~', agent.sandbox.extraPaths ?? [], !!agent.sandbox.denyNetwork)
+              .then(w => spawnHost(sandboxLocalWrap(w, hostBase)))
+              .catch(failResume)
+          } else void spawnHost(hostBase)
         } else {
-          const spawnCommand = `${envPrefix(type?.env)}${cmd}`.trim()
+          const base = `${envPrefix(type?.env)}${cmd}`.trim()
           const commandShell = terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
-          port.spawnSession(id, spawnCommand, agent.cwd || undefined, size?.rows, size?.cols, terminalShell, commandShell)
+          const failResume = (err: unknown) => {
+            dispatch(s => ({
+              ...s,
+              agents: s.agents.map(a => a.id === id
+                ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err' as const, x: String(err) }]) }
+                : a),
+            }))
+          }
+          const spawnLocal = (spawnCommand: string) => port.spawnSession(id, spawnCommand, agent.cwd || undefined, size?.rows, size?.cols, terminalShell, commandShell)
             .then(() => {
               // …and nudge a repaint once the CLI has booted, so resumed TUIs
               // draw a correct first frame even if layout shifted meanwhile
               setTimeout(() => port.repaintTerminal(id), 400)
             })
-            .catch(() => {})
+            .catch(failResume)
+          // fail closed: a sandboxed session that can't rebuild its wrapper
+          // errors instead of resuming unsandboxed
+          if (agent.sandbox && !terminalShell) {
+            port.sandboxWrapper(id, agent.cwd || '~', agent.sandbox.extraPaths ?? [], !!agent.sandbox.denyNetwork)
+              .then(w => spawnLocal(sandboxLocalWrap(w, base)))
+              .catch(failResume)
+          } else void spawnLocal(base)
           probeCliSession(id, cmd, agent.cwd || '', true)
         }
       }
@@ -288,8 +314,8 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       flash('Terminal cleared')
     },
 
-    newRealSession: (command, cwd, terminalShell, isolate, detached, machineId) => {
-      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell, isolate, detached, machineId })
+    newRealSession: (command, cwd, terminalShell, isolate, detached, machineId, sandbox) => {
+      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell, isolate, detached, machineId, sandbox })
       if (id) {
         logEvent('route', id, `Launched session · ${command.trim()}`)
         flash('Session launched')

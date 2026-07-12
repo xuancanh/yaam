@@ -39,7 +39,8 @@ app/                     Tauri app (the whole product)
     domains/             feature domains — each owns its view, components, logic (runner), actions:
       session/           terminal-session UI: Workspace, Pane, TerminalPane, FilesPane, GitPanel
                          (Fork-style git workbench: staging/commit/AI messages, shared by the
-                         review drawer + task drawer), NewSessionDialog (worktree isolation toggle)
+                         review drawer + task drawer), NewSessionDialog (worktree isolation +
+                         OS write-sandbox toggles; sandbox wrap helpers in sandbox.ts)
       chat/              ChatView, ChatPane, runner, agent (in-app chat agents: slash skills,
                          attachments/vision, ask-mode approvals, durable workspace memory)
       board/             Board + TaskSpecForm + ReviewPanel (review queue: diff/approve-merge/
@@ -63,6 +64,8 @@ app/                     Tauri app (the whole product)
       domains/git.rs, domains/fs.rs   git status/diff/stage/commit; fs + timeout-bounded exec
       domains/worktree.rs             git-worktree isolation (single- and multi-repo folders):
                                       create/diff/merge/remove under ~/.yaam/worktrees
+      domains/sandbox.rs              OS write-sandbox wrapper for local sessions
+                                      (sandbox-exec/Seatbelt on macOS, bwrap on Linux)
       domains/search.rs  tantivy full-text index over chat transcripts
       domains/mcp.rs     local stdio MCP child-process transport
       domains/bedrock.rs AWS Bedrock InvokeModel bridge + credential parsing/caching

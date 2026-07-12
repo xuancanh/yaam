@@ -39,6 +39,19 @@ describe('buildLaunch', () => {
     expect(plan.agent.repo).toBe('~')
   })
 
+  it('records the sandbox config on the agent and logs the restriction', () => {
+    const plan = buildLaunch({ command: 'claude', cwd: '/repo', typeId: 'claude', opts: { sandbox: { denyNetwork: true } } }, types, 'ws')!
+    expect(plan.agent.sandbox).toEqual({ denyNetwork: true })
+    const text = plan.agent.log.map(l => l.x).join('\n')
+    expect(text).toMatch(/sandboxed — file writes limited/)
+    expect(text).toMatch(/network denied/)
+  })
+
+  it('drops the sandbox for plain terminal sessions — there is no command to wrap', () => {
+    const plan = buildLaunch({ command: 'zsh -i', cwd: '/repo', opts: { terminalShell: 'zsh', sandbox: {} } }, types, 'ws')!
+    expect(plan.agent.sandbox).toBeUndefined()
+  })
+
   it('defaults the workspace to the active one', () => {
     const plan = buildLaunch({ command: 'claude', cwd: '/repo', typeId: 'claude' }, types, 'ws-active')!
     expect(plan.agent.workspaceId).toBe('ws-active')

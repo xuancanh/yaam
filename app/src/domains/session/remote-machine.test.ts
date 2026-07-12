@@ -78,6 +78,7 @@ describe('testCommand', () => {
     expect(t).toContain('tmux -V')
     expect(t).toContain('base64 -d')
     expect(t).toContain('command -v git')
+    expect(t).toContain('command -v bwrap')
     expect(t).toContain(`'/srv'`)
   })
 })

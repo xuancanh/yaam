@@ -1,14 +1,14 @@
 // Schedules-domain actions: agent-template CRUD + launch, and cron schedule
 // create/delete. Composed into the provider's action surface.
 import { useMemo } from 'react'
-import type { AgentTemplate, AppState, Cron, EventType } from '../../core/types'
+import type { AgentTemplate, AppState, Cron, EventType, SandboxConfig } from '../../core/types'
 import { mkId } from '../../shared/id'
 
 export interface SchedulesActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
   flash: (t: string) => void
   logEvent: (type: EventType, agentId: string | null, text: string) => void
-  launchFromTemplate: (templateId: string, task?: string, isolate?: boolean) => string | null
+  launchFromTemplate: (templateId: string, task?: string, isolate?: boolean, sandbox?: SandboxConfig | false) => string | null
   /** application command registry entry point (routes schedule toggle/remove) */
   execCommand?: <R = unknown>(name: string, input: unknown, ctx: { actor: { kind: 'user' } }) => Promise<R>
 }
@@ -17,7 +17,8 @@ export interface SchedulesActions {
   addTemplate: () => string
   updateTemplate: (id: string, patch: Partial<AgentTemplate>) => void
   deleteTemplate: (id: string) => void
-  runTemplate: (id: string, task?: string, isolate?: boolean) => void
+  /** sandbox: false = explicitly off (dialog unchecked); undefined = inherit the template's setting */
+  runTemplate: (id: string, task?: string, isolate?: boolean, sandbox?: SandboxConfig | false) => void
   addCron: (cron: Omit<Cron, 'id' | 'on' | 'built' | 'last'>) => void
   deleteCron: (id: string) => void
   toggleCron: (id: string) => void
@@ -55,8 +56,8 @@ export function createSchedulesActions(ctx: SchedulesActionsCtx): SchedulesActio
       tasks: s.tasks.map(t => t.templateId === id ? { ...t, templateId: undefined } : t),
       crons: s.crons.map(c => c.templateId === id ? { ...c, templateId: undefined } : c),
     })),
-    runTemplate: (id, task, isolate) => {
-      const lid = ctx.launchFromTemplate(id, task, isolate)
+    runTemplate: (id, task, isolate, sandbox) => {
+      const lid = ctx.launchFromTemplate(id, task, isolate, sandbox)
       if (lid) ctx.flash('Session launched from template')
     },
 

@@ -19,7 +19,11 @@ function summarizeTest(output: string): { ok: boolean; text: string } {
   if (!has('B64_OK')) miss.push('no base64 -d')
   if (!has('GIT_OK')) miss.push('no git')
   if (has('NO_DIR')) miss.push('working dir not found')
-  return miss.length ? { ok: false, text: `Connected, but: ${miss.join(', ')}` } : { ok: true, text: 'Connected · tmux, base64, git all present' }
+  // bwrap only matters for Sandbox sessions — warn without failing the test
+  const warn = has('NO_BWRAP') ? ' · no bwrap: “Sandbox” sessions will fail here (apt install bubblewrap)' : ''
+  return miss.length
+    ? { ok: false, text: `Connected, but: ${miss.join(', ')}${warn}` }
+    : { ok: true, text: `Connected · tmux, base64, git all present${warn}` }
 }
 
 /** Spacious popup for one machine: every SSH field + a connection test.

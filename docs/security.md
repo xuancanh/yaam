@@ -191,9 +191,38 @@ copies reject symlinks. `delete_path` remains approval-gated in Ask mode.
 ### PTY sessions
 
 Agent CLIs and shells are user-selected programs. Command sessions run through
-`/bin/sh -lc`; terminal sessions start the selected executable directly. They
-inherit user-level OS authority. YAAM manages lifecycle and terminal I/O but
-does not sandbox their filesystem, network, or subprocess access.
+`/bin/sh -lc`; terminal sessions start the selected executable directly. By
+default they inherit user-level OS authority: YAAM manages lifecycle and
+terminal I/O but does not sandbox their filesystem, network, or subprocess
+access unless the session opts into the write sandbox below.
+
+### Session write sandbox (opt-in)
+
+Command sessions (and templates) can opt into an OS-enforced write sandbox.
+The spawn command is wrapped in a platform wrapper —
+`sandbox-exec -f <profile>` (Seatbelt) on macOS, `bwrap --ro-bind / / …`
+(bubblewrap) on Linux and on remote SSH machines — so the whole process tree,
+including everything the agent spawns, inherits the restriction.
+
+Policy (allow-default): reads are unrestricted; **file writes are limited to**
+the session working directory (the worktree workdir when combined with
+worktree isolation), `/tmp` + `TMPDIR`, `/dev` (PTYs), the agent config
+dot-dirs (`~/.claude`, `~/.codex`, `~/.config`, `~/.cache`, `~/.local`,
+`~/.yaam`), and any template-configured extra paths. Network is allowed by
+default so agent CLIs keep working; a template can additionally deny all
+network (`(deny network*)` / `--unshare-net`). Local wrappers are built by the
+`sandbox_wrapper` backend command, which canonicalizes every root (symlinks,
+`/tmp` → `/private/tmp`) and writes macOS profiles to `~/.yaam/sandbox/<id>.sb`.
+
+The feature is **fail-closed**: if the wrapper can't be built (unsupported OS,
+missing `sandbox-exec`/`bwrap`, bad cwd) the launch or resume errors instead of
+running unprotected, and a remote host without bubblewrap aborts before the
+agent starts. Resume regenerates the wrapper from the persisted per-session
+config. Limits: plain terminal sessions can't be sandboxed (no command string
+to wrap); reads are not restricted; `sandbox-exec` is deprecated by Apple but
+ships with current macOS and is the same primitive Chrome/Bazel/Claude Code
+use. This is a guardrail against agent mistakes, not a hard boundary against a
+deliberately malicious program run by the user.
 
 On Unix, normal stop sends SIGTERM to the child and process group, followed by
 SIGKILL after a two-second grace period. This is lifecycle hygiene and resume

@@ -130,6 +130,37 @@ function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => v
           </div>
         )}
 
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 12, padding: '11px 14px',
+          background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ flex: 1, fontSize: 12, color: 'var(--mut)', lineHeight: 1.5 }}>
+              <b style={{ color: 'var(--text)' }}>Sandbox (OS-level write protection)</b><br />
+              <span style={{ color: 'var(--dim)' }}>file writes limited to the working folder, temp, and agent config dirs — sandbox-exec on macOS, bwrap on Linux / remote hosts</span>
+            </div>
+            <Switch on={!!tpl.sandbox} onToggle={() => upd({ sandbox: tpl.sandbox ? undefined : {} })} />
+          </div>
+          {tpl.sandbox && (
+            <DialogGrid>
+              <DialogField label="EXTRA WRITABLE PATHS" hint="one absolute path per line">
+                <textarea
+                  value={(tpl.sandbox.extraPaths ?? []).join('\n')}
+                  onChange={e => upd({ sandbox: { ...tpl.sandbox, extraPaths: e.target.value.split('\n').map(p => p.trim()).filter(Boolean) } })}
+                  placeholder={'/path/the/agent/may/write\n~/another/path'}
+                  rows={2}
+                  style={{ ...FIELD_STYLE, width: '100%', resize: 'vertical', lineHeight: 1.55 }}
+                />
+              </DialogField>
+              <DialogField label="DENY NETWORK" hint="blocks ALL network — the agent CLI's own API calls too; only for offline runs">
+                <div style={{ paddingTop: 6 }}>
+                  <Switch on={!!tpl.sandbox.denyNetwork} onToggle={() => upd({ sandbox: { ...tpl.sandbox, denyNetwork: !tpl.sandbox?.denyNetwork || undefined } })} />
+                </div>
+              </DialogField>
+            </DialogGrid>
+          )}
+        </div>
+
         <DialogField label="COMMAND PREVIEW" hint="what this template launches">
           <div className="mono" style={{
             fontSize: 11, color: 'var(--dim)', background: 'var(--bg3)', border: '1px solid var(--line)',
@@ -187,6 +218,7 @@ function TemplateCard({ tpl, onEdit }: { tpl: AgentTemplate; onEdit: () => void 
         {tpl.model && <><span style={{ color: 'var(--faint)' }}>·</span><span className="mono">{tpl.model}</span></>}
         <span style={{ color: 'var(--faint)' }}>·</span>
         <span>{APPROVALS.find(a => a.id === tpl.approval)?.label}</span>
+        {tpl.sandbox && <><span style={{ color: 'var(--faint)' }}>·</span><span title={`OS write sandbox${tpl.sandbox.denyNetwork ? ' · network denied' : ''}`}>sandboxed{tpl.sandbox.denyNetwork ? ' · no net' : ''}</span></>}
       </div>
       {promptPreview && (
         <div style={{ fontSize: 11.5, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

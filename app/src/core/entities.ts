@@ -235,6 +235,19 @@ export interface SessionRecord {
   /** connection snapshot taken at launch, so the session keeps resuming/stopping
    *  and browsing Files/Git even if the saved machine is later edited or removed */
   machine?: Machine
+  /** OS write-sandbox this session runs in (presence = enabled); re-applied on
+   *  resume. sandbox-exec locally on macOS, bwrap on remote Linux machines. */
+  sandbox?: SandboxConfig
+}
+
+/** Session/template sandbox policy. Presence enables the sandbox: file writes
+ *  are limited to the session cwd, temp, and agent config dirs; the fields are
+ *  additive knobs on top of that baseline. */
+export interface SandboxConfig {
+  /** additionally deny all network access */
+  denyNetwork?: boolean
+  /** extra absolute paths made writable (advanced) */
+  extraPaths?: string[]
 }
 
 /** A session as the app works with it: durable record plus live runtime state.
@@ -704,6 +717,8 @@ export interface AgentTemplate {
   autoArchive: boolean
   /** run on a saved remote machine (SSH + tmux) instead of locally; empty = local */
   machineId?: string
+  /** OS write-sandbox sessions launched from this template run in (presence = enabled) */
+  sandbox?: SandboxConfig
 }
 
 /** one message in a task's watcher chat */

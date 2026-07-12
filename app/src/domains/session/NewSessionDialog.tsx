@@ -29,6 +29,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
 
   const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
   const [isolate, setIsolate] = useState(false)
+  const [sandbox, setSandbox] = useState(false)
   const [detached, setDetached] = useState(false)
 
   // remote machine (ssh + tmux); '' = run locally
@@ -72,13 +73,14 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   // Dispatch a template run or a real PTY session.
   const launch = () => {
     if (tpl) {
-      runTemplate(tpl.id, task.trim() || undefined, isolate || undefined)
+      // sandbox: checked = the template's config (or defaults); unchecked = explicitly off
+      runTemplate(tpl.id, task.trim() || undefined, isolate || undefined, sandbox ? (tpl.sandbox ?? {}) : false)
       onClose()
       return
     }
     if (!effectiveCommand.trim()) return
     // worktree isolation is local-only; detached = tmux on a machine, setsid host locally
-    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined, machine ? false : (isolate || undefined), detached || undefined, machineId || undefined)
+    newRealSession(effectiveCommand, cwd, isShell ? shell : undefined, machine ? false : (isolate || undefined), detached || undefined, machineId || undefined, sandbox && !isShell ? {} : undefined)
     onClose()
   }
 
@@ -101,7 +103,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
           {templates.length > 0 && (
             <div>
               <FieldLabel>Template (optional)</FieldLabel>
-              <select value={templateId} onChange={e => setTemplateId(e.target.value)} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
+              <select value={templateId} onChange={e => { setTemplateId(e.target.value); setSandbox(!!templates.find(t => t.id === e.target.value)?.sandbox) }} disabled={!isTauri} className="select-field" style={FIELD_STYLE}>
                 <option value="">none — configure manually</option>
                 {templates.map(t => <option key={t.id} value={t.id}>{t.name} · {t.mode === 'ephemeral' ? 'one-shot' : 'interactive'}</option>)}
               </select>
@@ -199,6 +201,19 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
                 <span style={{ fontSize: 12.5, fontWeight: 600 }}>Isolate in a git worktree</span>
                 <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
                   Runs on a branch in a mirrored copy — supports multi-repo folders; review &amp; merge when done.
+                </span>
+              </span>
+            </label>
+          )}
+          {/* plain terminals spawn `shell -l -i` with no command string, so the
+              OS wrapper has nothing to wrap — the option only applies to commands */}
+          {!(isShell && !tpl) && (
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', userSelect: 'none', marginTop: 10 }} title="OS-level write sandbox (sandbox-exec on macOS, bwrap on Linux — locally or on the remote host). The agent reads everything but can only write inside the working folder, temp, and its own config dirs. Network stays available; templates can add writable paths or deny network.">
+              <input type="checkbox" checked={sandbox} onChange={e => setSandbox(e.target.checked)} disabled={!isTauri} style={{ marginTop: 2 }} />
+              <span>
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>Sandbox (block writes outside the working folder)</span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                  OS-enforced: file writes limited to this folder, temp, and agent config dirs. If the sandbox can't be applied, the launch fails instead of running unprotected.
                 </span>
               </span>
             </label>

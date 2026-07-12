@@ -23,6 +23,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     sendLine: vi.fn(),
     detectCliSession: vi.fn(async () => null),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
+    sandboxWrapper: vi.fn(async () => "sandbox-exec -f '/fake.sb'"),
     detachedSpawn: vi.fn(async () => 'attach-cmd'),
     detachedKill: vi.fn(async () => {}),
     restoreTerminalModes: vi.fn(),
@@ -144,6 +145,69 @@ describe('createLaunchRuntime.launchSession', () => {
     expect(useAppStore.getState().newSessionOpen).toBe(true)
     rt.launchSession('mycli run', '/repo', 'Fg', 'cli', 'ws')
     expect(useAppStore.getState().newSessionOpen).toBe(false)
+  })
+})
+
+describe('sandboxed launches', () => {
+  it('wraps a local spawn in the backend sandbox wrapper', async () => {
+    const port = fakePort()
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('mycli run', '/repo', 'Sbx', 'cli', undefined, { sandbox: {} })!
+    await Promise.resolve(); await Promise.resolve()
+    expect(port.sandboxWrapper).toHaveBeenCalledWith(id, '/repo', [], false)
+    expect(port.spawnSession).toHaveBeenCalledWith(
+      id, expect.stringMatching(/^sandbox-exec -f '\/fake\.sb' \/bin\/sh -c 'mycli run/), '/repo', undefined, undefined, undefined, 'zsh')
+    expect(useAppStore.getState().agents.find(a => a.id === id)?.sandbox).toEqual({})
+  })
+
+  it('forwards denyNetwork and extraPaths to the wrapper', async () => {
+    const port = fakePort()
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('mycli run', '/repo', 'Sbx', 'cli', undefined, { sandbox: { denyNetwork: true, extraPaths: ['/data'] } })!
+    await Promise.resolve()
+    expect(port.sandboxWrapper).toHaveBeenCalledWith(id, '/repo', ['/data'], true)
+  })
+
+  it('sandbox + isolate: the wrapper is built from the worktree workdir', async () => {
+    const port = fakePort({
+      createWorktree: vi.fn(async (base: string, slug: string) => ({
+        root: `/wt/${slug}`, base, slug, workdir: `/wt/${slug}/repo`,
+        repos: [{ name: 'repo', source: base, branch: `yaam/${slug}`, base_ref: 'main' }],
+      })),
+    })
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('mycli run', '/repo', 'Sbx', 'cli', undefined, { isolate: true, sandbox: {} })!
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    expect(port.sandboxWrapper).toHaveBeenCalledWith(id, `/wt/${id}/repo`, [], false)
+  })
+
+  it('fails closed: a wrapper rejection errors the session and nothing spawns', async () => {
+    const port = fakePort({ sandboxWrapper: vi.fn(async () => { throw new Error('sandbox: bwrap is not installed') }) })
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('mycli run', '/repo', 'Sbx', 'cli', undefined, { sandbox: {} })!
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    const agent = useAppStore.getState().agents.find(a => a.id === id)
+    expect(agent?.status).toBe('error')
+    expect(agent?.log.some(l => l.t === 'err' && l.x.includes('bwrap'))).toBe(true)
+    expect(port.spawnSession).not.toHaveBeenCalled()
+  })
+
+  it('machine launch: the bwrap sandbox rides inside the ssh wrap for the remote host', () => {
+    const machine = { id: 'm1', label: 'Box', host: 'box.test', user: 'u' } as Machine
+    useAppStore.setState({ settings: { shell: 'zsh', machines: [machine] } as AppState['settings'] } as Partial<AppState> as AppState)
+    const port = fakePort()
+    const rt = createLaunchRuntime(ctx(port))
+    rt.launchSession('mycli run', '/home/u/proj', 'Sbx', 'cli', undefined, { machineId: 'm1', sandbox: {} })
+    // local wrapper never consulted for a machine session
+    expect(port.sandboxWrapper).not.toHaveBeenCalled()
+    const cmd = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    // the inner command travels base64-encoded; decode and check the bwrap wrap
+    const b64 = /printf %s (\S+) \| base64 -d/.exec(cmd)?.[1]
+    expect(b64).toBeTruthy()
+    const inner = atob(b64!)
+    expect(inner).toContain('command -v bwrap')
+    expect(inner).toContain('exec bwrap --ro-bind / /')
+    expect(inner).toContain('mycli run')
   })
 })
 

@@ -81,6 +81,7 @@ pub fn run() {
             domains::worktree::worktree_diff,
             domains::worktree::worktree_merge,
             domains::worktree::worktree_remove,
+            domains::sandbox::sandbox_wrapper,
             domains::mcp::mcp_stdio_start,
             domains::mcp::mcp_stdio_request,
             domains::mcp::mcp_stdio_notify,

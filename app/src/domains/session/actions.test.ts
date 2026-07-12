@@ -25,6 +25,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     sendLine: vi.fn(),
     detectCliSession: vi.fn(async () => null),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
+    sandboxWrapper: vi.fn(async () => "sandbox-exec -f '/fake.sb'"),
     detachedSpawn: vi.fn(async () => 'attach-cmd'),
     detachedKill: vi.fn(async () => {}),
     restoreTerminalModes: vi.fn(),
@@ -159,6 +160,38 @@ describe('createSessionActions', () => {
     expect(port.spawnSession).not.toHaveBeenCalled()
     expect(get('a1')?.status).toBe('error')
     expect(get('a1')?.log.at(-1)?.x).toContain('not recorded')
+  })
+
+  it('resume re-wraps a sandboxed session in a fresh backend wrapper', async () => {
+    const type = { id: 'cli', name: 'CLI', model: 'mycli', resumeCmd: 'mycli --resume {id}' } as unknown as AgentType
+    seed([agent({ status: 'idle', cliSessionId: 'sid-9', typeId: 'cli', sandbox: { denyNetwork: true, extraPaths: ['/data'] } })], { agentTypes: [type] })
+    const port = fakePort()
+    createSessionActions(ctx(port)).resume('a1')
+    await Promise.resolve(); await Promise.resolve()
+    expect(port.sandboxWrapper).toHaveBeenCalledWith('a1', '/repo', ['/data'], true)
+    expect(port.spawnSession).toHaveBeenCalledWith('a1', expect.stringMatching(/^sandbox-exec -f '\/fake\.sb' \/bin\/sh -c 'mycli --resume sid-9'/), '/repo', 48, 190, undefined, 'zsh')
+  })
+
+  it('resume fails closed when a sandboxed session cannot rebuild its wrapper', async () => {
+    seed([agent({ status: 'idle', sandbox: {} })])
+    const port = fakePort({ sandboxWrapper: vi.fn(async () => { throw new Error('sandbox: bwrap is not installed') }) })
+    createSessionActions(ctx(port)).resume('a1')
+    await Promise.resolve(); await Promise.resolve()
+    expect(port.spawnSession).not.toHaveBeenCalled()
+    expect(get('a1')?.status).toBe('error')
+    expect(get('a1')?.log.at(-1)?.x).toContain('bwrap')
+  })
+
+  it('resume of a sandboxed machine session re-enters the remote bwrap wrap', () => {
+    const machine = { id: 'm1', label: 'Box', host: 'box.test', user: 'u' } as unknown as Agent['machine']
+    seed([agent({ status: 'idle', machineId: 'm1', machine, sandbox: {}, cwd: '/home/u/proj' })])
+    const port = fakePort()
+    createSessionActions(ctx(port)).resume('a1')
+    expect(port.sandboxWrapper).not.toHaveBeenCalled()
+    const cmd = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    const b64 = /printf %s (\S+) \| base64 -d/.exec(cmd)?.[1]
+    expect(b64).toBeTruthy()
+    expect(atob(b64!)).toContain('exec bwrap --ro-bind / /')
   })
 
   // resume NEVER wipes the scrollback automatically — the regression was an

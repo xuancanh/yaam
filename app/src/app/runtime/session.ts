@@ -5,7 +5,7 @@
 // monitor/watcher/spawn cycle-refs; returns the handles the rest of the runtime
 // needs. A plain factory with a start/dispose lifecycle (settle TUI scan + the
 // native exit subscription) — composed by createAppRuntime.
-import type { EscOption, TaskChatMsg } from '../../core/types'
+import type { EscOption, SandboxConfig, TaskChatMsg } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { browserClock, type StatePort } from '../../core/ports'
 import { mkId } from '../../shared/id'
@@ -38,7 +38,7 @@ export interface SessionRuntime {
   disposeSettle: (id: string) => void
   clearNeeds: (id: string) => void
   launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }) => string | null
-  launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string, isolate?: boolean) => string | null
+  launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string, isolate?: boolean, machineIdOverride?: string, sandboxOverride?: SandboxConfig | false) => string | null
   spawnTaskSession: (taskId: string, opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string }) => string | null
   spawnSessionForTask: (taskId: string, workspaceId?: string) => void
   startTaskViaWatcher: (taskId: string) => void

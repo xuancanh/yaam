@@ -29,6 +29,8 @@ export interface SessionProcessPort {
   detectCliSession: (kind: string, cwd: string | undefined, sinceMs: number, exclude?: string[]) => Promise<string | null>
   /** isolate a working folder in git worktree(s); returns where to run */
   createWorktree: (baseCwd: string, slug: string) => Promise<native.WorktreeInfo>
+  /** OS write-sandbox wrapper prefix for a local session (rejects = fail closed) */
+  sandboxWrapper: (id: string, cwd: string, extraPaths: string[], denyNetwork: boolean) => Promise<string>
   /** ensure a detached host (reattach live, relaunch dead); returns the attach command to spawn */
   detachedSpawn: (id: string, command: string, cwd?: string, commandShell?: string, rows?: number, cols?: number) => Promise<string>
   /** end a detached session for real */
@@ -66,6 +68,7 @@ export const realSessionProcessPort: SessionProcessPort = {
   sendLine: (id, text) => sendLineToSession(id, text),
   detectCliSession: (kind, cwd, sinceMs, exclude) => native.detectCliSession(kind, cwd, sinceMs, exclude),
   createWorktree: (baseCwd, slug) => native.worktreeCreate(baseCwd, slug),
+  sandboxWrapper: (id, cwd, extraPaths, denyNetwork) => native.sandboxWrapper(id, cwd, extraPaths, denyNetwork),
   detachedSpawn: (id, command, cwd, commandShell, rows, cols) => native.detachedSpawn(id, command, cwd, commandShell, rows, cols),
   detachedKill: id => native.detachedKill(id),
   attachTerminal: (id, onPlainLine, onUserInput, onActivity, onUserSubmit) => {

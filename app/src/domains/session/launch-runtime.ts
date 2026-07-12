@@ -5,13 +5,14 @@
 // provider; operates on the runtime callbacks/refs passed in ctx.
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
-import type { AgentTemplate, AppState, EventType, TaskChatMsg } from '../../core/types'
+import type { AgentTemplate, AppState, EventType, SandboxConfig, TaskChatMsg } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { hasCreds } from '../../master'
 import { buildLaunch } from './launch'
 import { focusSessionIn } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
 import { findMachine, wrapLaunch } from './remote-machine'
+import { sandboxLocalWrap, sandboxRemoteWrap } from './sandbox'
 import { probeRemoteCliSession } from './remote-probe'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
@@ -37,8 +38,8 @@ export interface LaunchRuntimeCtx {
 
 export interface LaunchRuntime {
   probeCliSession: (id: string, command: string, cwd: string, isResume: boolean) => void
-  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string }) => string | null
-  launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string, isolate?: boolean, machineIdOverride?: string) => string | null
+  launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string; sandbox?: SandboxConfig }) => string | null
+  launchFromTemplate: (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string, isolate?: boolean, machineIdOverride?: string, sandboxOverride?: SandboxConfig | false) => string | null
   spawnTaskSession: (taskId: string, opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string }) => string | null
   spawnSessionForTask: (taskId: string, workspaceId?: string) => void
   startTaskViaWatcher: (taskId: string) => void
@@ -89,7 +90,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
     }
 
     // Create optimistic session state, spawn its PTY, and attach lifecycle tracking.
-    const launchSession = (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string }): string | null => {
+    const launchSession = (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string; sandbox?: SandboxConfig }): string | null => {
       const machine = findMachine(stateRef.current.settings?.machines, opts?.machineId)
       const plan = buildLaunch({ command, cwd, nameHint, typeId, workspaceId, opts }, stateRef.current.agentTypes, stateRef.current.activeWorkspace, machine)
       if (!plan) return null
@@ -110,18 +111,21 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
             : a),
         }))
       }
-      const spawn = (spawnCwd: string | undefined) => {
+      const spawn = async (spawnCwd: string | undefined) => {
         // Command sessions use the configured shell as login+interactive so a
         // GUI-launched app gets the same PATH/toolchain setup as the user's
         // terminal. Plain terminal sessions already carry terminalShell and
         // launch that shell directly instead.
         const commandShell = opts?.terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
+        const sandbox = plan.agent.sandbox
+        const base = `${envPrefix(launchType?.env)}${spawnCommand}`
         // Machine session: the local PTY runs an ssh client into a remote tmux
         // session (the durability layer). The remote cwd is handled inside the
         // wrap, so the local spawn cwd is irrelevant; CLI id probing/detach are
         // local-only and skipped.
         if (machine) {
-          const inner = `${envPrefix(launchType?.env)}${spawnCommand}`
+          // the bwrap sandbox runs on the remote host, inside the ssh/tmux wrap
+          const inner = sandbox ? sandboxRemoteWrap(base, agent.cwd || machine.remoteDir, sandbox) : base
           // tmux only when detached is requested; otherwise a plain ssh run
           port.spawnSession(id, wrapLaunch(machine, inner, id, agent.cwd, opts?.detached), undefined, undefined, undefined, undefined, commandShell).catch(fail)
           // claude's id was minted at launch; codex has no such flag, so recover
@@ -130,6 +134,11 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
           if (!knownSessionId) probeRemoteCliSession(id, machine, launchType?.probe)
           return
         }
+        // local sandbox: the backend builds the OS wrapper (sandbox-exec/bwrap);
+        // a rejection fails the launch instead of running unsandboxed
+        const cmd = sandbox
+          ? sandboxLocalWrap(await port.sandboxWrapper(id, spawnCwd || agent.cwd || '~', sandbox.extraPaths ?? [], !!sandbox.denyNetwork), base)
+          : base
         // Claude's id is known up front; only codex/opencode need file detection.
         if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', spawnCwd ?? '', false)
         if (opts?.detached) {
@@ -137,7 +146,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
           // attach client instead. agent.cmd keeps the ORIGINAL command —
           // resume re-derives the attach wrapper via detachedSpawn, which
           // reattaches a live host or relaunches this command if it ended.
-          port.detachedSpawn(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd, commandShell)
+          port.detachedSpawn(id, cmd, spawnCwd, commandShell)
             .then(attachCmd => {
               dispatch(s => ({
                 ...s,
@@ -150,7 +159,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
             .catch(fail)
           return
         }
-        port.spawnSession(id, `${envPrefix(launchType?.env)}${spawnCommand}`, spawnCwd || undefined, undefined, undefined, opts?.terminalShell, commandShell).catch(fail)
+        port.spawnSession(id, cmd, spawnCwd || undefined, undefined, undefined, opts?.terminalShell, commandShell).catch(fail)
       }
       if (opts?.isolate && agent.cwd && !machine) {
         // isolation: mirror the working folder (a repo, or a folder of repos)
@@ -166,16 +175,16 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
                 }
               : a),
           }))
-          spawn(wt.workdir)
+          spawn(wt.workdir).catch(fail)
         }).catch(fail)
       } else {
-        spawn(agent.cwd)
+        spawn(agent.cwd).catch(fail)
       }
       return id
     }
 
     // Resolve a persisted template into a command and launch it in the target workspace.
-    const launchFromTemplate = (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string, isolate?: boolean, machineIdOverride?: string): string | null => {
+    const launchFromTemplate = (templateId: string, task?: string, workspaceId?: string, cwdOverride?: string, forceEphemeral?: boolean, contract?: string, isolate?: boolean, machineIdOverride?: string, sandboxOverride?: SandboxConfig | false): string | null => {
       const st = stateRef.current
       const stored = (st.templates ?? []).find(t => t.id === templateId)
       if (!stored) {
@@ -188,6 +197,8 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       const id = launchSession(command, cwdOverride || tpl.cwd || st.settings.defaultCwd || '', tpl.name, type?.id, workspaceId, {
         ephemeral: tpl.mode === 'ephemeral', autoArchive: tpl.autoArchive, templateId: tpl.id, isolate,
         machineId: machineIdOverride ?? tpl.machineId,
+        // false = explicitly off (dialog unchecked); undefined = inherit template
+        sandbox: sandboxOverride === false ? undefined : (sandboxOverride ?? tpl.sandbox),
       })
       if (id) logEvent('route', id, `Launched template “${tpl.name}”${task ? ` · ${task.slice(0, 48)}` : ''}`)
       return id

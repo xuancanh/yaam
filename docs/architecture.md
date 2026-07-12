@@ -462,6 +462,16 @@ symlinked), and the session runs in the mirror's `workdir`. The agent record
 carries `{ root, base, workdir }`; a task's follow-up sessions re-enter the
 same mirror so work-in-progress survives relaunches.
 
+Orthogonal to worktrees, sessions and templates can also opt into an
+OS-enforced **write sandbox**: the spawn command is prefixed with
+`sandbox-exec -f <generated Seatbelt profile>` on macOS or a `bwrap` wrap on
+Linux/remote SSH hosts, limiting file writes to the working folder (worktree
+workdir when combined), temp, and the agent's config dot-dirs, with an
+optional deny-network knob. The wrapper is a plain command-string prefix
+(mirroring the env prefix), so local, detached, resume, and remote launches
+all carry it; failures are fail-closed. See docs/security.md → "Session write
+sandbox" for the exact policy.
+
 Review closes the loop: worktree diffs (against each repo's fork ref, new
 files included) render in the review surfaces — the board's ReviewPanel, the
 agents → Review drawer, and the shared `GitWorkbench` (staging, per-side

@@ -1,7 +1,7 @@
 // Pure launch planning: turn a launch request into the concrete Agent record
 // and the exact command to spawn, without touching state, terminals, or the
 // backend. The provider applies the plan (dispatch + terminal + native spawn).
-import type { Agent, AgentType, Machine } from '../../core/types'
+import type { Agent, AgentType, Machine, SandboxConfig } from '../../core/types'
 import { defaultDetail, mkMemory, mkTools } from '../../core/data'
 import { mkId } from '../../shared/id'
 import { typeForCommand } from './command'
@@ -12,7 +12,7 @@ export interface LaunchInput {
   nameHint?: string
   typeId?: string
   workspaceId?: string
-  opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string }
+  opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string; sandbox?: SandboxConfig }
 }
 
 export interface LaunchPlan {
@@ -70,6 +70,9 @@ export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeW
     detached: machine ? (opts?.detached || undefined) : undefined,
     ephemeral: opts?.ephemeral, autoArchive: opts?.autoArchive, templateId: opts?.templateId,
     terminalShell: opts?.terminalShell,
+    // plain terminals spawn `shell -l -i` with no command string, so the
+    // wrapper has nothing to wrap — the dialog disables the option there
+    sandbox: opts?.terminalShell ? undefined : opts?.sandbox,
     memory: mkMemory(), tools: mkTools(),
     log: [
       { t: 'sys', x: `spawning · ${trimmed}${dir ? ` @ ${dir}` : ''}` },
@@ -77,6 +80,9 @@ export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeW
       // label the silence so a long run doesn't read as a hang
       ...(opts?.ephemeral ? [{ t: 'sys' as const, x: 'one-shot run — output appears when the turn completes; this can take a while' }] : []),
       ...(!dir ? [{ t: 'warn' as const, x: 'no working folder set — running in your home directory' }] : []),
+      ...(opts?.sandbox && !opts?.terminalShell
+        ? [{ t: 'sys' as const, x: `sandboxed — file writes limited to the working folder, temp, and agent config dirs${opts.sandbox.denyNetwork ? ' · network denied' : ''}` }]
+        : []),
     ],
     ...defaultDetail(), usageVersion: 1,
   }

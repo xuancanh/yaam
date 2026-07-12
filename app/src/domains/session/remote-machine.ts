@@ -115,6 +115,7 @@ export function testCommand(m: Machine): string {
     'tmux -V >/dev/null 2>&1 && echo TMUX_OK || echo NO_TMUX',
     'printf x | base64 | base64 -d >/dev/null 2>&1 && echo B64_OK || echo NO_B64',
     'command -v git >/dev/null 2>&1 && echo GIT_OK || echo NO_GIT',
+    'command -v bwrap >/dev/null 2>&1 && echo BWRAP_OK || echo NO_BWRAP',
     dir ? `[ -d ${shq(dir)} ] && echo DIR_OK || echo NO_DIR` : 'echo DIR_SKIP',
   ].join('; ')
   return `${sshPrefix(m, {})} ${shq(checks)}`
