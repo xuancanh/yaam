@@ -31,14 +31,14 @@
     },
     {
       "name": "workflows",
-      "version": "3.0.1",
+      "version": "3.1.0",
       "icon": "⛓",
       "description": "Task workflows as state machines — every step is a board-task spec with on-done / on-fail transitions, so runs branch into remediation steps, loop back for visit-capped retries, and halt where you choose. Workflow list with pass rates and pause toggles, drag-and-drop canvas editor with labeled transitions, cron triggers, and a run history you can replay on the canvas.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/workflows.yaam.json"
     },
     {
       "name": "github-issues",
-      "version": "2.1.1",
+      "version": "2.2.0",
       "icon": "🐙",
       "description": "A GitHub issue triage inbox — sync open issues from any number of repos on a schedule, spawn linked board tasks (or let the addon's customizable triage agent decide), track their progress, and optionally close the issue on GitHub when the task is done. Token stays in the OS keychain.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/github-issues.yaam.json"
@@ -52,7 +52,7 @@
     },
     {
       "name": "dev-kitchen-sink",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "icon": "🧪",
       "description": "Developer reference — a tab that exercises every addon capability (state, sessions, tasks incl. review verbs, templates, schedules, storage, allowlisted HTTP, keychain secrets, the addon's own agent, UI calls), plus all four hooks, a Master tool, and a masterPromptAppend.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/dev-kitchen-sink.yaam.json"
