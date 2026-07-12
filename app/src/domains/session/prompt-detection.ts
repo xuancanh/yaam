@@ -44,6 +44,25 @@ export function detectPrompt(content: string[], alt: boolean): PromptDetection {
   return { busy, promptDetected, question }
 }
 
+// Volatile glyphs that change every frame without changing meaning: braille /
+// block spinners, progress-bar fills, and the like. Stripped before comparing
+// two settled screens so a redraw that only advances a spinner does not read as
+// new output (which would re-arm the settle loop and re-wake the watcher).
+// eslint-disable-next-line no-misleading-character-class
+const SPINNER_RE = /[⠀-⣿▀-▟◐◓◑◒◴◵◶◷⣾⣽⣻⢿⡿⣟⣯⣷]/g
+
+/**
+ * A stable identity for a settled terminal screen: drop decoration/noise lines,
+ * strip spinner glyphs, and collapse whitespace so cosmetic redraws compare
+ * equal. Used to tell "genuinely new output" from "same screen, redrawn". Pure.
+ */
+export function stableScreenKey(content: string[]): string {
+  return content
+    .map(l => l.replace(SPINNER_RE, '').replace(/\s+/g, ' ').trim())
+    .filter(l => l && !NOISE_LINE_RE.test(l))
+    .join('\n')
+}
+
 // Output that reads like something went wrong — used to flag a session card
 // deterministically when there is no LLM monitor to judge the outcome.
 const ERROR_LINE_RE = /\b(error|errno|failed|failure|fatal|panic|traceback|exception|unhandled|segmentation fault|core dumped|cannot |could ?n[o']t |command not found|not recognized|no such file|permission denied|access denied|connection refused|timed out|unable to)\b/i

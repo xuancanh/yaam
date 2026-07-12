@@ -10,6 +10,7 @@ import { callApiStream } from '../../llm/client'
 import type { ApiResponse, LlmConfig } from '../../llm/client'
 import { runWatcherTurn } from './watcher'
 import type { WatcherExec } from './watcher'
+import { enqueueWatcherNote } from './watcher-notes'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { sendLineToSession } from '../session/command'
 import { findTaskInState, updateLocatedTask } from './task-state'
@@ -85,7 +86,8 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
   }
   if (!findTaskInState(ctx.stateRef.current, taskId)) return
   if (ctx.busy.has(taskId)) {
-    ctx.queue.set(taskId, (ctx.queue.get(taskId) ?? []).concat([note]))
+    // collapse redundant progress notes; keep discrete events (see watcher-notes)
+    ctx.queue.set(taskId, enqueueWatcherNote(ctx.queue.get(taskId) ?? [], note))
     return
   }
   ctx.busy.add(taskId)

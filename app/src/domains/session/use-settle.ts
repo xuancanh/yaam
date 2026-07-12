@@ -14,8 +14,9 @@ import { dispatch } from '../../core/store'
 import { browserClock, type ClockPort, type Disposable, type StatePort } from '../../core/ports'
 import { activeGroupOf } from './layout-state'
 import {
-  detectPrompt, deterministicStatus, extractOptions, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
+  detectPrompt, deterministicStatus, extractOptions, stableScreenKey, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
 } from './prompt-detection'
+import { NOTE_PROGRESS } from '../board/watcher-notes'
 
 export interface SettleDeps {
   state: StatePort
@@ -60,6 +61,10 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   const armed = new Map<string, { snapshot: string; at: number; continuation?: boolean }>()
   const settle = new Map<string, { since: number; timer: Disposable }>()
   const lastFlagged = new Map<string, string>()
+  // normalized key of the last settled screen we handed the task watcher, so an
+  // unchanged screen (a redraw, or a second settle on the same final output)
+  // does not wake the watcher LLM again for nothing.
+  const lastReported = new Map<string, string>()
   let scan: Disposable | undefined
 
   // "responding" indicator: a session is streaming while raw output keeps
@@ -84,9 +89,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   const armResponseWatch = (id: string) => {
     const alt = isAltScreen(id)
     const agent = state.get().agents.find(a => a.id === id)
-    const snapshot = alt
-      ? readScreen(id).join('\n')
-      : (agent?.log ?? []).slice(-14).map(l => l.x).join('\n')
+    const snapshot = stableScreenKey(alt
+      ? readScreen(id)
+      : (agent?.log ?? []).slice(-14).map(l => l.x))
     armed.set(id, { snapshot, at: clock.now() })
     // ensure a settle check runs even if the session produces no output at all
     clock.setTimeout(() => bumpSettle(id), 4000)
@@ -149,9 +154,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     }
 
     if (arm) {
-      const joined = content.join('\n')
+      const key = stableScreenKey(content)
       const expired = clock.now() - arm.at > 15 * 60 * 1000
-      const unchanged = joined === arm.snapshot
+      const unchanged = key === arm.snapshot
       if ((busy || unchanged) && !expired) {
         settle.delete(id)
         const timer = clock.setTimeout(() => onSettle(id, since), 3500)
@@ -209,19 +214,25 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
         // which froze the card for sessions that work many steps on one prompt.
         const still = state.get().agents.find(a => a.id === id)
         if (still && (still.status === 'running' || still.status === 'needs')) {
-          armed.set(id, { snapshot: joined, at: clock.now(), continuation: true })
+          armed.set(id, { snapshot: key, at: clock.now(), continuation: true })
         }
       }
     }
 
     // Task watchers own progress independently of the global follow-mode
-    // monitor. Feed every stable output snapshot to the watcher, including
-    // routine progress that the session monitor deliberately does not report.
+    // monitor. Feed stable output snapshots to the watcher — but only when the
+    // settled screen actually changed since the last one we sent, so a redraw or
+    // a second settle on the same final screen doesn't wake the watcher LLM for
+    // nothing. Tagged [progress] so its note queue can collapse duplicates.
     const taskFor = taskForSession(id)
     if (taskFor) {
-      runWatcherRef.current(taskFor.task.id,
-        `The task's session "${agent.name}" produced stable output. ${alt ? 'Current screen' : 'New output'}:\n` +
-        `${content.slice(-14).join('\n')}\n\nTrack progress against the acceptance criteria, update the card note, and move the task only if the evidence supports it.`)
+      const reportKey = stableScreenKey(content)
+      if (reportKey && lastReported.get(id) !== reportKey) {
+        lastReported.set(id, reportKey)
+        runWatcherRef.current(taskFor.task.id,
+          `${NOTE_PROGRESS} The task's session "${agent.name}" produced stable output. ${alt ? 'Current screen' : 'New output'}:\n` +
+          `${content.slice(-14).join('\n')}\n\nTrack progress against the acceptance criteria, update the card note, and move the task only if the evidence supports it.`)
+      }
     }
   }
 
@@ -272,6 +283,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     settle.delete(id)
     armed.delete(id)
     lastFlagged.delete(id)
+    lastReported.delete(id)
     lastLive.delete(id)
     setResponding(id, false)
   }
@@ -319,7 +331,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     dispose() {
       scan?.dispose(); scan = undefined
       for (const { timer } of settle.values()) timer.dispose()
-      settle.clear(); armed.clear(); lastFlagged.clear(); streaming.clear(); lastLive.clear()
+      settle.clear(); armed.clear(); lastFlagged.clear(); lastReported.clear(); streaming.clear(); lastLive.clear()
     },
   }
 }

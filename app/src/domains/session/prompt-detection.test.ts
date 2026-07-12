@@ -1,5 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { detectPrompt, deterministicStatus, extractOptions } from './prompt-detection'
+import { detectPrompt, deterministicStatus, extractOptions, stableScreenKey } from './prompt-detection'
+
+describe('stableScreenKey', () => {
+  it('treats a redraw that only advances a spinner as the same screen', () => {
+    const a = stableScreenKey(['⠋ Building project', 'compiling module A'])
+    const b = stableScreenKey(['⠙ Building project', 'compiling module A'])
+    expect(a).toBe(b)
+  })
+
+  it('drops decoration/blank lines and collapses whitespace', () => {
+    expect(stableScreenKey(['────────', '  running   tests  ', '   '])).toBe('running tests')
+  })
+
+  it('changes when real content changes', () => {
+    expect(stableScreenKey(['tests: 1 passed'])).not.toBe(stableScreenKey(['tests: 2 passed']))
+  })
+})
 
 describe('detectPrompt', () => {
   it('flags a plain y/n prompt on the stream tail', () => {
