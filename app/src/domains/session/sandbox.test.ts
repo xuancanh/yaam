@@ -68,5 +68,14 @@ describe('sandboxRemoteWrap', () => {
     expect(() => sandboxRemoteWrap('x', 'relative', {})).toThrow(/absolute path/)
     expect(() => sandboxRemoteWrap('x', '/repo\n--bind / /', {})).toThrow(/control characters/)
     expect(() => sandboxRemoteWrap('x', '/repo', { extraPaths: Array.from({ length: 33 }, () => '/tmp') })).toThrow(/at most 32/)
+    expect(() => sandboxRemoteWrap('x', '/', {})).toThrow(/specific folder/)
+    expect(() => sandboxRemoteWrap('x', '~', {})).toThrow(/specific folder/)
+    expect(() => sandboxRemoteWrap('x', '/repo', { extraPaths: ['~'] })).toThrow(/specific folder/)
+  })
+
+  it('preflights remote writable paths before invoking bwrap', () => {
+    expect(wrap).toContain('[ -d "$p" ]')
+    expect(wrap).toContain('readlink -f -- "$p"')
+    expect(wrap).toContain('sandbox writable path is too broad')
   })
 })

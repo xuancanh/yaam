@@ -72,7 +72,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const sandboxCwd = tpl
     ? (tpl.cwd || templateMachine?.remoteDir || (!templateMachine ? s.settings.defaultCwd : '') || '')
     : (cwd || machine?.remoteDir || '')
-  const sandboxNeedsCwd = sandbox && !sandboxCwd.trim()
+  const sandboxNeedsCwd = sandbox && (!sandboxCwd.trim() || sandboxCwd.trim() === '~' || sandboxCwd.trim() === '/')
   const canLaunch = Boolean(tpl || effectiveCommand.trim()) && !machineIncomplete && !sandboxNeedsCwd
 
   // Dispatch a template run or a real PTY session.
@@ -225,7 +225,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
           )}
           {sandboxNeedsCwd && (
             <div role="alert" style={{ fontSize: 11, color: 'var(--amber)', marginTop: -5 }}>
-              Choose a working folder before launching a sandboxed session.
+              Choose a specific working folder (not home or /) before launching a sandboxed session.
             </div>
           )}
           {/* detached = durable lifecycle: a tmux session on a machine, a setsid

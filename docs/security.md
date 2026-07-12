@@ -229,7 +229,8 @@ nodes on macOS.
 The feature is **fail-closed**: if the wrapper can't be built (unsupported OS,
 missing `sandbox-exec`/`bwrap`, bad cwd) the launch or resume errors instead of
 running unprotected, and a remote host without bubblewrap aborts before the
-agent starts. Resume regenerates the wrapper from the persisted per-session
+agent starts. Home and filesystem-root write grants are rejected because they
+would make the sandbox badge misleading. Resume regenerates the wrapper from the persisted per-session
 config. Limits: plain terminal sessions can't be sandboxed (no command string
 to wrap); reads are not restricted; `sandbox-exec` is deprecated by Apple but
 ships with current macOS and is the same primitive Chrome/Bazel/Claude Code

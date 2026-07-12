@@ -92,8 +92,9 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
     // Create optimistic session state, spawn its PTY, and attach lifecycle tracking.
     const launchSession = (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean; detached?: boolean; machineId?: string; sandbox?: SandboxConfig }): string | null => {
       const machine = findMachine(stateRef.current.settings?.machines, opts?.machineId)
-      if (opts?.sandbox && !cwd.trim() && !machine?.remoteDir?.trim()) {
-        flash('Sandboxed sessions need a working folder')
+      const sandboxCwd = cwd.trim() || machine?.remoteDir?.trim() || ''
+      if (opts?.sandbox && (!sandboxCwd || sandboxCwd === '~' || sandboxCwd === '/')) {
+        flash('Sandboxed sessions need a specific working folder')
         return null
       }
       const plan = buildLaunch({ command, cwd, nameHint, typeId, workspaceId, opts }, stateRef.current.agentTypes, stateRef.current.activeWorkspace, machine)

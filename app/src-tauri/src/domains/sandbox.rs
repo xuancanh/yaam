@@ -57,6 +57,24 @@ fn canonical_dir(label: &str, path: &str) -> Result<PathBuf, String> {
     Ok(real)
 }
 
+fn reject_overbroad_explicit_root(label: &str, root: &Path) -> Result<(), String> {
+    if root.parent().is_none() {
+        return Err(format!(
+            "sandbox: {label} must not grant the filesystem root"
+        ));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if let Ok(home) = std::fs::canonicalize(home) {
+            if home == root || home.starts_with(root) {
+                return Err(format!(
+                    "sandbox: {label} must be inside the home directory, not the home directory or one of its parents"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn append_agent_state_roots(home: &Path, roots: &mut Vec<PathBuf>) -> Result<(), String> {
     for dir in HOME_WRITE_DIRS {
         let path = home.join(dir);
@@ -91,6 +109,7 @@ fn writable_roots(cwd: &str, extra_paths: &[String]) -> Result<Vec<String>, Stri
         ));
     }
     let cwd = canonical_dir("working directory", cwd)?;
+    reject_overbroad_explicit_root("working directory", &cwd)?;
 
     let mut roots: Vec<PathBuf> = vec![cwd, PathBuf::from("/tmp"), std::env::temp_dir()];
     if let Ok(home) = std::env::var("HOME") {
@@ -100,10 +119,9 @@ fn writable_roots(cwd: &str, extra_paths: &[String]) -> Result<Vec<String>, Stri
         if path.trim().is_empty() {
             continue;
         }
-        roots.push(canonical_dir(
-            &format!("extra writable path {}", index + 1),
-            path,
-        )?);
+        let root = canonical_dir(&format!("extra writable path {}", index + 1), path)?;
+        reject_overbroad_explicit_root(&format!("extra writable path {}", index + 1), &root)?;
+        roots.push(root);
     }
 
     let mut out: Vec<String> = Vec::new();
@@ -286,6 +304,19 @@ mod tests {
     /// A missing cwd fails closed instead of producing a wrapper.
     fn rejects_missing_cwd() {
         assert!(writable_roots("/yaam-definitely-does-not-exist", &[]).is_err());
+    }
+
+    #[test]
+    fn rejects_home_and_filesystem_wide_write_roots() {
+        assert!(writable_roots("~", &[])
+            .unwrap_err()
+            .contains("home directory"));
+        assert!(writable_roots("/", &[])
+            .unwrap_err()
+            .contains("filesystem root"));
+        assert!(writable_roots("/tmp", &["~".into()])
+            .unwrap_err()
+            .contains("home directory"));
     }
 
     #[test]

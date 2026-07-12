@@ -154,9 +154,18 @@ describe('sandboxed launches', () => {
     const c = ctx(port)
     const rt = createLaunchRuntime(c)
     expect(rt.launchSession('mycli run', '', 'Sbx', 'cli', undefined, { sandbox: {} })).toBeNull()
-    expect(c.flash).toHaveBeenCalledWith('Sandboxed sessions need a working folder')
+    expect(c.flash).toHaveBeenCalledWith('Sandboxed sessions need a specific working folder')
     expect(port.attachTerminal).not.toHaveBeenCalled()
     expect(useAppStore.getState().agents).toEqual([])
+  })
+
+  it('refuses home/root as ineffective sandbox working folders', () => {
+    const port = fakePort()
+    const c = ctx(port)
+    const rt = createLaunchRuntime(c)
+    expect(rt.launchSession('mycli run', '~', 'Sbx', 'cli', undefined, { sandbox: {} })).toBeNull()
+    expect(rt.launchSession('mycli run', '/', 'Sbx', 'cli', undefined, { sandbox: {} })).toBeNull()
+    expect(port.attachTerminal).not.toHaveBeenCalled()
   })
 
   it('uses a remote machine default as the sandbox working folder', () => {
