@@ -5,7 +5,7 @@ import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
 import { ChatPane } from '../chat/ChatPane'
-import { TaskReviewFooter } from '../board/WatcherChat'
+import { TaskReviewFooter, WatcherChat } from '../board/WatcherChat'
 import { Divider } from './Divider'
 import { FilesPane } from './FilesPane'
 import { GitPopup, GitWorkbench } from './GitPanel'
@@ -22,6 +22,9 @@ const gitOpenCache = new Map<string, boolean>()
 type PanelDock = 'left' | 'right' | 'bottom'
 const gitDockCache = new Map<string, PanelDock>()
 const filesDockCache = new Map<string, PanelDock>()
+// the task-watcher conversation, docked beside the session when it works a task
+const watcherOpenCache = new Map<string, boolean>()
+const watcherDockCache = new Map<string, PanelDock>()
 // drag-resizable split ratios: each dock area's share of the pane
 const splitCache = new Map<string, { left: number; right: number; bottom: number }>()
 
@@ -101,8 +104,13 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
   const [gitDock, setGitDock] = useState<PanelDock>(gitDockCache.get(agent.id) ?? 'right')
   const [filesDock, setFilesDock] = useState<PanelDock>(filesDockCache.get(agent.id) ?? 'right')
   const [gitPopup, setGitPopup] = useState(false)
+  // watcher conversation panel: dock defaults to the roomier bottom area (the
+  // chat reads better full-width than in a narrow side rail)
+  const [watcherOpen, setWatcherOpen] = useState(watcherOpenCache.get(agent.id) ?? false)
+  const [watcherDock, setWatcherDock] = useState<PanelDock>(watcherDockCache.get(agent.id) ?? 'bottom')
   const setDock = (d: PanelDock) => { gitDockCache.set(agent.id, d); setGitDock(d) }
   const setFDock = (d: PanelDock) => { filesDockCache.set(agent.id, d); setFilesDock(d) }
+  const setWDock = (d: PanelDock) => { watcherDockCache.set(agent.id, d); setWatcherDock(d) }
   // drag-resizable panel splits: each dock area's share of the pane
   const [split, setSplitState] = useState(() => splitCache.get(agent.id) ?? { left: 0.42, right: 0.45, bottom: 0.42 })
   const setSplit = (patch: Partial<{ left: number; right: number; bottom: number }>) =>
@@ -172,6 +180,16 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             onClick={e => { e.stopPropagation(); setGitOpen(v => { gitOpenCache.set(agent.id, !v); return !v }) }}
           >
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={15} stroke={1.7} />
+          </button>
+        )}
+        {task && (
+          <button
+            className="icon-btn"
+            title={watcherOpen ? 'Hide the watcher chat' : "Watcher — the task's monitor conversation: progress notes, questions, and your replies"}
+            style={{ width: 27, height: 27, borderRadius: 7, color: watcherOpen ? 'var(--accent)' : task.awaitingUser ? 'var(--amber)' : undefined }}
+            onClick={e => { e.stopPropagation(); setWatcherOpen(v => { watcherOpenCache.set(agent.id, !v); return !v }) }}
+          >
+            <Icon paths={['M4 5h16v10H9l-4 4z']} size={15} stroke={1.7} />
           </button>
         )}
         <div ref={settingsAnchor} style={{ position: 'relative' }}>
@@ -269,6 +287,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
       {(() => {
         const closeFiles = () => { filesOpenCache.set(agent.id, false); setFilesOpen(false) }
         const closeGit = () => { gitOpenCache.set(agent.id, false); setGitOpen(false) }
+        const closeWatcher = () => { watcherOpenCache.set(agent.id, false); setWatcherOpen(false) }
         const filesPanel = filesOpen && (
           <>
             <DockStrip label="FILES" dock={filesDock} onDock={setFDock} onClose={closeFiles} />
@@ -293,9 +312,16 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             />
           </>
         )
+        const watcherPanel = watcherOpen && task && (
+          <>
+            <DockStrip label="WATCHER" dock={watcherDock} onDock={setWDock} onClose={closeWatcher} />
+            <WatcherChat task={task} />
+          </>
+        )
         const sidePanels = (side: PanelDock) => [
           ...(filesPanel && filesDock === side ? [filesPanel] : []),
           ...(gitPanel && gitDock === side ? [gitPanel] : []),
+          ...(watcherPanel && watcherDock === side ? [watcherPanel] : []),
         ]
         const leftPanels = sidePanels('left')
         const rightPanels = sidePanels('right')
