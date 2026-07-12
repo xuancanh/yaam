@@ -66,7 +66,7 @@ const MAX_RESPONSE_TOTAL_BYTES: usize = 16 * 1024 * 1024;
 
 fn valid_command(cmd: &RemoteCommand) -> bool {
     const KINDS: &[&str] = &[
-        "master_send", "chat_send", "chat_new", "task_chat", "task_start",
+        "master_send", "chat_send", "chat_new", "chat_reply", "chat_rate", "task_chat", "task_start",
         "session_input", "session_key", "session_focus", "session_blur",
         "prompt_answer", "prompt_approve", "prompt_deny", "session_stop",
         "session_resume", "approve_master", "approve_chat", "workspace_switch", "rpc_fs_list",
@@ -624,6 +624,19 @@ mod tests {
         assert!(!check_device(&s, &q("base", "", "")), "url token alone is not enough");
         assert!(!check_device(&s, &q("base", "wrong", "")));
         assert!(!check_device(&s, &q("wrong", "devtok", "")), "device token alone is not enough");
+    }
+
+    #[test]
+    fn mobile_chat_reply_and_rating_commands_are_allowed() {
+        for kind in ["chat_reply", "chat_rate"] {
+            assert!(valid_command(&RemoteCommand {
+                kind: kind.into(),
+                id: "message-1".into(),
+                agent_id: "chat-1".into(),
+                text: "Yes".into(),
+                ok: true,
+            }));
+        }
     }
 
     #[test]
