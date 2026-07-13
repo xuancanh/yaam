@@ -88,3 +88,16 @@ export async function destroyThisWindow(): Promise<void> {
   const { getCurrentWindow } = await import('@tauri-apps/api/window')
   await getCurrentWindow().destroy().catch(() => {})
 }
+
+/** Zoom this webview like a browser's ⌘+/⌘− (WebKit setPageZoom / WebView2
+ *  ZoomFactor / WebKitGTK zoom-level). Unlike CSS `zoom` on the root, native
+ *  zoom recomputes viewport units, so the 100vh/100vw layout keeps fitting on
+ *  every engine — spec-compliant CSS `zoom` (Safari 18+, Chromium, WebKitGTK)
+ *  overflows it. Returns false in a plain browser so the caller can fall back
+ *  to CSS `zoom`. */
+export async function setWebviewZoom(factor: number): Promise<boolean> {
+  if (!isTauri) return false
+  const { getCurrentWebview } = await import('@tauri-apps/api/webview')
+  await getCurrentWebview().setZoom(factor).catch(() => {})
+  return true
+}

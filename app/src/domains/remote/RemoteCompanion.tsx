@@ -3,7 +3,14 @@
 // command queue, and surfaces pairing requests as explicit approval dialogs.
 // Every command is applied through the SAME conductor actions the desktop
 // buttons use, so a paired phone can never do anything the UI can't.
+//
+// MAIN WINDOW ONLY: the command queue is shared process-wide, so if a spun-out
+// workspace satellite also mounted this it would drain commands into its own
+// pinned state — a phone `workspace_switch` would land in the wrong window and
+// the main snapshot (the one the phone sees) would never change. Like every
+// other single-owner runtime, it belongs to the main window.
 import { useEffect, useRef } from 'react'
+import { isSatelliteWindow } from '../../core/window-role'
 import { dispatch, useAppStore } from '../../core/store'
 import { useActions, useConductorSelector } from '../../store'
 import {
@@ -107,7 +114,7 @@ async function answerRpc(kind: string, requestId: string, payload: string): Prom
 }
 
 export function RemoteCompanion() {
-  const enabled = useConductorSelector(s => s.settings.remoteEnabled === true)
+  const enabled = useConductorSelector(s => s.settings.remoteEnabled === true) && !isSatelliteWindow()
   const devices = useConductorSelector(s => s.settings.remoteDevices)
   /** user edited/regenerated the token in Settings → restart the server on it */
   const tokenKey = useConductorSelector(s => s.settings.remoteToken ?? '')

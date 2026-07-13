@@ -2,6 +2,8 @@
 // so index.css palettes and variables take effect. Pure DOM — no React.
 import type { AppearanceSettings } from '../core/types'
 import { applyTerminalTheme } from '../core/terminals'
+import { isTauri } from '../infrastructure/native/base'
+import { setWebviewZoom } from '../infrastructure/native/windows'
 
 export const FONT_STACKS = {
   sans: {
@@ -54,9 +56,20 @@ export function applyAppearance(a?: AppearanceSettings): void {
   applyTerminalTheme(theme) // xterm canvases can't read CSS variables
   root.setAttribute('data-density', cfg.density)
   const style = root.style as CSSStyleDeclaration & { zoom?: string }
-  // zoom scales the whole UI (fonts + spacing) — the pragmatic scale knob for
-  // an app styled with absolute px values; WebKit and Chromium both support it
-  style.zoom = cfg.uiScale === 100 ? '' : String(cfg.uiScale / 100)
+  // Scale the whole UI (fonts + spacing) — the pragmatic knob for an app styled
+  // in absolute px. Prefer the WebView's native zoom: CSS `zoom` on the root
+  // overflows our 100vh/100vw layout wherever the engine follows the *new*
+  // standardized `zoom` (Safari 18 / macOS Sequoia, Chromium, WebKitGTK), which
+  // resolves viewport units against the UNZOOMED viewport. Legacy WebKit (older
+  // macOS) special-cased root `zoom` as page-zoom, which is why it only looked
+  // right there. Native zoom reflows correctly on every engine/version; keep CSS
+  // `zoom` for the browser (dev/test) build where the native API is absent.
+  if (isTauri) {
+    style.zoom = ''
+    void setWebviewZoom(cfg.uiScale / 100)
+  } else {
+    style.zoom = cfg.uiScale === 100 ? '' : String(cfg.uiScale / 100)
+  }
   root.style.setProperty('--font-sans', FONT_STACKS.sans[cfg.uiFont] ?? FONT_STACKS.sans.plex)
   root.style.setProperty('--font-mono', FONT_STACKS.mono[cfg.monoFont] ?? FONT_STACKS.mono.jetbrains)
   root.style.setProperty('--table-font-size', `${cfg.tableFontSize}px`)
