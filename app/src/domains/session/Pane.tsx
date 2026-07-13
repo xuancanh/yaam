@@ -27,15 +27,19 @@ const watcherOpenCache = new Map<string, boolean>()
 const watcherDockCache = new Map<string, PanelDock>()
 // drag-resizable split ratios: each dock area's share of the pane
 const splitCache = new Map<string, { left: number; right: number; bottom: number }>()
+// "full tab" mode: the docked panels take the whole pane, terminal hidden
+const panelFullCache = new Map<string, boolean>()
 
 /** Slim docked-panel header: label + dock switches + host extras + close,
  *  shared by the Files and Changes panels so they behave identically. */
-function DockStrip({ label, dock, onDock, onPopup, onClose }: {
+function DockStrip({ label, dock, onDock, onPopup, onClose, full, onToggleFull }: {
   label: string
   dock: PanelDock
   onDock: (d: PanelDock) => void
   onPopup?: () => void
   onClose: () => void
+  full?: boolean
+  onToggleFull?: () => void
 }) {
   return (
     <div style={{ height: 28, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, padding: '0 8px', borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
@@ -65,6 +69,18 @@ function DockStrip({ label, dock, onDock, onPopup, onClose }: {
       >
         <Icon paths={['M4 5h16v14H4z', 'M4 13h16']} size={12} stroke={1.7} />
       </button>
+      {onToggleFull && (
+        <button
+          className="icon-btn"
+          title={full ? 'Restore the terminal' : 'Expand to the full tab (hide the terminal)'}
+          style={{ width: 22, height: 22, borderRadius: 6, color: full ? 'var(--accent)' : undefined }}
+          onClick={e => { e.stopPropagation(); onToggleFull() }}
+        >
+          {full
+            ? <Icon paths={['M9 4v5H4', 'M15 4v5h5', 'M9 20v-5H4', 'M15 20v-5h5']} size={12} stroke={1.7} />
+            : <Icon paths={['M4 9V4h5', 'M20 9V4h-5', 'M4 15v5h5', 'M20 15v5h-5']} size={12} stroke={1.7} />}
+        </button>
+      )}
       {onPopup && (
         <button
           className="icon-btn"
@@ -119,6 +135,10 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
       splitCache.set(agent.id, next)
       return next
     })
+  // "full tab": expand the docked panels over the whole pane, hiding the
+  // terminal (which stays alive — its xterm is registry-owned and re-attaches)
+  const [panelFull, setPanelFull] = useState(panelFullCache.get(agent.id) ?? false)
+  const toggleFull = () => setPanelFull(v => { panelFullCache.set(agent.id, !v); return !v })
   const [settingsOpen, setSettingsOpen] = useState(false)
   // open the settings menu upward when a bottom-row pane lacks room below, so it
   // never renders off the bottom edge of the window
@@ -290,13 +310,13 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         const closeWatcher = () => { watcherOpenCache.set(agent.id, false); setWatcherOpen(false) }
         const filesPanel = filesOpen && (
           <>
-            <DockStrip label="FILES" dock={filesDock} onDock={setFDock} onClose={closeFiles} />
+            <DockStrip label="FILES" dock={filesDock} onDock={setFDock} onClose={closeFiles} full={panelFull} onToggleFull={toggleFull} />
             <FilesPane agent={agent} />
           </>
         )
         const gitPanel = gitOpen && agent.cwd && (
           <>
-            <DockStrip label="CHANGES" dock={gitDock} onDock={setDock} onPopup={() => setGitPopup(true)} onClose={closeGit} />
+            <DockStrip label="CHANGES" dock={gitDock} onDock={setDock} onPopup={() => setGitPopup(true)} onClose={closeGit} full={panelFull} onToggleFull={toggleFull} />
             <GitWorkbench
               cwd={agent.cwd}
               worktree={agent.worktree}
@@ -314,7 +334,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         )
         const watcherPanel = watcherOpen && task && (
           <>
-            <DockStrip label="WATCHER" dock={watcherDock} onDock={setWDock} onClose={closeWatcher} />
+            <DockStrip label="WATCHER" dock={watcherDock} onDock={setWDock} onClose={closeWatcher} full={panelFull} onToggleFull={toggleFull} />
             <WatcherChat task={task} />
           </>
         )
@@ -326,10 +346,14 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         const leftPanels = sidePanels('left')
         const rightPanels = sidePanels('right')
         const bottomPanels = sidePanels('bottom')
-        // one dock area: panels stack (vertically beside, side-by-side below)
-        const dockArea = (panels: React.ReactNode[], dir: 'column' | 'row', size: number) => (
+        // full-tab mode only applies while a panel is actually open; otherwise
+        // there'd be nothing to show with the terminal hidden.
+        const full = panelFull && leftPanels.length + rightPanels.length + bottomPanels.length > 0
+        // one dock area: panels stack (vertically beside, side-by-side below).
+        // `size` undefined → grow to fill (full mode); otherwise a fixed share.
+        const dockArea = (panels: React.ReactNode[], dir: 'column' | 'row', size?: number) => (
           <div style={{
-            flexBasis: `${size * 100}%`, flexGrow: 0, flexShrink: 1,
+            ...(size === undefined ? { flex: 1 } : { flexBasis: `${size * 100}%`, flexGrow: 0, flexShrink: 1 }),
             minWidth: 0, minHeight: 0, display: 'flex', flexDirection: dir,
           }}>
             {panels.map((p, i) => (
@@ -342,29 +366,45 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             ))}
           </div>
         )
+        // in full mode the top row only exists if a left/right panel is docked
+        // there — a lone bottom panel then owns the whole pane.
+        const topRow = !full || leftPanels.length + rightPanels.length > 0
         return (
           <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
-              {leftPanels.length > 0 && <>
-                {dockArea(leftPanels, 'column', split.left)}
-                <Divider dir="col" onRatio={r => setSplit({ left: r })} />
-                <div style={{ width: 1, flexShrink: 0, background: 'var(--line)' }} />
-              </>}
-              <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                {agent.kind === 'chat'
-                  ? <ChatPane agent={agent} active={active} />
-                  : <TerminalPane agent={agent} active={active} />}
+            {topRow && (
+              <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
+                {leftPanels.length > 0 && <>
+                  {dockArea(leftPanels, 'column', full ? undefined : split.left)}
+                  {!full && <>
+                    <Divider dir="col" onRatio={r => setSplit({ left: r })} />
+                    <div style={{ width: 1, flexShrink: 0, background: 'var(--line)' }} />
+                  </>}
+                </>}
+                {!full && (
+                  <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                    {agent.kind === 'chat'
+                      ? <ChatPane agent={agent} active={active} />
+                      : <TerminalPane agent={agent} active={active} />}
+                  </div>
+                )}
+                {full && leftPanels.length > 0 && rightPanels.length > 0 &&
+                  <div style={{ width: 1, flexShrink: 0, background: 'var(--line)' }} />}
+                {rightPanels.length > 0 && <>
+                  {!full && <>
+                    <div style={{ width: 1, flexShrink: 0, background: 'var(--line)' }} />
+                    <Divider dir="col" onRatio={r => setSplit({ right: 1 - r })} />
+                  </>}
+                  {dockArea(rightPanels, 'column', full ? undefined : split.right)}
+                </>}
               </div>
-              {rightPanels.length > 0 && <>
-                <div style={{ width: 1, flexShrink: 0, background: 'var(--line)' }} />
-                <Divider dir="col" onRatio={r => setSplit({ right: 1 - r })} />
-                {dockArea(rightPanels, 'column', split.right)}
-              </>}
-            </div>
+            )}
             {bottomPanels.length > 0 && <>
-              <Divider dir="row" onRatio={r => setSplit({ bottom: 1 - r })} />
-              <div style={{ height: 1, flexShrink: 0, background: 'var(--line)' }} />
-              {dockArea(bottomPanels, 'row', split.bottom)}
+              {!full && <>
+                <Divider dir="row" onRatio={r => setSplit({ bottom: 1 - r })} />
+                <div style={{ height: 1, flexShrink: 0, background: 'var(--line)' }} />
+              </>}
+              {full && topRow && <div style={{ height: 1, flexShrink: 0, background: 'var(--line)' }} />}
+              {dockArea(bottomPanels, 'row', full ? undefined : split.bottom)}
             </>}
           </div>
         )
