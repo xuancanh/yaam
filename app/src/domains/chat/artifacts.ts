@@ -25,9 +25,16 @@ export function extractArtifact(text: string): ChatArtifact | null {
   return found
 }
 
-/** Wrap an artifact as a self-contained srcDoc under a no-network CSP. */
-export function artifactSrcDoc(a: ChatArtifact): string {
-  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:">`
+/** Wrap an artifact as a self-contained srcDoc. By default it runs under a
+ *  no-network CSP (inline scripts only) — the right stance for untrusted LLM
+ *  output. `trusted` drops the CSP entirely so the page renders exactly as a
+ *  browser would (external scripts, eval, network all work); the caller must
+ *  still keep the iframe on an opaque origin (sandbox="allow-scripts", no
+ *  allow-same-origin) so it can't reach back into the app. */
+export function artifactSrcDoc(a: ChatArtifact, opts?: { trusted?: boolean }): string {
+  const csp = opts?.trusted
+    ? ''
+    : `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:">`
   if (a.kind === 'svg') {
     return `<!doctype html><html><head>${csp}<style>html,body{margin:0;height:100%;display:grid;place-items:center;background:#fff}svg{max-width:100%;max-height:100%}</style></head><body>${a.source}</body></html>`
   }

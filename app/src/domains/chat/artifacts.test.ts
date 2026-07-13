@@ -47,6 +47,20 @@ describe('artifactSrcDoc', () => {
     expect(doc.match(/<html/gi)).toHaveLength(1)
   })
 
+  it('drops the CSP entirely for a trusted preview so scripts + network work', () => {
+    const doc = artifactSrcDoc({ kind: 'html', source: bigHtml }, { trusted: true })
+    expect(doc).not.toContain('Content-Security-Policy')
+    expect(doc).not.toContain("default-src 'none'")
+    expect(doc).toContain(bigHtml)
+  })
+
+  it('leaves a trusted full document essentially untouched (no CSP injected)', () => {
+    const full = `<html><head><title>t</title></head><body>${bigHtml}</body></html>`
+    const doc = artifactSrcDoc({ kind: 'html', source: full }, { trusted: true })
+    expect(doc).not.toContain('Content-Security-Policy')
+    expect(doc.match(/<html/gi)).toHaveLength(1)
+  })
+
   it('centers svg artifacts in a minimal shell', () => {
     const doc = artifactSrcDoc({ kind: 'svg', source: bigSvg })
     expect(doc).toContain(bigSvg)

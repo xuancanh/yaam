@@ -180,6 +180,12 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   const [sheetIx, setSheetIx] = useState(0)
   // html files render live in a sandboxed iframe; 'source' shows/edits markup
   const [htmlView, setHtmlView] = useState<'rendered' | 'source'>('rendered')
+  // opt-in: render the live page faithfully (external scripts, eval, network)
+  // instead of the locked-down no-network CSP. Still sandboxed to an opaque
+  // origin, so a trusted page still can't reach into the app.
+  const [htmlTrusted, setHtmlTrusted] = useState(false)
+  // bumped by the refresh button to remount the preview iframe (re-run scripts)
+  const [reloadKey, setReloadKey] = useState(0)
   const [editing, setEditing] = useState(false)
   const editingRef = useRef(false)
   editingRef.current = editing
@@ -270,6 +276,7 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
     setSheetIx(0)
     setMdView('rendered')
     setHtmlView('rendered')
+    setHtmlTrusted(false)
     setEditing(false)
     void load()
     if (kind === 'image' || kind === 'pdf') return
@@ -355,6 +362,30 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
           >
             <span className="mono" style={{ fontSize: 10, fontWeight: 700 }}>M↓</span>
           </button>
+        )}
+        {kind === 'html' && htmlView === 'rendered' && !editing && (
+          <>
+            <button
+              className="icon-btn"
+              title="Reload the preview (re-runs the page's scripts)"
+              onClick={() => { setReloadKey(k => k + 1); void load() }}
+              style={{ width: 26, height: 26, borderRadius: 6 }}
+            >
+              <Icon paths={['M20 11a8 8 0 10-.6 3', 'M20 4v5h-5']} size={14} stroke={1.7} />
+            </button>
+            <button
+              className="icon-btn"
+              title={htmlTrusted
+                ? 'Network + full JavaScript ENABLED — click to lock down (no network, inline scripts only)'
+                : 'Locked down (no network, inline scripts only) — click to allow network + full JavaScript'}
+              onClick={() => { setHtmlTrusted(v => !v); setReloadKey(k => k + 1) }}
+              style={{ width: 26, height: 26, borderRadius: 6, color: htmlTrusted ? 'var(--accent)' : undefined }}
+            >
+              <Icon paths={htmlTrusted
+                ? ['M12 2a10 10 0 100 20 10 10 0 000-20z', 'M2 12h20', 'M12 2a15 15 0 010 20', 'M12 2a15 15 0 000 20']
+                : ['M6 10V8a6 6 0 0111.6-2', 'M5 10h14v10H5z']} size={14} stroke={1.7} />
+            </button>
+          </>
         )}
         {kind === 'html' && !editing && (
           <button
@@ -446,9 +477,10 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
         )
       ) : kind === 'html' && htmlView === 'rendered' ? (
         content !== null ? (
-          // same trust model as chat artifacts: opaque origin, scripts allowed,
-          // no reach back into the app
-          <iframe title={name} sandbox="allow-scripts" srcDoc={artifactSrcDoc({ kind: 'html', source: content })} style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }} />
+          // opaque origin (no allow-same-origin) is the boundary — a page can
+          // never reach back into the app. `htmlTrusted` additionally drops the
+          // no-network CSP so external scripts + network work (opt-in per file).
+          <iframe key={`${reloadKey}-${htmlTrusted}`} title={name} sandbox="allow-scripts" srcDoc={artifactSrcDoc({ kind: 'html', source: content }, { trusted: htmlTrusted })} style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }} />
         ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
       ) : kind === 'image' ? (
         dataUrl ? (
