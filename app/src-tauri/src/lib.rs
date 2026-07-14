@@ -44,6 +44,13 @@ pub fn run() {
         .manage(McpManager::default())
         .manage(RemoteManager::default())
         .manage(WatchManager::default())
+        .manage(domains::preview::PreviewStore::default())
+        // serve rich HTML previews on their own origin so they escape the app's
+        // inherited CSP without weakening the privileged WebView (see preview.rs)
+        .register_uri_scheme_protocol(
+            domains::preview::PREVIEW_SCHEME,
+            domains::preview::preview_protocol,
+        )
         .invoke_handler(tauri::generate_handler![
             domains::session::spawn_session,
             domains::session::write_session,
@@ -87,6 +94,8 @@ pub fn run() {
             domains::mcp::mcp_stdio_notify,
             domains::mcp::mcp_stdio_stop,
             domains::icons::file_icon,
+            domains::preview::preview_stash,
+            domains::preview::preview_clear,
             domains::detach::detached_spawn,
             domains::detach::detached_list,
             domains::detach::detached_kill,

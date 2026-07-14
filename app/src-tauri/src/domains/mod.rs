@@ -6,6 +6,7 @@ pub mod git;
 pub mod mcp;
 pub mod detach;
 pub mod icons;
+pub mod preview;
 pub mod remote;
 pub mod sandbox;
 pub mod search;

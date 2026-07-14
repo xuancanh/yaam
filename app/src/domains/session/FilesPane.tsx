@@ -6,7 +6,7 @@
 // red = deletion).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { highlight, langForFile } from '../../core/highlight'
-import { isTauri, onFsChange, unwatchDir, watchDir } from '../../core/native'
+import { isTauri, onFsChange, previewClear, previewStash, unwatchDir, watchDir } from '../../core/native'
 import type { DirEntryInfo } from '../../core/native'
 import { sessionFs } from './remote-native'
 import type { SessionFs } from './remote-native'
@@ -186,6 +186,10 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   const [htmlTrusted, setHtmlTrusted] = useState(false)
   // bumped by the refresh button to remount the preview iframe (re-run scripts)
   const [reloadKey, setReloadKey] = useState(0)
+  // custom-scheme URL the HTML preview loads from (Tauri only, so the page gets
+  // its own policy container instead of inheriting the app CSP). null → not yet
+  // stashed, or a browser build that falls back to srcDoc.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const editingRef = useRef(false)
   editingRef.current = editing
@@ -284,6 +288,27 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
     const iv = window.setInterval(() => void load(), 4000)
     return () => window.clearInterval(iv)
   }, [load, kind])
+
+  // Stash the rendered HTML on the backend and load it through the custom
+  // scheme so it escapes the app's inherited CSP (Tauri only). Re-stashes when
+  // the file, the trust toggle, or the manual reload changes; the browser build
+  // keeps previewUrl null and falls back to srcDoc.
+  useEffect(() => {
+    if (!isTauri || kind !== 'html' || htmlView !== 'rendered' || editing || content === null) {
+      setPreviewUrl(null)
+      return
+    }
+    let alive = true
+    let stashedId: string | null = null
+    const doc = artifactSrcDoc({ kind: 'html', source: content }, { trusted: htmlTrusted })
+    void previewStash(doc).then(res => {
+      if (!res) return
+      if (!alive) { void previewClear(res.id); return }
+      stashedId = res.id
+      setPreviewUrl(res.url)
+    })
+    return () => { alive = false; if (stashedId) void previewClear(stashedId) }
+  }, [kind, htmlView, editing, content, htmlTrusted, reloadKey])
 
   const allLines = (content ?? '').split('\n')
   const truncated = allLines.length > MAX_LINES
@@ -477,10 +502,24 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
         )
       ) : kind === 'html' && htmlView === 'rendered' ? (
         content !== null ? (
-          // opaque origin (no allow-same-origin) is the boundary — a page can
-          // never reach back into the app. `htmlTrusted` additionally drops the
-          // no-network CSP so external scripts + network work (opt-in per file).
-          <iframe key={`${reloadKey}-${htmlTrusted}`} title={name} sandbox="allow-scripts" srcDoc={artifactSrcDoc({ kind: 'html', source: content }, { trusted: htmlTrusted })} style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }} />
+          // Isolation boundary: the preview loads from a distinct scheme origin
+          // (Tauri) or an opaque srcdoc origin (browser) and is sandboxed, so it
+          // can never reach into the app. `htmlTrusted` drops the no-network CSP
+          // (external scripts + network, opt-in per file) and, on its own scheme
+          // origin, grants same-origin so storage-using pages work.
+          isTauri ? (
+            previewUrl ? (
+              <iframe
+                key={previewUrl}
+                title={name}
+                sandbox={htmlTrusted ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals' : 'allow-scripts'}
+                src={previewUrl}
+                style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }}
+              />
+            ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
+          ) : (
+            <iframe key={`${reloadKey}-${htmlTrusted}`} title={name} sandbox="allow-scripts" srcDoc={artifactSrcDoc({ kind: 'html', source: content }, { trusted: htmlTrusted })} style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }} />
+          )
         ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
       ) : kind === 'image' ? (
         dataUrl ? (
