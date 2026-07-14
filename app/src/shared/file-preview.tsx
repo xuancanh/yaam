@@ -15,7 +15,7 @@ export function viewKind(name: string): 'image' | 'pdf' | 'office' | 'html' | 't
   const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
   if (IMG_MIME[ext]) return 'image'
   if (ext === 'pdf') return 'pdf'
-  if (ext === 'docx' || ext === 'xlsx' || ext === 'xls' || ext === 'ods' || ext === 'pptx') return 'office'
+  if (['docx', 'odt', 'xlsx', 'xls', 'ods', 'pptx', 'odp'].includes(ext)) return 'office'
   if (ext === 'html' || ext === 'htm') return 'html'
   return 'text'
 }

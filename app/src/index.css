@@ -194,6 +194,44 @@ input {
   color: var(--text);
 }
 
+/* Presentation slides (.pptx / .odp) rendered as cards in the file viewer */
+.slide-html {
+  width: 100%;
+  max-width: 900px;
+}
+.slide-html .slidecard {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  background: #fff;
+  color: #1c1f26;
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+  padding: 32px 40px;
+  font-family: var(--font-sans);
+}
+.slide-html .slidecard h2 {
+  margin: 0 0 16px;
+  font-size: 26px;
+  line-height: 1.25;
+}
+.slide-html .slidecard p {
+  margin: 0 0 10px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.slide-html .slidecard img {
+  max-width: 100%;
+  height: auto;
+  margin: 10px 0;
+  border-radius: 4px;
+}
+.slide-html .slidecard .slide-empty {
+  color: #8a8f98;
+  font-style: italic;
+}
+
 /* Dropdowns share inline field styles with text inputs, but WebKit's native
    menulist ignores padding/height — strip it so a select sizes exactly like
    the input next to it, and draw our own chevron. */

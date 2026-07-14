@@ -11,7 +11,7 @@ import type { DirEntryInfo } from '../../core/native'
 import { sessionFs } from './remote-native'
 import type { SessionFs } from './remote-native'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
-import { renderDocx, renderWorkbook } from '../../shared/office-render'
+import { renderDocx, renderOdp, renderOdt, renderPptx, renderWorkbook } from '../../shared/office-render'
 import type { OfficeRender } from '../../shared/office-render'
 import { IMG_MIME, viewKind } from '../../shared/file-preview'
 import { CodeEditor } from './lazy-editor'
@@ -225,6 +225,9 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
         const bytes = b64ToBytes(await fs.readFileB64(path))
         try {
           if (ext === 'docx') { setOffice(await renderDocx(bytes)); setErr(null); return }
+          if (ext === 'odt') { setOffice(await renderOdt(bytes)); setErr(null); return }
+          if (ext === 'pptx') { setOffice(await renderPptx(bytes)); setErr(null); return }
+          if (ext === 'odp') { setOffice(await renderOdp(bytes)); setErr(null); return }
           if (ext === 'xlsx' || ext === 'xls' || ext === 'ods') { setOffice(await renderWorkbook(bytes)); setErr(null); return }
         } catch { /* fall through to extracted text */ }
         setOffice(null)
@@ -473,6 +476,34 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
             })}
             style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }}
           />
+        ) : office.kind === 'slides' ? (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {(office.slides?.length ?? 0) > 1 && (
+              <div style={{ display: 'flex', gap: 2, padding: '6px 10px 0', flexShrink: 0, overflowX: 'auto' }}>
+                {office.slides!.map((sl, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSheetIx(i)}
+                    title={sl.title ?? `Slide ${i + 1}`}
+                    style={{
+                      border: '1px solid var(--line2)', borderRadius: 7, padding: '3px 10px', fontSize: 11, fontWeight: 600,
+                      cursor: 'pointer', whiteSpace: 'nowrap',
+                      background: sheetIx === i ? 'var(--panel2)' : 'transparent',
+                      color: sheetIx === i ? 'var(--accent)' : 'var(--mut)',
+                    }}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', justifyContent: 'center', padding: 16 }}>
+              <div
+                className="slide-html"
+                dangerouslySetInnerHTML={{ __html: office.slides?.[sheetIx]?.html ?? '<div>empty presentation</div>' }}
+              />
+            </div>
+          </div>
         ) : (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {(office.sheets?.length ?? 0) > 1 && (
