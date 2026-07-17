@@ -5,6 +5,7 @@
 // (Master can drive addons). A plain factory with a start/dispose lifecycle;
 // Plain factory (no React) — composed by createAppRuntime.
 import { dispatch } from '../../core/store'
+import { isUserWatching } from '../../core/focus-session'
 import { browserClock, type StatePort } from '../../core/ports'
 import * as native from '../../core/native'
 import { createMasterRuntime } from '../../domains/master/master-runtime'
@@ -72,6 +73,12 @@ export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, ses
   })
   const runMaster = master.run
   masterEventRef.current = (note, agentId) => {
+    // the user is watching this session's pane right now: Master still gets
+    // the update (context stays current) but is told not to narrate it —
+    // the user already sees the terminal first-hand
+    if (agentId && isUserWatching(agentId)) {
+      note = `[user-watching] ${note}`
+    }
     const s = stateRef.current
     const wid = widOf(s, agentId ?? null)
     if (wid === s.activeWorkspace) { void runMaster(note); return }

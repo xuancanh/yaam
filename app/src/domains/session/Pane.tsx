@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useActions, useConductorSelector } from '../../store'
 import { ACCENT } from '../../core/data'
 import { openTerminalSearch } from '../../core/terminals'
+import { clearFocusedSession, setFocusedSession } from '../../core/focus-session'
 import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
@@ -162,6 +163,13 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
       return !v
     })
   }
+  // register as the watched session while this pane is the focused one, so
+  // Master chat and notifications stay quiet about what the user already sees
+  useEffect(() => {
+    if (!active) return
+    setFocusedSession(agent.id)
+    return () => clearFocusedSession(agent.id)
+  }, [active, agent.id])
   // ctrl/cmd+clicking a file path in the terminal opens it in the Files panel
   useEffect(() => onEnsureFilesPanel(agent.id, () => {
     filesOpenCache.set(agent.id, true)

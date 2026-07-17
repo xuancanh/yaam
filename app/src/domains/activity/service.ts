@@ -6,6 +6,7 @@ import { useMemo } from 'react'
 import type { AppState, EventType, NotifKind } from '../../core/types'
 import { createStorePort, type StatePort } from '../../core/ports'
 import { osNotify } from '../../infrastructure/native/notify'
+import { isUserWatching } from '../../core/focus-session'
 import { mkId } from '../../shared/id'
 
 export interface ActivityService {
@@ -38,6 +39,9 @@ export function createActivityService(state: StatePort): ActivityService {
       })
     },
     notify: (kind, title, detail, agentId) => {
+      // the user is actively watching this session's pane — they see the
+      // prompt/result first-hand, so any notification would just be noise
+      if (agentId && isUserWatching(agentId)) return
       const item = { id: mkId('n'), kind, title, detail, time: stamp(), read: false, agentId }
       // escalations (and finished work) also reach the OS notification center
       // when the app isn't focused — approvals shouldn't require watching
