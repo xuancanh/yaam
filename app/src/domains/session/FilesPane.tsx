@@ -6,8 +6,8 @@
 // red = deletion).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { highlight, langForFile } from '../../core/highlight'
-import { isTauri, onFsChange, previewClear, previewStash, unwatchDir, watchDir } from '../../core/native'
-import type { DirEntryInfo } from '../../core/native'
+import { isTauri, onFsChange, openPath, previewClear, previewStash, unwatchDir, watchDir } from '../../core/native'
+import type { DirEntryInfo, OpenPathMode } from '../../core/native'
 import { sessionFs } from './remote-native'
 import type { SessionFs } from './remote-native'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
@@ -76,7 +76,7 @@ const OVERSCAN = 24
 // ---------------------------------------------------------------- tree
 
 /** Recursively render one directory level and lazily loaded descendants. */
-function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, onAttachFile, fs }: {
+function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, onAttachFile, onMenu, fs }: {
   dir: string
   depth: number
   expanded: Set<string>
@@ -86,6 +86,8 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
   git: GitInfo | null
   /** chat hosts: attach this file to the conversation (design's ＋ chip) */
   onAttachFile?: (path: string) => void
+  /** local sessions: right-click context menu (open in native app / Finder / VS Code) */
+  onMenu?: (ev: React.MouseEvent, path: string, isDir: boolean) => void
   /** local or remote (ssh) fs adapter for the owning session */
   fs: SessionFs
 }) {
@@ -116,6 +118,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
             <button
               className="palette-item"
               onClick={() => (e.isDir ? toggleDir(e.path) : openFile(e.path))}
+              onContextMenu={onMenu ? ev => onMenu(ev, e.path, e.isDir) : undefined}
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 6, border: 'none',
                 textAlign: 'left', padding: `3px 8px 3px ${8 + depth * 13}px`, borderRadius: 6,
@@ -147,7 +150,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
               )}
             </button>
             {e.isDir && isOpen && (
-              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} onAttachFile={onAttachFile} fs={fs} />
+              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} onAttachFile={onAttachFile} onMenu={onMenu} fs={fs} />
             )}
           </div>
         )
@@ -155,6 +158,48 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
       {entries.length === 0 && (
         <div style={{ padding: `3px 8px 3px ${20 + depth * 13}px`, fontSize: 11, color: 'var(--faint)' }}>empty</div>
       )}
+    </>
+  )
+}
+
+// ---------------------------------------------------------------- context menu
+
+interface TreeMenuState { x: number; y: number; path: string; isDir: boolean }
+
+/** Right-click menu for local tree rows: hand the path to the OS. */
+function TreeContextMenu({ menu, onClose }: { menu: TreeMenuState; onClose: () => void }) {
+  const items: { label: string; mode: OpenPathMode }[] = menu.isDir
+    ? [
+        { label: 'Open in Finder', mode: 'default' },
+        { label: 'Open in VS Code', mode: 'vscode' },
+      ]
+    : [
+        { label: 'Open in default app', mode: 'default' },
+        { label: 'Reveal in Finder', mode: 'reveal' },
+        { label: 'Open in VS Code', mode: 'vscode' },
+      ]
+  // keep the menu on-screen when the click lands near the bottom edge
+  const top = Math.min(menu.y, window.innerHeight - (items.length * 30 + 16))
+  const left = Math.min(menu.x, window.innerWidth - 190)
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 60 }} onClick={onClose} onContextMenu={ev => { ev.preventDefault(); onClose() }} />
+      <div style={{
+        position: 'fixed', top, left, zIndex: 61, minWidth: 172,
+        background: 'var(--panel)', border: '1px solid var(--line2)', borderRadius: 10,
+        padding: 4, boxShadow: '0 8px 28px rgba(0,0,0,.35)',
+      }}>
+        {items.map(it => (
+          <button
+            key={it.mode}
+            className="palette-item"
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: 'none', textAlign: 'left', padding: '6px 10px', borderRadius: 7, fontSize: 12, color: 'var(--text)' }}
+            onClick={() => { void openPath(menu.path, it.mode); onClose() }}
+          >
+            {it.label}
+          </button>
+        ))}
+      </div>
     </>
   )
 }
@@ -655,6 +700,15 @@ export function FilesPane({ agent }: { agent: Agent }) {
   // chat hosts: files can be attached to the conversation with one click —
   // the ChatPane below subscribes on the attach bus and chips the file
   const attachToChat = agent.kind === 'chat' ? (path: string) => { requestAttach(agent.id, path) } : undefined
+  // right-click → open natively; local sessions only (remote paths live on
+  // another host, and a browser build has no OS opener)
+  const [menu, setMenu] = useState<TreeMenuState | null>(null)
+  const onTreeMenu = isTauri && !agent.machine
+    ? (ev: React.MouseEvent, path: string, isDir: boolean) => {
+        ev.preventDefault()
+        setMenu({ x: ev.clientX, y: ev.clientY, path, isDir })
+      }
+    : undefined
 
   // persist UI state across remounts
   useEffect(() => {
@@ -747,10 +801,12 @@ export function FilesPane({ agent }: { agent: Agent }) {
             selected={file}
             git={git}
             onAttachFile={attachToChat}
+            onMenu={onTreeMenu}
             fs={fs}
           />
         </div>
       </div>
+      {menu && <TreeContextMenu menu={menu} onClose={() => setMenu(null)} />}
       <Divider dir="col" onRatio={r => { explorerSplitCache.set(agent.id, r); setTreeShare(r) }} />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>

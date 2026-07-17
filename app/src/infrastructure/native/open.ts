@@ -13,3 +13,13 @@ export async function openExternal(url: string): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('open_external', { url }).catch(() => {})
 }
+
+/** How the file explorer's context menu opens a local path. */
+export type OpenPathMode = 'default' | 'reveal' | 'vscode'
+
+/** Open a local file/folder in the default app, the file manager, or VS Code. */
+export async function openPath(path: string, mode: OpenPathMode): Promise<void> {
+  if (!isTauri) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('open_path', { path, mode }).catch(() => {})
+}

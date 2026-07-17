@@ -248,7 +248,7 @@ export function Workspace() {
         display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px',
       }}>
         <div style={{ display: 'flex', gap: 2, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2, flexShrink: 0, marginRight: 4 }}>
-          {([['tabs', 'Tabs'], ['runs', 'Runs']] as const).map(([id, label]) => (
+          {([['tabs', 'Tabs'], ['runs', 'Sidebar']] as const).map(([id, label]) => (
             <button
               key={id}
               title={id === 'tabs' ? 'Tab groups & split panes' : 'Every run in one triage list — tasks and sessions, urgent first (⌘1–9 jumps)'}
