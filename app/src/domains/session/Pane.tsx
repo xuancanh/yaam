@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useActions, useConductorSelector } from '../../store'
 import { ACCENT } from '../../core/data'
+import { openTerminalSearch } from '../../core/terminals'
 import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
@@ -9,6 +10,7 @@ import { TaskReviewFooter, WatcherChat } from '../board/WatcherChat'
 import { Divider } from './Divider'
 import { FilesPane } from './FilesPane'
 import { GitPopup, GitWorkbench } from './GitPanel'
+import { onEnsureFilesPanel } from './open-file-bus'
 import { sessionFs } from './remote-native'
 import { SuggestionChips } from './SuggestionChips'
 import { TerminalPane } from './TerminalPane'
@@ -160,6 +162,11 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
       return !v
     })
   }
+  // ctrl/cmd+clicking a file path in the terminal opens it in the Files panel
+  useEffect(() => onEnsureFilesPanel(agent.id, () => {
+    filesOpenCache.set(agent.id, true)
+    setFilesOpen(true)
+  }), [agent.id])
   return (
     <div
       onClick={() => { if (!standalone) setActivePane(index) }}
@@ -257,6 +264,16 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         {agent.kind === 'real' && agent.status === 'running' && (
           <button className="icon-btn" title="Stop session" style={{ width: 27, height: 27, borderRadius: 7, color: 'var(--red-soft)' }} onClick={e => { e.stopPropagation(); stopSession(agent.id) }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+          </button>
+        )}
+        {agent.kind !== 'chat' && (
+          <button
+            className="icon-btn"
+            title="Find in terminal (Cmd+F / Ctrl+Shift+F)"
+            style={{ width: 27, height: 27, borderRadius: 7 }}
+            onClick={e => { e.stopPropagation(); openTerminalSearch(agent.id) }}
+          >
+            <Icon paths={['M11 5a6 6 0 100 12 6 6 0 000-12z', 'M15.5 15.5L20 20']} size={14} stroke={1.7} />
           </button>
         )}
         {agent.kind !== 'chat' && (

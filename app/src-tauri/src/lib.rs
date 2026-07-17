@@ -94,6 +94,7 @@ pub fn run() {
             domains::mcp::mcp_stdio_notify,
             domains::mcp::mcp_stdio_stop,
             domains::icons::file_icon,
+            domains::open::open_external,
             domains::preview::preview_stash,
             domains::preview::preview_clear,
             domains::detach::detached_spawn,

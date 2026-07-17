@@ -3,16 +3,21 @@
 // session-data listener; keystrokes go straight back to the PTY.
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
-import { onSessionData, resizeSession, writeSession } from './native'
+import { onSessionData, openExternal, resizeSession, writeSession } from './native'
+import { filePathMatches } from './terminal-links'
 
-interface Entry {
+export interface Entry {
   term: Terminal
   fit: FitAddon
   /** lazily loaded — only when something (the mobile companion) serializes */
   serializer?: SerializeAddon
+  /** lazily loaded — only when the pane opens the find bar */
+  search?: SearchAddon
   /** GPU renderer, held only while the terminal's pane is mounted */
   gl?: WebglAddon
   onPlainLine: ((line: string) => void) | null
@@ -21,6 +26,12 @@ interface Entry {
   onUserSubmit: (() => void) | null
   /** called on every raw output chunk — TUI redraws often contain no newlines */
   onActivity: (() => void) | null
+  /** the mounted pane's find bar opener (Cmd/Ctrl+F inside the terminal) */
+  onSearchOpen: (() => void) | null
+  /** the mounted pane's file-link handler (ctrl/cmd+click on a path) */
+  onOpenFile: ((path: string) => void) | null
+  /** the find bar's live match counter (search decorations changed) */
+  onSearchResults: ((index: number, count: number) => void) | null
   pending: string
   /** per-session streaming decoder — partial UTF-8 must not mix across PTYs */
   decoder: TextDecoder
@@ -127,6 +138,38 @@ export function getTerminal(
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
+    // ctrl/cmd+click a URL → default browser. Plain clicks fall through to the
+    // terminal (TUIs get their mouse events; no accidental navigation).
+    term.loadAddon(new WebLinksAddon((ev, uri) => {
+      if (ev.ctrlKey || ev.metaKey) void openExternal(uri)
+    }))
+    // ctrl/cmd+click a file path → the session's Files viewer. The mounted
+    // pane owns resolution (cwd join) via its onOpenFile callback.
+    term.registerLinkProvider({
+      provideLinks(y, cb) {
+        const line = term.buffer.active.getLine(y - 1)
+        if (!line || line.isWrapped) return cb(undefined)
+        const text = line.translateToString(true)
+        cb(filePathMatches(text).map(match => ({
+          range: { start: { x: match.index + 1, y }, end: { x: match.index + match.length, y } },
+          text: text.slice(match.index, match.index + match.length),
+          decorations: { pointerCursor: true, underline: true },
+          activate(ev: MouseEvent) {
+            if (ev.ctrlKey || ev.metaKey) entries.get(id)?.onOpenFile?.(match.path)
+          },
+        })))
+      },
+    })
+    // Cmd+F (mac) / Ctrl+Shift+F opens the pane's find bar. Plain Ctrl+F must
+    // keep reaching the shell (readline forward-char).
+    term.attachCustomKeyEventHandler(ev => {
+      const findKey = ev.key.toLowerCase() === 'f' && (ev.metaKey || (ev.ctrlKey && ev.shiftKey))
+      if (ev.type === 'keydown' && findKey) {
+        entries.get(id)?.onSearchOpen?.()
+        return false
+      }
+      return true
+    })
     term.onData(data => {
       // scroll/mouse/arrow escape sequences are not the user answering a prompt
       if (!data.startsWith('\x1b[')) {
@@ -136,7 +179,7 @@ export function getTerminal(
       }
       writeSession(id, data).catch(() => {})
     })
-    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, onActivity: onActivity ?? null, onUserSubmit: onUserSubmit ?? null, pending: '', decoder: new TextDecoder() }
+    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, onActivity: onActivity ?? null, onUserSubmit: onUserSubmit ?? null, onSearchOpen: null, onOpenFile: null, onSearchResults: null, pending: '', decoder: new TextDecoder() }
     entries.set(id, entry)
   } else {
     if (onPlainLine) entry.onPlainLine = onPlainLine
@@ -222,6 +265,54 @@ export function serializeScreen(id: string, scrollback = 80): string {
   } catch {
     return ''
   }
+}
+
+// ── find bar plumbing ────────────────────────────────────────────────────────
+
+/** Lazily attach the search addon and forward its result counts. */
+function ensureSearch(entry: Entry): SearchAddon {
+  if (!entry.search) {
+    entry.search = new SearchAddon()
+    entry.term.loadAddon(entry.search)
+    entry.search.onDidChangeResults(e => entry.onSearchResults?.(e.resultIndex, e.resultCount))
+  }
+  return entry.search
+}
+
+/** Match highlight colors per app theme (decorations need literal #RRGGBB). */
+function searchDecorations(): { matchBackground: string; matchOverviewRuler: string; activeMatchBackground: string; activeMatchColorOverviewRuler: string } {
+  const dark = !['light', 'paper'].includes(currentAppTheme())
+  const match = dark ? '#5A4A18' : '#F0DFA8'
+  const active = '#F5C451'
+  return { matchBackground: match, matchOverviewRuler: match, activeMatchBackground: active, activeMatchColorOverviewRuler: active }
+}
+
+/** Find bar search: highlight all matches and move to the next/previous one.
+ *  `incremental` keeps the active match while the query is being typed. */
+export function findInTerminal(id: string, query: string, dir: 'next' | 'prev', incremental = false) {
+  const entry = entries.get(id)
+  if (!entry) return
+  const search = ensureSearch(entry)
+  if (!query) {
+    search.clearDecorations()
+    entry.onSearchResults?.(-1, 0)
+    return
+  }
+  const opts = { decorations: searchDecorations(), incremental: dir === 'next' && incremental }
+  if (dir === 'next') search.findNext(query, opts)
+  else search.findPrevious(query, opts)
+}
+
+/** Close the find bar: drop highlights and the selection it left behind. */
+export function clearTerminalSearch(id: string) {
+  const entry = entries.get(id)
+  entry?.search?.clearDecorations()
+  entry?.term.clearSelection()
+}
+
+/** Open the mounted pane's find bar (the pane header's search button). */
+export function openTerminalSearch(id: string) {
+  entries.get(id)?.onSearchOpen?.()
 }
 
 /** Current xterm dimensions, so a respawn can open its PTY at the pane's real

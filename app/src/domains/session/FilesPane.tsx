@@ -22,6 +22,7 @@ import { FileIcon } from '../../components/FileIcon'
 import { Markdown } from '../../components/Markdown'
 import { artifactSrcDoc } from '../chat/artifacts'
 import { requestAttach } from '../chat/attach-bus'
+import { onOpenFileRequest } from './open-file-bus'
 import { Divider } from './Divider'
 
 // UI state survives tab switches / pane moves (components remount freely)
@@ -659,6 +660,9 @@ export function FilesPane({ agent }: { agent: Agent }) {
   useEffect(() => {
     stateCache.set(agent.id, { file, gutter, expanded: [...expanded] })
   }, [agent.id, file, gutter, expanded])
+
+  // terminal ctrl/cmd+click on a path lands here (path already cwd-resolved)
+  useEffect(() => onOpenFileRequest(agent.id, path => setFile(path)), [agent.id])
 
   // Refresh repository status and rebuild the path-to-status lookup.
   const refreshGit = useCallback(() => {
