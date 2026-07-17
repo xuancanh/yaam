@@ -6,93 +6,120 @@ import { IC, Icon } from '../../components/ui'
 import { RunControl } from '../board/RunControl'
 import { NewSessionDialog } from './NewSessionDialog'
 import { Divider } from './Divider'
+import { groupRows, LAYOUT_VARIANTS } from './layout-state'
 import { Pane } from './Pane'
 
-type LayoutKey = '1' | '2col' | '2row' | '3' | '4'
-
-const LAYOUTS: { key: LayoutKey; n: number; stacked?: boolean; label: string; hint: string }[] = [
-  { key: '1', n: 1, label: 'Single', hint: '1 session' },
-  { key: '2col', n: 2, label: 'Split vertical', hint: 'side by side' },
-  { key: '2row', n: 2, stacked: true, label: 'Split horizontal', hint: 'top / bottom' },
-  { key: '3', n: 3, label: 'Three panes', hint: '2 top · 1 bottom' },
-  { key: '4', n: 4, label: 'Grid', hint: '2 × 2' },
-]
-
-/** Layout key describing a group's current pane arrangement. */
-function layoutKeyOf(g: TabGroup): LayoutKey {
-  return g.slots.length === 2 ? (g.stacked ? '2row' : '2col') : String(Math.max(1, Math.min(4, g.slots.length))) as LayoutKey
-}
-
-/** Draw a compact visual preview for one terminal-pane layout. */
-function LayoutGlyph({ k, color }: { k: LayoutKey; color: string }) {
-  const cells: [number, number, number, number][] =
-    k === '1' ? [[1, 1, 20, 14]]
-    : k === '2col' ? [[1, 1, 9, 14], [12, 1, 9, 14]]
-    : k === '2row' ? [[1, 1, 20, 6], [1, 9, 20, 6]]
-    : k === '3' ? [[1, 1, 9, 6.5], [12, 1, 9, 6.5], [1, 9.5, 20, 5.5]]
-    : [[1, 1, 9, 6.5], [12, 1, 9, 6.5], [1, 9.5, 9, 5.5], [12, 9.5, 9, 5.5]]
+/** Draw a compact visual preview of a row partition (panes per row). */
+function LayoutGlyph({ rows, color }: { rows: number[]; color: string }) {
+  const W = 22, H = 16, GAP = 1.6, PAD = 1
+  const rowH = (H - 2 * PAD - (rows.length - 1) * GAP) / rows.length
+  const cells: [number, number, number, number][] = []
+  rows.forEach((cols, ri) => {
+    const cw = (W - 2 * PAD - (cols - 1) * GAP) / cols
+    for (let ci = 0; ci < cols; ci++) {
+      cells.push([PAD + ci * (cw + GAP), PAD + ri * (rowH + GAP), cw, rowH])
+    }
+  })
   return (
     <svg width="22" height="16" viewBox="0 0 22 16" style={{ flexShrink: 0 }}>
       {cells.map((c, i) => (
         <rect key={i} x={c[0]} y={c[1]} width={c[2]} height={c[3]} rx="1.5"
-          fill="none" stroke={color} strokeWidth="1.4" />
+          fill="none" stroke={color} strokeWidth="1.3" />
       ))}
     </svg>
   )
 }
 
-/** Chrome-like split button: choose the ACTIVE group's pane layout (1–4 sessions). */
+const sameRows = (a: number[], b: number[]) => a.length === b.length && a.every((v, i) => v === b[i])
+
+/** Chrome-like split button: choose the ACTIVE group's pane layout. Two levels:
+ *  pick the pane count (1–6), then the arrangement variant for that count. */
 function LayoutMenu({ group }: { group: TabGroup | undefined }) {
   const { setPaneLayout } = useActions()
   const [open, setOpen] = useState(false)
-  const current: LayoutKey = group ? layoutKeyOf(group) : '1'
-  const split = (group?.slots.length ?? 1) > 1
+  const currentRows = group ? groupRows(group) : [1]
+  const currentCount = group?.slots.length ?? 1
+  // the count whose variants are on display; resyncs to the group on open
+  const [selCount, setSelCount] = useState(currentCount)
+  const split = currentCount > 1
+  const variants = LAYOUT_VARIANTS[selCount] ?? LAYOUT_VARIANTS[1]
 
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
       <button
         className="icon-btn"
         title="Pane layout (applies to the current tab group)"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => { setSelCount(currentCount); setOpen(o => !o) }}
         style={{
           width: 38, height: 30, gap: 3,
           background: split || open ? hexToRgba(ACCENT, 0.14) : 'transparent',
           color: split || open ? 'var(--accent)' : 'var(--mut2)',
         }}
       >
-        <LayoutGlyph k={current} color="currentColor" />
+        <LayoutGlyph rows={currentRows} color="currentColor" />
         <span style={{ fontSize: 8, transform: open ? 'rotate(180deg)' : 'none' }}>▼</span>
       </button>
       {open && (
         <>
           <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 44 }} />
           <div style={{
-            position: 'absolute', top: 34, right: 0, width: 210, background: 'var(--panel2)',
+            position: 'absolute', top: 34, right: 0, width: 232, background: 'var(--panel2)',
             border: '1px solid var(--line2)', borderRadius: 12, boxShadow: '0 18px 50px rgba(0,0,0,.55)',
-            zIndex: 45, overflow: 'hidden', padding: 6,
+            zIndex: 45, overflow: 'hidden', padding: 8,
           }}>
-            <div className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)', padding: '5px 10px 6px' }}>
-              PANE LAYOUT · THIS TAB
+            <div className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--dim)', padding: '3px 6px 6px' }}>
+              PANES · THIS TAB
             </div>
-            {LAYOUTS.map(l => {
-              const active = l.key === current
-              return (
-                <button
-                  key={l.key}
-                  className={active ? '' : 'palette-item'}
-                  onClick={() => { setPaneLayout(l.n, l.stacked); setOpen(false) }}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
-                    background: active ? 'rgba(245,196,81,.08)' : 'transparent', border: 'none', borderRadius: 8,
-                    color: active ? 'var(--accent)' : 'var(--text)', textAlign: 'left',
-                  }}
-                >
-                  <LayoutGlyph k={l.key} color={active ? 'var(--accent)' : 'var(--mut2)'} />
-                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600 }}>{l.label}</span>
-                  <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{l.hint}</span>
-                </button>
-              )
-            })}
+            <div style={{ display: 'flex', gap: 3, padding: '0 2px 8px' }}>
+              {[1, 2, 3, 4, 5, 6].map(n => {
+                const isCur = n === currentCount
+                const isSel = n === selCount
+                return (
+                  <button
+                    key={n}
+                    className={isSel ? '' : 'palette-item'}
+                    title={`${n} pane${n > 1 ? 's' : ''}`}
+                    // picking a count applies its default variant right away;
+                    // the variants below refine it
+                    onClick={() => {
+                      setSelCount(n)
+                      if (n !== currentCount) setPaneLayout(LAYOUT_VARIANTS[n][0].rows)
+                    }}
+                    style={{
+                      flex: 1, height: 26, border: '1px solid ' + (isSel ? 'var(--accent)' : 'var(--line2)'),
+                      borderRadius: 7, background: isSel ? 'rgba(245,196,81,.10)' : 'transparent',
+                      color: isCur ? 'var(--accent)' : isSel ? 'var(--text)' : 'var(--mut2)',
+                      fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
+                    }}
+                  >
+                    {n}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="mono" style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.4, color: 'var(--faint)', padding: '0 6px 5px' }}>
+              ARRANGEMENT
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3 }}>
+              {variants.map(v => {
+                const active = selCount === currentCount && sameRows(v.rows, currentRows)
+                return (
+                  <button
+                    key={v.rows.join('-')}
+                    className={active ? '' : 'palette-item'}
+                    onClick={() => { setPaneLayout(v.rows); setOpen(false) }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px',
+                      background: active ? 'rgba(245,196,81,.08)' : 'transparent', border: 'none', borderRadius: 8,
+                      color: active ? 'var(--accent)' : 'var(--text)', textAlign: 'left',
+                    }}
+                  >
+                    <LayoutGlyph rows={v.rows} color={active ? 'var(--accent)' : 'var(--mut2)'} />
+                    <span style={{ flex: 1, fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap' }}>{v.label}</span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </>
       )}
@@ -205,9 +232,16 @@ export function Workspace() {
     return { agent, i }
   })
   if (ag && ag.maximizedPane !== null && cells[ag.maximizedPane]?.agent) cells = [cells[ag.maximizedPane]]
-  const stacked2 = cells.length === 2 && (ag?.stacked ?? false)
-  const rows = stacked2 ? [[cells[0]], [cells[1]]]
-    : cells.length <= 2 ? [cells] : [cells.slice(0, 2), cells.slice(2)]
+  // partition the cells by the group's row layout (maximize collapses to one)
+  const partition = ag && cells.length === ag.slots.length ? groupRows(ag) : [cells.length || 1]
+  const rows: { agent: Agent | null; i: number }[][] = []
+  {
+    let at = 0
+    for (const n of partition) {
+      rows.push(cells.slice(at, at + n))
+      at += n
+    }
+  }
 
   const wsAgents = s.agents.filter(a => !a.archived && a.kind !== 'chat' && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
   const minimized = s.minimizedIds.map(id => byId.get(id)).filter((a): a is Agent => !!a)
@@ -285,7 +319,7 @@ export function Workspace() {
                     borderTop: `2px solid ${activeG ? (a?.color ?? 'var(--line2)') : 'transparent'}`,
                   }}
                 >
-                  {a ? tabDot(a) : <LayoutGlyph k={layoutKeyOf(g)} color="var(--dim)" />}
+                  {a ? tabDot(a) : <LayoutGlyph rows={groupRows(g)} color="var(--dim)" />}
                   <span style={{ fontSize: 12.5, fontWeight: 600, color: activeG ? 'var(--text)' : 'var(--mut2)', whiteSpace: 'nowrap' }}>
                     {a?.name ?? `empty · ${g.slots.length} pane${g.slots.length > 1 ? 's' : ''}`}
                   </span>
@@ -305,7 +339,7 @@ export function Workspace() {
                 }}
               >
                 <span title={`Split view · ${members.length} sessions`} style={{ color: activeG ? 'var(--accent)' : 'var(--dim)', display: 'flex', marginRight: 4 }}>
-                  <LayoutGlyph k={layoutKeyOf(g)} color="currentColor" />
+                  <LayoutGlyph rows={groupRows(g)} color="currentColor" />
                 </span>
                 {members.map(({ agent: a, slot }) => {
                   const active = activeG && slot === g.activePane
@@ -371,10 +405,15 @@ export function Workspace() {
         ) : (
           rows.map((row, ri) => (
             <div key={ri} style={{ display: 'contents' }}>
-              {ri > 0 && <Divider dir="row" onRatio={setRowSplit} />}
+              {/* the drag divider only exists for 2-row layouts (one ratio);
+                  3-row layouts get equal thirds with a static seam */}
+              {ri > 0 && rows.length === 2 && <Divider dir="row" onRatio={setRowSplit} />}
+              {ri > 0 && rows.length !== 2 && <div style={{ height: 1, flexShrink: 0 }} />}
               <div style={{
                 display: 'flex', minHeight: 0,
-                flexBasis: rows.length === 1 ? '100%' : `${(ri === 0 ? splits.row : 1 - splits.row) * 100}%`,
+                flexBasis: rows.length === 1 ? '100%'
+                  : rows.length === 2 ? `${(ri === 0 ? splits.row : 1 - splits.row) * 100}%`
+                  : `${100 / rows.length}%`,
                 flexGrow: 0, flexShrink: 1,
               }}>
                 {row.map(({ agent, i }, ci) => {

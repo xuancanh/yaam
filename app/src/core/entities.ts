@@ -982,10 +982,13 @@ export interface ArchivedWorkspace {
  *  Single-slot groups render as plain tabs; multi-slot groups as merged tabs. */
 export interface TabGroup {
   id: string
-  /** pane slots: length = chosen layout (1–4), null = empty slot awaiting assignment */
+  /** pane slots: length = chosen layout (1–6), null = empty slot awaiting assignment */
   slots: (string | null)[]
-  /** 2-pane orientation: true = stacked top/bottom instead of side by side */
+  /** legacy 2-pane orientation flag (pre-`rows`): stacked top/bottom */
   stacked: boolean
+  /** panes per visual row, top to bottom (e.g. [2,1] = 2 top + 1 bottom).
+   *  Must sum to slots.length; absent → derived from slots.length + stacked. */
+  rows?: number[]
   activePane: number
   /** index into slots of the pane currently maximized, or null */
   maximizedPane: number | null

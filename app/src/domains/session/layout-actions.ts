@@ -4,7 +4,7 @@
 // action surface.
 import { useMemo } from 'react'
 import { dispatch } from '../../core/store'
-import { activeGroupOf, focusSessionIn, mkGroup } from './layout-state'
+import { activeGroupOf, focusSessionIn, groupRows, mkGroup, MAX_PANES } from './layout-state'
 import { withActiveGroup } from '../../store/state-helpers'
 
 export interface SessionLayoutActions {
@@ -12,7 +12,8 @@ export interface SessionLayoutActions {
   focusTab: (id: string) => void
   activateGroup: (id: string) => void
   closeGroup: (id: string) => void
-  setPaneLayout: (n: number, stacked?: boolean) => void
+  /** rows = panes per visual row, top to bottom (e.g. [2,1]); pane count = sum */
+  setPaneLayout: (rows: number[]) => void
   assignPane: (i: number, id: string) => void
   closePane: (i: number) => void
   toggleMaximize: (i: number) => void
@@ -58,10 +59,22 @@ export function createSessionLayoutActions(): SessionLayoutActions {
 
     // layout changes apply to the ACTIVE group only — other tab groups keep
     // their own pane arrangement (each group remembers its layout, Chrome-style)
-    setPaneLayout: (n, stacked) => dispatch(s => {
-      const count = Math.max(1, Math.min(4, Math.round(n)))
+    setPaneLayout: rows => dispatch(s => {
+      // sanitize: whole rows only, and stop before exceeding the pane cap so
+      // the partition always sums exactly to the slot count
+      const clean: number[] = []
+      let count = 0
+      for (const r of rows) {
+        const v = Math.max(1, Math.round(r))
+        if (count + v > MAX_PANES) break
+        clean.push(v)
+        count += v
+      }
+      if (!clean.length) { clean.push(1); count = 1 }
+      // the legacy flag mirrors the 2-pane stacked case for pre-`rows` readers
+      const stacked = count === 2 && clean.length === 2
       if (!activeGroupOf(s)) {
-        const g = mkGroup(Array(count).fill(null), !!stacked)
+        const g = mkGroup(Array(count).fill(null), stacked, clean)
         return { ...s, groups: s.groups.concat([g]), activeGroup: g.id, view: 'workspace' }
       }
       return {
@@ -71,7 +84,8 @@ export function createSessionLayoutActions(): SessionLayoutActions {
           const slots: (string | null)[] = kept.concat(Array(count - kept.length).fill(null))
           return {
             ...g, slots,
-            stacked: !!stacked,
+            stacked,
+            rows: clean,
             activePane: Math.min(g.activePane, count - 1),
             maximizedPane: null,
           }
@@ -123,7 +137,19 @@ export function createSessionLayoutActions(): SessionLayoutActions {
       return withActiveGroup(s, g => {
         const slots = g.slots.slice()
         slots.splice(i, 1)
-        return { ...g, slots, activePane: Math.min(g.activePane, slots.length - 1), maximizedPane: null }
+        // shrink the row partition where the pane was removed (drop empty rows)
+        const rows = groupRows(g).slice()
+        let acc = 0
+        for (let r = 0; r < rows.length; r++) {
+          if (i < acc + rows[r]) { rows[r] -= 1; break }
+          acc += rows[r]
+        }
+        return {
+          ...g, slots,
+          rows: rows.filter(r => r > 0),
+          activePane: Math.min(g.activePane, slots.length - 1),
+          maximizedPane: null,
+        }
       })
     }),
 

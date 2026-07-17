@@ -3,12 +3,59 @@
 import type { AppState, TabGroup } from '../../core/types'
 import { mkId } from '../../shared/id'
 
+/** Hard cap on panes per tab group. */
+export const MAX_PANES = 6
+
+/** Arrangement variants offered per pane count: panes per visual row, top to
+ *  bottom. The first entry is each count's default. */
+export const LAYOUT_VARIANTS: Record<number, { rows: number[]; label: string }[]> = {
+  1: [{ rows: [1], label: 'Single' }],
+  2: [
+    { rows: [2], label: 'Side by side' },
+    { rows: [1, 1], label: 'Stacked' },
+  ],
+  3: [
+    { rows: [2, 1], label: 'Two + one' },
+    { rows: [1, 2], label: 'One + two' },
+    { rows: [3], label: 'Columns' },
+    { rows: [1, 1, 1], label: 'Rows' },
+  ],
+  4: [
+    { rows: [2, 2], label: 'Grid' },
+    { rows: [1, 3], label: 'One + three' },
+    { rows: [3, 1], label: 'Three + one' },
+    { rows: [4], label: 'Columns' },
+  ],
+  5: [
+    { rows: [2, 3], label: 'Two + three' },
+    { rows: [3, 2], label: 'Three + two' },
+    { rows: [1, 2, 2], label: 'One + grid' },
+  ],
+  6: [
+    { rows: [3, 3], label: '3 × 2' },
+    { rows: [2, 2, 2], label: '2 × 3' },
+  ],
+}
+
+/** A group's validated row partition; falls back to the pre-`rows` derivation
+ *  (2 panes honor `stacked`, 3 = two + one, 4 = grid) when absent/inconsistent. */
+export function groupRows(g: Pick<TabGroup, 'slots' | 'stacked' | 'rows'>): number[] {
+  const n = g.slots.length
+  if (g.rows?.length && g.rows.every(r => r >= 1) && g.rows.reduce((a, b) => a + b, 0) === n) {
+    return g.rows
+  }
+  if (n <= 1) return [1]
+  if (n === 2) return g.stacked ? [1, 1] : [2]
+  return LAYOUT_VARIANTS[Math.min(n, MAX_PANES)]?.[0]?.rows ?? [n]
+}
+
 /** Build a fresh tab group around the given slots. */
-export function mkGroup(slots: (string | null)[], stacked = false): TabGroup {
+export function mkGroup(slots: (string | null)[], stacked = false, rows?: number[]): TabGroup {
   return {
     id: mkId('g'),
-    slots: slots.length ? slots.slice(0, 4) : [null],
+    slots: slots.length ? slots.slice(0, MAX_PANES) : [null],
     stacked,
+    ...(rows ? { rows } : {}),
     activePane: 0,
     maximizedPane: null,
     splits: { row: 0.5, cols: [0.5, 0.5] },
