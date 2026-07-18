@@ -225,3 +225,63 @@ describe('createWorkspaceActions spin-out / restore', () => {
     expect(s.workspaceData['ws-b']).toBe(data)
   })
 })
+
+describe('createWorkspaceActions.moveSessionToWorkspace', () => {
+  const group = (id: string, slots: (string | null)[]) => ({
+    id, slots, stacked: false, activePane: 0, maximizedPane: null,
+    splits: { row: 0.5, cols: [0.5, 0.5] },
+  })
+
+  it('re-homes an active-workspace session, pulling it out of groups and the dock', () => {
+    const h = harness(baseState({
+      agents: [agent('a1', 'ws-a'), agent('a2', 'ws-a')],
+      groups: [group('g1', ['a1', 'a2'])],
+      activeGroup: 'g1',
+      minimizedIds: ['a1'],
+    }), fakePort())
+    h.actions.moveSessionToWorkspace('a1', 'ws-b')
+    const s = h.state()
+    expect(s.agents.find(a => a.id === 'a1')?.workspaceId).toBe('ws-b')
+    expect(s.agents.find(a => a.id === 'a2')?.workspaceId).toBe('ws-a')
+    expect(s.groups[0].slots).toEqual([null, 'a2'])
+    expect(s.minimizedIds).not.toContain('a1')
+    expect(h.ctx.flash).toHaveBeenCalledWith('Moved “a1” to B')
+  })
+
+  it('cleans the stashed slice when moving a session out of an inactive workspace', () => {
+    const h = harness(baseState({
+      agents: [agent('b1', 'ws-b')],
+      workspaceData: {
+        'ws-b': {
+          groups: [group('gb', ['b1'])], activeGroup: 'gb', minimizedIds: ['b1'],
+        } as unknown as AppState['workspaceData'][string],
+      },
+    }), fakePort())
+    h.actions.moveSessionToWorkspace('b1', 'ws-a')
+    const s = h.state()
+    expect(s.agents.find(a => a.id === 'b1')?.workspaceId).toBe('ws-a')
+    const slice = s.workspaceData['ws-b']
+    expect(slice.groups).toEqual([]) // fully-emptied group pruned
+    expect(slice.activeGroup).toBeNull()
+    expect(slice.minimizedIds).not.toContain('b1')
+  })
+
+  it('refuses moves to or from a workspace open in its own window', () => {
+    const h = harness(baseState({
+      agents: [agent('a1', 'ws-a')],
+      detachedWorkspaces: ['ws-b'],
+    }), fakePort())
+    h.actions.moveSessionToWorkspace('a1', 'ws-b')
+    expect(h.state().agents.find(a => a.id === 'a1')?.workspaceId).toBe('ws-a')
+    expect(h.ctx.flash).toHaveBeenCalledWith('Cannot move sessions to or from a workspace open in its own window')
+  })
+
+  it('no-ops when the target is the current workspace or unknown', () => {
+    const h = harness(baseState({ agents: [agent('a1', 'ws-a')] }), fakePort())
+    h.actions.moveSessionToWorkspace('a1', 'ws-a')
+    h.actions.moveSessionToWorkspace('a1', 'ws-nope')
+    h.actions.moveSessionToWorkspace('ghost', 'ws-b')
+    expect(h.state().agents.find(a => a.id === 'a1')?.workspaceId).toBe('ws-a')
+    expect(h.ctx.flash).not.toHaveBeenCalled()
+  })
+})

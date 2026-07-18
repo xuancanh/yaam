@@ -6,7 +6,7 @@ import type { MutableRefObject } from 'react'
 import type { AppState } from '../../core/types'
 import type { Agent, ArchivedWorkspace, WorkspaceData } from '../../core/entities'
 import { mkId } from '../../shared/id'
-import { scopedFromState, switchWorkspaceIn } from './state'
+import { moveSessionIn, scopedFromState, switchWorkspaceIn } from './state'
 import { MASTER_GREETING } from '../../core/data'
 import { realSessionProcessPort } from '../session/ports'
 import type { SessionProcessPort } from '../session/ports'
@@ -48,6 +48,8 @@ export interface WorkspaceActions {
   reattachWorkspace: (id: string, data?: WorkspaceData, agents?: Agent[]) => void
   /** satellite periodic sync — merge its slice into the background copy (stays detached) */
   mergeDetachedWorkspace: (id: string, data: WorkspaceData, agents: Agent[]) => void
+  /** re-home a session into another workspace (its process keeps running) */
+  moveSessionToWorkspace: (id: string, workspaceId: string) => void
 }
 
 export function useWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActions {
@@ -221,6 +223,24 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
         archivedWorkspaces: (s.archivedWorkspaces ?? []).filter(a => a.workspace.id !== id),
       }))
       flash(`Workspace “${entry.workspace.name.slice(0, 40)}” restored`)
+    },
+
+    moveSessionToWorkspace: (id, wsId) => {
+      const s0 = stateRef.current
+      const agent = s0.agents.find(a => a.id === id)
+      const target = s0.workspaces.find(w => w.id === wsId)
+      if (!agent || !target) return
+      const from = agent.workspaceId ?? s0.activeWorkspace
+      if (from === wsId) return
+      // a detached workspace lives in its own window whose satellite slice is
+      // authoritative — a move from here would be clobbered on the next merge
+      const detached = s0.detachedWorkspaces ?? []
+      if (detached.includes(wsId) || detached.includes(from)) {
+        flash('Cannot move sessions to or from a workspace open in its own window')
+        return
+      }
+      dispatch(s => moveSessionIn(s, id, wsId))
+      flash(`Moved “${agent.name}” to ${target.name}`)
     },
 
     deleteArchivedWorkspace: id => {

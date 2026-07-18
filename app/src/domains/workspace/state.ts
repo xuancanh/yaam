@@ -2,7 +2,7 @@
 // stored per-workspace slice. Pure state transitions.
 import type { AppState, WorkspaceData } from '../../core/types'
 import { mkId } from '../../shared/id'
-import { groupsFromLegacy } from '../session/layout-state'
+import { groupsFromLegacy, removeFromGroups } from '../session/layout-state'
 
 /** Create the isolated state slice for a new workspace. */
 export function emptyScoped(greeting: string): WorkspaceData {
@@ -33,6 +33,39 @@ export function applyScoped(s: AppState, d: WorkspaceData): AppState {
     messages: d.messages, crons: d.crons, tasks: d.tasks,
     events: d.events, notifications: d.notifications,
   }
+}
+
+/** Drop a session from a stashed workspace slice's layout containers. */
+function removeFromSlice(d: WorkspaceData, id: string): WorkspaceData {
+  const groups = (d.groups ?? [])
+    .map(g => (g.slots.includes(id)
+      ? { ...g, slots: g.slots.map(x => (x === id ? null : x)), maximizedPane: null }
+      : g))
+    .filter(g => g.slots.some(Boolean))
+  return {
+    ...d,
+    groups,
+    activeGroup: groups.some(g => g.id === d.activeGroup) ? d.activeGroup : groups[0]?.id ?? null,
+    minimizedIds: (d.minimizedIds ?? []).filter(x => x !== id),
+  }
+}
+
+/** Reassign a session to another workspace. Pulls it out of the source
+ *  workspace's layout containers (groups, dock); it arrives as a loose tab.
+ *  Pure state only — the terminal registry is keyed by session id, so the
+ *  running process and scrollback survive the move untouched. */
+export function moveSessionIn(s: AppState, id: string, wsId: string): AppState {
+  const agent = s.agents.find(a => a.id === id)
+  if (!agent || !s.workspaces.some(w => w.id === wsId)) return s
+  const from = agent.workspaceId ?? s.activeWorkspace
+  if (from === wsId) return s
+  let next = s
+  if (from === s.activeWorkspace) {
+    next = { ...s, ...removeFromGroups(s, id), minimizedIds: s.minimizedIds.filter(x => x !== id) }
+  } else if (s.workspaceData[from]) {
+    next = { ...s, workspaceData: { ...s.workspaceData, [from]: removeFromSlice(s.workspaceData[from], id) } }
+  }
+  return { ...next, agents: next.agents.map(a => (a.id === id ? { ...a, workspaceId: wsId } : a)) }
 }
 
 /** Stash the current workspace and hydrate the target workspace atomically. */

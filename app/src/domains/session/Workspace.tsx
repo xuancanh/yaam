@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { MouseEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR } from '../../core/data'
 import type { Agent, TabGroup } from '../../core/types'
@@ -31,6 +32,47 @@ function LayoutGlyph({ rows, color }: { rows: number[]; color: string }) {
 }
 
 const sameRows = (a: number[], b: number[]) => a.length === b.length && a.every((v, i) => v === b[i])
+
+interface TabMenuState { x: number; y: number; agent: Agent }
+
+/** Right-click menu for a session tab: re-home the session into another
+ *  workspace (its process keeps running; it arrives there as a loose tab). */
+function TabContextMenu({ menu, onClose }: { menu: TabMenuState; onClose: () => void }) {
+  const s = useConductorSelector(x => ({ workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, detachedWorkspaces: x.detachedWorkspaces }), shallowEqual)
+  const { moveSessionToWorkspace } = useActions()
+  // a detached workspace's window owns its state — not a valid move target here
+  const targets = s.workspaces.filter(w => w.id !== s.activeWorkspace && !(s.detachedWorkspaces ?? []).includes(w.id))
+  const top = Math.min(menu.y, window.innerHeight - ((Math.max(targets.length, 1) + 1) * 30 + 16))
+  const left = Math.min(menu.x, window.innerWidth - 220)
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 60 }} onClick={onClose} onContextMenu={e => { e.preventDefault(); onClose() }} />
+      <div style={{
+        position: 'fixed', top, left, zIndex: 61, minWidth: 200,
+        background: 'var(--panel)', border: '1px solid var(--line2)', borderRadius: 10,
+        padding: 4, boxShadow: '0 8px 28px rgba(0,0,0,.35)',
+      }}>
+        <div className="mono" style={{ fontSize: 9.5, letterSpacing: 0.8, color: 'var(--dim)', padding: '5px 10px 3px' }}>
+          MOVE TO WORKSPACE
+        </div>
+        {targets.length === 0 && (
+          <div style={{ fontSize: 12, color: 'var(--dim)', padding: '6px 10px' }}>No other workspaces</div>
+        )}
+        {targets.map(w => (
+          <button
+            key={w.id}
+            className="palette-item"
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: 'none', textAlign: 'left', padding: '6px 10px', borderRadius: 7, fontSize: 12, color: 'var(--text)' }}
+            onClick={() => { moveSessionToWorkspace(menu.agent.id, w.id); onClose() }}
+          >
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: w.color ?? 'var(--dim)', flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
 
 /** Chrome-like split button: choose the ACTIVE group's pane layout. Two levels:
  *  pick the pane count (1–6), then the arrangement variant for that count. */
@@ -217,6 +259,12 @@ export function Workspace() {
   const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen, workMode: x.settings.workMode ?? 'tabs' }), shallowEqual)
   const { focusTab, activateGroup, closeGroup, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit, updateSettings } = useActions()
   const runsMode = s.workMode === 'runs'
+  const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null)
+  const openTabMenu = (e: MouseEvent, a: Agent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setTabMenu({ x: e.clientX, y: e.clientY, agent: a })
+  }
   const byId = new Map(s.agents.map(a => [a.id, a]))
   const ag = s.groups.find(g => g.id === s.activeGroup)
   const slots: (string | null)[] = ag?.slots ?? [null]
@@ -314,6 +362,7 @@ export function Workspace() {
                   className="tab-btn"
                   title={a ? `${a.name} · ${a.repo}` : undefined}
                   onClick={() => (a ? focusTab(a.id) : activateGroup(g.id))}
+                  onContextMenu={a ? e => openTabMenu(e, a) : undefined}
                   style={{
                     background: activeG ? 'var(--panel2)' : 'transparent',
                     borderTop: `2px solid ${activeG ? (a?.color ?? 'var(--line2)') : 'transparent'}`,
@@ -347,6 +396,7 @@ export function Workspace() {
                     <button
                       key={a.id}
                       onClick={e => { e.stopPropagation(); focusTab(a.id) }}
+                      onContextMenu={e => openTabMenu(e, a)}
                       title={`${a.name} · ${a.repo}`}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 7,
@@ -375,6 +425,7 @@ export function Workspace() {
               className="tab-btn"
               title={`${a.name} · ${a.repo}`}
               onClick={() => focusTab(a.id)}
+              onContextMenu={e => openTabMenu(e, a)}
               style={{ background: 'transparent', borderTop: '2px solid transparent' }}
             >
               {tabDot(a)}
@@ -463,6 +514,7 @@ export function Workspace() {
                 className="dock-chip"
                 title="Restore from dock"
                 onClick={() => restoreSession(a.id)}
+                onContextMenu={e => openTabMenu(e, a)}
               >
                 <span style={{
                   width: 7, height: 7, borderRadius: '50%', background: indicatorColor(a), flexShrink: 0,
@@ -474,6 +526,7 @@ export function Workspace() {
           })}
         </div>
       )}
+      {tabMenu && <TabContextMenu menu={tabMenu} onClose={() => setTabMenu(null)} />}
       {s.newSessionOpen && <NewSessionDialog onClose={closeNewSession} />}
     </div>
   )
