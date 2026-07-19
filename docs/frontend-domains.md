@@ -646,6 +646,6 @@ debounce, close flush, and cleanup.
 
 Tests are colocated with domains. Pure functions use direct fixtures; effectful
 runtimes use fake `StatePort`, `ClockPort`, process ports, frames, and abort
-signals. The current suite includes 102 files and 622 test cases in this
+signals. The current suite includes 102 files and 623 test cases in this
 snapshot. UI behavior is covered selectively with jsdom and Testing Library;
 most coverage focuses on domain and runtime invariants.
