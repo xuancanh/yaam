@@ -10,6 +10,7 @@ import { ReviewPanel } from './ReviewPanel'
 import { GitWorkbench } from '../session/GitPanel'
 import { TaskReviewFooter, WatcherChat } from './WatcherChat'
 import { confirmAction } from '../../components/Confirm'
+import { HistoryList } from '../../components/HistoryList'
 
 const FIELD = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
@@ -87,7 +88,7 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
 function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | null; onClose: () => void }) {
   const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes, agents: x.agents }), shallowEqual)
   const { updateTask, focusTab, startTask, restartTask, archiveTask } = useActions()
-  const [view, setView] = useState<'chat' | 'review'>('chat')
+  const [view, setView] = useState<'chat' | 'review' | 'history'>('chat')
   // the task's worktree, if any of its sessions ran isolated
   const worktree = (task.agentIds ?? [])
     .map(aid => s.agents.find(a => a.id === aid)?.worktree)
@@ -154,6 +155,14 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
               )}
             </div>
           </div>
+          <button
+            className="icon-btn"
+            title={view === 'history' ? 'Back to the watcher chat' : 'History — your actions and decisions on this task'}
+            style={{ width: 26, height: 26, borderRadius: 7, color: view === 'history' ? 'var(--accent)' : undefined }}
+            onClick={() => setView(v => (v === 'history' ? 'chat' : 'history'))}
+          >
+            <Icon paths={['M12 7v5l3 2', 'M12 3a9 9 0 100 18 9 9 0 000-18z']} size={13} stroke={1.7} />
+          </button>
           <button
             className="icon-btn"
             title={view === 'chat' ? 'Review the task\'s changes (diff, stage, commit, approve)' : 'Back to the watcher chat'}
@@ -242,7 +251,13 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
           )}
         </div>
 
-        <WatcherChat task={task} />
+        {view === 'history' ? (
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            <HistoryList entries={task.history} emptyHint="No actions or decisions yet — they'll be logged here as you work this task." />
+          </div>
+        ) : (
+          <WatcherChat task={task} />
+        )}
         </>
         )}
       </div>

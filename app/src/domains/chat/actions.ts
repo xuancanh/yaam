@@ -12,6 +12,7 @@ import { defaultDetail, mkMemory, mkTools } from '../../core/data'
 import { buildContextSummary } from './turns'
 import { resolveDecision } from '../master/harness-stats'
 import { withMemoryAppend } from '../master/assistant-memory'
+import { recordHistory } from '../../core/history'
 import { LESSONS_FILE, appendBrainFile, commitBrain } from './durable-brain'
 import { execCommand, isTauri } from '../../core/native'
 import type { ThinkingEffort } from '../../llm/client'
@@ -247,14 +248,18 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
 
     sendChatMessage: (agentId, text, atts) => {
       const msg = text.trim()
-      if (msg || atts?.length) void ctx.runChatMessage(agentId, msg || '(see attachments)', atts)
+      if (msg || atts?.length) {
+        const label = msg.slice(0, 80) || '(see attachments)'
+        dispatch(s => ({ ...s, agents: s.agents.map(a => a.id === agentId ? { ...a, history: recordHistory(a.history, { category: 'action', kind: 'send', text: `Sent: ${label}` }) } : a) }))
+        void ctx.runChatMessage(agentId, msg || '(see attachments)', atts)
+      }
     },
 
     sendQuickReply: (agentId, msgId, reply) => {
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === agentId
-          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, suggestions: undefined } : m)) }
+          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, suggestions: undefined } : m)), history: recordHistory(a.history, { category: 'decision', kind: 'choose', text: `Quick reply · ${reply.trim().slice(0, 60)}` }) }
           : a),
         harnessLog: resolveDecision(s.harnessLog, { role: 'chat', kind: 'reply', agentId }, 'accepted', reply.slice(0, 60)),
       }))
@@ -350,7 +355,7 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === agentId
-          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, feedback: cleared ? undefined : rating } : m)) }
+          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, feedback: cleared ? undefined : rating } : m)), history: cleared ? a.history : recordHistory(a.history, { category: 'decision', kind: 'feedback', text: `Rated ${rating === 'up' ? '👍' : '👎'}${note?.trim() ? ' · with note' : ''}`, detail: note?.trim() || undefined }) }
           : a),
       }))
       if (cleared) return
@@ -399,13 +404,13 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
 
     archiveChat: agentId => dispatch(s => ({
       ...s,
-      agents: s.agents.map(a => a.id === agentId ? { ...a, archived: true, chatPinned: false } : a),
+      agents: s.agents.map(a => a.id === agentId ? { ...a, archived: true, chatPinned: false, history: recordHistory(a.history, { category: 'action', kind: 'archive', text: 'Archived chat' }) } : a),
       activeChatId: s.activeChatId === agentId ? null : s.activeChatId,
     })),
 
     restoreChat: agentId => dispatch(s => ({
       ...s,
-      agents: s.agents.map(a => a.id === agentId ? { ...a, archived: false } : a),
+      agents: s.agents.map(a => a.id === agentId ? { ...a, archived: false, history: recordHistory(a.history, { category: 'action', kind: 'restore', text: 'Restored chat' }) } : a),
     })),
 
     setChatTokenBudget: (agentId, tokens) => dispatch(s => ({

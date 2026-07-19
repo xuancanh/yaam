@@ -14,6 +14,7 @@ import type { TaskSpecDraft } from './watcher'
 import { sendLineToSession } from '../session/command'
 import { withMemoryAppend } from '../master/assistant-memory'
 import { resolveDecision } from '../master/harness-stats'
+import { recordHistory } from '../../core/history'
 import { updateLocatedTask } from './task-state'
 
 export interface BoardActionsCtx {
@@ -109,6 +110,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
           awaitingUser: false,
           chat: (t.chat ?? []).map(m => (m.id === msgId ? { ...m, suggestions: undefined } : m))
             .concat([{ id: mkId('tc'), role: 'user' as const, text: `▶ ${sug.label}`, at: Date.now() }]),
+          history: recordHistory(t.history, { category: 'decision', kind: 'choose', text: `Ran suggestion · ${sug.label}`, detail: sug.send }),
         })),
         // the click answers the ask — clear it from the worker card the
         // watcher mirrored it onto
@@ -124,6 +126,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
         ...updateLocatedTask(s, taskId, t => ({
           ...t,
           chat: (t.chat ?? []).map(m => (m.id === msgId ? { ...m, suggestions: undefined } : m)),
+          history: recordHistory(t.history, { category: 'decision', kind: 'dismiss', text: 'Dismissed suggestions' }),
         })),
         harnessLog: resolveDecision(s.harnessLog, { kind: 'suggestion', taskId }, 'dismissed'),
       }))
@@ -149,7 +152,10 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
       }
     },
 
-    startTask: taskId => ctx.startTaskViaWatcher(taskId),
+    startTask: taskId => {
+      dispatch(s => updateLocatedTask(s, taskId, t => ({ ...t, history: recordHistory(t.history, { category: 'action', kind: 'launch', text: 'Started task' }) })))
+      ctx.startTaskViaWatcher(taskId)
+    },
 
     restartTask: taskId => {
       const t = stateRef.current.tasks.find(x => x.id === taskId)
@@ -161,7 +167,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
       }
       dispatch(s => ({
         ...s,
-        tasks: s.tasks.map(x => (x.id === taskId ? { ...x, agentId: null } : x)),
+        tasks: s.tasks.map(x => (x.id === taskId ? { ...x, agentId: null, history: recordHistory(x.history, { category: 'action', kind: 'launch', text: 'Restarted task' }) } : x)),
       }))
       ctx.pushTaskChat(taskId, 'system', `Relaunching — previous session${prev ? ` “${prev.name}”` : ''} detached`)
       later(50, () => ctx.spawnSessionForTask(taskId))
@@ -212,7 +218,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
         const workerIds = new Set([...(task?.agentIds ?? []), ...(task?.agentId ? [task.agentId] : [])])
         return {
           ...s,
-          tasks: s.tasks.map(t => (t.id === taskId ? { ...t, awaitingUser: false } : t)),
+          tasks: s.tasks.map(t => (t.id === taskId ? { ...t, awaitingUser: false, history: recordHistory(t.history, { category: 'action', kind: 'send', text: `Sent: ${msg.slice(0, 80)}` }) } : t)),
           agents: task?.awaitingUser
             ? s.agents.map(a => (workerIds.has(a.id) && a.actionNeeded ? { ...a, actionNeeded: undefined } : a))
             : s.agents,
@@ -227,19 +233,19 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
     },
     renameTask: (id, title) => dispatch(s => ({
       ...s,
-      tasks: s.tasks.map(t => (t.id === id ? { ...t, title: title.trim() || t.title } : t)),
+      tasks: s.tasks.map(t => (t.id === id ? { ...t, title: title.trim() || t.title, history: recordHistory(t.history, { category: 'action', kind: 'edit', text: `Renamed · ${(title.trim() || t.title).slice(0, 60)}` }) } : t)),
     })),
     archiveTask: id => {
       ctx.disposeWatcher(id) // stop the watcher; the task itself stays recoverable
       for (const [sessionId, binding] of ctx.taskSessions.current) {
         if (binding.taskId === id) ctx.taskSessions.current.delete(sessionId)
       }
-      dispatch(s => ({ ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, archived: true, awaitingUser: false } : t)) }))
+      dispatch(s => ({ ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, archived: true, awaitingUser: false, history: recordHistory(t.history, { category: 'action', kind: 'archive', text: 'Archived task' }) } : t)) }))
       ctx.flash('Task archived — restore or delete it from Archived')
     },
 
     restoreTask: id => {
-      dispatch(s => ({ ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, archived: false } : t)) }))
+      dispatch(s => ({ ...s, tasks: s.tasks.map(t => (t.id === id ? { ...t, archived: false, history: recordHistory(t.history, { category: 'action', kind: 'restore', text: 'Restored task' }) } : t)) }))
       ctx.flash('Task restored')
     },
 
@@ -254,7 +260,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
     scheduleTask: (taskId, at, templateId) => dispatch(s => ({
       ...s,
       tasks: s.tasks.map(t => t.id === taskId
-        ? { ...t, scheduleAt: at ?? undefined, ...(templateId !== undefined ? { templateId: templateId ?? undefined } : {}) }
+        ? { ...t, scheduleAt: at ?? undefined, ...(templateId !== undefined ? { templateId: templateId ?? undefined } : {}), history: recordHistory(t.history, { category: 'action', kind: 'schedule', text: at ? 'Scheduled task' : 'Unscheduled task' }) }
         : t),
     })),
 
@@ -314,7 +320,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
       }
       dispatch(s => ({
         ...s,
-        tasks: s.tasks.map(t => (t.id === taskId ? { ...t, col: 'done' as const, awaitingUser: false } : t)),
+        tasks: s.tasks.map(t => (t.id === taskId ? { ...t, col: 'done' as const, awaitingUser: false, history: recordHistory(t.history, { category: 'decision', kind: 'approve', text: 'Approved review' }) } : t)),
       }))
       ctx.logEvent('done', task.agentId, `Approved review for “${task.title.slice(0, 48)}”`)
       ctx.flash('Approved & merged')
@@ -327,7 +333,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
       ctx.pushTaskChat(taskId, 'user', `Review — changes requested: ${note}`)
       dispatch(s => withMemoryAppend({
         ...s,
-        tasks: s.tasks.map(t => (t.id === taskId ? { ...t, col: 'progress' as const, awaitingUser: false } : t)),
+        tasks: s.tasks.map(t => (t.id === taskId ? { ...t, col: 'progress' as const, awaitingUser: false, history: recordHistory(t.history, { category: 'decision', kind: 'deny', text: 'Requested changes', detail: note }) } : t)),
       }, 'corrections', comment.trim() ? `review of "${title.slice(0, 60)}" rejected: ${note.slice(0, 140)}` : ''))
       void ctx.runWatcher(taskId,
         `[review] The user reviewed this task's changes and requested changes: ${note}. ` +

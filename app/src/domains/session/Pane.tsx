@@ -6,6 +6,7 @@ import { clearFocusedSession, setFocusedSession } from '../../core/focus-session
 import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
+import { HistoryList } from '../../components/HistoryList'
 import { ChatPane } from '../chat/ChatPane'
 import { TaskReviewFooter, WatcherChat } from '../board/WatcherChat'
 import { Divider } from './Divider'
@@ -28,6 +29,9 @@ const filesDockCache = new Map<string, PanelDock>()
 // the task-watcher conversation, docked beside the session when it works a task
 const watcherOpenCache = new Map<string, boolean>()
 const watcherDockCache = new Map<string, PanelDock>()
+// the session's user-action history (approvals, sends, launches, decisions)
+const historyOpenCache = new Map<string, boolean>()
+const historyDockCache = new Map<string, PanelDock>()
 // drag-resizable split ratios: each dock area's share of the pane
 const splitCache = new Map<string, { left: number; right: number; bottom: number }>()
 // "full tab" mode: the docked panels take the whole pane, terminal hidden
@@ -130,6 +134,11 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
   const setDock = (d: PanelDock) => { gitDockCache.set(agent.id, d); setGitDock(d) }
   const setFDock = (d: PanelDock) => { filesDockCache.set(agent.id, d); setFilesDock(d) }
   const setWDock = (d: PanelDock) => { watcherDockCache.set(agent.id, d); setWatcherDock(d) }
+  // session history: the user's actions + decisions in this session, newest first
+  const history = useConductorSelector(x => x.agents.find(a => a.id === agent.id)?.history)
+  const [historyOpen, setHistoryOpen] = useState(historyOpenCache.get(agent.id) ?? false)
+  const [historyDock, setHistoryDock] = useState<PanelDock>(historyDockCache.get(agent.id) ?? 'right')
+  const setHDock = (d: PanelDock) => { historyDockCache.set(agent.id, d); setHistoryDock(d) }
   // drag-resizable panel splits: each dock area's share of the pane
   const [split, setSplitState] = useState(() => splitCache.get(agent.id) ?? { left: 0.42, right: 0.45, bottom: 0.42 })
   const setSplit = (patch: Partial<{ left: number; right: number; bottom: number }>) =>
@@ -227,6 +236,14 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             <Icon paths={['M4 5h16v10H9l-4 4z']} size={15} stroke={1.7} />
           </button>
         )}
+        <button
+          className="icon-btn"
+          title={historyOpen ? 'Hide the history panel' : 'History — your actions and decisions in this session'}
+          style={{ width: 27, height: 27, borderRadius: 7, color: historyOpen ? 'var(--accent)' : undefined }}
+          onClick={e => { e.stopPropagation(); setHistoryOpen(v => { historyOpenCache.set(agent.id, !v); return !v }) }}
+        >
+          <Icon paths={['M12 7v5l3 2', 'M12 3a9 9 0 100 18 9 9 0 000-18z']} size={15} stroke={1.7} />
+        </button>
         <div ref={settingsAnchor} style={{ position: 'relative' }}>
           <button
             className="icon-btn"
@@ -333,6 +350,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         const closeFiles = () => { filesOpenCache.set(agent.id, false); setFilesOpen(false) }
         const closeGit = () => { gitOpenCache.set(agent.id, false); setGitOpen(false) }
         const closeWatcher = () => { watcherOpenCache.set(agent.id, false); setWatcherOpen(false) }
+        const closeHistory = () => { historyOpenCache.set(agent.id, false); setHistoryOpen(false) }
         const filesPanel = filesOpen && (
           <>
             <DockStrip label="FILES" dock={filesDock} onDock={setFDock} onClose={closeFiles} full={panelFull} onToggleFull={toggleFull} />
@@ -363,10 +381,19 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             <WatcherChat task={task} />
           </>
         )
+        const historyPanel = historyOpen && (
+          <>
+            <DockStrip label="HISTORY" dock={historyDock} onDock={setHDock} onClose={closeHistory} full={panelFull} onToggleFull={toggleFull} />
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              <HistoryList entries={history} emptyHint="No actions or decisions yet — they'll be logged here as you use the session." />
+            </div>
+          </>
+        )
         const sidePanels = (side: PanelDock) => [
           ...(filesPanel && filesDock === side ? [filesPanel] : []),
           ...(gitPanel && gitDock === side ? [gitPanel] : []),
           ...(watcherPanel && watcherDock === side ? [watcherPanel] : []),
+          ...(historyPanel && historyDock === side ? [historyPanel] : []),
         ]
         const leftPanels = sidePanels('left')
         const rightPanels = sidePanels('right')

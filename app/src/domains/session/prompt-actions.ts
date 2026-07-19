@@ -7,6 +7,7 @@ import type { AppState, EventType } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { withMemoryAppend } from '../master/assistant-memory'
 import { resolveDecision } from '../master/harness-stats'
+import { recordHistory } from '../../core/history'
 import { sendLineToSession } from './command'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
@@ -58,7 +59,7 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       dispatch(s => withMemoryAppend({
         ...s,
         agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'you' as const, x: `chose ${num}. ${target.label}` }]) }
+          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'you' as const, x: `chose ${num}. ${target.label}` }]), history: recordHistory(a.history, { category: 'decision', kind: 'choose', text: `Chose “${target.label}”`, detail: esc.reason || undefined }) }
           : a),
         messages: s.messages.map(m => m === msg && m.esc
           ? { ...m, esc: { ...m.esc, resolved: true, decision: 'approved' as const, choice: `${num}. ${target.label}` } }
@@ -78,7 +79,7 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       dispatch(s => withMemoryAppend({
         ...s,
         agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'approved by you' }]) }
+          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'approved by you' }]), history: recordHistory(a.history, { category: 'decision', kind: 'approve', text: 'Approved prompt', detail: reason || undefined }) }
           : a),
         messages: s.messages.map(m => (m.escFor === aid && m.esc ? { ...m, esc: { ...m.esc, resolved: true, decision: 'approved' as const } } : m)),
         harnessLog: resolveDecision(s.harnessLog, { kind: 'needs_input', agentId: aid }, 'accepted', 'approved'),
@@ -95,7 +96,7 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       dispatch(s => withMemoryAppend({
         ...s,
         agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'denied · prompt cancelled' }]) }
+          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'denied · prompt cancelled' }]), history: recordHistory(a.history, { category: 'decision', kind: 'deny', text: 'Denied prompt', detail: reason || undefined }) }
           : a),
         messages: s.messages.map(m => (m.escFor === aid && m.esc ? { ...m, esc: { ...m.esc, resolved: true, decision: 'denied' as const } } : m)),
         // the flag itself was right (the user engaged) — the answer was "no"
@@ -114,7 +115,7 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       dispatch(s => withMemoryAppend({
         ...s,
         agents: s.agents.map(a => a.id === aid
-          ? { ...a, suggestions: undefined, log: a.log.concat([{ t: 'you' as const, x: `ran suggestion · ${sug.label}` }]) }
+          ? { ...a, suggestions: undefined, log: a.log.concat([{ t: 'you' as const, x: `ran suggestion · ${sug.label}` }]), history: recordHistory(a.history, { category: 'decision', kind: 'choose', text: `Ran suggestion · ${sug.label}`, detail: sug.send }) }
           : a),
         harnessLog: resolveDecision(s.harnessLog, { kind: 'suggestion', agentId: aid }, 'accepted', sug.label),
       }, 'patterns', `when "${(agent.summary || agent.task || agent.name).slice(0, 90)}" → user ran "${sug.label}" (${sug.send.slice(0, 80)})`))
@@ -125,7 +126,7 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
     dismissSuggestions: aid => {
       dispatch(s => ({
         ...s,
-        agents: s.agents.map(a => (a.id === aid ? { ...a, suggestions: undefined } : a)),
+        agents: s.agents.map(a => (a.id === aid ? { ...a, suggestions: undefined, history: recordHistory(a.history, { category: 'decision', kind: 'dismiss', text: 'Dismissed suggestions' }) } : a)),
         harnessLog: resolveDecision(s.harnessLog, { kind: 'suggestion', agentId: aid }, 'dismissed'),
       }))
     },

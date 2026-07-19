@@ -5,6 +5,7 @@
 // that needs the id can supply + return it over the fire-and-forget seam.
 import type { BoardCol } from '../../core/types'
 import { mkId } from '../../shared/id'
+import { recordHistory } from '../../core/history'
 import type { StatePort } from '../../core/ports'
 import type { CommandRegistry } from './registry'
 
@@ -41,9 +42,14 @@ export function registerBoardCommands(
     name: 'add_task',
     capability: 'tasks',
     validate: i => { if (!i.title?.trim()) throw new Error('add_task: title is required') },
-    handler: i => {
+    handler: (i, ctx) => {
       const id = i.id ?? mkId('t')
       const col = i.col && (COLS as string[]).includes(i.col) ? (i.col as BoardCol) : 'backlog'
+      // a user-created task opens with a "created" history entry; tasks Master
+      // or an addon files don't (they aren't user actions on the board)
+      const history = ctx.actor.kind === 'user'
+        ? recordHistory(undefined, { category: 'action', kind: 'create', text: `Created task · ${i.title.trim().slice(0, 60)}` })
+        : undefined
       state.update(s => ({
         ...s,
         tasks: s.tasks.concat([{
@@ -61,6 +67,7 @@ export function registerBoardCommands(
           sessionMode: i.sessionMode === 'interactive' ? 'interactive' : undefined,
           scheduleAt: typeof i.scheduleAt === 'number' && i.scheduleAt > Date.now() ? i.scheduleAt : undefined,
           chat: [{ id: mkId('tc'), role: 'system', text: i.note || 'Task created', at: Date.now() }],
+          ...(history ? { history } : {}),
         }]),
       }))
       return id
@@ -78,12 +85,15 @@ export function registerBoardCommands(
     name: 'move_task',
     capability: 'tasks',
     validate: i => { if (!i.id) throw new Error('move_task: id is required') },
-    handler: i => {
+    handler: (i, ctx) => {
       // invalid column / missing task / same column are no-ops (as the callers were)
       if (!(COLS as string[]).includes(i.col)) return
       const prev = state.get().tasks.find(t => t.id === i.id)
       if (!prev || prev.col === i.col) return
-      state.update(s => ({ ...s, tasks: s.tasks.map(t => (t.id === i.id ? { ...t, col: i.col as BoardCol } : t)) }))
+      const user = ctx.actor.kind === 'user'
+      state.update(s => ({ ...s, tasks: s.tasks.map(t => (t.id === i.id
+        ? { ...t, col: i.col as BoardCol, ...(user ? { history: recordHistory(t.history, { category: 'action', kind: 'move', text: `Moved ${prev.col} → ${i.col}` }) } : {}) }
+        : t)) }))
       fireAddonHook('onTaskMoved', { taskId: i.id, title: prev.title, col: i.col, from: prev.col })
     },
   })

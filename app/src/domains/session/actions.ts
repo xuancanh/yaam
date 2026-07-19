@@ -16,6 +16,7 @@ import { execCommand, worktreeMerge, worktreeRemove } from '../../core/native'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
 import { inferLegacyTerminalShell } from '../../store/state-helpers'
+import { recordHistory } from '../../core/history'
 
 export interface SessionActionsCtx {
   stateRef: MutableRefObject<AppState>
@@ -123,7 +124,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       dispatch(s => ({
         ...s,
         ...removeFromGroups(s, id),
-        agents: s.agents.map(a => a.id === id ? { ...a, archived: true, status: 'idle' as const, escReason: undefined } : a),
+        agents: s.agents.map(a => a.id === id ? { ...a, archived: true, status: 'idle' as const, escReason: undefined, history: recordHistory(a.history, { category: 'action', kind: 'archive', text: 'Archived session' }) } : a),
         minimizedIds: s.minimizedIds.filter(x => x !== id),
         drawer: s.drawer?.agentId === id ? null : s.drawer,
       }))
@@ -141,7 +142,10 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         for (const l of agent.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
         term.writeln('\x1b[33m── unarchived · press ▶ to relaunch ──\x1b[0m')
       }
-      dispatch(s => focusSessionIn(s, id))
+      dispatch(s => focusSessionIn({
+        ...s,
+        agents: s.agents.map(a => a.id === id ? { ...a, history: recordHistory(a.history, { category: 'action', kind: 'restore', text: 'Restored session' }) } : a),
+      }, id))
     },
 
     deleteSession: id => {
@@ -294,7 +298,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       dispatch(s => focusSessionIn({
         ...s,
         agents: s.agents.map(a => a.id === id
-          ? { ...a, terminalShell, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]) }
+          ? { ...a, terminalShell, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]), history: recordHistory(a.history, { category: 'action', kind: 'launch', text: 'Resumed session', detail: resumeNote }) }
           : a),
       }, id))
     },
@@ -310,17 +314,20 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
     newRealSession: (command, cwd, terminalShell, isolate, detached, machineId, sandbox) => {
       const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell, isolate, detached, machineId, sandbox })
       if (id) {
-        logEvent('route', id, `Launched session · ${command.trim()}`)
+        const label = command.trim().slice(0, 80)
+        logEvent('route', id, `Launched session · ${label}`)
+        dispatch(s => ({ ...s, agents: s.agents.map(a => a.id === id ? { ...a, history: recordHistory(a.history, { category: 'action', kind: 'launch', text: `Launched · ${label || 'session'}` }) } : a) }))
         flash('Session launched')
       }
     },
 
     sendInput: (id, text) => {
       armResponseWatch(id)
+      const label = text.trim().slice(0, 80)
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
-          ? { ...a, log: a.log.concat([{ t: 'you', x: text }]) }
+          ? { ...a, log: a.log.concat([{ t: 'you', x: text }]), history: recordHistory(a.history, { category: 'action', kind: 'send', text: `Sent: ${label || '(empty)'}` }) }
           : a),
       }))
       // route the PTY write through the command registry (user actor) so every
@@ -356,7 +363,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       dispatch(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
-          ? { ...a, status: 'idle' as const, log: a.log.concat([{ t: 'sys', x: 'stopped by you' }]) }
+          ? { ...a, status: 'idle' as const, log: a.log.concat([{ t: 'sys', x: 'stopped by you' }]), history: recordHistory(a.history, { category: 'action', kind: 'stop', text: 'Stopped session' }) }
           : a),
       }))
       flash('Session stopped')

@@ -159,6 +159,9 @@ export interface SessionRecord {
   usageVersion?: 1
   snaps: Snapshot[]
   diff: DiffFile[]
+  /** newest-first log of the user's actions + decisions in this session
+   *  (approvals, choices, sends, launches, stops, …). See `recordHistory`. */
+  history?: HistoryEntry[]
   /** the CLI's own session/conversation id, captured after launch for resume */
   cliSessionId?: string
   launchedAt?: number
@@ -745,6 +748,9 @@ export interface BoardTask {
   criteria?: string[]
   /** chat with this task's watcher (mini master) */
   chat?: TaskChatMsg[]
+  /** newest-first log of the user's actions + decisions on this task
+   *  (starts, moves, archive, review approve/deny, suggestion picks, …). */
+  history?: HistoryEntry[]
   /** watcher's one-line status shown on the card */
   watcherNote?: string
   /** the watcher flagged a question and is waiting on the user */
@@ -888,6 +894,45 @@ export interface MemoryFile {
 }
 
 export type HarnessRole = 'monitor' | 'watcher' | 'master' | 'chat'
+
+/** One entry in a session's or task's history: a user action or decision.
+ *  Newest first (see `recordHistory`). Per-entity (`agent.history` /
+ *  `task.history`), distinct from the global `harnessLog` (which scores
+ *  assistant proposals) and the workspace activity feed (system events) — this
+ *  is the user's own trail on one entity. */
+export interface HistoryEntry {
+  id: string
+  at: number
+  /** action = something the user did; decision = a judgment call (approve/deny,
+   *  pick an option, give feedback) */
+  category: 'action' | 'decision'
+  /** stable slug identifying what happened */
+  kind: HistoryEventKind
+  /** one-line summary shown in the history list */
+  text: string
+  /** optional longer context (the prompt text, the chosen option, a comment) */
+  detail?: string
+}
+
+/** The kinds of user events a session/task history records. */
+export type HistoryEventKind =
+  // decisions — judgment calls between alternatives
+  | 'approve'   // approved a prompt / tool call / diff / review
+  | 'deny'      // denied / cancelled / requested changes
+  | 'choose'    // picked one of several options (escalation menu / suggestion)
+  | 'dismiss'   // dismissed / cleared suggestions
+  | 'feedback'  // rated a reply or left a review comment
+  // actions — things the user did
+  | 'send'      // typed/sent text (terminal, chat, or task chat)
+  | 'launch'    // started / restarted a session or task
+  | 'stop'      // stopped / interrupted
+  | 'create'    // created (a task)
+  | 'move'      // moved a task between columns
+  | 'archive'   // archived
+  | 'restore'   // restored
+  | 'delete'    // deleted
+  | 'edit'      // edited config / spec / name
+  | 'schedule'  // scheduled / unscheduled
 
 /** One recorded assistant decision + the user's implicit feedback — the online
  *  eval signal (acceptance/dismissal/override rates) behind the scorecard and
