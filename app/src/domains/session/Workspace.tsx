@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR } from '../../core/data'
 import type { Agent, TabGroup } from '../../core/types'
@@ -8,6 +9,7 @@ import { RunControl } from '../board/RunControl'
 import { NewSessionDialog } from './NewSessionDialog'
 import { Divider } from './Divider'
 import { groupRows, LAYOUT_VARIANTS } from './layout-state'
+import { MOVE_MENU_EDGE, MOVE_MENU_WIDTH, sessionMoveMenuPlacement } from './move-menu'
 import { Pane } from './Pane'
 
 /** Draw a compact visual preview of a row partition (panes per row). */
@@ -40,17 +42,43 @@ interface TabMenuState { x: number; y: number; agent: Agent }
 function TabContextMenu({ menu, onClose }: { menu: TabMenuState; onClose: () => void }) {
   const s = useConductorSelector(x => ({ workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, detachedWorkspaces: x.detachedWorkspaces }), shallowEqual)
   const { moveSessionToWorkspace } = useActions()
-  // a detached workspace's window owns its state — not a valid move target here
-  const targets = s.workspaces.filter(w => w.id !== s.activeWorkspace && !(s.detachedWorkspaces ?? []).includes(w.id))
-  const top = Math.min(menu.y, window.innerHeight - ((Math.max(targets.length, 1) + 1) * 30 + 16))
-  const left = Math.min(menu.x, window.innerWidth - 220)
-  return (
+  const firstTarget = useRef<HTMLButtonElement>(null)
+  const sourceWorkspace = menu.agent.workspaceId ?? s.activeWorkspace
+  const targets = s.workspaces.filter(w => w.id !== sourceWorkspace)
+  const detached = new Set(s.detachedWorkspaces ?? [])
+  const firstAvailable = targets.findIndex(w => !detached.has(w.id))
+  const placement = sessionMoveMenuPlacement(menu.x, menu.y, targets.length, window.innerWidth, window.innerHeight)
+
+  useEffect(() => {
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('resize', onClose)
+    firstTarget.current?.focus()
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('resize', onClose)
+    }
+  }, [onClose])
+
+  return createPortal((
     <>
-      <div style={{ position: 'fixed', inset: 0, zIndex: 60 }} onClick={onClose} onContextMenu={e => { e.preventDefault(); onClose() }} />
-      <div style={{
-        position: 'fixed', top, left, zIndex: 61, minWidth: 200,
+      <div
+        aria-hidden="true"
+        style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+        onPointerDown={onClose}
+        onContextMenu={e => { e.preventDefault(); onClose() }}
+      />
+      <div
+        role="menu"
+        aria-label={`Move ${menu.agent.name} to workspace`}
+        onContextMenu={e => e.preventDefault()}
+        style={{
+        position: 'fixed', top: placement.top, left: placement.left, zIndex: 61,
+        width: MOVE_MENU_WIDTH, maxWidth: `calc(100vw - ${MOVE_MENU_EDGE * 2}px)`, maxHeight: placement.maxHeight,
         background: 'var(--panel)', border: '1px solid var(--line2)', borderRadius: 10,
-        padding: 4, boxShadow: '0 8px 28px rgba(0,0,0,.35)',
+        padding: 4, boxShadow: '0 8px 28px rgba(0,0,0,.35)', overflow: 'hidden',
       }}>
         <div className="mono" style={{ fontSize: 9.5, letterSpacing: 0.8, color: 'var(--dim)', padding: '5px 10px 3px' }}>
           MOVE TO WORKSPACE
@@ -58,20 +86,41 @@ function TabContextMenu({ menu, onClose }: { menu: TabMenuState; onClose: () => 
         {targets.length === 0 && (
           <div style={{ fontSize: 12, color: 'var(--dim)', padding: '6px 10px' }}>No other workspaces</div>
         )}
-        {targets.map(w => (
-          <button
-            key={w.id}
-            className="palette-item"
-            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: 'none', textAlign: 'left', padding: '6px 10px', borderRadius: 7, fontSize: 12, color: 'var(--text)' }}
-            onClick={() => { moveSessionToWorkspace(menu.agent.id, w.id); onClose() }}
-          >
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: w.color ?? 'var(--dim)', flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
-          </button>
-        ))}
+        {targets.length > 0 && (
+          <div style={{ overflowY: 'auto', maxHeight: `calc(${placement.maxHeight}px - 38px)` }}>
+            {targets.map((w, index) => {
+              const unavailable = detached.has(w.id)
+              return (
+                <button
+                  key={w.id}
+                  ref={index === firstAvailable ? firstTarget : undefined}
+                  role="menuitem"
+                  disabled={unavailable}
+                  className="palette-item"
+                  title={unavailable ? 'Reattach this workspace window before moving a session into it' : `Move to ${w.name}`}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    background: 'transparent', border: 'none', textAlign: 'left', padding: '7px 10px',
+                    borderRadius: 7, fontSize: 12, color: unavailable ? 'var(--dim)' : 'var(--text)',
+                    cursor: unavailable ? 'not-allowed' : 'pointer', opacity: unavailable ? 0.65 : 1,
+                  }}
+                  onClick={() => {
+                    if (unavailable) return
+                    onClose()
+                    moveSessionToWorkspace(menu.agent.id, w.id)
+                  }}
+                >
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: w.color ?? 'var(--dim)', flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+                  {unavailable && <span className="mono" style={{ flexShrink: 0, fontSize: 9, color: 'var(--faint)' }}>SEPARATE WINDOW</span>}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
     </>
-  )
+  ), document.body)
 }
 
 /** Chrome-like split button: choose the ACTIVE group's pane layout. Two levels:
@@ -261,6 +310,7 @@ export function Workspace() {
   const { focusTab, activateGroup, closeGroup, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit, updateSettings } = useActions()
   const runsMode = s.workMode === 'runs'
   const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null)
+  const closeTabMenu = useCallback(() => setTabMenu(null), [])
   const openTabMenu = (e: MouseEvent, a: Agent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -527,7 +577,7 @@ export function Workspace() {
           })}
         </div>
       )}
-      {tabMenu && <TabContextMenu menu={tabMenu} onClose={() => setTabMenu(null)} />}
+      {tabMenu && <TabContextMenu menu={tabMenu} onClose={closeTabMenu} />}
       {s.newSessionOpen && <NewSessionDialog onClose={closeNewSession} />}
     </div>
   )
