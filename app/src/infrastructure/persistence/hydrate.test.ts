@@ -91,6 +91,17 @@ describe('buildHydration', () => {
     expect(next.groups[0].activePane).toBe(1) // clamped to slots.length - 1
   })
 
+  it('preserves persisted five- and six-pane layouts', () => {
+    const p = {
+      groups: [{ id: 'g1', slots: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'], activePane: 5, rows: [3, 3] }],
+      agents: Array.from({ length: 6 }, (_, i) => ({ id: `a${i + 1}`, kind: 'real', cmd: 'claude', log: [] })),
+    } as unknown as Partial<PersistedState>
+    const { next } = buildHydration(p, seed())
+    expect(next.groups[0].slots).toEqual(['a1', 'a2', 'a3', 'a4', 'a5', 'a6'])
+    expect(next.groups[0].rows).toEqual([3, 3])
+    expect(next.groups[0].activePane).toBe(5)
+  })
+
   it('does not auto-grant dangerous scopes to legacy addons', () => {
     const legacy = {
       id: 'addon', name: 'Legacy', enabled: true, source: 'file', createdAt: 'then',

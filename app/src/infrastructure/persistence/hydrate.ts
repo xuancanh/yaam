@@ -7,7 +7,7 @@ import { ALL_PERMISSIONS, DANGEROUS_PERMISSIONS } from '../../core/addons'
 import { mkMemory, mkTools } from '../../core/data'
 import { estimateLogUsage } from '../../core/usage'
 import { mkId } from '../../shared/id'
-import { groupsFromLegacy } from '../../domains/session/layout-state'
+import { groupsFromLegacy, MAX_PANES } from '../../domains/session/layout-state'
 import { builtinAssistant } from '../../domains/chat/slice'
 import { inferLegacyTerminalShell } from '../../store/state-helpers'
 
@@ -100,13 +100,13 @@ export function buildHydration(p: Partial<PersistedState>, seed: AppState): Hydr
   const ids = new Set(restoredAgents.filter(a => a.kind !== 'chat').map(a => a.id))
   // tab groups: invalid/duplicate/chat ids become empty slots (a session
   // may live in only one group; chats live in the Chat view), slots
-  // capped at 4, fully-empty groups dropped
+  // capped at MAX_PANES, fully-empty groups dropped
   const seenFocus = new Set<string>()
   const rawGroups = p.groups ?? groupsFromLegacy(p).groups
   const groups = rawGroups
     .map(g => ({
       ...g,
-      slots: g.slots.slice(0, 4).map(id => {
+      slots: g.slots.slice(0, MAX_PANES).map(id => {
         if (!id || !ids.has(id) || seenFocus.has(id)) return null
         seenFocus.add(id)
         return id
