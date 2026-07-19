@@ -49,7 +49,7 @@ expansion.
 | Session | `spawn_session`, `write_session`, `resize_session`, `kill_session`, `live_sessions`, `detect_cli_session` | `core/native.ts`, `SessionProcessPort` |
 | Git | `git_diff`, `git_status`, `git_file_diff`, `git_file_diff_side`, `git_stage`, `git_unstage`, `git_commit` | `core/native.ts`, FilesPane/Drawer/GitWorkbench |
 | Worktree | `worktree_create`, `worktree_diff`, `worktree_merge`, `worktree_remove` | `infrastructure/native/worktree.ts`, launch runtime + review surfaces |
-| Filesystem | `list_dir`, `read_text_file`, `read_file_b64`, `write_text_file`, `run_credential_command`, `exec_command` | `core/native.ts`, chat/files/settings |
+| Filesystem | `list_dir`, `read_text_file`, `read_text_range`, `read_file_b64`, `write_text_file`, `run_credential_command`, `exec_command` | `core/native.ts`, chat/files/settings |
 | State | `save_state`, `load_state`, `load_state_backup`, `save_partition`, `load_partition`, `save_session`, `remove_session`, `load_sessions` | persistence runtime/loaders |
 | MCP | `mcp_stdio_start`, `mcp_stdio_request`, `mcp_stdio_notify`, `mcp_stdio_stop` | `core/mcp.ts` through native adapters |
 | Search | `chat_search_reindex`, `chat_search` | chat search indexer/view |
@@ -57,6 +57,9 @@ expansion.
 | Secrets | `secret_set`, `secret_get`, `secret_delete` | persistence secret mirror |
 | Remote | `remote_start`, `remote_stop`, `remote_publish`, `remote_take_commands`, `remote_pending_pairs`, `remote_approve_pair`, `remote_deny_pair`, `remote_set_devices`, `remote_respond` | `infrastructure/native/remote.ts`, `RemoteCompanion` |
 | Detach | `detached_spawn`, `detached_list`, `detached_kill` | `infrastructure/native/detach.ts`, launch runtime + session actions |
+| Sandbox | `sandbox_wrapper` | session/template launch runtime |
+| Open/preview | `open_external`, `open_path`, `preview_stash`, `preview_clear` | FilesPane/TerminalPane rich preview and native-open actions |
+| Watch | `watch_dir`, `unwatch_dir` | FilesPane native recursive watcher |
 
 Tauri serializes command input/output with serde. `native.ts` performs any
 snake-case/camel-case conversion required by the frontend.
@@ -166,6 +169,26 @@ at 40,000 bytes, preserving the tail.
 Tests cover text round trips, directory ordering, credential output/error,
 merged execution output, timeout enforcement, relative and new scoped paths,
 traversal/absolute escape, symlinked file/directory escape, and missing roots.
+
+### Native watch, open, and preview adapters
+
+`domains/watch.rs` owns recursive native directory watchers. Each watched root
+has a bounded/coalescing event stream; the frontend receives `fs-change` and
+refreshes the affected explorer instead of polling. `unwatch_dir` tears down a
+root when the pane unmounts. Browser builds use the frontend polling fallback.
+
+`domains/open.rs` validates external `http(s)` URLs and local paths before
+delegating to the platform opener, including reveal-in-Finder/Explorer and
+open-in-Visual-Studio-Code modes. `domains/preview.rs` stores a bounded set of
+transient HTML payloads behind the `yaampreview` custom URI scheme. The separate
+origin lets rich office/HTML previews run their explicitly requested script or
+network mode without weakening the main webview CSP; `preview_clear` releases
+the payload when its viewer closes.
+
+`domains/sandbox.rs` builds the platform-specific Seatbelt/bubblewrap command
+prefix used by session launches. It validates writable roots and fails closed
+when a requested policy cannot be enforced; see [Security model](security.md)
+for the capability limits.
 
 ## Git domain (`domains/git.rs`)
 
@@ -351,6 +374,11 @@ device in Settings locks it out. The server executes nothing and holds no
 credentials; the frontend drains commands with `remote_take_commands` and
 applies them through normal conductor actions.
 
+Terminal bytes are exposed separately from the JSON snapshot: `/api/term` sends
+the bounded ring backlog followed by live PTY tap chunks. The frontend snapshot
+builder serializes only the phone-focused session's terminal buffer, keeping
+ordinary workspace updates small while preserving live terminal focus.
+
 Tests cover the token/device auth matrix, the pairing flow end-to-end,
 pending-list caps/dedup, interface classification, rpc result gating, and
 command serde.
@@ -394,14 +422,17 @@ Secrets are stored with the `keyring` crate under service
 - Delete treats a missing entry as success.
 
 The concrete store is macOS Keychain, Windows Credential Manager, or Linux
-Secret Service according to the platform feature.
+Secret Service according to the platform feature. Frontend account names cover
+Master and chat keys, GitHub tokens, remote URL/device tokens, MCP headers, and
+durable-agent brain profiles; the backend only sees opaque account names.
 
 ## Tauri capability configuration
 
 The main window receives core/window/dialog permissions and HTTP plugin access
-to HTTPS plus localhost/127.0.0.1 HTTP. The application-wide Tauri CSP is
-currently unset; addon frames inject their own restrictive CSP and opaque-origin
-sandbox independently.
+to HTTPS plus localhost/127.0.0.1 HTTP. The shipped application CSP restricts
+scripts to the app origin, permits IPC/HTTPS/local connections, and explicitly
+lists the `yaampreview`/localhost preview origins; addon frames inject their own
+more restrictive CSP and opaque-origin sandbox independently.
 
 Custom commands are registered only for the main window, but command-level Rust
 handlers generally trust the main frontend as the caller. Actor-level policy is
@@ -411,7 +442,7 @@ See [Security model](security.md) for implications.
 
 ## Backend test architecture
 
-There are 69 Rust unit tests in this snapshot. Tests are colocated inside each
+There are 110 Rust unit tests in this snapshot. Tests are colocated inside each
 domain module and call internal implementation functions directly, avoiding a
 running Tauri application where possible. Temporary filesystem fixtures use
 RAII cleanup. MCP uses a shell-based fake server; Bedrock tests focus on pure

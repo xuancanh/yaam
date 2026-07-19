@@ -327,14 +327,18 @@ default.
 
 ## Secret handling
 
-Credential-bearing fields include the Master API key, chat-agent keys, and MCP
-headers. The persistence runtime mirrors them to the OS keychain under service
+Credential-bearing fields include the Master API key, chat-agent keys, GitHub
+tokens, remote URL/device tokens, MCP headers, and durable-agent brain-profile
+keys. The persistence runtime mirrors them to the OS keychain under service
 `dev.yaam.conductor`.
 
 Only accounts confirmed written to the keychain are redacted from the main JSON
-file. If keychain storage fails, YAAM intentionally keeps the value in plaintext
-state to avoid silent credential loss and logs the failure. Browser preview has
-no keychain and stores state in localStorage.
+file. The mirror compares exact account/value pairs and skips unchanged writes;
+removed accounts are deleted. Satellite workspace windows hydrate without
+resolving keychain entries, leaving the main window as the sole keychain reader
+and writer. If keychain storage fails, YAAM intentionally keeps the value in
+plaintext state to avoid silent credential loss and logs the failure. Browser
+preview has no keychain and stores state in localStorage.
 
 Secrets exist in frontend memory while in use. Credential commands and AWS
 refresh commands are arbitrary user-configured shell commands. Bedrock signing
@@ -360,13 +364,25 @@ These controls protect against crashes and accidental corruption, not malicious
 local file modification. Persisted JSON is parsed and defensively hydrated but
 is not signed.
 
+### macOS release identity
+
+Local development and ad-hoc bundles use the configured ad-hoc signing identity
+(`signingIdentity: "-"`). macOS may therefore associate each rebuilt bundle
+with a different code identity, causing Keychain to ask for access again even
+when the account was previously allowed. Release distribution should use one
+stable Developer ID/application signing identity across updates; this is an
+operational signing requirement, not a keychain retry fix.
+
 ## Main webview and IPC boundary
 
-The Tauri application-level CSP is currently `null`. The shipped main webview is
-trusted and has access to registered commands and approved plugins. A script
-injection vulnerability in first-party UI code would therefore be high impact.
-Avoid unsafe HTML in the main origin and keep untrusted content in sandboxed
-frames or escaped React rendering.
+The shipped main webview uses an application CSP: scripts are limited to the app
+origin, connections are limited to Tauri IPC plus HTTPS and local development
+endpoints, and images/frames/objects explicitly allow only the app assets,
+`yaampreview`, and the documented local preview origins. Rich HTML previews use
+the separate `yaampreview` scheme so opting into preview JavaScript or network
+does not weaken the privileged main document. A script-injection vulnerability
+in first-party UI code would still be high impact; keep untrusted content in
+sandboxed frames or escaped React rendering.
 
 Rust commands do not receive the frontend actor identity and generally do not
 enforce Master/chat/addon policy. Those checks occur before IPC. Addon isolation

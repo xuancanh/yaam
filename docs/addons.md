@@ -171,6 +171,7 @@ For URL/registry distribution, pack a folder into a single file:
   "manifest": 2,
   "name": "my-addon",             // required; unique — installs replace by name
   "version": "1.0.0",             // bump on changes (Customize chat does this)
+  "minAppVersion": "0.6.1",        // optional dotted version floor
   "icon": "🧩",                   // 1-2 chars, shown in the icon rail
   "description": "what it does",  // shown in Settings and the tab header
   "author": "you",
@@ -185,6 +186,9 @@ Validation rules (`parseAddonPackage`):
 
 - `name` is required; a package must contain at least one of `html`, `tools`,
   `hooks`, `agent`.
+- `minAppVersion`, when present, is a dotted numeric version. YAAM rejects the
+  package before installation when the running app is older than that floor;
+  use it when an addon depends on a newer API surface.
 - `hosts` entries must look like hostnames (`api.x.com` or `*.x.com`);
   `secrets` names are `[A-Za-z0-9_]`; `agent.every` must be a 5-field cron.
 - Tool names are normalized to `[a-z0-9_]`; tools without a `handler` are
@@ -234,6 +238,12 @@ Grant lifecycle:
   Master to build it (still intersected with the declared scope list on edit).
 - **Legacy** (pre-permission packages): treated as requesting every scope, but
   the same fresh-install rule applies — dangerous scopes stay off until granted.
+
+Before committing a file, URL, folder, or registry install, the Addons view
+shows a permission preview with the package metadata, requested scopes, and the
+scopes that will remain withheld. The user can cancel that preview. Dev-folder
+installs keep the edit loop fast but still enforce `minAppVersion`; upgrades
+preserve the existing grants intersected with the new request set.
 
 `masterPromptAppend` only takes effect while the addon holds `master:prompt`;
 state snapshots are pushed to a view only while its addon holds `state:read`;

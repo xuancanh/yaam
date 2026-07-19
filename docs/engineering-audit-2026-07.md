@@ -75,6 +75,27 @@ defense-in-depth, or user-experience work.
 | Registry/addon packing | Folder and single-file formats are documented with a packing script. | Validate manifests/packages in CI, reject traversal/symlinks/oversized assets, sign or checksum registry artifacts, and add reproducibility tests. |
 | Documentation/release | Architecture docs are unusually detailed; release remains ad-hoc signed and unnotarized. | Keep this ledger current, document threat model/recovery paths, and add notarized signed release provenance when distribution warrants it. |
 
+## Subsequent shipped changes (2026-07-05 through 2026-07-18)
+
+The original audit is a point-in-time ledger. The following changes landed after
+its verification pass and are now part of the current implementation:
+
+- Keychain mirroring now covers remote URL/device tokens and all settings-owned
+  credential classes, compares exact account/value pairs, deletes removed
+  accounts, and skips keychain resolution in satellite windows.
+- Workspace windows now support explicit satellite reclaim/reattach, session
+  moves between workspaces, archive/restore, and six-pane layout variants.
+  Remote snapshots serialize only the phone-focused terminal; `/api/term`
+  remains the raw live-byte path.
+- Files refresh through native recursive watch events in Tauri, support native
+  open/reveal/VS Code actions, and render pptx/odp/odt through the bounded rich
+  preview path. Preview JavaScript/network access remains opt-in.
+- Master suppresses narration about a session while the user is actively
+  watching it, reducing duplicate or distracting interventions.
+
+These updates are documented in [the current implementation design chapter](design-runtime-2026-07.md)
+and the domain references linked from [the documentation index](README.md).
+
 ## Verification record
 
 Final verification completed:
