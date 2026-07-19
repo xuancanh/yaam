@@ -127,16 +127,41 @@ export interface FsChange {
   paths: string[]
 }
 
-/** Start (or replace) a recursive native watch on a workspace root. No-op in the
- *  browser build, where the file pane keeps its polling fallback instead. */
-export async function watchDir(root: string): Promise<void> {
-  if (!isTauri) return
-  await invoke('watch_dir', { root })
+// The backend keeps ONE watcher per canonical root, so two panes watching the
+// same folder share it — refcount here so the first unmount doesn't tear the
+// watch out from under the surviving pane. Counted by the raw root string
+// (panes on the same session share it verbatim).
+const watchRefs = new Map<string, number>()
+const watchKeys = new Map<string, Promise<string>>()
+
+/** Start (or join) a recursive native watch on a workspace root. Resolves to
+ *  the canonical root key stamped on every `fs-change` event for this root, so
+ *  the caller can filter the shared event stream. In the browser build (where
+ *  the file pane polls instead) it resolves to the input unchanged. */
+export async function watchDir(root: string): Promise<string> {
+  if (!isTauri) return root
+  watchRefs.set(root, (watchRefs.get(root) ?? 0) + 1)
+  let key = watchKeys.get(root)
+  if (!key) {
+    key = invoke<string>('watch_dir', { root }).catch(() => root)
+    watchKeys.set(root, key)
+  }
+  return key
 }
 
-/** Stop watching a workspace root. No-op outside Tauri. */
+/** Release one watch on a workspace root; the native watcher stops when the
+ *  last holder lets go. No-op outside Tauri. */
 export async function unwatchDir(root: string): Promise<void> {
   if (!isTauri) return
+  const n = (watchRefs.get(root) ?? 0) - 1
+  if (n > 0) {
+    watchRefs.set(root, n)
+    return
+  }
+  watchRefs.delete(root)
+  const pending = watchKeys.get(root)
+  watchKeys.delete(root)
+  if (pending) await pending.catch(() => {}) // never unwatch before the watch landed
   await invoke('unwatch_dir', { root })
 }
 

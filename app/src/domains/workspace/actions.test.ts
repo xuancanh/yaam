@@ -285,3 +285,12 @@ describe('createWorkspaceActions.moveSessionToWorkspace', () => {
     expect(h.ctx.flash).not.toHaveBeenCalled()
   })
 })
+
+describe('createWorkspaceActions.switchWorkspace', () => {
+  it('refuses to activate a workspace owned by a satellite window', () => {
+    const h = harness(baseState({ detachedWorkspaces: ['ws-b'] }), fakePort())
+    h.actions.switchWorkspace('ws-b')
+    expect(h.state().activeWorkspace).toBe('ws-a')
+    expect(h.ctx.flash).toHaveBeenCalledWith('That workspace is open in its own window')
+  })
+})

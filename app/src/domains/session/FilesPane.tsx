@@ -75,8 +75,12 @@ const OVERSCAN = 24
 
 // ---------------------------------------------------------------- tree
 
+/** A refresh request for mounted tree levels: bump `tick` to re-list in place;
+ *  `dirs` limits the re-list to those directories (null = every level). */
+interface TreeRefresh { tick: number; dirs: Set<string> | null }
+
 /** Recursively render one directory level and lazily loaded descendants. */
-function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, onAttachFile, onMenu, fs }: {
+function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, refresh, onAttachFile, onMenu, fs }: {
   dir: string
   depth: number
   expanded: Set<string>
@@ -84,6 +88,8 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
   openFile: (path: string) => void
   selected: string | null
   git: GitInfo | null
+  /** re-list signal — levels update in place (no remount, no placeholder flash) */
+  refresh: TreeRefresh
   /** chat hosts: attach this file to the conversation (design's ＋ chip) */
   onAttachFile?: (path: string) => void
   /** local sessions: right-click context menu (open in native app / Finder / VS Code) */
@@ -97,10 +103,23 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
   useEffect(() => {
     let live = true
     fs.listDir(dir)
-      .then(es => { if (live) setEntries(es.filter(e => e.name !== '.git')) })
+      .then(es => { if (live) { setEntries(es.filter(e => e.name !== '.git')); setErr(null) } })
       .catch(e => { if (live) setErr(e instanceof Error ? e.message : String(e)) })
     return () => { live = false }
   }, [dir, fs])
+
+  // targeted refresh: keep the current listing on screen while re-fetching, and
+  // skip entirely when the change batch didn't touch this directory
+  useEffect(() => {
+    if (refresh.tick === 0) return
+    if (refresh.dirs && !refresh.dirs.has(dir)) return
+    let live = true
+    fs.listDir(dir)
+      .then(es => { if (live) { setEntries(es.filter(e => e.name !== '.git')); setErr(null) } })
+      .catch(e => { if (live) setErr(e instanceof Error ? e.message : String(e)) })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refresh])
 
   if (err) return <div style={{ padding: `3px 8px 3px ${14 + depth * 13}px`, fontSize: 11, color: 'var(--red-soft)' }}>{err}</div>
   if (!entries) return <div style={{ padding: `3px 8px 3px ${14 + depth * 13}px`, fontSize: 11, color: 'var(--faint)' }}>…</div>
@@ -150,7 +169,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, o
               )}
             </button>
             {e.isDir && isOpen && (
-              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} onAttachFile={onAttachFile} onMenu={onMenu} fs={fs} />
+              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} refresh={refresh} onAttachFile={onAttachFile} onMenu={onMenu} fs={fs} />
             )}
           </div>
         )
@@ -690,7 +709,7 @@ export function FilesPane({ agent }: { agent: Agent }) {
   const [gutter, setGutter] = useState<'numbers' | 'git'>(init.gutter)
   const [expanded, setExpanded] = useState<Set<string>>(new Set(init.expanded))
   const [git, setGit] = useState<GitInfo | null>(null)
-  const [treeKey, setTreeKey] = useState(0)
+  const [refresh, setRefresh] = useState<TreeRefresh>({ tick: 0, dirs: null })
   // explorer/viewer split — fixed default width until first dragged
   const [treeShare, setTreeShare] = useState<number | null>(explorerSplitCache.get(agent.id) ?? null)
   const root = agent.cwd || '~'
@@ -746,11 +765,20 @@ export function FilesPane({ agent }: { agent: Agent }) {
     // native fs watch is local-only; a remote (ssh) session can't receive
     // change events, so it falls back to the periodic refresh below
     if (isTauri && !fs.remote) {
-      void watchDir(root)
-      const off = onFsChange(() => { setTreeKey(k => k + 1); refreshGit() })
+      // the fs-change stream is shared by every watched root — remember our
+      // canonical key so other sessions' churn doesn't refresh this pane
+      let key: string | null = null
+      void watchDir(root).then(k => { key = k })
+      const off = onFsChange(e => {
+        if (key !== null && e.root !== key) return
+        // re-list only the directories the batch actually touched
+        const dirs = new Set(e.paths.map(p => p.slice(0, p.lastIndexOf('/'))).filter(Boolean))
+        setRefresh(r => ({ tick: r.tick + 1, dirs: dirs.size ? dirs : null }))
+        refreshGit()
+      })
       return () => { off(); void unwatchDir(root) }
     }
-    const iv = window.setInterval(() => { setTreeKey(k => k + 1); refreshGit() }, 6000)
+    const iv = window.setInterval(() => { setRefresh(r => ({ tick: r.tick + 1, dirs: null })); refreshGit() }, 6000)
     return () => window.clearInterval(iv)
   }, [refreshGit, root, fs])
 
@@ -784,7 +812,7 @@ export function FilesPane({ agent }: { agent: Agent }) {
           <button
             className="icon-btn"
             title="Refresh tree & git status"
-            onClick={() => { setTreeKey(k => k + 1); refreshGit() }}
+            onClick={() => { setRefresh(r => ({ tick: r.tick + 1, dirs: null })); refreshGit() }}
             style={{ width: 22, height: 22, borderRadius: 5, marginLeft: 'auto' }}
           >
             <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={12} stroke={1.8} />
@@ -792,7 +820,6 @@ export function FilesPane({ agent }: { agent: Agent }) {
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '5px 4px' }}>
           <TreeLevel
-            key={treeKey}
             dir={root}
             depth={0}
             expanded={expanded}
@@ -800,6 +827,7 @@ export function FilesPane({ agent }: { agent: Agent }) {
             openFile={setFile}
             selected={file}
             git={git}
+            refresh={refresh}
             onAttachFile={attachToChat}
             onMenu={onTreeMenu}
             fs={fs}
@@ -841,7 +869,7 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
   const [file, setFile] = useState<string | null>(init.file)
   const [gutter, setGutter] = useState<'numbers' | 'git'>('numbers')
   const [expanded, setExpanded] = useState<Set<string>>(new Set(init.expanded))
-  const [treeKey, setTreeKey] = useState(0)
+  const [refresh, setRefresh] = useState<TreeRefresh>({ tick: 0, dirs: null })
   const [treeShare, setTreeShare] = useState<number | null>(explorerSplitCache.get(`folder:${root}`) ?? null)
 
   useEffect(() => {
@@ -877,7 +905,7 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
           <button
             className="icon-btn"
             title="Refresh tree"
-            onClick={() => setTreeKey(k => k + 1)}
+            onClick={() => setRefresh(r => ({ tick: r.tick + 1, dirs: null }))}
             style={{ width: 22, height: 22, borderRadius: 5, marginLeft: 'auto' }}
           >
             <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={12} stroke={1.8} />
@@ -885,7 +913,6 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '5px 4px' }}>
           <TreeLevel
-            key={treeKey}
             dir={root}
             depth={0}
             expanded={expanded}
@@ -893,6 +920,7 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
             openFile={setFile}
             selected={file}
             git={null}
+            refresh={refresh}
             fs={fs}
           />
         </div>

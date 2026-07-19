@@ -125,3 +125,13 @@ describe('buildRemoteSnapshot', () => {
     expect(snap.chats[0].durableAgentId).toBe('agent-default')
   })
 })
+
+describe('buildRemoteSnapshot workspace list', () => {
+  it('hides detached (windowed) workspaces from the phone switcher', () => {
+    const snap = buildRemoteSnapshot(state({
+      workspaces: [{ id: 'w1', name: 'acme' }, { id: 'w2', name: 'side' }, { id: 'w3', name: 'windowed' }],
+      detachedWorkspaces: ['w3'],
+    } as unknown as Partial<AppState>))
+    expect(snap.workspaces.map(w => w.id)).toEqual(['w1', 'w2'])
+  })
+})

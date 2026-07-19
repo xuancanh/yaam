@@ -170,7 +170,12 @@ export function buildRemoteSnapshot(
     ts: Date.now(),
     workspace: s.workspaces.find(w => w.id === s.activeWorkspace)?.name ?? 'yaam',
     workspaceId: s.activeWorkspace,
-    workspaces: s.workspaces.map(w => ({ id: w.id, name: w.name })),
+    // a detached workspace lives in its own OS window whose satellite owns its
+    // state — offering it as a phone switch target would put the main window
+    // and the satellite in charge of the same sessions at once
+    workspaces: s.workspaces
+      .filter(w => !(s.detachedWorkspaces ?? []).includes(w.id))
+      .map(w => ({ id: w.id, name: w.name })),
     sessions: live
       .filter(a => a.kind !== 'chat')
       .map(a => ({

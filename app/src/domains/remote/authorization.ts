@@ -27,7 +27,9 @@ export function remoteCommandAllowed(s: AppState, command: RemoteCommand): boole
   const task = s.tasks.find(t => t.id === command.id && !t.archived)
   switch (command.kind) {
     case 'workspace_switch':
+      // never switch main onto a workspace a satellite window owns
       return (s.workspaces ?? []).some(w => w.id === command.id)
+        && !(s.detachedWorkspaces ?? []).includes(command.id)
     case 'chat_new':
       return (s.durableAgents ?? []).some(d => d.id === command.id && !d.archived)
     case 'chat_send':

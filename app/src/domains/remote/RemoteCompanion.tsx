@@ -148,6 +148,11 @@ export function RemoteCompanion() {
   }, [enabled, rotate])
 
   useEffect(() => {
+    // Satellite windows must never touch the server lifecycle: the Rust remote
+    // manager is process-wide, so a satellite mounting with enabled=false would
+    // remoteStop() the very server the MAIN window is running — opening a
+    // workspace window would kill the phone remote out from under the phone.
+    if (isSatelliteWindow()) return
     if (!enabled) {
       dispatch(s => (s.remoteInfo ? { ...s, remoteInfo: null } : s))
       void remoteStop()

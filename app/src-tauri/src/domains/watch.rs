@@ -53,9 +53,11 @@ fn dedup_visible_paths<I: IntoIterator<Item = PathBuf>>(paths: I) -> Vec<String>
 impl WatchManager {
     /// Start (or replace) a recursive watch on `root`. Change bursts are coalesced
     /// on a background thread and delivered to the frontend as `fs-change`.
-    pub fn watch(&self, app: AppHandle, root: String) -> Result<(), String> {
-        let canon =
-            std::fs::canonicalize(&root).map_err(|e| format!("watch root unavailable: {e}"))?;
+    /// Returns the canonical root key carried by every emitted event, so the
+    /// caller can filter the shared `fs-change` stream down to its own root.
+    pub fn watch(&self, app: AppHandle, root: String) -> Result<String, String> {
+        let canon = std::fs::canonicalize(crate::util::expand_tilde(&root))
+            .map_err(|e| format!("watch root unavailable: {e}"))?;
         if !canon.is_dir() { return Err("watch root is not a directory".to_string()); }
         let root_key = canon.to_string_lossy().into_owned();
         {
@@ -108,15 +110,15 @@ impl WatchManager {
 
         // Inserting drops any previous watcher for this root, which closes its
         // channel and lets its debounce thread exit cleanly.
-        self.watchers.lock().unwrap().insert(root_key, watcher);
-        Ok(())
+        self.watchers.lock().unwrap().insert(root_key.clone(), watcher);
+        Ok(root_key)
     }
 
     /// Stop watching `root` (dropping the watcher and ending its debounce thread).
     pub fn unwatch(&self, root: &str) {
         // Match the stored canonical key; fall back to the raw path if the root
         // no longer resolves (e.g. it was deleted).
-        let key = std::fs::canonicalize(root)
+        let key = std::fs::canonicalize(crate::util::expand_tilde(root))
             .map(|c| c.to_string_lossy().into_owned())
             .unwrap_or_else(|_| root.to_string());
         self.watchers.lock().unwrap().remove(&key);
@@ -128,7 +130,7 @@ pub fn watch_dir(
     app: AppHandle,
     state: State<'_, WatchManager>,
     root: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     state.watch(app, root)
 }
 

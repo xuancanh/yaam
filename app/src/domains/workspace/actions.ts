@@ -82,6 +82,12 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
 
   return {
     switchWorkspace: id => {
+      // a detached workspace is owned by its satellite window — activating it
+      // here too would have two windows driving the same sessions and PTYs
+      if ((stateRef.current.detachedWorkspaces ?? []).includes(id)) {
+        flash('That workspace is open in its own window')
+        return
+      }
       // Master events that queued while this workspace was inactive
       const pending = stateRef.current.workspaceData[id]?.pendingMasterNotes ?? []
       dispatch(s => switchWorkspaceIn(s, id, MASTER_GREETING))
