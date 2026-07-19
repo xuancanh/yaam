@@ -11,6 +11,7 @@ import '@xterm/xterm/css/xterm.css'
 import { onSessionData, openExternal, resizeSession, writeSession } from './native'
 import { filePathMatches } from './terminal-links'
 import { TerminalInputBuffer } from './terminal-input'
+import { runTerminalSearch } from './terminal-search'
 
 export interface Entry {
   term: Terminal
@@ -32,7 +33,7 @@ export interface Entry {
   onSearchOpen: (() => void) | null
   /** the mounted pane's file-link handler (ctrl/cmd+click on a path) */
   onOpenFile: ((path: string) => void) | null
-  /** the find bar's live match counter (search decorations changed) */
+  /** the find bar's current match state */
   onSearchResults: ((index: number, count: number) => void) | null
   pending: string
   /** per-session streaming decoder — partial UTF-8 must not mix across PTYs */
@@ -274,42 +275,56 @@ export function serializeScreen(id: string, scrollback = 80): string {
 /** Lazily attach the search addon and forward its result counts. */
 function ensureSearch(entry: Entry): SearchAddon {
   if (!entry.search) {
-    entry.search = new SearchAddon()
-    entry.term.loadAddon(entry.search)
-    entry.search.onDidChangeResults(e => entry.onSearchResults?.(e.resultIndex, e.resultCount))
+    const search = new SearchAddon()
+    try {
+      entry.term.loadAddon(search)
+      entry.search = search
+    } catch (error) {
+      try { search.dispose() } catch { /* partially activated */ }
+      throw error
+    }
   }
   return entry.search
 }
 
-/** Match highlight colors per app theme (decorations need literal #RRGGBB). */
-function searchDecorations(): { matchBackground: string; matchOverviewRuler: string; activeMatchBackground: string; activeMatchColorOverviewRuler: string } {
-  const dark = !['light', 'paper'].includes(currentAppTheme())
-  const match = dark ? '#5A4A18' : '#F0DFA8'
-  const active = '#F5C451'
-  return { matchBackground: match, matchOverviewRuler: match, activeMatchBackground: active, activeMatchColorOverviewRuler: active }
+function discardSearch(entry: Entry) {
+  try { entry.search?.clearDecorations() } catch { /* broken addon */ }
+  try { entry.search?.dispose() } catch { /* already disposed */ }
+  entry.search = undefined
+  try { entry.term.clearSelection() } catch { /* disposed terminal */ }
+  entry.onSearchResults?.(-1, 0)
 }
 
-/** Find bar search: highlight all matches and move to the next/previous one.
- *  `incremental` keeps the active match while the query is being typed. */
-export function findInTerminal(id: string, query: string, dir: 'next' | 'prev', incremental = false) {
+/** Find bar search: select the next/previous match. Decoration mode is omitted
+ *  deliberately because its async write/resize rescans can throw on live PTYs. */
+export function findInTerminal(id: string, query: string, dir: 'next' | 'prev', incremental = false): boolean {
   const entry = entries.get(id)
-  if (!entry) return
-  const search = ensureSearch(entry)
-  if (!query) {
-    search.clearDecorations()
-    entry.onSearchResults?.(-1, 0)
-    return
+  if (!entry) return false
+  try {
+    const found = runTerminalSearch(ensureSearch(entry), query, dir, incremental)
+    // SearchAddon only calculates total counts in unsafe decoration mode. Keep
+    // the UI honest: -1 means a current match exists but the total is unknown.
+    entry.onSearchResults?.(found ? 0 : -1, found ? -1 : 0)
+    return found
+  } catch (error) {
+    console.warn('[yaam] terminal search reset after addon failure:', error)
+    discardSearch(entry)
+    return false
   }
-  const opts = { decorations: searchDecorations(), incremental: dir === 'next' && incremental }
-  if (dir === 'next') search.findNext(query, opts)
-  else search.findPrevious(query, opts)
 }
 
 /** Close the find bar: drop highlights and the selection it left behind. */
 export function clearTerminalSearch(id: string) {
   const entry = entries.get(id)
-  entry?.search?.clearDecorations()
-  entry?.term.clearSelection()
+  if (!entry) return
+  try {
+    entry.search?.clearDecorations()
+    entry.term.clearSelection()
+    entry.onSearchResults?.(-1, 0)
+  } catch (error) {
+    console.warn('[yaam] terminal search cleanup reset after addon failure:', error)
+    discardSearch(entry)
+  }
 }
 
 /** Open the mounted pane's find bar (the pane header's search button). */

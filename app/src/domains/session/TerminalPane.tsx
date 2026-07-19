@@ -34,7 +34,9 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
 
   // live search as the query is typed (incremental keeps the active match)
   useEffect(() => {
-    if (findOpen) findInTerminal(agent.id, query, 'next', true)
+    if (!findOpen) return
+    const timer = window.setTimeout(() => findInTerminal(agent.id, query, 'next', true), 80)
+    return () => window.clearTimeout(timer)
   }, [findOpen, query, agent.id])
 
   const closeFind = () => {
@@ -142,7 +144,7 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
             style={{ width: 150, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 11.5 }}
           />
           <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', minWidth: 36, textAlign: 'right' }}>
-            {query ? (result && result.count > 0 ? (result.index >= 0 ? `${result.index + 1}/${result.count}` : `${result.count}`) : '0') : ''}
+            {query ? (result?.count === -1 ? 'match' : '0') : ''}
           </span>
           <button
             className="icon-btn"
