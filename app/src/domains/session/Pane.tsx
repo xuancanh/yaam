@@ -7,6 +7,7 @@ import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
 import { HistoryList } from '../../components/HistoryList'
+import { ContextMenu } from '../../components/ContextMenu'
 import { ChatPane } from '../chat/ChatPane'
 import { TaskReviewFooter, WatcherChat } from '../board/WatcherChat'
 import { Divider } from './Divider'
@@ -151,19 +152,13 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
   // terminal (which stays alive — its xterm is registry-owned and re-attaches)
   const [panelFull, setPanelFull] = useState(panelFullCache.get(agent.id) ?? false)
   const toggleFull = () => setPanelFull(v => { panelFullCache.set(agent.id, !v); return !v })
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  // open the settings menu upward when a bottom-row pane lacks room below, so it
-  // never renders off the bottom edge of the window
-  const [settingsUp, setSettingsUp] = useState(false)
+  const [settingsMenu, setSettingsMenu] = useState<{ x: number; y: number } | null>(null)
+  const settingsOpen = settingsMenu !== null
   const settingsAnchor = useRef<HTMLDivElement>(null)
   const toggleSettings = () => {
-    setSettingsOpen(v => {
-      if (!v) {
-        const rect = settingsAnchor.current?.getBoundingClientRect()
-        setSettingsUp(!!rect && window.innerHeight - rect.bottom < 150)
-      }
-      return !v
-    })
+    if (settingsMenu) { setSettingsMenu(null); return }
+    const rect = settingsAnchor.current?.getBoundingClientRect()
+    if (rect) setSettingsMenu({ x: rect.right - 210, y: rect.bottom + 5 })
   }
   // Toggle the pane-local file explorer and repaint the terminal after resizing.
   const toggleFiles = () => {
@@ -253,32 +248,32 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
           >
             <Icon paths={[...IC.sliders, 'M6 9m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 15m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']} size={15} />
           </button>
-          {settingsOpen && (
-            <>
-              <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={e => { e.stopPropagation(); setSettingsOpen(false) }} />
-              <div style={{
-                position: 'absolute', ...(settingsUp ? { bottom: 31 } : { top: 31 }), right: 0, zIndex: 41, minWidth: 190,
-                background: 'var(--panel)', border: '1px solid var(--line2)', borderRadius: 10,
-                padding: 4, boxShadow: '0 8px 28px rgba(0,0,0,.35)',
-              }}>
+          {settingsMenu && (
+            <ContextMenu
+              x={settingsMenu.x}
+              y={settingsMenu.y}
+              width={210}
+              label={`Settings for ${agent.name}`}
+              onClose={() => setSettingsMenu(null)}
+              header={<div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)' }}>SESSION SETTINGS</div>}
+            >
                 <button
-                  className="palette-item"
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: 'none', textAlign: 'left', padding: '7px 10px', borderRadius: 7, fontSize: 12, color: 'var(--text)' }}
-                  onClick={e => { e.stopPropagation(); setSettingsOpen(false); openPanel(agent.id, 'memory') }}
+                  role="menuitem"
+                  className="context-menu-item"
+                  onClick={() => { setSettingsMenu(null); openPanel(agent.id, 'memory') }}
                 >
                   <Icon paths={['M7 7h10v10H7z', ...IC.chip]} size={14} />
                   Memory & context
                 </button>
                 <button
-                  className="palette-item"
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: 'none', textAlign: 'left', padding: '7px 10px', borderRadius: 7, fontSize: 12, color: 'var(--text)' }}
-                  onClick={e => { e.stopPropagation(); setSettingsOpen(false); openPanel(agent.id, 'tools') }}
+                  role="menuitem"
+                  className="context-menu-item"
+                  onClick={() => { setSettingsMenu(null); openPanel(agent.id, 'tools') }}
                 >
                   <Icon paths={[...IC.sliders, 'M6 9m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 15m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']} size={14} />
                   Tools & permissions
                 </button>
-              </div>
-            </>
+            </ContextMenu>
           )}
         </div>
         {agent.kind !== 'chat' && (agent.status === 'idle' || agent.status === 'error') && (

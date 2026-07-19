@@ -148,10 +148,10 @@ workspace file viewer.
 | `remote-machine.ts` | Pure SSH/tmux command builders (wrap launch, kill, ssh options, connection test) for machine sessions |
 | `remote-native.ts` | `SessionFs` adapter: local native fs/git, or the same operations over SSH for a machine session |
 | `attention.ts` | Screen tails, needs-input escalation, monitor status, bounded output/usage |
-| `prompt-detection.ts` | Pure prompt/menu heuristics, numbered option extraction, and the no-brain status digest |
+| `prompt-detection.ts` | Pure prompt/menu heuristics, numbered option extraction, and stable screen identity |
 | `use-settle.ts` | Plain settle runtime plus legacy React adapter |
 | `session-work-status.ts` | Shared task/current-action/next-action precedence for tabs and the Sidebar rail |
-| `SessionHoverPreview.tsx` | Delayed tab/Sidebar hover card with the monitor/watcher-authored Task / Now / Next brief |
+| `SessionHoverPreview.tsx` | Delayed tab/Sidebar hover card with the synthesized brief plus a bounded live terminal evidence panel |
 | `exit.ts` | Pure stopped/failed/completed/exited classification |
 | `exit-handler.ts` | Effectful process-exit coordinator and native subscription |
 | `FilesPane.tsx` | File tree, git status/diff gutter, source/document/media preview |
@@ -164,8 +164,8 @@ uses two-line rows and automatically expands only rows that
 attention, review, or failure); Full shows Task / Now / Next for every row. The
 same predicate also places actionable work in the **Needs you** group, preventing
 display density and triage order from drifting apart. Hovering a live-session
-row opens its synthesized status brief to the right of the rail; top-tab
-previews retain their vertical placement.
+row opens its synthesized status brief and terminal evidence panel to the right
+of the rail; top-tab previews retain their vertical placement.
 
 ### Launch and resume
 
@@ -208,8 +208,17 @@ per-session monitor; task runs prefer `BoardTask.title`, `watcherNote`, and
 `watcherNext`, authored by their watcher. Suggested actions and lifecycle
 placeholders cover pending decisions and the interval before the first LLM
 digest. Raw terminal lines and extractive last-line summaries are deliberately
-excluded. Session tabs and Sidebar rows share the same hover-intent component;
-the Sidebar places it to the right while top tabs place it vertically.
+excluded from those three authored fields. The hover card separately includes a
+bounded, read-only `readScreen` snapshot (log-tail fallback) as supporting
+evidence; it never mounts a second xterm or changes the synthesized status.
+Session tabs and Sidebar rows share the component; the Sidebar places it to the
+right while top tabs place it vertically.
+
+Session-tab, dock, and Files Explorer right-click actions plus the session
+settings popup share `components/ContextMenu.tsx`. It portals floating surfaces
+to `document.body`, measures and clamps them to every viewport edge, scrolls
+long item lists, and centralizes dismissal, hover/focus styling, and arrow-key
+navigation.
 
 ### Settle and prompt detection
 
@@ -569,8 +578,10 @@ Own global navigation and overlays rather than feature data.
   drawer, new-session dialog, and needs-attention navigation.
 - `TitleBar.tsx` hosts workspace and appearance controls.
 - `IconRail.tsx` selects top-level built-in/addon views.
-- `Overview.tsx` is the fleet ops console (stat tiles, Master routing rail,
-  watched-task and chat cards); `Timeline.tsx` and `UsageSummary.tsx` present
+- `ControlCenter.tsx` is the fleet ops console (stat tiles and session,
+  watched-task, and chat cards). Session/task cards use the same synthesized
+  Task / Now / Next contract as the Work Sidebar and never fall back to raw
+  terminal lines; `Timeline.tsx` and `UsageSummary.tsx` present
   aggregate state.
 - `Drawer.tsx` hosts agent detail and live git diff review.
 - `SlideOver.tsx` hosts memory/tool configuration.

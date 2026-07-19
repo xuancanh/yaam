@@ -20,6 +20,7 @@ import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { FileIcon } from '../../components/FileIcon'
 import { Markdown } from '../../components/Markdown'
+import { ContextMenu } from '../../components/ContextMenu'
 import { artifactSrcDoc } from '../chat/artifacts'
 import { requestAttach } from '../chat/attach-bus'
 import { onOpenFileRequest } from './open-file-bus'
@@ -197,29 +198,19 @@ function TreeContextMenu({ menu, onClose }: { menu: TreeMenuState; onClose: () =
         { label: 'Reveal in Finder', mode: 'reveal' },
         { label: 'Open in VS Code', mode: 'vscode' },
       ]
-  // keep the menu on-screen when the click lands near the bottom edge
-  const top = Math.min(menu.y, window.innerHeight - (items.length * 30 + 16))
-  const left = Math.min(menu.x, window.innerWidth - 190)
   return (
-    <>
-      <div style={{ position: 'fixed', inset: 0, zIndex: 60 }} onClick={onClose} onContextMenu={ev => { ev.preventDefault(); onClose() }} />
-      <div style={{
-        position: 'fixed', top, left, zIndex: 61, minWidth: 172,
-        background: 'var(--panel)', border: '1px solid var(--line2)', borderRadius: 10,
-        padding: 4, boxShadow: '0 8px 28px rgba(0,0,0,.35)',
-      }}>
+    <ContextMenu x={menu.x} y={menu.y} width={196} label={`File actions for ${menu.path}`} onClose={onClose}>
         {items.map(it => (
           <button
             key={it.mode}
-            className="palette-item"
-            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: 'none', textAlign: 'left', padding: '6px 10px', borderRadius: 7, fontSize: 12, color: 'var(--text)' }}
+            role="menuitem"
+            className="context-menu-item"
             onClick={() => { void openPath(menu.path, it.mode); onClose() }}
           >
             {it.label}
           </button>
         ))}
-      </div>
-    </>
+    </ContextMenu>
   )
 }
 

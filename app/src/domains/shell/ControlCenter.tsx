@@ -3,6 +3,8 @@ import { formatEstimatedTokens } from '../../core/usage'
 import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from '../../components/ui'
 import { UsageSummary } from './UsageSummary'
 import { confirmAction } from '../../components/Confirm'
+import { sessionWorkStatus } from '../session/session-work-status'
+import type { SessionWorkStatus } from '../session/session-work-status'
 
 /** Compact inline token/cost readout with a slim budget bar for one agent row. */
 function InlineUsage({ agent }: { agent: { used: number; cost: number; budget: number; color: string } }) {
@@ -27,6 +29,27 @@ function FleetStat({ label, value, tone }: { label: string; value: string | numb
     <div style={{ flex: 1, minWidth: 110, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 11, padding: '10px 13px' }}>
       <div className="grotesk" style={{ fontSize: 19, fontWeight: 600, color: tone ?? 'var(--text)' }}>{value}</div>
       <div className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.5, color: 'var(--dim)', marginTop: 2 }}>{label}</div>
+    </div>
+  )
+}
+
+/** Monitor/watcher-authored Task / Now / Next status used by session and task
+ * cards. Terminal output remains available in the session, never as fallback. */
+function WorkBrief({ work, needsAction, updatedAt }: { work: SessionWorkStatus; needsAction?: boolean; updatedAt?: string }) {
+  return (
+    <div style={{ display: 'grid', gap: 6, background: 'var(--bg)', border: `1px solid ${needsAction ? 'rgba(255,176,32,.35)' : 'var(--line-soft)'}`, borderRadius: 9, padding: '9px 10px' }}>
+      {([
+        ['TASK', work.task, 'var(--accent)'],
+        ['NOW', work.current, 'var(--text2)'],
+        ['NEXT', work.next, needsAction ? 'var(--amber)' : 'var(--green)'],
+      ] as const).map(([label, value, color]) => (
+        <div key={label} style={{ display: 'grid', gridTemplateColumns: '38px minmax(0, 1fr)', gap: 7, alignItems: 'start' }}>
+          <span className="mono" style={{ fontSize: 8.5, letterSpacing: .55, color: 'var(--faint)', paddingTop: 1 }}>{label}</span>
+          <span style={{ minWidth: 0, fontSize: 11.5, lineHeight: 1.38, color, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {value}{label === 'NOW' && updatedAt && <span className="mono" style={{ color: 'var(--faint)', fontSize: 9.5, marginLeft: 6 }}>· {updatedAt}</span>}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -60,6 +83,11 @@ function FleetView() {
   const running = active.filter(a => a.status === 'running')
   const needs = active.filter(a => a.status === 'needs' || a.attention || a.actionNeeded)
   const spend = [...active, ...chats, ...archived].reduce((n, a) => n + a.cost, 0)
+  const taskByAgent = new Map<string, typeof s.tasks[number]>()
+  for (const task of s.tasks) {
+    if (task.agentId) taskByAgent.set(task.agentId, task)
+    for (const id of task.agentIds ?? []) if (!taskByAgent.has(id)) taskByAgent.set(id, task)
+  }
 
   return (
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
@@ -77,9 +105,11 @@ function FleetView() {
           {active.map(a => {
             const memOn = a.memory.filter(m => m.on).length
             const toolOn = a.tools.filter(t => t.on).length
-            const last = a.log.length ? a.log[a.log.length - 1].x : ''
+            const task = taskByAgent.get(a.id)
+            const work = sessionWorkStatus(a, task)
+            const needsAction = a.status === 'needs' || Boolean(a.attention || a.actionNeeded || task?.awaitingUser || task?.col === 'review')
             return (
-              <div key={a.id} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, padding: 15 }}>
+              <div key={a.id} style={{ background: 'var(--panel)', border: `1px solid ${needsAction ? 'rgba(255,176,32,.38)' : 'var(--line)'}`, borderRadius: 14, padding: 15 }}>
                 <div onClick={() => openAgent(a.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, cursor: 'pointer' }}>
                   <AgentAvatar agent={a} size={34} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -88,38 +118,7 @@ function FleetView() {
                   </div>
                   <StatusPill agent={a} small />
                 </div>
-                {a.task && (
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 6 }}>
-                    <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, color: 'var(--accent)', flexShrink: 0 }}>TASK</span>
-                    <span style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.4 }}>{a.task}</span>
-                  </div>
-                )}
-                {a.summary ? (
-                  <div style={{
-                    background: 'var(--bg)', border: '1px solid var(--line-soft)', borderRadius: 8, padding: '8px 10px',
-                    fontSize: 11.5, color: 'var(--mut)', lineHeight: 1.45,
-                  }}>
-                    {a.summary}
-                    {a.summaryAt && <span className="mono" style={{ color: 'var(--faint)', fontSize: 10, marginLeft: 6 }}>· {a.summaryAt}</span>}
-                  </div>
-                ) : (
-                  <div className="mono" style={{
-                    background: 'var(--bg)', border: '1px solid var(--line-soft)', borderRadius: 8, padding: '8px 10px',
-                    fontSize: 11, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}>
-                    {last}
-                  </div>
-                )}
-                {a.actionNeeded && (
-                  <div style={{
-                    marginTop: 8, background: 'rgba(255,176,32,.07)', border: '1px solid rgba(255,176,32,.35)',
-                    borderRadius: 8, padding: '7px 10px', fontSize: 11.5, color: 'var(--amber)', lineHeight: 1.4,
-                    display: 'flex', gap: 7, alignItems: 'baseline',
-                  }}>
-                    <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, flexShrink: 0 }}>ACTION</span>
-                    <span style={{ color: '#E8C48A' }}>{a.actionNeeded}</span>
-                  </div>
-                )}
+                <WorkBrief work={work} needsAction={needsAction} updatedAt={a.summaryAt} />
                 <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, fontSize: 11, color: 'var(--dim)' }}>
                   <span>{memOn} mem</span><span>{toolOn} tools</span>
                   <InlineUsage agent={a} />
@@ -146,7 +145,7 @@ function FleetView() {
             <div className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color: 'var(--dim)', marginBottom: 10 }}>WATCHED TASKS</div>
             <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))' }}>
               {watched.map(tk => (
-                <div key={tk.id} style={{ background: 'var(--panel)', border: `1px solid ${tk.awaitingUser ? 'rgba(255,176,32,.45)' : 'var(--line)'}`, borderRadius: 12, padding: 12 }}>
+                <div key={tk.id} style={{ background: 'var(--panel)', border: `1px solid ${tk.awaitingUser || tk.col === 'review' ? 'rgba(255,176,32,.45)' : 'var(--line)'}`, borderRadius: 12, padding: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span className="mono" style={{
                       fontSize: 9, fontWeight: 700, letterSpacing: 0.4, padding: '1px 7px', borderRadius: 5, flexShrink: 0,
@@ -156,9 +155,12 @@ function FleetView() {
                     <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tk.title}</span>
                     {tk.awaitingUser && <span className="mono" style={{ fontSize: 9, fontWeight: 700, color: 'var(--amber)', flexShrink: 0 }}>WAITING ON YOU</span>}
                   </div>
-                  {tk.watcherNote && (
-                    <div className="mono" style={{ marginTop: 6, fontSize: 10.5, color: 'var(--accent)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>⌁ {tk.watcherNote}</div>
-                  )}
+                  <div style={{ marginTop: 9 }}>
+                    <WorkBrief
+                      work={sessionWorkStatus(tk.agentId ? s.agents.find(a => a.id === tk.agentId) : undefined, tk)}
+                      needsAction={Boolean(tk.awaitingUser || tk.col === 'review')}
+                    />
+                  </div>
                   <button className="open-btn" style={{ marginTop: 9, padding: '5px 0', fontSize: 11.5, width: '100%' }} onClick={() => setView('board')}>
                     Open board
                   </button>

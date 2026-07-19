@@ -50,11 +50,12 @@ each session remains in at most one group.
 
 The Work view's Sidebar mode is a task-aware run triage rail. Each row derives
 one shared status tuple—task, current action, next action—from the linked board
-task, monitor/watcher state, suggestions, and durable history fallbacks. Normal
-tabs and Sidebar session rows use that same tuple in a delayed hover card. The
-card reads a bounded live xterm screen snapshot (or the persisted log tail when
-no rendered screen exists); it never attaches or moves the registry-owned
-terminal DOM, so previewing a session cannot disturb its active pane.
+task, monitor/watcher state, suggestions, and lifecycle placeholders. Normal
+tabs, Sidebar rows, and Control Center cards use that same tuple. The delayed
+hover card presents the authored tuple first, then reads a bounded live xterm
+screen snapshot (or the persisted log tail when no rendered screen exists) as
+separate evidence; it never attaches or moves the registry-owned terminal DOM,
+so previewing a session cannot disturb its active pane.
 
 ## 3. Terminal, files, and preview pipeline
 

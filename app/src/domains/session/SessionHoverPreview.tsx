@@ -2,14 +2,28 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { createPortal } from 'react-dom'
 import type { Agent, BoardTask } from '../../core/types'
 import { indicatorColor } from '../../core/data'
+import { readScreen } from '../../core/terminals'
 import { sessionWorkStatus } from './session-work-status'
 
 type PreviewPlacement = 'vertical' | 'right'
 
+function previewLines(agent: Agent): string[] {
+  const rendered = readScreen(agent.id, 12)
+  if (rendered.length) return rendered
+  return agent.log.slice(-12).map(line => line.x).filter(Boolean)
+}
+
 function PreviewCard({ agent, task, anchor, placement }: { agent: Agent; task?: BoardTask; anchor: HTMLElement; placement: PreviewPlacement }) {
   const status = sessionWorkStatus(agent, task)
   const card = useRef<HTMLDivElement>(null)
+  const [lines, setLines] = useState(() => previewLines(agent))
   const [position, setPosition] = useState({ top: 0, left: 0, ready: false })
+
+  useEffect(() => {
+    setLines(previewLines(agent))
+    const timer = window.setInterval(() => setLines(previewLines(agent)), 700)
+    return () => window.clearInterval(timer)
+  }, [agent])
 
   useLayoutEffect(() => {
     const place = () => {
@@ -35,7 +49,7 @@ function PreviewCard({ agent, task, anchor, placement }: { agent: Agent; task?: 
       window.removeEventListener('resize', place)
       window.removeEventListener('scroll', place, true)
     }
-  }, [anchor, placement])
+  }, [anchor, lines.length, placement])
 
   return createPortal((
     <div
@@ -69,6 +83,15 @@ function PreviewCard({ agent, task, anchor, placement }: { agent: Agent; task?: 
             {task.description}
           </div>
         )}
+      </div>
+      <div style={{ borderTop: '1px solid var(--line)', background: 'var(--bg)', padding: '8px 10px 9px' }}>
+        <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 8.5, letterSpacing: .65, color: 'var(--dim)', marginBottom: 6 }}>
+          <span style={{ width: 5, height: 5, borderRadius: '50%', background: agent.responding ? 'var(--green)' : 'var(--dim)' }} />
+          LIVE TERMINAL · EVIDENCE
+        </div>
+        <div className="mono" style={{ height: 128, overflow: 'hidden', fontSize: 9.5, lineHeight: 1.32, color: 'var(--mut2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {lines.length ? lines.join('\n') : 'No terminal output yet.'}
+        </div>
       </div>
     </div>
   ), document.body)
