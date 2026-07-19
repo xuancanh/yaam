@@ -8,7 +8,7 @@ export interface MasterExec {
   readSession: (sessionId: string, lines?: number) => string
   flagNeedsInput: (sessionId: string, question: string) => string
   renameSession: (sessionId: string, name: string) => string
-  updateAgentStatus: (sessionId: string, task?: string, summary?: string, actionNeeded?: string) => string
+  updateAgentStatus: (sessionId: string, task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => string
   runAddonTool: (name: string, input: Record<string, unknown>) => Promise<string>
   configureSetting: (key: string, value: string) => string
   setToolPermission: (toolId: string, perm: string) => string
@@ -115,7 +115,7 @@ export const TOOLS = [
     name: 'create_addon',
     description: `Create (or replace, by name) an addon: a custom tab in the app's icon rail rendering a self-contained HTML document in a sandboxed iframe. Use this when the user asks for a new panel/view/feature — addons can fully replicate built-in views (the kanban board, usage charts, …).
 The view gets live state AND can call the app over postMessage RPC:
-- state push: window.addEventListener('message', e => { if (e.data.type === 'yaam:state') render(e.data.state) }) — pushed on load and every ~3s. state = { workspace, sessions:[{id,name,status,task,summary,actionNeeded,cwd,cost,used}], tasks:[{id,title,col,agentId}], crons, events, totals }
+- state push: window.addEventListener('message', e => { if (e.data.type === 'yaam:state') render(e.data.state) }) — pushed on load and every ~3s. state = { workspace, sessions:[{id,name,status,task,summary,nextAction,actionNeeded,cwd,cost,used}], tasks:[{id,title,col,agentId,watcherNote,watcherNext}], crons, events, totals }
 - calls: const pend = {}; function yaam(method, ...args){ return new Promise((res, rej) => { const id = Math.random().toString(36).slice(2); pend[id] = { res, rej }; parent.postMessage({ type: 'yaam:call', callId: id, method, args }, '*') }) }; window.addEventListener('message', e => { const d = e.data; if (d.type === 'yaam:result' && pend[d.callId]) { d.error ? pend[d.callId].rej(new Error(d.error)) : pend[d.callId].res(d.result); delete pend[d.callId] } })
 - methods (each needs its permission granted): getState, sessions.readOutput(id, lines), templates.list() [state:read] · sendToSession(id, text), sessions.stop(id) [sessions:send] · launchSession(cmd, cwd, name), templates.run(idOrName, task) [sessions:launch] · focusSession(id), focusTask(taskId), flash(t), notify(title, detail), logEvent(t) [ui] · tasks.add(title, col, {description, criteria[], cwd, typeId, templateId})/tasks.update(id, patch)/tasks.rename/tasks.move(id, col)/tasks.remove(id)/tasks.start(id)/tasks.restart(id)/tasks.chat(id, text) [tasks] (cols: backlog|progress|review|done|failed; started tasks get a watcher-driven one-shot; tasks.chat talks to the task's watcher) · schedules.add({name, schedule|at, cmd|task})/schedules.toggle(name, on)/schedules.remove(name) [schedules] · agent.wake(note) → reply [agent] (the addon's own LLM agent, declared via an "agent": {system, on: [hooks]} field) · storage.get(key)/storage.set(key, value) [storage]
 - hooks available: onSessionExit {sessionId, name, code} · onNeedsInput {sessionId, name, question} · onTaskMoved {taskId, title, col, from} · onCronFired {name, kind} · masterPromptAppend (plain text)
@@ -146,13 +146,14 @@ Style to match the app: dark background #0A0B0F, text #E7E9F0, muted #8B93A1, ac
   },
   {
     name: 'update_agent_status',
-    description: 'Update a session\'s card on the Agents overview: what it is working on (task), a 1-2 sentence state summary, and what the user must do if anything (action_needed, empty string to clear). Call this whenever you review a session\'s output so the overview stays current.',
+    description: 'Update a session\'s synthesized Task / Now / Next brief and what the user must do, if anything (action_needed; empty string clears it). Never paste raw terminal output into these fields.',
     input_schema: {
       type: 'object',
       properties: {
         session_id: { type: 'string' },
         task: { type: 'string' },
         summary: { type: 'string' },
+        next: { type: 'string' },
         action_needed: { type: 'string' },
       },
       required: ['session_id'],
@@ -273,6 +274,7 @@ export async function runTool(name: string, input: Record<string, unknown>, exec
       str('session_id'),
       typeof input.task === 'string' ? input.task : undefined,
       typeof input.summary === 'string' ? input.summary : undefined,
+      typeof input.next === 'string' ? input.next : undefined,
       typeof input.action_needed === 'string' ? input.action_needed : undefined,
     )
     case 'create_schedule': return exec.createSchedule(str('name'), str('cron'), str('command') || undefined, str('cwd') || undefined, str('template') || undefined, str('prompt') || undefined)

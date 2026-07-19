@@ -321,11 +321,9 @@ if armed:
     if (busy or unchanged) and not expired:
         reschedule onSettle in 3500 ms; return                  // wait for real change
     armed.delete(id)
-    digest = (no LLM and not task) ? deterministicStatus(content) : null
-    if not watching or digest:
-        update card (attention, summary, actionNeeded from digest)
-        if not watching and (fresh arm or digest.actionNeeded):
-            notify(done|escalate)                               // bell/tab flash
+    if not watching:
+        update card attention only
+        if fresh arm: notify(done)                              // bell/tab flash
     if still running: re-arm as {continuation:true}             // keep tracking
 
 flushOutput(id, final=true, content)  // watcher for task sessions; monitor otherwise
@@ -347,11 +345,10 @@ Notes:
   their card — but `continuation` suppresses re-pinging the user at every quiet
   point.
 
-### 5.5 `deterministicStatus` and `detectPrompt` (`prompt-detection.ts`)
-- `deterministicStatus(content)`: drop noise/decoration lines
-  (`NOISE_LINE_RE`), take the last meaningful line as `summary` (≤140 chars);
-  if any of the last 8 clean lines match `ERROR_LINE_RE`, surface
-  `actionNeeded = "Possible error — …"`.
+### 5.5 Stable screen identity and `detectPrompt` (`prompt-detection.ts`)
+- `stableScreenKey(content)` removes spinner/decorative noise only for redraw
+  deduplication. Terminal lines are never promoted directly into the visible
+  Task / Now / Next brief; that brief is synthesized by the monitor/watcher.
 - `detectPrompt`: `busy` from the interrupt marker; `promptDetected` from
   `TUI_PROMPT_RE` (alt) or `PROMPT_RE`/trailing `?:` (plain); `question` = first
   question-shaped line.
@@ -373,9 +370,13 @@ Two LLM consumers receive settle notes. Both are per-key serialized loops
 ### 6.1 Session monitor (`monitor-runner.ts`, follow mode, per session)
 - Triggers: submitted user terminal input plus bounded output checkpoints/final
   snapshots for non-task sessions.
-- **Queue policy: latest-wins** — `queue.set(id, note)` overwrites. While a turn
-  runs, only the most recent note survives.
+- **Queue policy: bounded accumulation** — while a turn runs, up to eight
+  submitted-input/output notes are retained and joined for the next turn. This
+  prevents a user submission from being overwritten by its output checkpoint.
 - Tools: `update_status`, `flag_needs_input`, `report_to_master`, …
+- `update_status` writes the complete synthesized `task`, `summary` (Now),
+  `next`, and `action_needed` contract. Each incoming input/output checkpoint
+  is reassessed; the monitor calls it when the brief changed.
 
 ### 6.2 Task watcher (`watcher.ts` + `watcher-runner.ts`, per task — the mini-orchestrator)
 - Triggers (all funnel to `runWatcher(taskId, note)`):
@@ -391,7 +392,7 @@ Two LLM consumers receive settle notes. Both are per-key serialized loops
   - user messages / review actions
 - **Queue policy: accumulate** —
   `queue.set(taskId, (queue.get(taskId) ?? []).concat([note]))`; next turn joins
-  **all** pending notes with `\n\n`. (Contrast with the monitor's latest-wins.)
+  **all** pending notes with `\n\n`.
 - Turn: `runWatcherTurn` → `runToolLoop` (`maxRounds 5`, `sequential`), system
   prompt `watcherSystem` (task spec + live worker list + ground-truth rules),
   tools: `move_task`, `update_note`, `spawn_session`, `send_to_session`,
@@ -405,6 +406,9 @@ Two LLM consumers receive settle notes. Both are per-key serialized loops
   generates; the final prose is posted to the task chat.
 - History hygiene: `sanitizeToolHistory` before, `capToolHistory(history, 20)`
   after.
+- `update_note` writes both `watcherNote` (Now) and `watcherNext` (Next), and
+  mirrors them to the current worker. Every submitted user input and buffered or
+  settled output wakes the watcher; it refreshes both fields when meaning changes.
 
 ### 6.3 What the watcher actually "sees" of the output
 The watcher receives bounded decoded-output checkpoints (last 40 lines / 12 KiB)
@@ -499,8 +503,8 @@ period**, with an accumulating queue that concatenates near-duplicate snapshots.
 **Problem.** The watcher's queue *accumulates* every "stable output" note and
 joins them with `\n\n`. Each note is the last 14 lines of an evolving screen, so
 a burst of settles enqueues several **overlapping** tails that are concatenated
-into one giant, redundant user message. The session monitor already does the
-right thing (latest-wins).
+into one giant, redundant user message. The session monitor instead keeps a
+small bounded event queue so submitted input is not lost behind later output.
 
 **Fix.**
 - Collapse consecutive same-kind "stable output" notes in the queue to the
@@ -530,18 +534,18 @@ since the last report** and send those (bounded, e.g. ≤60 lines with a
 `lastReportedLogLen: Map<string, number>` alongside `armed`. This both shrinks
 tokens and makes "what changed" explicit.
 
-### P1 — Gate LLM turns behind a deterministic pre-filter (cost + noise)
-**Problem.** Every stable-output settle wakes the LLM watcher, even for routine
-progress that changes nothing material. This is the dominant cost and the main
-source of "the watcher is chatty/laggy".
+### P1 — Reduce LLM turns without degrading synthesized status
+**Problem.** Every stable-output settle can wake the LLM watcher, even for
+routine progress whose Task / Now / Next meaning has not changed.
 
-**Fix.** Reuse `deterministicStatus` as a pre-filter in the task path:
-- Update the card note **deterministically** (no LLM) for routine progress.
-- Only wake the LLM watcher on **state transitions**: a detected prompt, a new
-  error signature, a **process exit**, a criteria-relevant keyword, or a
-  min-interval heartbeat (e.g. ≥1 LLM turn / 45 s while running). Add a
-  per-task `lastWatcherRunAt` and a "significant change" test (≥K new non-noise
-  lines or an error/prompt/exit).
+**Constraint.** Do not restore an extractive last-terminal-line status path.
+Visible Task / Now / Next text must remain watcher/monitor-authored.
+
+**Possible follow-up.** Add a deterministic wake-up pre-filter that only decides
+whether evidence is materially different (prompt, error signature, process
+exit, criteria keyword, or a minimum heartbeat). It may skip an LLM turn, but it
+must not write visible status text. Add per-task `lastWatcherRunAt` and a
+significant-change test before changing the current every-checkpoint delivery.
 
 ### P1 — Widen the exit note and protect it from the progress queue
 **Current state.** `session-exit` is **already** a first-class watcher trigger

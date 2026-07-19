@@ -17,17 +17,33 @@ export interface RunGroup {
   runs: RunRef[]
 }
 
+/** True when a compact Sidebar row must open to expose what the user needs to
+ * do. This drives both triage ordering and row density so actionable work can
+ * never remain hidden in a collapsed row. */
+export function runNeedsUserAction(run: RunRef): boolean {
+  const agent = run.agent
+  const task = run.kind === 'task' ? run.task : undefined
+  return Boolean(
+    task?.awaitingUser
+    || task?.col === 'review'
+    || task?.col === 'failed'
+    || agent?.status === 'needs'
+    || agent?.status === 'error'
+    || agent?.attention
+    || agent?.actionNeeded,
+  )
+}
+
 /** Which triage group a run belongs to. Precedence: anything waiting on the
  *  user (prompts, attention, review) → needs; a live agent → running;
- *  unstarted backlog tasks → backlog (startable in place); a finished/failed
- *  task → done; the rest (paused progress, idle sessions) → idle. */
+ *  unstarted backlog tasks → backlog (startable in place); a finished task →
+ *  done; the rest (paused progress, idle sessions) → idle. */
 export function runGroupOf(run: RunRef): RunGroupId {
   const agent = run.agent
   const task = run.kind === 'task' ? run.task : undefined
-  if (task?.awaitingUser || agent?.status === 'needs' || agent?.attention) return 'needs'
-  if (task?.col === 'review') return 'needs'
+  if (runNeedsUserAction(run)) return 'needs'
   if (agent?.status === 'running') return 'running'
-  if (task && (task.col === 'done' || task.col === 'failed')) return 'done'
+  if (task?.col === 'done') return 'done'
   if (task && task.col === 'backlog' && !agent) return 'backlog'
   return 'idle'
 }
@@ -49,10 +65,11 @@ export function runMatchesFilter(run: RunRef, filter: RunFilter): boolean {
 export function runStatusLabel(run: RunRef): { label: string; tone: 'amber' | 'green' | 'mut' | 'red' } {
   const agent = run.agent
   const task = run.kind === 'task' ? run.task : undefined
-  if (task?.awaitingUser || agent?.status === 'needs' || agent?.attention) return { label: 'waiting on you', tone: 'amber' }
-  if (task?.col === 'review') return { label: 'review', tone: 'amber' }
-  if (agent?.status === 'running') return { label: 'running', tone: 'green' }
   if (agent?.status === 'error' || task?.col === 'failed') return { label: 'failed', tone: 'red' }
+  if (task?.col === 'review') return { label: 'review', tone: 'amber' }
+  if (agent?.actionNeeded) return { label: 'action needed', tone: 'amber' }
+  if (task?.awaitingUser || agent?.status === 'needs' || agent?.attention) return { label: 'waiting on you', tone: 'amber' }
+  if (agent?.status === 'running') return { label: 'running', tone: 'green' }
   if (task?.col === 'done') return { label: 'done', tone: 'mut' }
   if (task && !agent) return { label: task.scheduleAt ? 'scheduled' : 'not started', tone: 'mut' }
   return { label: 'idle', tone: 'mut' }

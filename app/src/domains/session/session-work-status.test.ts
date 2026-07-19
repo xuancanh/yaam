@@ -14,7 +14,7 @@ const task = (patch: Partial<BoardTask> = {}) => ({
 describe('sessionWorkStatus', () => {
   it('prefers explicit task, monitor summary, and required user action', () => {
     expect(sessionWorkStatus(agent({
-      task: 'older task label', summary: 'Running the authentication tests', actionNeeded: 'Choose an OAuth scope',
+      task: 'older task label', summary: 'Running the authentication tests', nextAction: 'Verify the callback flow', actionNeeded: 'Choose an OAuth scope',
     }), task())).toEqual({
       task: 'Repair login', current: 'Running the authentication tests', next: 'Choose an OAuth scope', nextDetail: undefined,
     })
@@ -26,12 +26,21 @@ describe('sessionWorkStatus', () => {
     })
   })
 
-  it('falls back to durable work history and lifecycle actions', () => {
+  it('does not expose extractive terminal history while waiting for a monitor brief', () => {
     const stopped = agent({
       status: 'idle', history: [{ id: 'h1', at: 1, category: 'work', actor: 'session', kind: 'changes', text: 'Changed two files' }],
     })
     expect(sessionWorkStatus(stopped)).toMatchObject({
-      task: 'Unassigned session', current: 'Changed two files', next: 'Resume when ready',
+      task: 'Waiting for watcher task summary', current: 'Idle', next: 'Resume when ready',
+    })
+  })
+
+  it('uses the task watcher for now and next ahead of worker status', () => {
+    expect(sessionWorkStatus(
+      agent({ summary: 'stale worker summary', nextAction: 'stale worker next' }),
+      task({ watcherNote: 'Reviewing the authentication diff', watcherNext: 'Run the focused integration tests' }),
+    )).toMatchObject({
+      current: 'Reviewing the authentication diff', next: 'Run the focused integration tests',
     })
   })
 

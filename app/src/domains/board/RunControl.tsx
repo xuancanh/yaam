@@ -6,7 +6,7 @@ import { Pane } from '../session/Pane'
 import { SessionHoverPreview } from '../session/SessionHoverPreview'
 import { sessionWorkStatus } from '../session/session-work-status'
 import { useDiffStats } from '../session/diff-stats'
-import { groupRuns, runStatusLabel } from './run-state'
+import { groupRuns, runNeedsUserAction, runStatusLabel } from './run-state'
 import type { RunFilter, RunRef } from './run-state'
 import { WatcherChat } from './WatcherChat'
 
@@ -32,12 +32,13 @@ function runCwd(run: RunRef): string | undefined {
 
 /** One selectable run row: status dot, title, working folder, live diff stats,
  *  and an inline start for unstarted tasks (backlog). */
-function RunRow({ run, linkedTask, stats, selected, shortcut, onSelect }: {
+function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, onSelect }: {
   run: RunRef
   linkedTask?: BoardTask
   stats?: { add: number; del: number; files: number }
   selected: boolean
   shortcut?: number
+  showDetails: boolean
   onSelect: () => void
 }) {
   const { startTask } = useActions()
@@ -46,6 +47,7 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, onSelect }: {
   const st = runStatusLabel(run)
   const work = sessionWorkStatus(agent, task)
   const flash = st.tone === 'amber'
+  const expanded = showDetails || runNeedsUserAction(run)
   const startable = !!task && !agent && task.col !== 'done' && task.col !== 'failed'
   const cwd = runCwd(run)
   const folder = cwd?.replace(/\/+$/, '').split('/').pop()
@@ -53,8 +55,10 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, onSelect }: {
     <button
       className="palette-item"
       onClick={onSelect}
+      aria-expanded={expanded}
       style={{
-        width: '100%', display: 'flex', flexDirection: 'column', gap: 3, padding: '8px 10px', textAlign: 'left',
+        width: '100%', display: 'flex', flexDirection: 'column', gap: expanded ? 3 : 2,
+        padding: expanded ? '8px 10px 9px' : '6px 10px', textAlign: 'left',
         background: selected ? 'rgba(245,196,81,.09)' : 'transparent', border: 'none',
         borderLeft: `2px solid ${selected ? 'var(--accent)' : 'transparent'}`, borderRadius: 8, cursor: 'pointer',
       }}
@@ -95,7 +99,7 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, onSelect }: {
           </span>
         )}
       </div>
-      {([
+      {expanded && ([
         ['TASK', work.task, 'var(--accent)'],
         ['NOW', work.current, 'var(--mut2)'],
         ['NEXT', work.next, agent?.actionNeeded || task?.awaitingUser ? 'var(--amber)' : 'var(--green)'],
@@ -107,7 +111,7 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, onSelect }: {
       ))}
     </button>
   )
-  return agent ? <SessionHoverPreview agent={agent} task={task}>{row}</SessionHoverPreview> : row
+  return agent ? <SessionHoverPreview agent={agent} task={task} placement="right">{row}</SessionHoverPreview> : row
 }
 
 /** Detail for a task run without a live session: spec + start, with the
@@ -164,7 +168,11 @@ const FILTERS: Array<{ id: RunFilter; label: string }> = [
 
 /** The Work view's Runs mode: triage rail + the standard session pane. */
 export function RunControl() {
-  const s = useConductorSelector(x => ({ tasks: x.tasks, agents: x.agents, activeWorkspace: x.activeWorkspace }), shallowEqual)
+  const s = useConductorSelector(x => ({
+    tasks: x.tasks, agents: x.agents, activeWorkspace: x.activeWorkspace,
+    runListMode: x.settings.runListMode ?? 'compact',
+  }), shallowEqual)
+  const { updateSettings } = useActions()
   const [filter, setFilter] = useState<RunFilter>('all')
   const groups = useMemo(
     () => groupRuns(s.tasks, s.agents, filter, s.activeWorkspace),
@@ -215,7 +223,7 @@ export function RunControl() {
   let shortcutIx = 0
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-      <div style={{ width: 'clamp(250px, 28vw, 310px)', flexShrink: 0, borderRight: '1px solid var(--line)', overflowY: 'auto', background: 'var(--panel)', padding: '6px 6px 12px' }}>
+      <div style={{ width: 'clamp(238px, 26vw, 294px)', flexShrink: 0, borderRight: '1px solid var(--line)', overflowY: 'auto', background: 'var(--panel)', padding: '6px 6px 12px' }}>
         <div style={{ display: 'flex', gap: 2, margin: '4px 4px 8px', background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2 }}>
           {FILTERS.map(f => (
             <button
@@ -230,6 +238,24 @@ export function RunControl() {
               }}
             >
               {f.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '0 7px 5px' }}>
+          <span className="mono" style={{ flex: 1, fontSize: 8.5, letterSpacing: .55, color: 'var(--faint)' }}>VIEW</span>
+          {(['compact', 'full'] as const).map(mode => (
+            <button
+              key={mode}
+              title={mode === 'compact' ? 'Compact rows; expand only when action is needed' : 'Show Task, Now, and Next for every row'}
+              onClick={() => updateSettings({ runListMode: mode })}
+              style={{
+                border: 'none', borderRadius: 6, padding: '3px 7px', cursor: 'pointer',
+                background: s.runListMode === mode ? 'var(--panel2)' : 'transparent',
+                color: s.runListMode === mode ? 'var(--accent)' : 'var(--dim)',
+                fontSize: 9.5, fontWeight: 600, textTransform: 'capitalize',
+              }}
+            >
+              {mode}
             </button>
           ))}
         </div>
@@ -257,6 +283,7 @@ export function RunControl() {
                   stats={run.agent ? stats[run.agent.id] : undefined}
                   selected={selected?.key === run.key}
                   shortcut={ix <= 9 ? ix : undefined}
+                  showDetails={s.runListMode === 'full'}
                   onSelect={() => setSelKey(run.key)}
                 />
               )

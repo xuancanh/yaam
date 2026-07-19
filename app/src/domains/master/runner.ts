@@ -33,7 +33,7 @@ export interface MasterCtx {
   sessionScreenTail: (id: string) => string
   logEvent: (type: import('../../core/types').EventType, agentId: string | null, text: string) => void
   flash: (t: string) => void
-  applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
+  applyAgentStatus: (sid: string, task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => void
   setNeedsInput: (id: string, question: string) => void
   makeAddonApi: (addonId: string) => AddonApi
   /** write a line to a session's PTY (routes through the shared command as the
@@ -239,10 +239,10 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
       return `removed addon "${name}"`
     },
     runAddonTool: (name, input) => execAddonTool(stateRef.current, name, input, ctx.makeAddonApi),
-    updateAgentStatus: (sid, task, summary, actionNeeded) => {
+    updateAgentStatus: (sid, task, summary, nextAction, actionNeeded) => {
       const agent = stateRef.current.agents.find(a => a.id === sid)
       if (!agent) return `no session with id ${sid}`
-      ctx.applyAgentStatus(sid, task, summary, actionNeeded)
+      ctx.applyAgentStatus(sid, task, summary, nextAction, actionNeeded)
       return `updated status for ${agent.name}`
     },
     renameSession: (sid, name) => {

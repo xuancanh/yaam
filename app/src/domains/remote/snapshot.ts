@@ -49,6 +49,7 @@ export interface RemoteSnapshot {
     status: string
     task: string
     summary: string
+    nextAction: string
     actionNeeded: string
     /** unseen finished/needs-action event — groups with "needs you" in triage */
     attention: boolean
@@ -68,6 +69,7 @@ export interface RemoteSnapshot {
     title: string
     col: string
     watcherNote: string
+    watcherNext: string
     awaitingUser: boolean
     description: string
     criteria: string[]
@@ -186,6 +188,7 @@ export function buildRemoteSnapshot(
         status: a.status,
         task: a.task ?? '',
         summary: a.summary ?? '',
+        nextAction: a.nextAction ?? '',
         actionNeeded: a.actionNeeded ?? '',
         attention: Boolean(a.attention),
         cost: a.cost,
@@ -202,6 +205,7 @@ export function buildRemoteSnapshot(
         title: t.title,
         col: t.col,
         watcherNote: t.watcherNote ?? '',
+        watcherNext: t.watcherNext ?? '',
         awaitingUser: Boolean(t.awaitingUser),
         description: clip(t.description ?? ''),
         criteria: t.criteria ?? [],

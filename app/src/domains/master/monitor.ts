@@ -8,7 +8,7 @@ import type { ApiMessage, LlmConfig } from '../../llm/client'
 import { capToolHistory, runToolLoop, sanitizeToolHistory } from '../../llm/tool-loop'
 
 export interface MonitorExec {
-  updateStatus: (task?: string, summary?: string, actionNeeded?: string) => string
+  updateStatus: (task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => string
   flagNeedsInput: (question: string) => string
   reportToMaster: (digest: string, importance: 'info' | 'action' | 'critical') => string
   /** propose clickable next actions for the user (label + exact text to send) */
@@ -40,15 +40,16 @@ export function promptExtraSections(x: PromptExtras | undefined): string {
 const MONITOR_TOOLS = [
   {
     name: 'update_status',
-    description: 'Update this session\'s card. Each call is a COMPLETE statement: always pass summary (1-2 sentences) and action_needed (what the user must do right now, or "" when nothing — it REPLACES the previous value, so stale asks never linger). task (what it is working on) may be omitted to keep the current one.',
+    description: 'Update this session\'s Task / Now / Next brief. Each call is COMPLETE: summary = what it is doing now (1-2 synthesized sentences, never copied terminal output); next = its next planned step; action_needed = what the user must do right now, or "" when nothing. task may be omitted only when unchanged.',
     input_schema: {
       type: 'object',
       properties: {
         task: { type: 'string' },
         summary: { type: 'string' },
+        next: { type: 'string' },
         action_needed: { type: 'string' },
       },
-      required: ['summary', 'action_needed'],
+      required: ['summary', 'next', 'action_needed'],
     },
   },
   {
@@ -107,10 +108,10 @@ function monitorSystem(agent: Agent, extras?: PromptExtras): string {
 - name: ${agent.name}
 - command: ${agent.cmd || '-'}
 - working dir: ${agent.cwd || '-'}
-- currently tracked: task="${agent.task || '-'}" summary="${agent.summary || '-'}" action_needed="${agent.actionNeeded || '-'}"
+- currently tracked: task="${agent.task || '-'}" now="${agent.summary || '-'}" next="${agent.nextAction || '-'}" action_needed="${agent.actionNeeded || '-'}"
 
 You receive the session's output whenever it settles. Your duties, in order:
-1. Keep the status card current with update_status (terse: task, 1-2 sentence summary; action_needed = what the user must do RIGHT NOW, or "" — each call replaces the old value, so re-state it while it still applies).
+1. On every incoming user-input or terminal-output update, assess whether Task / Now / Next changed. If it did, call update_status with a synthesized task, 1-2 sentence current summary, and concrete next planned step; never paste or merely truncate a terminal line. Always re-state action_needed while it applies, or pass "" to clear it.
 2. If the session is waiting on the user (permission prompt, question, selection menu), call flag_needs_input.
 3. When the session is blocked, errored, or finished with obvious next moves, ALSO call suggest_actions with 1-4 one-click options (exact text to send) — the user prefers choosing over typing. Check learned memory / memory_lookup first so the suggestions match how this user actually responds; put the likeliest choice first.
 4. Call report_to_master ONLY when noteworthy: task completed, error/blocked, user decision required, or a major milestone. Routine progress = update_status only, no report. Master is busy — do not spam it.
@@ -127,6 +128,7 @@ function runMonitorTool(name: string, input: Record<string, unknown>, exec: Moni
       return exec.updateStatus(
         typeof input.task === 'string' ? input.task : undefined,
         typeof input.summary === 'string' ? input.summary : undefined,
+        typeof input.next === 'string' ? input.next : undefined,
         typeof input.action_needed === 'string' ? input.action_needed : undefined,
       )
     case 'flag_needs_input':

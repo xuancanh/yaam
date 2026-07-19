@@ -177,6 +177,8 @@ export interface SessionRecord {
   task?: string
   /** Master-maintained: latest 1-2 sentence state summary */
   summary?: string
+  /** Monitor/watcher-maintained: the session's next planned step */
+  nextAction?: string
   /** Master-maintained: what the user must do, if anything */
   actionNeeded?: string
   summaryAt?: string
@@ -661,6 +663,8 @@ export interface OrchestrationSettings {
   chatListWidth?: number
   /** Work view mode: tab groups & split panes, or the runs triage rail */
   workMode?: 'tabs' | 'runs'
+  /** Runs rail density: compact rows auto-open only when user action is needed */
+  runListMode?: 'compact' | 'full'
   /** auto-compact a chat once one turn's input reaches this many tokens:
    *  the API context is distilled into a summary (the visible transcript is
    *  untouched). undefined = default (80k) · 0 = off */
@@ -752,6 +756,8 @@ export interface BoardTask {
   history?: HistoryEntry[]
   /** watcher's one-line status shown on the card */
   watcherNote?: string
+  /** watcher's concise next planned step for the task */
+  watcherNext?: string
   /** the watcher flagged a question and is waiting on the user */
   awaitingUser?: boolean
   /** epoch ms — a session is spawned for the task at this time */

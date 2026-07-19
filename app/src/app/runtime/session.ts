@@ -27,7 +27,7 @@ import type { RuntimeRefs } from './refs'
 export interface SessionRuntime {
   sessionScreenTail: (id: string) => string
   setNeedsInput: (id: string, question: string, options?: EscOption[], cursorNum?: number) => void
-  applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
+  applyAgentStatus: (sid: string, task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => void
   appendTail: (id: string, line: string) => void
   runMonitor: (id: string, note: string) => void
   disposeMonitor: (id: string) => void

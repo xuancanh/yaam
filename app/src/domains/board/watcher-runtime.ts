@@ -12,7 +12,7 @@ export interface WatcherPorts {
   stateRef: MutableRefObject<AppState>
   dispatch: (f: (s: AppState) => AppState) => void
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
-  applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
+  applyAgentStatus: (sid: string, task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => void
   pushTaskChat: (taskId: string, role: TaskChatMsg['role'], text: string) => void
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void

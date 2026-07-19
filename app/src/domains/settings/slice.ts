@@ -55,6 +55,7 @@ export function freshSettingsSlice(): SettingsSlice {
       masterEnabled: false, masterModel: 'claude-sonnet-5', monitorModel: 'claude-haiku-4-5-20251001', apiKey: '',
       provider: 'anthropic', baseUrl: '',
       awsRegion: 'us-east-1', awsProfile: '', awsRefreshCmd: '', credCmd: '',
+      runListMode: 'compact',
       registryUrl: 'https://raw.githubusercontent.com/xuancanh/yaam/main/registry/index.json',
       registries: [{ name: 'yaam', url: 'https://raw.githubusercontent.com/xuancanh/yaam/main/registry/index.json' }],
       pluginRegistries: [{ name: 'claude-plugins-official', url: 'https://github.com/anthropics/claude-plugins-official' }],

@@ -52,7 +52,7 @@ describe('createSessionSettle', () => {
     expect(h.clock.pending).toBe(0)
   })
 
-  it('keeps refreshing the status card as one running session produces more output', () => {
+  it('keeps forwarding settled output for monitor-authored status refreshes', () => {
     const h = harness([agent({ log: [{ t: 'out', x: 'starting up' }] as Agent['log'] })])
     const push = (line: string) => h.state.update(s => ({
       ...s,
@@ -64,43 +64,46 @@ describe('createSessionSettle', () => {
     push('compiling module A')
     h.rt.bumpSettle('a1')
     h.clock.advance(10_000)
-    expect(h.state.get().agents[0].summary).toBe('compiling module A')
+    expect(h.deps.runMonitor).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(h.deps.runMonitor).mock.calls[0][1]).toContain('compiling module A')
+    expect(h.state.get().agents[0].summary).toBeUndefined()
 
     // a SECOND burst on the same run must update the card again — the settle
     // loop re-arms an active session, so status no longer freezes after step 1
     push('running tests · 12 passed')
     h.rt.bumpSettle('a1')
     h.clock.advance(10_000)
-    expect(h.state.get().agents[0].summary).toBe('running tests · 12 passed')
+    expect(h.deps.runMonitor).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(h.deps.runMonitor).mock.calls[1][1]).toContain('running tests · 12 passed')
+    expect(h.state.get().agents[0].summary).toBeUndefined()
 
     // but the user is only pinged once (the fresh arm); the re-armed
     // continuation refreshes silently unless the output needs attention
     expect(h.deps.notify).toHaveBeenCalledTimes(1)
   })
 
-  it('live-updates the status line from output while the session is still streaming', () => {
-    const h = harness([agent({ log: [{ t: 'out', x: 'starting up' }] as Agent['log'] })])
+  it('keeps the monitor summary stable while raw output is streaming', () => {
+    const h = harness([agent({ summary: 'Preparing the build', log: [{ t: 'out', x: 'starting up' }] as Agent['log'] })])
     const push = (line: string) => h.state.update(s => ({
       ...s,
       agents: s.agents.map(a => a.id === 'a1' ? { ...a, log: [...a.log, { t: 'out', x: line }] } : a),
     }))
 
-    // no settle timer has fired — this is the mid-stream card refresh
+    // No settle timer has fired: raw output changes only the responding edge.
     push('resolving dependencies')
     h.rt.bumpSettle('a1')
-    expect(h.state.get().agents[0].summary).toBe('resolving dependencies')
+    expect(h.state.get().agents[0].summary).toBe('Preparing the build')
     expect(h.state.get().agents[0].responding).toBe(true)
 
-    // further chunks within the throttle window don't churn the card…
+    // Further chunks never overwrite the synthesized monitor summary.
     push('linking')
     h.rt.bumpSettle('a1')
-    expect(h.state.get().agents[0].summary).toBe('resolving dependencies')
+    expect(h.state.get().agents[0].summary).toBe('Preparing the build')
 
-    // …but once the throttle elapses the newest line shows through
     h.clock.advance(1300)
     push('bundling assets')
     h.rt.bumpSettle('a1')
-    expect(h.state.get().agents[0].summary).toBe('bundling assets')
+    expect(h.state.get().agents[0].summary).toBe('Preparing the build')
   })
 
   it('reports a task session to its watcher once per changed screen, not per settle', () => {

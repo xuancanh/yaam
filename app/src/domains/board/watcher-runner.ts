@@ -30,7 +30,7 @@ export interface WatcherCtx {
   /** per-task cancellation — aborted when the task is deleted */
   aborts: AbortRegistry
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
-  applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
+  applyAgentStatus: (sid: string, task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => void
   pushTaskChat: (taskId: string, role: TaskChatMsg['role'], text: string) => void
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
@@ -144,13 +144,13 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           if (col === 'failed') ctx.notify('escalate', 'Task failed', t.title.slice(0, 60), t.agentId)
           return `moved to ${col}`
         },
-        updateNote: n => {
+        updateNote: (n, next) => {
           const a = primaryAgent()
           const event = createTaskActivity(ctx.stateRef.current, taskId, {
             category: 'work', actor: 'watcher', kind: 'progress', text: n.slice(0, 140),
           }, a?.id)
           ctx.dispatch(s2 => withActivityTargets(
-            updateLocatedTask(s2, taskId, x => ({ ...x, watcherNote: n.slice(0, 140) })),
+            updateLocatedTask(s2, taskId, x => ({ ...x, watcherNote: n.slice(0, 140), watcherNext: next.slice(0, 140) || undefined })),
             event,
             { taskId, sessionId: a?.id, coalesce: true },
           ))
@@ -160,7 +160,7 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           // forever (nothing else manages that field for task sessions).
           const t = getTask()
           if (a && t && (a.status === 'running' || a.status === 'needs')) {
-            ctx.applyAgentStatus(a.id, t.title.slice(0, 60), n.slice(0, 140), t.awaitingUser ? undefined : '')
+            ctx.applyAgentStatus(a.id, t.title.slice(0, 60), n.slice(0, 140), next.slice(0, 140), t.awaitingUser ? undefined : '')
           }
           return 'note updated'
         },
@@ -187,7 +187,7 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           // remote show WHAT is needed, not just that something is
           const a = primaryAgent()
           if (a && (a.status === 'running' || a.status === 'needs')) {
-            ctx.applyAgentStatus(a.id, undefined, undefined, q.slice(0, 140))
+            ctx.applyAgentStatus(a.id, undefined, undefined, 'Continue after the user answers', q.slice(0, 140))
           }
           ctx.notify('escalate', `Task “${(t?.title ?? '').slice(0, 40)}” needs you`, q.slice(0, 90), t?.agentId ?? null)
           return 'asked — the user will reply in the task chat'

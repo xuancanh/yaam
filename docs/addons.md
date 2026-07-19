@@ -295,11 +295,11 @@ Pushed on iframe load and every ~3 s. Shape:
 {
   workspace: string,                        // active workspace name
   sessions: { id, name, status, ephemeral,  // running | idle | needs | error
-              repo, task, summary, actionNeeded,
+              repo, task, summary, nextAction, actionNeeded,
               cwd, cost, used,
               machineId, isolated }[],      // remote machine · git-worktree flag
   tasks:    { id, title, col, agentId,      // col: backlog|progress|review|done|failed
-              description, criteria, watcherNote, awaitingUser,
+              description, criteria, watcherNote, watcherNext, awaitingUser,
               cwd, templateId, typeId,
               machineId, isolate, sessionMode, scheduleAt,
               chatTail }[],                 // last 5 watcher-chat messages

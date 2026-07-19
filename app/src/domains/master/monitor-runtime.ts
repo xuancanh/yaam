@@ -11,7 +11,7 @@ import { runMonitorLoop } from './monitor-runner'
 export interface MonitorPorts {
   stateRef: MutableRefObject<AppState>
   dispatch: (f: (s: AppState) => AppState) => void
-  applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
+  applyAgentStatus: (sid: string, task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => void
   setNeedsInput: (id: string, question: string, options?: EscOption[], cursorNum?: number) => void
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
@@ -26,7 +26,7 @@ export interface MonitorRuntime {
 export function createMonitorRuntime(ports: MonitorPorts): MonitorRuntime {
   const histories = new Map<string, ApiMessage[]>()
   const busy = new Set<string>()
-  const queue = new Map<string, string>()
+  const queue = new Map<string, string[]>()
   const aborts = new AbortRegistry()
   return {
     run: (id, note) => { void runMonitorLoop({ ...ports, histories, busy, queue, aborts }, id, note) },

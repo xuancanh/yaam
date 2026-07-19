@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupRuns, runGroupOf, runMatchesFilter, runStatusLabel } from './run-state'
+import { groupRuns, runGroupOf, runMatchesFilter, runNeedsUserAction, runStatusLabel } from './run-state'
 import type { Agent, BoardTask } from '../../core/types'
 
 const task = (over: Partial<BoardTask>): BoardTask =>
@@ -19,11 +19,23 @@ describe('runGroupOf / runStatusLabel', () => {
     const r3 = { kind: 'session' as const, key: 'sess:a1', agent: agent({ status: 'needs' }) }
     expect(runGroupOf(r3)).toBe('needs')
   })
-  it('live agents run, unstarted backlog tasks are startable, finished tasks are done, the rest idles', () => {
+  it('treats monitor actions and failures as user-action rows', () => {
+    const action = { kind: 'session' as const, key: 'sess:a1', agent: agent({ status: 'running', actionNeeded: 'Approve the command' }) }
+    expect(runNeedsUserAction(action)).toBe(true)
+    expect(runGroupOf(action)).toBe('needs')
+    expect(runStatusLabel(action)).toEqual({ label: 'action needed', tone: 'amber' })
+
+    const failed = { kind: 'task' as const, key: 'task:t1', task: task({ col: 'failed' }) }
+    expect(runNeedsUserAction(failed)).toBe(true)
+    expect(runGroupOf(failed)).toBe('needs')
+    expect(runStatusLabel(failed)).toEqual({ label: 'failed', tone: 'red' })
+  })
+  it('live agents run, unstarted backlog tasks are startable, finished tasks are done, and ordinary rows stay compact', () => {
     expect(runGroupOf({ kind: 'session', key: 'sess:a1', agent: agent({ status: 'running' }) })).toBe('running')
     expect(runGroupOf({ kind: 'task', key: 'task:t1', task: task({ col: 'done' }) })).toBe('done')
     expect(runGroupOf({ kind: 'task', key: 'task:t1', task: task({ col: 'backlog' }) })).toBe('backlog')
     expect(runGroupOf({ kind: 'session', key: 'sess:a1', agent: agent({ status: 'idle' }) })).toBe('idle')
+    expect(runNeedsUserAction({ kind: 'session', key: 'sess:a1', agent: agent({ status: 'running' }) })).toBe(false)
   })
 })
 

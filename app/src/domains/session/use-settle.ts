@@ -14,7 +14,7 @@ import { dispatch } from '../../core/store'
 import { browserClock, type ClockPort, type Disposable, type StatePort } from '../../core/ports'
 import { activeGroupOf } from './layout-state'
 import {
-  detectPrompt, deterministicStatus, extractOptions, stableScreenKey, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
+  detectPrompt, extractOptions, stableScreenKey, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
 } from './prompt-detection'
 import { NOTE_PROGRESS } from '../board/watcher-notes'
 
@@ -76,9 +76,6 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   // store is only touched on the false→true / true→false edges — bumpSettle runs
   // at PTY speed, and dispatching per chunk would defeat the output batching.
   const streaming = new Set<string>()
-  // throttle for the live status refresh below — bumpSettle runs at PTY speed
-  const lastLive = new Map<string, number>()
-  const LIVE_STATUS_MS = 1200
   const OUTPUT_CHECKPOINT_MS = 8000
   const setResponding = (id: string, on: boolean) => {
     if (on === streaming.has(id)) return
@@ -163,7 +160,6 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     const streamLines = agent.log.slice(since).map(l => l.x).filter(Boolean)
     const content = alt ? readScreen(id) : streamLines.slice(-14)
     if (!content.length) { flushOutput(id, true); return }
-    const lastLine = content[content.length - 1] ?? ''
     // Never flag input, and never relay half-answers, while the TUI busy marker
     // is visible — any question-looking text on screen is transient then.
     const { busy, promptDetected, question } = detectPrompt(content, alt)
@@ -222,33 +218,20 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
         const watching = (g2 ? g2.slots[g2.activePane] : null) === id
           && (agent.workspaceId ?? st2.activeWorkspace) === st2.activeWorkspace
           && focused()
-        // No LLM monitor to write a status card — derive one deterministically
-        // from the settled output so the session still reports what it last did
-        // and flags output that looks like an error. (When the brain is on, the
-        // monitor below authors a richer status instead.)
-        const digest = !llm && !taskForSession(id) ? deterministicStatus(content) : null
-        if (!watching || digest) {
-          const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        if (!watching) {
           state.update(s2 => ({
             ...s2,
             agents: s2.agents.map(a => (a.id === id
-              ? {
-                  ...a,
-                  attention: a.attention || !watching,
-                  // the digest is authoritative for this deterministic path:
-                  // a clean settle must CLEAR a stale "possible error" flag
-                  ...(digest ? { summary: digest.summary || a.summary, summaryAt: at, actionNeeded: digest.actionNeeded } : {}),
-                }
+              ? { ...a, attention: true }
               : a)),
           }))
           // Ping the user when a response settles — but on a re-armed
           // continuation (the same run producing more output) only if the
           // output now needs attention, so a long autonomous run refreshes its
           // card silently instead of ringing the bell at every quiet point.
-          if (!watching && (!arm.continuation || digest?.actionNeeded)) {
-            notify(digest?.actionNeeded ? 'escalate' : 'done',
-              `${agent.name} ${digest?.actionNeeded ? 'may need attention' : 'finished responding'}`,
-              (digest?.actionNeeded ?? lastLine).slice(0, 90), id)
+          if (!arm.continuation) {
+            notify('done', `${agent.name} finished responding`,
+              llm ? 'Watcher is preparing a status summary' : 'Open the session to review its output', id)
           }
         }
         // Keep an actively-running session under watch: re-arm with the screen
@@ -273,38 +256,11 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     const agent = state.get().agents.find(a => a.id === id)
     if (agent?.status === 'running') {
       setResponding(id, true)
-      liveStatus(id, agent)
     }
     const since = prev?.since ?? Math.max(0, (agent?.log.length ?? 1) - 1)
     const timer = clock.setTimeout(() => onSettle(id, since), 3000)
     settle.set(id, { since, timer })
     scheduleOutputCheckpoint(id)
-  }
-
-  // While a session streams, keep its status line tracking the latest output in
-  // real time instead of only refreshing at quiet points — a deterministic,
-  // throttled read of the current screen/tail. The settle monitor still
-  // overwrites this with a richer, considered summary once output stabilizes;
-  // action_needed is left untouched here so transient mid-stream error text
-  // never raises a false "needs attention" flag.
-  const liveStatus = (id: string, agent: AppState['agents'][number]) => {
-    const now = clock.now()
-    const last = lastLive.get(id)
-    if (last !== undefined && now - last < LIVE_STATUS_MS) return
-    const alt = isAltScreen(id)
-    const content = alt ? readScreen(id) : agent.log.slice(-14).map(l => l.x).filter(Boolean)
-    if (!content.length) return
-    // never surface half-drawn prompt text while the TUI busy marker is up
-    const { busy, promptDetected } = detectPrompt(content, alt)
-    if (busy || promptDetected) return
-    const { summary } = deterministicStatus(content)
-    if (!summary || summary === agent.summary) return
-    lastLive.set(id, now)
-    const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    state.update(s => ({
-      ...s,
-      agents: s.agents.map(a => (a.id === id ? { ...a, summary, summaryAt: at } : a)),
-    }))
   }
 
   const clearFlagged = (id: string) => { lastFlagged.delete(id) }
@@ -318,7 +274,6 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     outputTimers.delete(id)
     lastOutputKey.delete(id)
     lastFinalKey.delete(id)
-    lastLive.delete(id)
     setResponding(id, false)
   }
 
@@ -366,7 +321,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       scan?.dispose(); scan = undefined
       for (const { timer } of settle.values()) timer.dispose()
       for (const timer of outputTimers.values()) timer.dispose()
-      settle.clear(); armed.clear(); lastFlagged.clear(); outputBuffers.clear(); outputTimers.clear(); lastOutputKey.clear(); lastFinalKey.clear(); streaming.clear(); lastLive.clear()
+      settle.clear(); armed.clear(); lastFlagged.clear(); outputBuffers.clear(); outputTimers.clear(); lastOutputKey.clear(); lastFinalKey.clear(); streaming.clear()
     },
   }
 }

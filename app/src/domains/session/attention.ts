@@ -25,7 +25,7 @@ export interface SessionAttentionCtx {
 export interface SessionAttention {
   sessionScreenTail: (id: string) => string
   setNeedsInput: (id: string, question: string, options?: EscOption[], cursorNum?: number) => void
-  applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
+  applyAgentStatus: (sid: string, task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => void
   appendTail: (id: string, line: string) => void
 }
 
@@ -108,7 +108,7 @@ export function createSessionAttention(ctx: SessionAttentionCtx): SessionAttenti
     },
 
     // Merge monitor-authored status fields into one session card.
-    applyAgentStatus: (sid, task, summary, actionNeeded) => {
+    applyAgentStatus: (sid, task, summary, nextAction, actionNeeded) => {
       const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       const before = stateRef.current.agents.find(a => a.id === sid)
       const boardTask = findTaskForAgentInState(stateRef.current, sid)
@@ -132,6 +132,7 @@ export function createSessionAttention(ctx: SessionAttentionCtx): SessionAttenti
               ...a,
               task: task !== undefined ? (task || undefined) : a.task,
               summary: summary !== undefined ? (summary || undefined) : a.summary,
+              nextAction: nextAction !== undefined ? (nextAction || undefined) : a.nextAction,
               actionNeeded: actionNeeded !== undefined ? (actionNeeded || undefined) : a.actionNeeded,
               attention: a.attention || Boolean(actionNeeded),
               summaryAt: at,

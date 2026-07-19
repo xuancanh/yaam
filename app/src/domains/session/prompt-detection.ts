@@ -63,24 +63,8 @@ export function stableScreenKey(content: string[]): string {
     .join('\n')
 }
 
-// Output that reads like something went wrong — used to flag a session card
-// deterministically when there is no LLM monitor to judge the outcome.
-const ERROR_LINE_RE = /\b(error|errno|failed|failure|fatal|panic|traceback|exception|unhandled|segmentation fault|core dumped|cannot |could ?n[o']t |command not found|not recognized|no such file|permission denied|access denied|connection refused|timed out|unable to)\b/i
-// Lines that are just decoration/noise, not a meaningful "last thing it said".
+// Lines that are just decoration/noise, not meaningful screen identity.
 const NOISE_LINE_RE = /^[\s│┌└├─╭╰╮╯>#$%❯•·*=-]*$/
-
-/**
- * A no-LLM stand-in for the session monitor's status update: from a settled
- * terminal tail, pick the last meaningful line as a one-line summary and, if the
- * recent output looks like an error, surface it as an action-needed flag. Pure.
- */
-export function deterministicStatus(content: string[]): { summary: string; actionNeeded?: string } {
-  const clean = content.map(l => l.trim()).filter(l => l && !NOISE_LINE_RE.test(l))
-  const summary = (clean[clean.length - 1] ?? '').slice(0, 140)
-  // scan only the recent tail so old, already-handled errors don't re-flag
-  const errLine = [...clean].reverse().slice(0, 8).find(l => ERROR_LINE_RE.test(l))
-  return errLine ? { summary, actionNeeded: `Possible error — ${errLine.slice(0, 120)}` } : { summary }
-}
 
 /** Extract numbered TUI choices and the visible cursor from settled screen rows. */
 export function extractOptions(lines: string[]): { options: EscOption[]; cursorNum: number } {

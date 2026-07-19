@@ -151,12 +151,21 @@ workspace file viewer.
 | `prompt-detection.ts` | Pure prompt/menu heuristics, numbered option extraction, and the no-brain status digest |
 | `use-settle.ts` | Plain settle runtime plus legacy React adapter |
 | `session-work-status.ts` | Shared task/current-action/next-action precedence for tabs and the Sidebar rail |
-| `SessionHoverPreview.tsx` | Delayed tab/Sidebar hover card with task context and a read-only live screen snapshot |
+| `SessionHoverPreview.tsx` | Delayed tab/Sidebar hover card with the monitor/watcher-authored Task / Now / Next brief |
 | `exit.ts` | Pure stopped/failed/completed/exited classification |
 | `exit-handler.ts` | Effectful process-exit coordinator and native subscription |
 | `FilesPane.tsx` | File tree, git status/diff gutter, source/document/media preview |
 | `GitPanel.tsx` | `GitWorkbench` (staging tree, single/all-files diffs, repo picker, AI-draftable commits) + the pane-header popup shell |
 | `Workspace.tsx`, `Pane.tsx`, `TerminalPane.tsx` | Pane layout and terminal/chat mounting |
+
+The Work view's Sidebar has explicit **Compact** and **Full** modes. Compact
+uses two-line rows and automatically expands only rows that
+`runNeedsUserAction` classifies as actionable (prompt, monitor-requested action,
+attention, review, or failure); Full shows Task / Now / Next for every row. The
+same predicate also places actionable work in the **Needs you** group, preventing
+display density and triage order from drifting apart. Hovering a live-session
+row opens its synthesized status brief to the right of the rail; top-tab
+previews retain their vertical placement.
 
 ### Launch and resume
 
@@ -193,14 +202,14 @@ printable output characters.
 
 ### Tabs, Sidebar status, and hover preview
 
-`sessionWorkStatus` deterministically resolves a run's task, current action, and
-next action. Explicit monitor/watcher state wins; suggested actions, linked-task
-state, durable work history, and lifecycle state provide bounded fallbacks.
-Sidebar rows render all three fields. Session tabs and Sidebar session rows wrap
-the same hover-intent component, whose miniature terminal is a periodically
-refreshed `readScreen` snapshot with a log-tail fallback. It is deliberately
-textual/read-only: mounting another xterm host would steal the singleton terminal
-element from the real pane.
+`sessionWorkStatus` resolves the synthesized Task / Now / Next brief.
+`Agent.task`, `Agent.summary`, and `Agent.nextAction` are authored by the
+per-session monitor; task runs prefer `BoardTask.title`, `watcherNote`, and
+`watcherNext`, authored by their watcher. Suggested actions and lifecycle
+placeholders cover pending decisions and the interval before the first LLM
+digest. Raw terminal lines and extractive last-line summaries are deliberately
+excluded. Session tabs and Sidebar rows share the same hover-intent component;
+the Sidebar places it to the right while top tabs place it vertically.
 
 ### Settle and prompt detection
 
@@ -354,7 +363,7 @@ prompt construction, tool execution, approval handling, and sidebar UI.
 - `master-runtime.ts` owns busy/queued/dedup state and cancellation.
 - `monitor.ts` defines a three-round session-monitor harness.
 - `monitor-runner.ts` maps monitor tools to status, prompt, and Master events.
-- `monitor-runtime.ts` owns per-session histories, busy set, last-note queue, and
+- `monitor-runtime.ts` owns per-session histories, busy set, bounded note queue, and
   abort registry.
 - `actions.ts` implements composer send and Master tool approval decisions.
 - `Sidebar.tsx` renders chat, routes, escalations, build results, collapsed

@@ -12,7 +12,6 @@ import { dispatch } from '../../core/store'
 import * as native from '../../core/native'
 import { classifyExit } from './exit'
 import type { SessionExit } from './exit'
-import { deterministicStatus } from './prompt-detection'
 import { realSessionProcessPort } from './ports'
 import { removeFromGroups } from './layout-state'
 import { typeForCommand } from './command'
@@ -77,11 +76,13 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
     autoArchive: !!agent?.autoArchive, hasTask: !!taskFor,
   })
   const { failed } = cls
-  // No LLM monitor to digest the exit — for a plain (non-task) session, derive a
-  // deterministic status so its card still reflects the outcome. Task sessions
-  // use the board column/note above instead.
+  // Without a monitor, retain only a lifecycle summary. Never promote a raw
+  // terminal line into the synthesized Task / Now / Next status brief.
   const brainDigest = brainOff && !userStopped && !taskFor && agent
-    ? deterministicStatus((agent.log ?? []).slice(-14).map(l => l.x))
+    ? {
+        summary: failed ? `Session exited with code ${e.code ?? 'unknown'}` : 'Session process completed',
+        nextAction: failed ? 'Inspect the failure and decide whether to retry' : 'Review the completed session',
+      }
     : null
   const digestAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const outcomeEvent = agent && !userStopped
@@ -102,10 +103,10 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
           log: a.log.concat([{ t: 'sys' as const, x: userStopped ? 'stopped by you' : `process exited${e.code !== null ? ` · code ${e.code}` : ''}` }]),
           ...(brainDigest
             ? {
-                summary: (failed ? `Exited with code ${e.code}` : brainDigest.summary) || a.summary,
+                summary: brainDigest.summary,
+                nextAction: brainDigest.nextAction,
                 summaryAt: digestAt,
-                // authoritative: a clean exit clears any stale error flag
-                actionNeeded: failed ? `Exited with code ${e.code} — check the terminal output` : brainDigest.actionNeeded,
+                actionNeeded: failed ? `Exited with code ${e.code ?? 'unknown'} — review the failure` : undefined,
               }
             : {}),
         }

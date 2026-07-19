@@ -275,7 +275,7 @@ export function addonSnapshot(s: AppState): Record<string, unknown> {
   return {
     sessions: s.agents.filter(a => !a.archived).map(a => ({
       id: a.id, name: a.name, status: a.status, ephemeral: !!a.ephemeral, repo: a.repo,
-      task: a.task ?? null, summary: a.summary ?? null, actionNeeded: a.actionNeeded ?? null,
+      task: a.task ?? null, summary: a.summary ?? null, nextAction: a.nextAction ?? null, actionNeeded: a.actionNeeded ?? null,
       cwd: a.cwd ?? null, cost: Number(a.cost.toFixed(3)), used: Number(a.used.toFixed(2)),
       machineId: a.machineId ?? null, isolated: !!a.worktree,
     })),
@@ -283,7 +283,7 @@ export function addonSnapshot(s: AppState): Record<string, unknown> {
     tasks: s.tasks.map(t => ({
       id: t.id, title: t.title, col: t.col, agentId: t.agentId,
       description: t.description ?? null, criteria: t.criteria ?? [],
-      watcherNote: t.watcherNote ?? null, awaitingUser: !!t.awaitingUser,
+      watcherNote: t.watcherNote ?? null, watcherNext: t.watcherNext ?? null, awaitingUser: !!t.awaitingUser,
       cwd: t.cwd ?? null, templateId: t.templateId ?? null, typeId: t.typeId ?? null,
       machineId: t.machineId ?? null, isolate: !!t.isolate,
       sessionMode: t.sessionMode ?? 'oneshot', scheduleAt: t.scheduleAt ?? null,

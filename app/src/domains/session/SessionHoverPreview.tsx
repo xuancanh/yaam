@@ -2,37 +2,30 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { createPortal } from 'react-dom'
 import type { Agent, BoardTask } from '../../core/types'
 import { indicatorColor } from '../../core/data'
-import { readScreen } from '../../core/terminals'
 import { sessionWorkStatus } from './session-work-status'
 
-function previewLines(agent: Agent): string[] {
-  const rendered = readScreen(agent.id, 12)
-  if (rendered.length) return rendered
-  return agent.log.slice(-12).map(line => line.x).filter(Boolean)
-}
+type PreviewPlacement = 'vertical' | 'right'
 
-function PreviewCard({ agent, task, anchor }: { agent: Agent; task?: BoardTask; anchor: HTMLElement }) {
+function PreviewCard({ agent, task, anchor, placement }: { agent: Agent; task?: BoardTask; anchor: HTMLElement; placement: PreviewPlacement }) {
   const status = sessionWorkStatus(agent, task)
   const card = useRef<HTMLDivElement>(null)
-  const [lines, setLines] = useState(() => previewLines(agent))
   const [position, setPosition] = useState({ top: 0, left: 0, ready: false })
-
-  useEffect(() => {
-    setLines(previewLines(agent))
-    const timer = window.setInterval(() => setLines(previewLines(agent)), 700)
-    return () => window.clearInterval(timer)
-  }, [agent])
 
   useLayoutEffect(() => {
     const place = () => {
       const box = anchor.getBoundingClientRect()
       const width = Math.min(420, window.innerWidth - 20)
       const height = card.current?.offsetHeight ?? 360
-      const left = Math.max(10, Math.min(box.left, window.innerWidth - width - 10))
+      const rightSide = box.right + 8
+      const left = placement === 'right'
+        ? Math.max(10, Math.min(rightSide, window.innerWidth - width - 10))
+        : Math.max(10, Math.min(box.left, window.innerWidth - width - 10))
       const below = box.bottom + 8
-      const top = below + height <= window.innerHeight - 10
-        ? below
-        : Math.max(10, box.top - height - 8)
+      const top = placement === 'right'
+        ? Math.max(10, Math.min(box.top, window.innerHeight - height - 10))
+        : below + height <= window.innerHeight - 10
+          ? below
+          : Math.max(10, box.top - height - 8)
       setPosition({ top, left, ready: true })
     }
     place()
@@ -42,7 +35,7 @@ function PreviewCard({ agent, task, anchor }: { agent: Agent; task?: BoardTask; 
       window.removeEventListener('resize', place)
       window.removeEventListener('scroll', place, true)
     }
-  }, [anchor, lines.length])
+  }, [anchor, placement])
 
   return createPortal((
     <div
@@ -77,19 +70,18 @@ function PreviewCard({ agent, task, anchor }: { agent: Agent; task?: BoardTask; 
           </div>
         )}
       </div>
-      <div style={{ borderTop: '1px solid var(--line)', background: 'var(--bg)', padding: '8px 10px 9px' }}>
-        <div className="mono" style={{ fontSize: 8.5, letterSpacing: .65, color: 'var(--dim)', marginBottom: 6 }}>LIVE SESSION PREVIEW</div>
-        <div className="mono" style={{ height: 128, overflow: 'hidden', fontSize: 9.5, lineHeight: 1.32, color: 'var(--mut2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {lines.length ? lines.join('\n') : 'No terminal output yet.'}
-        </div>
-      </div>
     </div>
   ), document.body)
 }
 
 /** Hover-intent wrapper for tab/sidebar rows. `display: contents` preserves the
  * existing flex/grid layout while the first child remains the placement anchor. */
-export function SessionHoverPreview({ agent, task, children }: { agent: Agent; task?: BoardTask; children: ReactNode }) {
+export function SessionHoverPreview({ agent, task, children, placement = 'vertical' }: {
+  agent: Agent
+  task?: BoardTask
+  children: ReactNode
+  placement?: PreviewPlacement
+}) {
   const host = useRef<HTMLSpanElement>(null)
   const timer = useRef<number | null>(null)
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
@@ -110,7 +102,7 @@ export function SessionHoverPreview({ agent, task, children }: { agent: Agent; t
   return (
     <span ref={host} onMouseEnter={open} onMouseLeave={close} style={{ display: 'contents' }}>
       {children}
-      {anchor && <PreviewCard agent={agent} task={task} anchor={anchor} />}
+      {anchor && <PreviewCard agent={agent} task={task} anchor={anchor} placement={placement} />}
     </span>
   )
 }

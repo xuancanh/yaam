@@ -66,7 +66,7 @@ export async function draftTaskSpec(
 
 export interface WatcherExec {
   moveTask: (col: string) => string
-  updateNote: (note: string) => string
+  updateNote: (note: string, next: string) => string
   sendToSession: (text: string, session?: string) => string
   askUser: (question: string) => string
   checkSession: () => string
@@ -89,11 +89,11 @@ const WATCHER_TOOLS = [
   },
   {
     name: 'update_note',
-    description: "Set the one-line status shown on the task's card (terse, present tense, e.g. 'running tests · 2/3 criteria met').",
+    description: "Update the task's synthesized Now / Next brief. note = what is happening now (terse present tense, never copied terminal output); next = the next planned step. Call whenever incoming user input or terminal output materially changes either field.",
     input_schema: {
       type: 'object',
-      properties: { note: { type: 'string' } },
-      required: ['note'],
+      properties: { note: { type: 'string' }, next: { type: 'string' } },
+      required: ['note', 'next'],
     },
   },
   {
@@ -184,7 +184,7 @@ YOUR DUTIES
 1. YOU own the workers: spawn_session when the task needs work and nothing is running; respawn with extra_instructions after a fixable failure; spawn a second session only when parallel work genuinely helps (they share no state — split cleanly).
 2. Track progress against the acceptance criteria — only against evidence from digests/output/check_session, never invented.
 3. Keep the board truthful with move_task: progress while working; review when the work looks complete (criteria appear met) so the user can verify; done only when the user confirms or the evidence is unambiguous; failed when the attempt failed for good.
-4. Keep the card's one-line note current with update_note on every meaningful change.
+4. For every incoming user-input or terminal-output event, reassess Task / Now / Next. When Now or Next changed, call update_note with both fields as a synthesized status brief — never paste or merely truncate raw terminal output.
 5. When a session stalls, errs, or asks something you can answer from the task spec, unblock it with send_to_session.
 6. When YOU are stuck, the outcome is ambiguous, or a decision belongs to the user — ask_user (sparingly; one focused question).
 
@@ -197,7 +197,7 @@ function runWatcherTool(name: string, input: Record<string, unknown>, exec: Watc
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '')
   switch (name) {
     case 'move_task': return exec.moveTask(str('col'))
-    case 'update_note': return exec.updateNote(str('note'))
+    case 'update_note': return exec.updateNote(str('note'), str('next'))
     case 'send_to_session': return exec.sendToSession(str('text'), str('session') || undefined)
     case 'ask_user': return exec.askUser(str('question'))
     case 'check_session': return exec.checkSession()

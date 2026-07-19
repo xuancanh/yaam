@@ -21,10 +21,10 @@ export interface MonitorCtx {
   dispatch: (f: (s: AppState) => AppState) => void
   histories: Map<string, ApiMessage[]>
   busy: Set<string>
-  queue: Map<string, string>
+  queue: Map<string, string[]>
   /** per-session cancellation — aborted when the session is disposed */
   aborts: AbortRegistry
-  applyAgentStatus: (sid: string, task?: string, summary?: string, actionNeeded?: string) => void
+  applyAgentStatus: (sid: string, task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => void
   setNeedsInput: (id: string, question: string, options?: EscOption[], cursorNum?: number) => void
   logEvent: (type: EventType, agentId: string | null, text: string) => void
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
@@ -36,7 +36,7 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
   const st = ctx.stateRef.current.settings
   if (!(st.masterEnabled && hasCreds(st) && st.followMode)) return
   if (ctx.busy.has(id)) {
-    ctx.queue.set(id, note)
+    ctx.queue.set(id, [...(ctx.queue.get(id) ?? []), note].slice(-8))
     return
   }
   ctx.busy.add(id)
@@ -54,8 +54,8 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
         ctx.histories.set(id, history)
       }
       const exec: MonitorExec = {
-        updateStatus: (task, summary, actionNeeded) => {
-          ctx.applyAgentStatus(id, task, summary, actionNeeded)
+        updateStatus: (task, summary, nextAction, actionNeeded) => {
+          ctx.applyAgentStatus(id, task, summary, nextAction, actionNeeded)
           return 'status updated'
         },
         flagNeedsInput: question => {
@@ -110,7 +110,8 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
         if (isAbortError(e) || runSignal.aborted) { pending = undefined; break }
         ctx.logEvent('escalate', id, `Monitor error: ${e instanceof Error ? e.message : String(e)}`)
       }
-      pending = ctx.queue.get(id)
+      const queued = ctx.queue.get(id)
+      pending = queued?.length ? queued.join('\n\n') : undefined
       ctx.queue.delete(id)
     }
   } finally {
