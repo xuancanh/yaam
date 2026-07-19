@@ -3,7 +3,7 @@ import type { MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR } from '../../core/data'
-import type { Agent, TabGroup } from '../../core/types'
+import type { Agent, BoardTask, TabGroup } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { RunControl } from '../board/RunControl'
 import { NewSessionDialog } from './NewSessionDialog'
@@ -11,6 +11,7 @@ import { Divider } from './Divider'
 import { groupRows, LAYOUT_VARIANTS } from './layout-state'
 import { MOVE_MENU_EDGE, MOVE_MENU_WIDTH, sessionMoveMenuPlacement } from './move-menu'
 import { Pane } from './Pane'
+import { SessionHoverPreview } from './SessionHoverPreview'
 
 /** Draw a compact visual preview of a row partition (panes per row). */
 function LayoutGlyph({ rows, color }: { rows: number[]; color: string }) {
@@ -306,7 +307,7 @@ function EmptySlot({ index }: { index: number }) {
 /** Compose the mode toggle, group/loose tabs, the active group's split grid,
  *  and the dock — or, in Runs mode, the triage rail + session pane. */
 export function Workspace() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen, workMode: x.settings.workMode ?? 'tabs' }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen, workMode: x.settings.workMode ?? 'tabs' }), shallowEqual)
   const { focusTab, activateGroup, closeGroup, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit, updateSettings } = useActions()
   const runsMode = s.workMode === 'runs'
   const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null)
@@ -317,6 +318,12 @@ export function Workspace() {
     setTabMenu({ x: e.clientX, y: e.clientY, agent: a })
   }
   const byId = new Map(s.agents.map(a => [a.id, a]))
+  const taskByAgent = new Map<string, BoardTask>()
+  for (const task of s.tasks) {
+    if (task.archived) continue
+    if (task.agentId) taskByAgent.set(task.agentId, task)
+    for (const id of task.agentIds ?? []) if (!taskByAgent.has(id)) taskByAgent.set(id, task)
+  }
   const ag = s.groups.find(g => g.id === s.activeGroup)
   const slots: (string | null)[] = ag?.slots ?? [null]
   const splits = ag?.splits ?? { row: 0.5, cols: [0.5, 0.5] }
@@ -407,11 +414,10 @@ export function Workspace() {
             if (members.length <= 1) {
               const a = members[0]?.agent
               if (!a && !activeG) return null
-              return (
+              const button = (
                 <button
-                  key={g.id}
                   className="tab-btn"
-                  title={a ? `${a.name} · ${a.repo}` : undefined}
+                  aria-label={a ? `${a.name} · ${a.repo}` : undefined}
                   onClick={() => (a ? focusTab(a.id) : activateGroup(g.id))}
                   onContextMenu={a ? e => openTabMenu(e, a) : undefined}
                   style={{
@@ -426,6 +432,9 @@ export function Workspace() {
                   {a && <span className="mono" style={repoStyle}>{a.repo}</span>}
                 </button>
               )
+              return a
+                ? <SessionHoverPreview key={g.id} agent={a} task={taskByAgent.get(a.id)}>{button}</SessionHoverPreview>
+                : <span key={g.id} style={{ display: 'contents' }}>{button}</span>
             }
             return (
               <div
@@ -444,11 +453,12 @@ export function Workspace() {
                 {members.map(({ agent: a, slot }) => {
                   const active = activeG && slot === g.activePane
                   return (
+                    <SessionHoverPreview key={a.id} agent={a} task={taskByAgent.get(a.id)}>
                     <button
                       key={a.id}
                       onClick={e => { e.stopPropagation(); focusTab(a.id) }}
                       onContextMenu={e => openTabMenu(e, a)}
-                      title={`${a.name} · ${a.repo}`}
+                      aria-label={`${a.name} · ${a.repo}`}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 7,
                         background: active ? hexToRgba(a.color, 0.16) : 'transparent', border: 'none',
@@ -457,6 +467,7 @@ export function Workspace() {
                       {tabDot(a)}
                       <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--text)' : 'var(--mut2)', whiteSpace: 'nowrap' }}>{a.name}</span>
                     </button>
+                    </SessionHoverPreview>
                   )
                 })}
                 <button
@@ -471,10 +482,10 @@ export function Workspace() {
             )
           })}
           {looseTabs.map(a => (
+            <SessionHoverPreview key={a.id} agent={a} task={taskByAgent.get(a.id)}>
             <button
-              key={a.id}
               className="tab-btn"
-              title={`${a.name} · ${a.repo}`}
+              aria-label={`${a.name} · ${a.repo}`}
               onClick={() => focusTab(a.id)}
               onContextMenu={e => openTabMenu(e, a)}
               style={{ background: 'transparent', borderTop: '2px solid transparent' }}
@@ -483,6 +494,7 @@ export function Workspace() {
               <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--mut2)', whiteSpace: 'nowrap' }}>{a.name}</span>
               <span className="mono" style={repoStyle}>{a.repo}</span>
             </button>
+            </SessionHoverPreview>
           ))}
           </>}
         </div>

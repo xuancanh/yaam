@@ -150,6 +150,8 @@ workspace file viewer.
 | `attention.ts` | Screen tails, needs-input escalation, monitor status, bounded output/usage |
 | `prompt-detection.ts` | Pure prompt/menu heuristics, numbered option extraction, and the no-brain status digest |
 | `use-settle.ts` | Plain settle runtime plus legacy React adapter |
+| `session-work-status.ts` | Shared task/current-action/next-action precedence for tabs and the Sidebar rail |
+| `SessionHoverPreview.tsx` | Delayed tab/Sidebar hover card with task context and a read-only live screen snapshot |
 | `exit.ts` | Pure stopped/failed/completed/exited classification |
 | `exit-handler.ts` | Effectful process-exit coordinator and native subscription |
 | `FilesPane.tsx` | File tree, git status/diff gutter, source/document/media preview |
@@ -180,13 +182,25 @@ resume command.
 
 The terminal registry routes raw bytes directly to xterm and calls:
 
-- `appendTail` for complete ANSI-stripped lines;
+- `appendTail` and `bufferOutput` for complete ANSI-stripped lines;
 - `bumpSettle` for every raw chunk, including TUI redraws;
 - `clearNeeds` for meaningful user input;
-- `armResponseWatch` when the user submits input.
+- `recordTerminalSubmit` when Enter submits reconstructed user input; this also
+  records the action, routes it to the watcher/monitor, and arms response watch.
 
 Retained logs are capped at 200 entries. Cost and token usage are estimates from
 printable output characters.
+
+### Tabs, Sidebar status, and hover preview
+
+`sessionWorkStatus` deterministically resolves a run's task, current action, and
+next action. Explicit monitor/watcher state wins; suggested actions, linked-task
+state, durable work history, and lifecycle state provide bounded fallbacks.
+Sidebar rows render all three fields. Session tabs and Sidebar session rows wrap
+the same hover-intent component, whose miniature terminal is a periodically
+refreshed `readScreen` snapshot with a log-tail fallback. It is deliberately
+textual/read-only: mounting another xterm host would steal the singleton terminal
+element from the real pane.
 
 ### Settle and prompt detection
 

@@ -48,6 +48,14 @@ one through six panes, with single, split, three-up, rows, grid, and six-up
 arrangements. Legacy focused-session state migrates through the layout helpers;
 each session remains in at most one group.
 
+The Work view's Sidebar mode is a task-aware run triage rail. Each row derives
+one shared status tuple—task, current action, next action—from the linked board
+task, monitor/watcher state, suggestions, and durable history fallbacks. Normal
+tabs and Sidebar session rows use that same tuple in a delayed hover card. The
+card reads a bounded live xterm screen snapshot (or the persisted log tail when
+no rendered screen exists); it never attaches or moves the registry-owned
+terminal DOM, so previewing a session cannot disturb its active pane.
+
 ## 3. Terminal, files, and preview pipeline
 
 PTY bytes are emitted by Rust, registered in the module-level xterm registry,

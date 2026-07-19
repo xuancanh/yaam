@@ -3,6 +3,8 @@ import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { indicatorColor } from '../../core/data'
 import type { Agent, BoardTask } from '../../core/types'
 import { Pane } from '../session/Pane'
+import { SessionHoverPreview } from '../session/SessionHoverPreview'
+import { sessionWorkStatus } from '../session/session-work-status'
 import { useDiffStats } from '../session/diff-stats'
 import { groupRuns, runStatusLabel } from './run-state'
 import type { RunFilter, RunRef } from './run-state'
@@ -30,8 +32,9 @@ function runCwd(run: RunRef): string | undefined {
 
 /** One selectable run row: status dot, title, working folder, live diff stats,
  *  and an inline start for unstarted tasks (backlog). */
-function RunRow({ run, stats, selected, shortcut, onSelect }: {
+function RunRow({ run, linkedTask, stats, selected, shortcut, onSelect }: {
   run: RunRef
+  linkedTask?: BoardTask
   stats?: { add: number; del: number; files: number }
   selected: boolean
   shortcut?: number
@@ -39,13 +42,14 @@ function RunRow({ run, stats, selected, shortcut, onSelect }: {
 }) {
   const { startTask } = useActions()
   const agent = run.agent
-  const task = run.kind === 'task' ? run.task : undefined
+  const task = run.kind === 'task' ? run.task : linkedTask
   const st = runStatusLabel(run)
+  const work = sessionWorkStatus(agent, task)
   const flash = st.tone === 'amber'
   const startable = !!task && !agent && task.col !== 'done' && task.col !== 'failed'
   const cwd = runCwd(run)
   const folder = cwd?.replace(/\/+$/, '').split('/').pop()
-  return (
+  const row = (
     <button
       className="palette-item"
       onClick={onSelect}
@@ -91,20 +95,19 @@ function RunRow({ run, stats, selected, shortcut, onSelect }: {
           </span>
         )}
       </div>
-      {/* Master-maintained context: the specific action the user must take,
-          else what the session is currently working on (skip when it would
-          just repeat the task title) */}
-      {agent?.actionNeeded ? (
-        <div title={agent.actionNeeded} style={{ width: '100%', fontSize: 10, color: 'var(--amber)', paddingLeft: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          ⚠ {agent.actionNeeded}
+      {([
+        ['TASK', work.task, 'var(--accent)'],
+        ['NOW', work.current, 'var(--mut2)'],
+        ['NEXT', work.next, agent?.actionNeeded || task?.awaitingUser ? 'var(--amber)' : 'var(--green)'],
+      ] as const).map(([label, value, color]) => (
+        <div key={label} title={value} style={{ display: 'grid', gridTemplateColumns: '34px minmax(0, 1fr)', gap: 5, width: '100%', paddingLeft: 15, fontSize: 10, lineHeight: 1.35 }}>
+          <span className="mono" style={{ color: 'var(--faint)', fontSize: 8.5, letterSpacing: .45 }}>{label}</span>
+          <span style={{ color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</span>
         </div>
-      ) : agent?.task && agent.task !== runTitle(run) ? (
-        <div title={agent.task} style={{ width: '100%', fontSize: 10, color: 'var(--mut)', paddingLeft: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          ◇ {agent.task}
-        </div>
-      ) : null}
+      ))}
     </button>
   )
+  return agent ? <SessionHoverPreview agent={agent} task={task}>{row}</SessionHoverPreview> : row
 }
 
 /** Detail for a task run without a live session: spec + start, with the
@@ -168,6 +171,15 @@ export function RunControl() {
     [s.tasks, s.agents, filter, s.activeWorkspace],
   )
   const flat = useMemo(() => groups.flatMap(g => g.runs), [groups])
+  const taskByAgent = useMemo(() => {
+    const map = new Map<string, BoardTask>()
+    for (const task of s.tasks) {
+      if (task.archived) continue
+      if (task.agentId) map.set(task.agentId, task)
+      for (const id of task.agentIds ?? []) if (!map.has(id)) map.set(id, task)
+    }
+    return map
+  }, [s.tasks])
   const [selKey, setSelKey] = useState<string | null>(null)
   const selected = flat.find(r => r.key === selKey) ?? flat[0]
 
@@ -203,7 +215,7 @@ export function RunControl() {
   let shortcutIx = 0
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-      <div style={{ width: 264, flexShrink: 0, borderRight: '1px solid var(--line)', overflowY: 'auto', background: 'var(--panel)', padding: '6px 6px 12px' }}>
+      <div style={{ width: 'clamp(250px, 28vw, 310px)', flexShrink: 0, borderRight: '1px solid var(--line)', overflowY: 'auto', background: 'var(--panel)', padding: '6px 6px 12px' }}>
         <div style={{ display: 'flex', gap: 2, margin: '4px 4px 8px', background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2 }}>
           {FILTERS.map(f => (
             <button
@@ -241,6 +253,7 @@ export function RunControl() {
                 <RunRow
                   key={run.key}
                   run={run}
+                  linkedTask={run.agent ? taskByAgent.get(run.agent.id) : undefined}
                   stats={run.agent ? stats[run.agent.id] : undefined}
                   selected={selected?.key === run.key}
                   shortcut={ix <= 9 ? ix : undefined}
