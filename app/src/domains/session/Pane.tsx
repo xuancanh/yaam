@@ -344,8 +344,6 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         </button>
       </div>
 
-      <SuggestionChips agent={agent} />
-
       {(() => {
         const closeFiles = () => { filesOpenCache.set(agent.id, false); setFilesOpen(false) }
         const closeGit = () => { gitOpenCache.set(agent.id, false); setGitOpen(false) }
@@ -461,6 +459,8 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
           </div>
         )
       })()}
+
+      <SuggestionChips agent={agent} />
 
       {gitPopup && agent.cwd && <GitPopup agent={agent} onClose={() => setGitPopup(false)} />}
     </div>
