@@ -19,6 +19,7 @@ import { isAbortError } from '../../core/abort-registry'
 import { mkId } from '../../shared/id'
 import { formatHits, memoryDigest, searchMemory, wsMemory } from '../master/assistant-memory'
 import { calibrationNote, recordDecision } from '../master/harness-stats'
+import { createTaskActivity, withActivityTargets } from '../activity/history'
 
 export interface WatcherCtx {
   stateRef: MutableRefObject<AppState>
@@ -128,7 +129,14 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           const t = getTask()
           if (!t) return 'task no longer exists'
           if (t.col === col) return `already in ${col}`
-          ctx.dispatch(s2 => updateLocatedTask(s2, taskId, x => ({ ...x, col: col as BoardCol })))
+          const event = createTaskActivity(ctx.stateRef.current, taskId, {
+            category: 'lifecycle', actor: 'watcher', kind: 'move', text: `Watcher moved ${t.col} → ${col}`,
+          }, t.agentId ?? undefined)
+          ctx.dispatch(s2 => withActivityTargets(
+            updateLocatedTask(s2, taskId, x => ({ ...x, col: col as BoardCol })),
+            event,
+            { taskId, sessionId: t.agentId ?? undefined },
+          ))
           ctx.pushTaskChat(taskId, 'system', `Watcher moved the task to ${col}`)
           ctx.fireAddonHook('onTaskMoved', { taskId, title: t.title, col, from: t.col })
           ctx.logEvent(col === 'failed' ? 'escalate' : 'edit', t.agentId, `Watcher moved “${t.title.slice(0, 40)}” to ${col}`)
@@ -137,12 +145,19 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           return `moved to ${col}`
         },
         updateNote: n => {
-          ctx.dispatch(s2 => updateLocatedTask(s2, taskId, x => ({ ...x, watcherNote: n.slice(0, 140) })))
+          const a = primaryAgent()
+          const event = createTaskActivity(ctx.stateRef.current, taskId, {
+            category: 'work', actor: 'watcher', kind: 'progress', text: n.slice(0, 140),
+          }, a?.id)
+          ctx.dispatch(s2 => withActivityTargets(
+            updateLocatedTask(s2, taskId, x => ({ ...x, watcherNote: n.slice(0, 140) })),
+            event,
+            { taskId, sessionId: a?.id, coalesce: true },
+          ))
           // mirror onto the live worker's status card — the watcher IS its
           // monitor. When the task is not waiting on the user, a fresh note is
           // authoritative: clear any stale action_needed instead of keeping it
           // forever (nothing else manages that field for task sessions).
-          const a = primaryAgent()
           const t = getTask()
           if (a && t && (a.status === 'running' || a.status === 'needs')) {
             ctx.applyAgentStatus(a.id, t.title.slice(0, 60), n.slice(0, 140), t.awaitingUser ? undefined : '')
@@ -156,6 +171,11 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
             : live[live.length - 1]
           if (!a) return session ? `no live session named "${session}"` : 'no live session attached to this task'
           sendLineToSession(a.id, text)
+          const event = createTaskActivity(ctx.stateRef.current, taskId, {
+            category: 'action', actor: 'watcher', kind: 'send',
+            text: `Watcher instructed ${a.name}`, detail: text.slice(0, 300),
+          }, a.id)
+          ctx.dispatch(s2 => withActivityTargets(s2, event, { taskId, sessionId: a.id }))
           ctx.pushTaskChat(taskId, 'system', `Watcher → ${a.name}: ${text.slice(0, 120)}`)
           return `sent to "${a.name}"`
         },
@@ -232,7 +252,17 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           custom: curState.settings.assistantPrompts?.watcher,
         })
         stream.clear()
-        if (reply) ctx.pushTaskChat(taskId, 'watcher', reply)
+        if (reply) {
+          ctx.pushTaskChat(taskId, 'watcher', reply)
+          const a = primaryAgent()
+          const summary = reply.replace(/\s+/g, ' ').trim()
+          const event = createTaskActivity(ctx.stateRef.current, taskId, {
+            category: 'work', actor: 'watcher', kind: 'progress',
+            text: summary.slice(0, 140),
+            detail: reply.length > 140 ? reply.slice(0, 800) : undefined,
+          }, a?.id)
+          ctx.dispatch(s2 => withActivityTargets(s2, event, { taskId, sessionId: a?.id }))
+        }
         else if (isUserMessage) {
           ctx.pushTaskChat(taskId, 'system', 'The watcher acted with tools but wrote no reply — ask again if you need details.')
         }

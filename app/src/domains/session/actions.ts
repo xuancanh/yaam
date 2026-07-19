@@ -16,7 +16,8 @@ import { execCommand, worktreeMerge, worktreeRemove } from '../../core/native'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
 import { inferLegacyTerminalShell } from '../../store/state-helpers'
-import { recordHistory } from '../../core/history'
+import { createSessionActivity, withActivityTargets } from '../activity/history'
+import { findTaskForAgentInState } from '../board/task-state'
 
 export interface SessionActionsCtx {
   stateRef: MutableRefObject<AppState>
@@ -66,6 +67,17 @@ export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
 export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
   const { stateRef, flash, logEvent, markUserStopped, disposeSessionRuntime, launchSession, probeCliSession, armResponseWatch, appendTail, clearNeeds, bumpSettle } = ctx
   const port = ctx.port ?? realSessionProcessPort
+  const recordTerminalSubmit = (id: string) => {
+    const st = stateRef.current
+    const task = findTaskForAgentInState(st, id)
+    const event = createSessionActivity(st, id, {
+      category: 'action', actor: 'user', kind: 'send', text: 'Submitted terminal input',
+    }, task?.task.id)
+    dispatch(s => withActivityTargets(s, event, {
+      sessionId: id, taskId: task?.task.id, workspaceId: task?.workspaceId,
+    }))
+    armResponseWatch(id)
+  }
   return {
     mergeSessionWorktree: async (id, message) => {
       const agent = ctx.stateRef.current.agents.find(a => a.id === id)
@@ -81,12 +93,15 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       } catch (e) {
         return `changes merged, but worktree cleanup failed: ${e instanceof Error ? e.message : String(e)}`
       }
-      dispatch(s => ({
+      const event = createSessionActivity(stateRef.current, id, {
+        category: 'decision', actor: 'user', kind: 'approve', text: 'Merged session worktree', detail: summary,
+      })
+      dispatch(s => withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === id
           ? { ...a, cwd: agent.worktree!.base, worktree: undefined, log: a.log.concat([{ t: 'sys' as const, x: `worktree merged back:\n${summary}` }]) }
           : a),
-      }))
+      }, event, { sessionId: id, taskId: event.taskId }))
       ctx.logEvent('done', id, `Merged worktree changes from “${agent.name}”`)
       ctx.flash('Worktree merged back')
       return ''
@@ -101,12 +116,15 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       } catch (e) {
         return e instanceof Error ? e.message : String(e)
       }
-      dispatch(s => ({
+      const event = createSessionActivity(stateRef.current, id, {
+        category: 'decision', actor: 'user', kind: 'deny', text: 'Discarded session worktree',
+      })
+      dispatch(s => withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === id
           ? { ...a, cwd: agent.worktree!.base, worktree: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'worktree discarded — changes were not merged' }]) }
           : a),
-      }))
+      }, event, { sessionId: id, taskId: event.taskId }))
       ctx.logEvent('edit', id, `Discarded worktree of “${agent.name}”`)
       ctx.flash('Worktree discarded')
       return ''
@@ -121,13 +139,14 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       // free the xterm buffer + runtime registries; the agent (with its log
       // tail) stays persisted and the terminal is rebuilt on unarchive
       disposeSessionRuntime(id)
-      dispatch(s => ({
+      const event = createSessionActivity(stateRef.current, id, { category: 'action', actor: 'user', kind: 'archive', text: 'Archived session' })
+      dispatch(s => withActivityTargets({
         ...s,
         ...removeFromGroups(s, id),
-        agents: s.agents.map(a => a.id === id ? { ...a, archived: true, status: 'idle' as const, escReason: undefined, history: recordHistory(a.history, { category: 'action', kind: 'archive', text: 'Archived session' }) } : a),
+        agents: s.agents.map(a => a.id === id ? { ...a, archived: true, status: 'idle' as const, escReason: undefined } : a),
         minimizedIds: s.minimizedIds.filter(x => x !== id),
         drawer: s.drawer?.agentId === id ? null : s.drawer,
-      }))
+      }, event, { sessionId: id, taskId: event.taskId }))
       flash(`Archived ${agent?.name ?? 'session'}`)
       logEvent('edit', id, `Archived session ${agent?.name ?? id}`)
     },
@@ -138,14 +157,12 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       const agent = stateRef.current.agents.find(a => a.id === id)
       if (agent && agent.kind !== 'chat') {
         port.disposeTerminal(id)
-        const term = port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
+        const term = port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => recordTerminalSubmit(id))
         for (const l of agent.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
         term.writeln('\x1b[33m── unarchived · press ▶ to relaunch ──\x1b[0m')
       }
-      dispatch(s => focusSessionIn({
-        ...s,
-        agents: s.agents.map(a => a.id === id ? { ...a, history: recordHistory(a.history, { category: 'action', kind: 'restore', text: 'Restored session' }) } : a),
-      }, id))
+      const event = createSessionActivity(stateRef.current, id, { category: 'action', actor: 'user', kind: 'restore', text: 'Restored session' })
+      dispatch(s => focusSessionIn(withActivityTargets(s, event, { sessionId: id, taskId: event.taskId }), id))
     },
 
     deleteSession: id => {
@@ -154,7 +171,12 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       port.killSession(id).catch(() => {})
       disposeSessionRuntime(id)
       port.removeSession(id).catch(() => {}) // drop its persisted file too
-      dispatch(s => ({
+      const task = findTaskForAgentInState(stateRef.current, id)
+      const event = createSessionActivity(stateRef.current, id, {
+        category: 'action', actor: 'user', kind: 'delete', text: `Deleted session · ${agent?.name ?? id}`,
+      }, task?.task.id)
+      dispatch(s => {
+        const without = {
         ...s,
         ...removeFromGroups(s, id),
         agents: s.agents.filter(a => a.id !== id),
@@ -164,7 +186,9 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         minimizedIds: s.minimizedIds.filter(x => x !== id),
         drawer: s.drawer?.agentId === id ? null : s.drawer,
         panel: s.panel?.agentId === id ? null : s.panel,
-      }))
+        }
+        return task ? withActivityTargets(without, event, { taskId: task.task.id, workspaceId: task.workspaceId }) : without
+      })
       flash(`Deleted ${agent?.name ?? 'session'}`)
       logEvent('edit', null, `Deleted session ${agent?.name ?? id}`)
     },
@@ -295,12 +319,15 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           probeCliSession(id, cmd, agent.cwd || '', true)
         }
       }
-      dispatch(s => focusSessionIn({
+      const event = createSessionActivity(stateRef.current, id, {
+        category: 'action', actor: 'user', kind: 'launch', text: 'Resumed session', detail: resumeNote,
+      })
+      dispatch(s => focusSessionIn(withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === id
-          ? { ...a, terminalShell, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]), history: recordHistory(a.history, { category: 'action', kind: 'launch', text: 'Resumed session', detail: resumeNote }) }
+          ? { ...a, terminalShell, status: 'running' as const, log: a.log.concat([{ t: 'sys', x: resumeNote }]) }
           : a),
-      }, id))
+      }, event, { sessionId: id, taskId: event.taskId }), id))
     },
 
     refreshTerminal: id => {
@@ -316,20 +343,25 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       if (id) {
         const label = command.trim().slice(0, 80)
         logEvent('route', id, `Launched session · ${label}`)
-        dispatch(s => ({ ...s, agents: s.agents.map(a => a.id === id ? { ...a, history: recordHistory(a.history, { category: 'action', kind: 'launch', text: `Launched · ${label || 'session'}` }) } : a) }))
+        const event = createSessionActivity(stateRef.current, id, {
+          category: 'lifecycle', actor: 'user', kind: 'launch', text: 'Launched session',
+        })
+        dispatch(s => withActivityTargets(s, event, { sessionId: id }))
         flash('Session launched')
       }
     },
 
     sendInput: (id, text) => {
       armResponseWatch(id)
-      const label = text.trim().slice(0, 80)
-      dispatch(s => ({
+      const event = createSessionActivity(stateRef.current, id, {
+        category: 'action', actor: 'user', kind: 'send', text: 'Sent terminal input', detail: text.trim().slice(0, 240) || undefined,
+      })
+      dispatch(s => withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === id
-          ? { ...a, log: a.log.concat([{ t: 'you', x: text }]), history: recordHistory(a.history, { category: 'action', kind: 'send', text: `Sent: ${label || '(empty)'}` }) }
+          ? { ...a, log: a.log.concat([{ t: 'you', x: text }]) }
           : a),
-      }))
+      }, event, { sessionId: id, taskId: event.taskId }))
       // route the PTY write through the command registry (user actor) so every
       // caller shares one send path + policy; fall back to the port directly
       // when no registry is wired (unit tests, standalone use)
@@ -360,12 +392,13 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       // status/log/toast stay here. Fall back to the port when unwired.
       if (ctx.execCommand) void ctx.execCommand('stop_session', { sessionId: id }, { actor: { kind: 'user' } })
       else { markUserStopped(id); port.killSession(id).catch(() => {}) }
-      dispatch(s => ({
+      const event = createSessionActivity(stateRef.current, id, { category: 'action', actor: 'user', kind: 'stop', text: 'Stopped session' })
+      dispatch(s => withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === id
-          ? { ...a, status: 'idle' as const, log: a.log.concat([{ t: 'sys', x: 'stopped by you' }]), history: recordHistory(a.history, { category: 'action', kind: 'stop', text: 'Stopped session' }) }
+          ? { ...a, status: 'idle' as const, log: a.log.concat([{ t: 'sys', x: 'stopped by you' }]) }
           : a),
-      }))
+      }, event, { sessionId: id, taskId: event.taskId }))
       flash('Session stopped')
     },
   }

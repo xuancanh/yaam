@@ -19,6 +19,8 @@ import { typeForCommand } from './command'
 import { updateLocatedTask } from '../board/task-state'
 import type { LocatedTask } from '../board/task-state'
 import { hasCreds } from '../../llm/client'
+import { createSessionActivity, withActivityTargets } from '../activity/history'
+import { captureSessionChanges } from './change-history'
 
 /** The native process-exit event we react to. */
 export interface SessionExitEvent {
@@ -82,6 +84,13 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
     ? deterministicStatus((agent.log ?? []).slice(-14).map(l => l.x))
     : null
   const digestAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const outcomeEvent = agent && !userStopped
+    ? createSessionActivity(stateRef.current, e.id, {
+        category: 'lifecycle', actor: 'session', kind: failed ? 'fail' : 'complete',
+        text: failed ? `Session exited with code ${e.code ?? 'unknown'}` : 'Session process completed',
+        detail: (agent.log ?? []).slice(-3).map(l => l.x).filter(Boolean).join('\n').slice(0, 500) || undefined,
+      }, taskFor?.task.id)
+    : null
   dispatchFn(s => {
     const withAgent = {
       ...s,
@@ -102,8 +111,7 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
         }
       : a),
     }
-    if (!taskFor) return withAgent
-    return updateLocatedTask(withAgent, taskFor.task.id, t => ({
+    const withTask = !taskFor ? withAgent : updateLocatedTask(withAgent, taskFor.task.id, t => ({
       ...t,
       col: userStopped ? t.col : failed ? 'failed' : t.col === 'done' ? 'done' : 'review',
       awaitingUser: false,
@@ -115,6 +123,11 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
             ? 'finished · review the changes'
             : 'one-shot finished · assessing result',
     }), taskFor.workspaceId)
+    return outcomeEvent ? withActivityTargets(withTask, outcomeEvent, {
+      sessionId: e.id,
+      taskId: taskFor?.task.id,
+      workspaceId: taskFor?.workspaceId,
+    }) : withTask
   })
   if (agent && !agent.cliSessionId && agent.cmd && agent.launchedAt) {
     const probeType = typeForCommand(agent.cmd, stateRef.current.agentTypes)
@@ -223,6 +236,11 @@ export function subscribeSessionExits(ctx: SessionExitCtx): () => void {
         }, 400)
       },
     })
+    void captureSessionChanges({
+      stateRef: ctx.stateRef,
+      dispatch,
+      taskForSession: ctx.taskForSession,
+    }, e.id)
   })
 }
 

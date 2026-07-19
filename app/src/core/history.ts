@@ -1,11 +1,7 @@
-// Per-session / per-task user-action history: a newest-first, capped, append-only
-// log of what the user DID (actions) and DECIDED (approvals, choices, feedback).
-// Distinct from harnessLog (which scores assistant proposals) and the workspace
-// activity feed (system events) — this is the user's own trail on one entity.
-//
-// Pure helpers, no React: call recordHistory() inside a dispatch updater, the
-// same way resolveDecision/recordDecision feed the global harnessLog.
-import type { HistoryEntry, HistoryEventKind } from './entities'
+// Durable per-session / per-task activity. IDs and timestamps are created
+// BEFORE state updates; prependHistory is a pure reducer operation. This keeps
+// state updaters replay-safe under React StrictMode.
+import type { HistoryActor, HistoryEntry, HistoryEventKind, HistoryFileChange } from './entities'
 import { mkId } from '../shared/id'
 
 /** Newest-first cap. Matches the harnessLog budget so a busy session/task never
@@ -13,26 +9,56 @@ import { mkId } from '../shared/id'
 export const HISTORY_CAP = 200
 
 export interface HistoryInput {
-  category: 'action' | 'decision'
+  category: HistoryEntry['category']
+  actor: HistoryActor
   kind: HistoryEventKind
   /** one-line summary shown in the history list */
   text: string
   /** optional longer context (prompt text, chosen option, comment) */
   detail?: string
+  sessionId?: string
+  sessionName?: string
+  taskId?: string
+  taskTitle?: string
+  changes?: HistoryFileChange[]
   /** epoch ms; defaults to now (overridable for tests) */
   at?: number
 }
 
-/** Prepend one entry (newest first, capped). Tolerates states from before this
- *  field existed (undefined log). Pure — call from inside a dispatch updater. */
-export function recordHistory(log: HistoryEntry[] | undefined, input: HistoryInput): HistoryEntry[] {
+/** Create an immutable event outside a store updater. */
+export function createHistoryEntry(input: HistoryInput): HistoryEntry {
   const entry: HistoryEntry = {
     id: mkId('h'),
     at: input.at ?? Date.now(),
     category: input.category,
+    actor: input.actor,
     kind: input.kind,
     text: input.text,
   }
   if (input.detail) entry.detail = input.detail
-  return [entry, ...(log ?? [])].slice(0, HISTORY_CAP)
+  if (input.sessionId) entry.sessionId = input.sessionId
+  if (input.sessionName) entry.sessionName = input.sessionName
+  if (input.taskId) entry.taskId = input.taskId
+  if (input.taskTitle) entry.taskTitle = input.taskTitle
+  if (input.changes?.length) entry.changes = input.changes
+  return entry
+}
+
+function sameEvent(a: HistoryEntry, b: HistoryEntry): boolean {
+  return a.actor === b.actor && a.kind === b.kind && a.text === b.text
+    && a.sessionId === b.sessionId && a.taskId === b.taskId
+}
+
+/** Prepend a pre-built event (newest first, capped). `coalesce` replaces an
+ *  identical leading milestone instead of filling the log with status polls. */
+export function prependHistory(
+  log: HistoryEntry[] | undefined,
+  entry: HistoryEntry,
+  options?: { coalesce?: boolean },
+): HistoryEntry[] {
+  const previous = log ?? []
+  if (options?.coalesce && previous[0] && sameEvent(previous[0], entry)) {
+    return [entry, ...previous.slice(1)].slice(0, HISTORY_CAP)
+  }
+  return [entry, ...previous].slice(0, HISTORY_CAP)
 }

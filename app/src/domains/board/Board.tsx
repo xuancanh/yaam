@@ -157,7 +157,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
           </div>
           <button
             className="icon-btn"
-            title={view === 'history' ? 'Back to the watcher chat' : 'History — your actions and decisions on this task'}
+            title={view === 'history' ? 'Back to watcher chat' : 'Activity — session work and your actions'}
             style={{ width: 26, height: 26, borderRadius: 7, color: view === 'history' ? 'var(--accent)' : undefined }}
             onClick={() => setView(v => (v === 'history' ? 'chat' : 'history'))}
           >
@@ -165,9 +165,9 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
           </button>
           <button
             className="icon-btn"
-            title={view === 'chat' ? 'Review the task\'s changes (diff, stage, commit, approve)' : 'Back to the watcher chat'}
+            title={view === 'review' ? 'Back to watcher chat' : 'Review the task\'s changes (diff, stage, commit, approve)'}
             style={{ width: 26, height: 26, borderRadius: 7, color: view === 'review' ? 'var(--accent)' : worktree ? 'var(--amber)' : undefined }}
-            onClick={() => setView(v => (v === 'chat' ? 'review' : 'chat'))}
+            onClick={() => setView(v => (v === 'review' ? 'chat' : 'review'))}
           >
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={13} stroke={1.7} />
           </button>
@@ -253,7 +253,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
 
         {view === 'history' ? (
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-            <HistoryList entries={task.history} emptyHint="No actions or decisions yet — they'll be logged here as you work this task." />
+            <HistoryList entries={task.history} scope="task" emptyHint="No activity yet — session work, file changes, and your actions will appear here." />
           </div>
         ) : (
           <WatcherChat task={task} />

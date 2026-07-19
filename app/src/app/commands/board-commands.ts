@@ -5,7 +5,7 @@
 // that needs the id can supply + return it over the fire-and-forget seam.
 import type { BoardCol } from '../../core/types'
 import { mkId } from '../../shared/id'
-import { recordHistory } from '../../core/history'
+import { createHistoryEntry, prependHistory } from '../../core/history'
 import type { StatePort } from '../../core/ports'
 import type { CommandRegistry } from './registry'
 
@@ -45,11 +45,15 @@ export function registerBoardCommands(
     handler: (i, ctx) => {
       const id = i.id ?? mkId('t')
       const col = i.col && (COLS as string[]).includes(i.col) ? (i.col as BoardCol) : 'backlog'
-      // a user-created task opens with a "created" history entry; tasks Master
-      // or an addon files don't (they aren't user actions on the board)
-      const history = ctx.actor.kind === 'user'
-        ? recordHistory(undefined, { category: 'action', kind: 'create', text: `Created task · ${i.title.trim().slice(0, 60)}` })
-        : undefined
+      const createdAt = Date.now()
+      const chatId = mkId('tc')
+      const scheduleAt = typeof i.scheduleAt === 'number' && i.scheduleAt > createdAt ? i.scheduleAt : undefined
+      const actor = ctx.actor.kind === 'user' ? 'user' : ctx.actor.kind === 'watcher' ? 'watcher' : 'system'
+      const created = createHistoryEntry({
+        category: 'lifecycle', actor, kind: 'create',
+        text: `Created task · ${i.title.trim().slice(0, 60)}`,
+        taskId: id, taskTitle: i.title.trim().slice(0, 120),
+      })
       state.update(s => ({
         ...s,
         tasks: s.tasks.concat([{
@@ -65,9 +69,9 @@ export function registerBoardCommands(
           machineId: i.machineId || undefined,
           isolate: i.isolate || undefined,
           sessionMode: i.sessionMode === 'interactive' ? 'interactive' : undefined,
-          scheduleAt: typeof i.scheduleAt === 'number' && i.scheduleAt > Date.now() ? i.scheduleAt : undefined,
-          chat: [{ id: mkId('tc'), role: 'system', text: i.note || 'Task created', at: Date.now() }],
-          ...(history ? { history } : {}),
+          scheduleAt,
+          chat: [{ id: chatId, role: 'system', text: i.note || 'Task created', at: createdAt }],
+          history: [created],
         }]),
       }))
       return id
@@ -90,9 +94,13 @@ export function registerBoardCommands(
       if (!(COLS as string[]).includes(i.col)) return
       const prev = state.get().tasks.find(t => t.id === i.id)
       if (!prev || prev.col === i.col) return
-      const user = ctx.actor.kind === 'user'
+      const actor = ctx.actor.kind === 'user' ? 'user' : ctx.actor.kind === 'watcher' ? 'watcher' : 'system'
+      const moved = createHistoryEntry({
+        category: 'lifecycle', actor, kind: 'move', text: `Moved ${prev.col} → ${i.col}`,
+        taskId: prev.id, taskTitle: prev.title,
+      })
       state.update(s => ({ ...s, tasks: s.tasks.map(t => (t.id === i.id
-        ? { ...t, col: i.col as BoardCol, ...(user ? { history: recordHistory(t.history, { category: 'action', kind: 'move', text: `Moved ${prev.col} → ${i.col}` }) } : {}) }
+        ? { ...t, col: i.col as BoardCol, history: prependHistory(t.history, moved) }
         : t)) }))
       fireAddonHook('onTaskMoved', { taskId: i.id, title: prev.title, col: i.col, from: prev.col })
     },

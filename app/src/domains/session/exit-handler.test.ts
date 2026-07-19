@@ -69,6 +69,7 @@ describe('coordinateSessionExit', () => {
     const cls = h.run(0)
     expect(cls.outcome).toBe('completed')
     expect(h.state().agents[0].status).toBe('idle')
+    expect(h.state().agents[0].history?.[0]).toMatchObject({ actor: 'session', kind: 'complete' })
     expect(h.ports.notify).toHaveBeenCalledWith('done', expect.stringContaining('completed'), expect.any(String), 'a1')
     expect(h.ports.monitorEvent).toHaveBeenCalledOnce()
     expect(h.ports.fireAddonHook).toHaveBeenCalledWith('onSessionExit', expect.objectContaining({ sessionId: 'a1', code: 0 }))
@@ -116,6 +117,9 @@ describe('coordinateSessionExit', () => {
     expect(h.ports.runWatcher).toHaveBeenCalledWith('t1', expect.any(String))
     expect(h.ports.pushTaskChat).toHaveBeenCalledWith('t1', 'system', expect.stringContaining('cleanly'))
     expect(h.state().tasks.find(t => t.id === 't1')?.col).toBe('review')
+    expect(h.state().tasks.find(t => t.id === 't1')?.history?.[0]).toMatchObject({
+      kind: 'complete', sessionId: 'a1', taskId: 't1',
+    })
   })
 
   it('with the brain off, a task session reaches a final state deterministically and guides the user', () => {

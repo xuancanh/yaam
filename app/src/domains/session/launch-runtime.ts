@@ -19,6 +19,7 @@ import type { SessionProcessPort } from './ports'
 import { buildTemplateCommand } from '../schedules/template-command'
 import { taskContract, taskWorkText } from '../board/task-prompt'
 import { findTaskInState, updateLocatedTask } from '../board/task-state'
+import { createSessionActivity, withActivityTargets } from '../activity/history'
 
 export interface LaunchRuntimeCtx {
   stateRef: MutableRefObject<AppState>
@@ -56,6 +57,17 @@ export function useLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
 export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
   const { stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch, pushTaskChat, runWatcher, taskSessions } = ctx
   const port = ctx.port ?? realSessionProcessPort
+  const recordTerminalSubmit = (id: string) => {
+    const st = stateRef.current
+    const bound = taskSessions.current.get(id)
+    const event = createSessionActivity(st, id, {
+      category: 'action', actor: 'user', kind: 'send', text: 'Submitted terminal input',
+    }, bound?.taskId)
+    dispatch(s => withActivityTargets(s, event, {
+      sessionId: id, taskId: bound?.taskId, workspaceId: bound?.workspaceId,
+    }))
+    armResponseWatch(id)
+  }
   {
     // Poll native session files until the launched CLI's resume id is discoverable.
     const probeCliSession = (id: string, command: string, cwd: string, isResume: boolean) => {
@@ -101,13 +113,16 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       if (!plan) return null
       const { agent, spawnCommand, knownSessionId, launchType } = plan
       const id = agent.id
+      const launched = createSessionActivity({ ...stateRef.current, agents: stateRef.current.agents.concat([agent]) }, id, {
+        category: 'lifecycle', actor: 'system', kind: 'launch', text: 'Session process launched',
+      })
       dispatch(s => {
-        const withAgent = { ...s, agents: s.agents.concat([agent]) }
+        const withAgent = { ...s, agents: s.agents.concat([{ ...agent, history: [launched] }]) }
         // background-workspace launches (cron) must not touch the active layout
         if (agent.workspaceId !== s.activeWorkspace) return withAgent
         return { ...focusSessionIn(withAgent, id), newSessionOpen: false }
       })
-      port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => armResponseWatch(id))
+      port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => recordTerminalSubmit(id))
       const fail = (err: unknown) => {
         dispatch(s => ({
           ...s,
@@ -263,10 +278,15 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
       }
       taskSessions.current.set(id, { taskId, workspaceId })
       const sessionName = stateRef.current.agents.find(a => a.id === id)?.name ?? id
-      dispatch(s2 => updateLocatedTask(s2, taskId, t => ({
-        ...t, agentId: id, agentIds: [...(t.agentIds ?? []), id!], scheduleAt: undefined,
+      const assigned = createSessionActivity(stateRef.current, id, {
+        category: 'lifecycle', actor: 'watcher', kind: 'task',
+        text: `Assigned task · ${task.title.slice(0, 80)}`,
+        detail: opts?.extraInstructions?.trim().slice(0, 300) || undefined,
+      }, taskId)
+      dispatch(s2 => withActivityTargets(updateLocatedTask(s2, taskId, t => ({
+        ...t, agentId: id, agentIds: [...new Set([...(t.agentIds ?? []), id!])], scheduleAt: undefined,
         col: t.col === 'backlog' || t.col === 'done' || t.col === 'failed' ? 'progress' as const : t.col,
-      }), workspaceId))
+      }), workspaceId), assigned, { sessionId: id, taskId, workspaceId }))
       armResponseWatch(id)
       pushTaskChat(taskId, 'system', `Spawned ${interactive ? 'interactive' : 'one-shot'} session “${sessionName}” for this task`)
       if (!task.cwd && !st.settings.defaultCwd && !(task.templateId && (st.templates ?? []).find(t => t.id === task.templateId)?.cwd)) {

@@ -12,7 +12,7 @@ import { defaultDetail, mkMemory, mkTools } from '../../core/data'
 import { buildContextSummary } from './turns'
 import { resolveDecision } from '../master/harness-stats'
 import { withMemoryAppend } from '../master/assistant-memory'
-import { recordHistory } from '../../core/history'
+import { createSessionActivity, withActivityTargets } from '../activity/history'
 import { LESSONS_FILE, appendBrainFile, commitBrain } from './durable-brain'
 import { execCommand, isTauri } from '../../core/native'
 import type { ThinkingEffort } from '../../llm/client'
@@ -249,28 +249,47 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
     sendChatMessage: (agentId, text, atts) => {
       const msg = text.trim()
       if (msg || atts?.length) {
-        const label = msg.slice(0, 80) || '(see attachments)'
-        dispatch(s => ({ ...s, agents: s.agents.map(a => a.id === agentId ? { ...a, history: recordHistory(a.history, { category: 'action', kind: 'send', text: `Sent: ${label}` }) } : a) }))
+        const event = createSessionActivity(stateRef.current, agentId, {
+          category: 'action', actor: 'user', kind: 'send',
+          text: atts?.length ? `Sent message · ${atts.length} attachment${atts.length === 1 ? '' : 's'}` : 'Sent message',
+          detail: msg.slice(0, 240) || undefined,
+        })
+        dispatch(s => withActivityTargets(s, event, { sessionId: agentId }))
         void ctx.runChatMessage(agentId, msg || '(see attachments)', atts)
       }
     },
 
     sendQuickReply: (agentId, msgId, reply) => {
-      dispatch(s => ({
+      const event = createSessionActivity(stateRef.current, agentId, {
+        category: 'decision', actor: 'user', kind: 'choose', text: `Quick reply · ${reply.trim().slice(0, 60)}`,
+      })
+      dispatch(s => withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === agentId
-          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, suggestions: undefined } : m)), history: recordHistory(a.history, { category: 'decision', kind: 'choose', text: `Quick reply · ${reply.trim().slice(0, 60)}` }) }
+          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, suggestions: undefined } : m)) }
           : a),
         harnessLog: resolveDecision(s.harnessLog, { role: 'chat', kind: 'reply', agentId }, 'accepted', reply.slice(0, 60)),
-      }))
+      }, event, { sessionId: agentId }))
       void ctx.runChatMessage(agentId, reply)
     },
 
-    stopChat: agentId => ctx.stopChatMessage(agentId),
+    stopChat: agentId => {
+      const event = createSessionActivity(stateRef.current, agentId, {
+        category: 'action', actor: 'user', kind: 'stop', text: 'Stopped response',
+      })
+      dispatch(s => withActivityTargets(s, event, { sessionId: agentId }))
+      ctx.stopChatMessage(agentId)
+    },
 
     compactChat: agentId => ctx.compactChatContext(agentId),
 
-    retryChat: agentId => ctx.retryChatMessage(agentId),
+    retryChat: agentId => {
+      const event = createSessionActivity(stateRef.current, agentId, {
+        category: 'action', actor: 'user', kind: 'launch', text: 'Retried response',
+      })
+      dispatch(s => withActivityTargets(s, event, { sessionId: agentId }))
+      ctx.retryChatMessage(agentId)
+    },
 
     editAndResendChat: (agentId, turnId, text, atts) => ctx.replayChatMessage(agentId, turnId, text, atts),
 
@@ -352,12 +371,22 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
       const msg = conv?.chatLog?.find(m => m.id === msgId)
       if (!conv || !msg || msg.role !== 'assistant') return
       const cleared = msg.feedback === rating && !note // same thumb again = un-rate
-      dispatch(s => ({
+      const event = !cleared ? createSessionActivity(st, agentId, {
+        category: 'decision', actor: 'user', kind: 'feedback',
+        text: `Rated ${rating === 'up' ? '👍' : '👎'}${note?.trim() ? ' · with note' : ''}`,
+        detail: note?.trim() || undefined,
+      }) : null
+      dispatch(s => event ? withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === agentId
-          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, feedback: cleared ? undefined : rating } : m)), history: cleared ? a.history : recordHistory(a.history, { category: 'decision', kind: 'feedback', text: `Rated ${rating === 'up' ? '👍' : '👎'}${note?.trim() ? ' · with note' : ''}`, detail: note?.trim() || undefined }) }
+          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, feedback: cleared ? undefined : rating } : m)) }
           : a),
-      }))
+      }, event, { sessionId: agentId }) : {
+        ...s,
+        agents: s.agents.map(a => a.id === agentId
+          ? { ...a, chatLog: (a.chatLog ?? []).map(m => (m.id === msgId ? { ...m, feedback: undefined } : m)) }
+          : a),
+      })
       if (cleared) return
       // turn the rating into a durable lesson: explicit feedback is the highest-
       // signal learning input, so it lands in the brain immediately instead of
@@ -402,16 +431,21 @@ export function createChatActions(ctx: ChatActionsCtx): ChatActions {
       } : a),
     })),
 
-    archiveChat: agentId => dispatch(s => ({
-      ...s,
-      agents: s.agents.map(a => a.id === agentId ? { ...a, archived: true, chatPinned: false, history: recordHistory(a.history, { category: 'action', kind: 'archive', text: 'Archived chat' }) } : a),
-      activeChatId: s.activeChatId === agentId ? null : s.activeChatId,
-    })),
+    archiveChat: agentId => {
+      const event = createSessionActivity(stateRef.current, agentId, { category: 'action', actor: 'user', kind: 'archive', text: 'Archived chat' })
+      dispatch(s => withActivityTargets({
+        ...s,
+        agents: s.agents.map(a => a.id === agentId ? { ...a, archived: true, chatPinned: false } : a),
+        activeChatId: s.activeChatId === agentId ? null : s.activeChatId,
+      }, event, { sessionId: agentId }))
+    },
 
-    restoreChat: agentId => dispatch(s => ({
-      ...s,
-      agents: s.agents.map(a => a.id === agentId ? { ...a, archived: false, history: recordHistory(a.history, { category: 'action', kind: 'restore', text: 'Restored chat' }) } : a),
-    })),
+    restoreChat: agentId => {
+      const event = createSessionActivity(stateRef.current, agentId, { category: 'action', actor: 'user', kind: 'restore', text: 'Restored chat' })
+      dispatch(s => withActivityTargets({
+        ...s, agents: s.agents.map(a => a.id === agentId ? { ...a, archived: false } : a),
+      }, event, { sessionId: agentId }))
+    },
 
     setChatTokenBudget: (agentId, tokens) => dispatch(s => ({
       ...s,

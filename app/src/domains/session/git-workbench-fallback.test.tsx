@@ -18,6 +18,7 @@ vi.mock('../../core/native', () => ({
     { name: 'assets', path: '/plain/assets', isDir: true },
   ],
   gitStatus: async () => { throw new Error('not a git repository') },
+  gitDiff: async () => '',
   gitStage: async () => {},
   gitUnstage: async () => {},
   gitCommit: async () => '',

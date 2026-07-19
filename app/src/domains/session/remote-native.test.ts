@@ -6,7 +6,7 @@ vi.mock('../../core/native', () => ({
   execCommand: (cmd: string, cwd?: string, t?: number) => exec(cmd, cwd, t),
   // local fns — unused in these remote tests, present so the import resolves
   listDir: vi.fn(), readTextFile: vi.fn(), readFileB64: vi.fn(),
-  gitStatus: vi.fn(), gitFileDiff: vi.fn(), gitFileDiffSide: vi.fn(),
+  gitStatus: vi.fn(), gitDiff: vi.fn(), gitFileDiff: vi.fn(), gitFileDiffSide: vi.fn(),
   gitStage: vi.fn(), gitUnstage: vi.fn(), gitCommit: vi.fn(),
 }))
 

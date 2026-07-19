@@ -7,7 +7,7 @@ import type { AppState, EventType } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { withMemoryAppend } from '../master/assistant-memory'
 import { resolveDecision } from '../master/harness-stats'
-import { recordHistory } from '../../core/history'
+import { createSessionActivity, withActivityTargets } from '../activity/history'
 import { sendLineToSession } from './command'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
@@ -56,16 +56,19 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       if (moves) port.writeSession(aid, moves).catch(() => {})
       window.setTimeout(() => { port.writeSession(aid, '\r').catch(() => {}) }, 200)
       clearFlagged(aid)
-      dispatch(s => withMemoryAppend({
+      const event = createSessionActivity(st, aid, {
+        category: 'decision', actor: 'user', kind: 'choose', text: `Chose “${target.label}”`, detail: esc.reason || undefined,
+      })
+      dispatch(s => withMemoryAppend(withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'you' as const, x: `chose ${num}. ${target.label}` }]), history: recordHistory(a.history, { category: 'decision', kind: 'choose', text: `Chose “${target.label}”`, detail: esc.reason || undefined }) }
+          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'you' as const, x: `chose ${num}. ${target.label}` }]) }
           : a),
         messages: s.messages.map(m => m === msg && m.esc
           ? { ...m, esc: { ...m.esc, resolved: true, decision: 'approved' as const, choice: `${num}. ${target.label}` } }
           : m),
         harnessLog: resolveDecision(s.harnessLog, { kind: 'needs_input', agentId: aid }, 'accepted', `${num}. ${target.label}`),
-      }, 'approvals', `prompt "${(esc.reason ?? '').slice(0, 90)}" in ${agent.name} → chose "${target.label}"`))
+      }, event, { sessionId: aid, taskId: event.taskId }), 'approvals', `prompt "${(esc.reason ?? '').slice(0, 90)}" in ${agent.name} → chose "${target.label}"`))
       flash(`Chose “${target.label}”`)
       logEvent('done', aid, `Answered prompt · ${num}. ${target.label}`)
       armResponseWatch(aid)
@@ -76,14 +79,17 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       // answer the prompt: Enter accepts the default / highlighted option
       if (agent?.kind === 'real') port.writeSession(aid, '\r').catch(() => {})
       const reason = (agent?.escReason ?? '').slice(0, 90)
-      dispatch(s => withMemoryAppend({
+      const event = createSessionActivity(stateRef.current, aid, {
+        category: 'decision', actor: 'user', kind: 'approve', text: 'Approved prompt', detail: reason || undefined,
+      })
+      dispatch(s => withMemoryAppend(withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'approved by you' }]), history: recordHistory(a.history, { category: 'decision', kind: 'approve', text: 'Approved prompt', detail: reason || undefined }) }
+          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'approved by you' }]) }
           : a),
         messages: s.messages.map(m => (m.escFor === aid && m.esc ? { ...m, esc: { ...m.esc, resolved: true, decision: 'approved' as const } } : m)),
         harnessLog: resolveDecision(s.harnessLog, { kind: 'needs_input', agentId: aid }, 'accepted', 'approved'),
-      }, 'approvals', reason ? `prompt "${reason}" in ${agent?.name ?? aid} → approved` : ''))
+      }, event, { sessionId: aid, taskId: event.taskId }), 'approvals', reason ? `prompt "${reason}" in ${agent?.name ?? aid} → approved` : ''))
       flash(`Approved — ${agent?.name || 'agent'} resumed`)
       logEvent('done', aid, 'Approved · prompt accepted')
     },
@@ -93,15 +99,18 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       // Escape cancels the prompt
       if (agent?.kind === 'real') port.writeSession(aid, '\x1b').catch(() => {})
       const reason = (agent?.escReason ?? '').slice(0, 90)
-      dispatch(s => withMemoryAppend({
+      const event = createSessionActivity(stateRef.current, aid, {
+        category: 'decision', actor: 'user', kind: 'deny', text: 'Denied prompt', detail: reason || undefined,
+      })
+      dispatch(s => withMemoryAppend(withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === aid
-          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'denied · prompt cancelled' }]), history: recordHistory(a.history, { category: 'decision', kind: 'deny', text: 'Denied prompt', detail: reason || undefined }) }
+          ? { ...a, status: 'running' as const, escReason: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'denied · prompt cancelled' }]) }
           : a),
         messages: s.messages.map(m => (m.escFor === aid && m.esc ? { ...m, esc: { ...m.esc, resolved: true, decision: 'denied' as const } } : m)),
         // the flag itself was right (the user engaged) — the answer was "no"
         harnessLog: resolveDecision(s.harnessLog, { kind: 'needs_input', agentId: aid }, 'accepted', 'denied'),
-      }, 'approvals', reason ? `prompt "${reason}" in ${agent?.name ?? aid} → denied` : ''))
+      }, event, { sessionId: aid, taskId: event.taskId }), 'approvals', reason ? `prompt "${reason}" in ${agent?.name ?? aid} → denied` : ''))
       flash(`Denied — prompt cancelled`)
       logEvent('escalate', aid, 'Denied · prompt cancelled')
     },
@@ -112,23 +121,29 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       if (!agent || !sug) return
       sendLineToSession(aid, sug.send)
       armResponseWatch(aid)
-      dispatch(s => withMemoryAppend({
+      const event = createSessionActivity(stateRef.current, aid, {
+        category: 'decision', actor: 'user', kind: 'choose', text: `Ran suggestion · ${sug.label}`, detail: sug.send,
+      })
+      dispatch(s => withMemoryAppend(withActivityTargets({
         ...s,
         agents: s.agents.map(a => a.id === aid
-          ? { ...a, suggestions: undefined, log: a.log.concat([{ t: 'you' as const, x: `ran suggestion · ${sug.label}` }]), history: recordHistory(a.history, { category: 'decision', kind: 'choose', text: `Ran suggestion · ${sug.label}`, detail: sug.send }) }
+          ? { ...a, suggestions: undefined, log: a.log.concat([{ t: 'you' as const, x: `ran suggestion · ${sug.label}` }]) }
           : a),
         harnessLog: resolveDecision(s.harnessLog, { kind: 'suggestion', agentId: aid }, 'accepted', sug.label),
-      }, 'patterns', `when "${(agent.summary || agent.task || agent.name).slice(0, 90)}" → user ran "${sug.label}" (${sug.send.slice(0, 80)})`))
+      }, event, { sessionId: aid, taskId: event.taskId }), 'patterns', `when "${(agent.summary || agent.task || agent.name).slice(0, 90)}" → user ran "${sug.label}" (${sug.send.slice(0, 80)})`))
       flash(`Sent “${sug.label}”`)
       logEvent('route', aid, `Ran suggestion · ${sug.label}`)
     },
 
     dismissSuggestions: aid => {
-      dispatch(s => ({
+      const event = createSessionActivity(stateRef.current, aid, {
+        category: 'decision', actor: 'user', kind: 'dismiss', text: 'Dismissed suggestions',
+      })
+      dispatch(s => withActivityTargets({
         ...s,
-        agents: s.agents.map(a => (a.id === aid ? { ...a, suggestions: undefined, history: recordHistory(a.history, { category: 'decision', kind: 'dismiss', text: 'Dismissed suggestions' }) } : a)),
+        agents: s.agents.map(a => (a.id === aid ? { ...a, suggestions: undefined } : a)),
         harnessLog: resolveDecision(s.harnessLog, { kind: 'suggestion', agentId: aid }, 'dismissed'),
-      }))
+      }, event, { sessionId: aid, taskId: event.taskId }))
     },
   }
 }

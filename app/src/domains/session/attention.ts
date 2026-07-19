@@ -11,6 +11,8 @@ import { dispatch } from '../../core/store'
 import { mkId } from '../../shared/id'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { estimateLogUsage, estimateOutputUsage } from '../../core/usage'
+import { findTaskForAgentInState } from '../board/task-state'
+import { createSessionActivity, withActivityTargets } from '../activity/history'
 
 export interface SessionAttentionCtx {
   stateRef: MutableRefObject<AppState>
@@ -108,7 +110,22 @@ export function createSessionAttention(ctx: SessionAttentionCtx): SessionAttenti
     // Merge monitor-authored status fields into one session card.
     applyAgentStatus: (sid, task, summary, actionNeeded) => {
       const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      dispatch(s2 => ({
+      const before = stateRef.current.agents.find(a => a.id === sid)
+      const boardTask = findTaskForAgentInState(stateRef.current, sid)
+      const taskChanged = task !== undefined && (task || undefined) !== before?.task
+      const summaryChanged = summary !== undefined && (summary || undefined) !== before?.summary
+      // Task sessions get their progress from the watcher, which has the task
+      // and criteria context. Plain sessions use monitor status as their work
+      // timeline; coalesce identical polling updates.
+      const event = !boardTask && (taskChanged || summaryChanged)
+        ? createSessionActivity(stateRef.current, sid, {
+            category: 'work', actor: 'monitor', kind: taskChanged ? 'task' : 'progress',
+            text: taskChanged ? `Working on · ${task || 'unspecified task'}` : (summary || 'Status updated'),
+            detail: taskChanged && summary ? summary.slice(0, 300) : undefined,
+          }, undefined, task || before?.task)
+        : null
+      dispatch(s2 => {
+        const next = {
         ...s2,
         agents: s2.agents.map(a => a.id === sid
           ? {
@@ -120,7 +137,9 @@ export function createSessionAttention(ctx: SessionAttentionCtx): SessionAttenti
               summaryAt: at,
             }
           : a),
-      }))
+        }
+        return event ? withActivityTargets(next, event, { sessionId: sid, coalesce: true }) : next
+      })
     },
 
     // Retain a bounded plain-text output tail and update character usage

@@ -6,7 +6,7 @@
 // ControlMaster connection (via the session id) so each call is cheap.
 import type { Machine } from '../../core/types'
 import {
-  execCommand, gitCommit, gitFileDiff, gitFileDiffSide, gitStage, gitStatus, gitUnstage,
+  execCommand, gitCommit, gitDiff, gitFileDiff, gitFileDiffSide, gitStage, gitStatus, gitUnstage,
   listDir, readFileB64, readTextFile, writeTextFile,
 } from '../../core/native'
 import type { DirEntryInfo, GitStatusResult } from '../../core/native'
@@ -23,6 +23,7 @@ export interface SessionFs {
   writeTextFile(path: string, contents: string): Promise<void>
   readFileB64(path: string): Promise<string>
   gitStatus(cwd: string): Promise<GitStatusResult>
+  gitDiff(cwd: string): Promise<string>
   gitFileDiff(cwd: string, path: string): Promise<string>
   gitFileDiffSide(cwd: string, path: string, staged: boolean): Promise<string>
   gitStage(cwd: string, paths: string[]): Promise<void>
@@ -37,7 +38,7 @@ export interface SessionFs {
 
 /** The local (in-process native) adapter — the existing behavior verbatim. */
 const localFs: SessionFs = {
-  listDir, readTextFile, readFileB64, gitStatus, gitFileDiff, gitFileDiffSide, gitStage, gitUnstage, gitCommit,
+  listDir, readTextFile, readFileB64, gitStatus, gitDiff, gitFileDiff, gitFileDiffSide, gitStage, gitUnstage, gitCommit,
   writeTextFile: (path, contents) => writeTextFile(path, contents),
   detectRepos: detectRepoDirs,
   remote: false,
@@ -132,6 +133,9 @@ export function remoteFs(machine: Machine, id: string): SessionFs {
       const root = (lines[0] ?? '').trim()
       if (!root) throw new Error('not a git repository')
       return parsePorcelain(root, (lines[1] ?? '').trim(), lines.slice(2).filter(Boolean))
+    },
+    async gitDiff(cwd) {
+      return ok(await run(`git -C ${shq(cwd)} diff --no-color HEAD`))
     },
     async gitFileDiff(cwd, path) {
       return ok(await run(`git -C ${shq(cwd)} diff --no-color -U0 HEAD -- ${shq(path)}`))

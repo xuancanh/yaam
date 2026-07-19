@@ -273,6 +273,7 @@ describe('createSessionActions', () => {
     expect(c.armResponseWatch).toHaveBeenCalledWith('a1')
     expect(port.sendLine).toHaveBeenCalledWith('a1', 'hello')
     expect(get('a1')?.log.at(-1)).toMatchObject({ t: 'you', x: 'hello' })
+    expect(get('a1')?.history?.[0]).toMatchObject({ actor: 'user', kind: 'send', detail: 'hello' })
   })
 
   it('unarchiveSession rebuilds the terminal and replays the retained log', () => {
@@ -284,5 +285,8 @@ describe('createSessionActions', () => {
     expect(port.attachTerminal).toHaveBeenCalledOnce()
     expect(writeln).toHaveBeenCalledWith(expect.stringContaining('line one'))
     expect(get('a1')?.archived).toBeFalsy()
+    const submit = vi.mocked(port.attachTerminal).mock.calls[0][4]
+    submit()
+    expect(get('a1')?.history?.[0]).toMatchObject({ actor: 'user', text: 'Submitted terminal input' })
   })
 })

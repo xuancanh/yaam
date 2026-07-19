@@ -64,6 +64,7 @@ describe('archive / restore / delete', () => {
     const c = ctx()
     createBoardActions(c).archiveTask('t1')
     expect(getTask('t1')).toMatchObject({ archived: true, awaitingUser: false })
+    expect(getTask('t1')?.history?.[0]).toMatchObject({ actor: 'user', kind: 'archive' })
     expect(c.disposeWatcher).toHaveBeenCalledWith('t1')
     expect(c.taskSessions.current.has('a1')).toBe(false)
   })
@@ -90,6 +91,7 @@ describe('review queue actions', () => {
     expect(worktreeMerge).toHaveBeenCalledWith('/wt', expect.stringContaining('Fix the login flow'))
     expect(worktreeRemove).toHaveBeenCalledWith('/wt')
     expect(getTask('t1')?.col).toBe('done')
+    expect(getTask('t1')?.history?.[0]).toMatchObject({ actor: 'user', kind: 'approve', sessionId: 'a1' })
     // the removed mirror must not be re-entered by follow-up sessions
     expect(useAppStore.getState().agents.find(a => a.id === 'a1')).toMatchObject({ cwd: '/repo', worktree: undefined })
     expect(c.pushTaskChat).toHaveBeenCalledWith('t1', 'system', expect.stringContaining('merged back'))

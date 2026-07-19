@@ -159,8 +159,8 @@ export interface SessionRecord {
   usageVersion?: 1
   snaps: Snapshot[]
   diff: DiffFile[]
-  /** newest-first log of the user's actions + decisions in this session
-   *  (approvals, choices, sends, launches, stops, …). See `recordHistory`. */
+  /** Newest-first activity timeline: user actions and decisions plus the
+   *  session's task changes, progress, file evidence, and outcome. */
   history?: HistoryEntry[]
   /** the CLI's own session/conversation id, captured after launch for resume */
   cliSessionId?: string
@@ -748,8 +748,7 @@ export interface BoardTask {
   criteria?: string[]
   /** chat with this task's watcher (mini master) */
   chat?: TaskChatMsg[]
-  /** newest-first log of the user's actions + decisions on this task
-   *  (starts, moves, archive, review approve/deny, suggestion picks, …). */
+  /** Newest-first activity timeline for the task and every attached session. */
   history?: HistoryEntry[]
   /** watcher's one-line status shown on the card */
   watcherNote?: string
@@ -895,26 +894,46 @@ export interface MemoryFile {
 
 export type HarnessRole = 'monitor' | 'watcher' | 'master' | 'chat'
 
-/** One entry in a session's or task's history: a user action or decision.
- *  Newest first (see `recordHistory`). Per-entity (`agent.history` /
- *  `task.history`), distinct from the global `harnessLog` (which scores
- *  assistant proposals) and the workspace activity feed (system events) — this
- *  is the user's own trail on one entity. */
+export type HistoryActor = 'user' | 'session' | 'monitor' | 'watcher' | 'system'
+
+export interface HistoryFileChange {
+  /** Repository-relative path. Multi-repo folders prefix it with repo/. */
+  path: string
+  change: 'added' | 'modified' | 'deleted' | 'renamed' | 'binary'
+  additions?: number
+  deletions?: number
+  /** Rename source when `change` is `renamed`. */
+  from?: string
+}
+
+/** One durable event in a session or task activity timeline. Newest first.
+ *  Entries are deliberately evidence-sized: a concise explanation plus an
+ *  optional structured file snapshot, not raw terminal output. Legacy entries
+ *  from 0.6.1 may omit actor and linkage; the UI treats those as user events. */
 export interface HistoryEntry {
   id: string
   at: number
-  /** action = something the user did; decision = a judgment call (approve/deny,
-   *  pick an option, give feedback) */
-  category: 'action' | 'decision'
+  category: 'action' | 'decision' | 'work' | 'lifecycle'
+  /** Who caused the event. Optional only for compatibility with 0.6.1 data. */
+  actor?: HistoryActor
   /** stable slug identifying what happened */
   kind: HistoryEventKind
   /** one-line summary shown in the history list */
   text: string
-  /** optional longer context (the prompt text, the chosen option, a comment) */
+  /** Optional explanation, instruction preview, result, or failure context. */
   detail?: string
+  /** Cross-links let a session show every task it worked and let a task show
+   *  what each attached session did. Names are snapshots so history survives
+   *  later rename/archive/delete operations. */
+  sessionId?: string
+  sessionName?: string
+  taskId?: string
+  taskTitle?: string
+  /** Concrete working-tree evidence captured at a stable milestone/exit. */
+  changes?: HistoryFileChange[]
 }
 
-/** The kinds of user events a session/task history records. */
+/** Stable event vocabulary shared by session and task activity timelines. */
 export type HistoryEventKind =
   // decisions — judgment calls between alternatives
   | 'approve'   // approved a prompt / tool call / diff / review
@@ -933,6 +952,12 @@ export type HistoryEventKind =
   | 'delete'    // deleted
   | 'edit'      // edited config / spec / name
   | 'schedule'  // scheduled / unscheduled
+  // work + lifecycle — what a session/watcher actually did
+  | 'task'      // began or changed the task being worked
+  | 'progress'  // evidence-backed status milestone
+  | 'changes'   // structured working-tree snapshot
+  | 'complete'  // process/task completed successfully
+  | 'fail'      // process/task failed
 
 /** One recorded assistant decision + the user's implicit feedback — the online
  *  eval signal (acceptance/dismissal/override rates) behind the scorecard and

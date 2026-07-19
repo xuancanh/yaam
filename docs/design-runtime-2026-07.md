@@ -115,7 +115,42 @@ Satellites hydrate without keychain resolution. Stable release signing remains
 necessary on macOS: ad-hoc rebuilt bundles can have a new code identity and
 therefore prompt for Keychain access again.
 
-## 7. Design decisions and non-goals
+## 7. Session and task activity model
+
+Each durable `SessionRecord` and `BoardTask` carries a bounded, newest-first
+activity timeline. This is not terminal scrollback and it is not the global
+workspace event feed. It answers three narrower questions after the work is
+over: which tasks a session handled, what evidence exists for the work, and
+which decisions/actions came from the user.
+
+An entry has an explicit actor (`user`, `session`, `monitor`, `watcher`, or
+`system`), a stable event kind, a concise explanation, and snapshot links to the
+session/task names and ids. Task-linked activity is written to both entity
+timelines with the same event id, so a session can index its tasks while a task
+can index every contributing session. IDs and timestamps are minted before the
+Zustand update; reducer functions only prepend/coalesce an immutable entry.
+
+Work evidence comes from three sources:
+
+- monitor or watcher milestones explain the current task and approach;
+- process exit records a completed/failed outcome with a bounded final digest;
+- a best-effort local, worktree, or SSH Git snapshot stores structured paths,
+  change kinds, and line counts, never the complete diff.
+
+Working-tree snapshots are observations at a session milestone, not exclusive
+attribution: non-isolated folders can be shared, and follow-up task sessions
+reuse one cumulative worktree. The UI labels the snapshot accordingly. Direct
+terminal Enter records that input was submitted without trying to reconstruct
+or persist the xterm input buffer; explicit chat/task instructions can retain a
+bounded preview. Legacy 0.6.1 history entries without actor/link fields remain
+readable as user events.
+
+The timeline is capped at 200 entries per entity. Consecutive identical status
+polls coalesce; user actions and intervening milestones do not. Deleting an
+entity deletes its own timeline, while snapshot names and task-side copies keep
+linked history understandable after a contributing session is removed.
+
+## 8. Design decisions and non-goals
 
 - One persistence owner is preferred over cross-window locking; satellites sync
   their workspace slice instead of writing the file themselves.

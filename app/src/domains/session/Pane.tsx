@@ -29,7 +29,7 @@ const filesDockCache = new Map<string, PanelDock>()
 // the task-watcher conversation, docked beside the session when it works a task
 const watcherOpenCache = new Map<string, boolean>()
 const watcherDockCache = new Map<string, PanelDock>()
-// the session's user-action history (approvals, sends, launches, decisions)
+// the session's durable activity (tasks, work evidence, and user actions)
 const historyOpenCache = new Map<string, boolean>()
 const historyDockCache = new Map<string, PanelDock>()
 // drag-resizable split ratios: each dock area's share of the pane
@@ -134,7 +134,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
   const setDock = (d: PanelDock) => { gitDockCache.set(agent.id, d); setGitDock(d) }
   const setFDock = (d: PanelDock) => { filesDockCache.set(agent.id, d); setFilesDock(d) }
   const setWDock = (d: PanelDock) => { watcherDockCache.set(agent.id, d); setWatcherDock(d) }
-  // session history: the user's actions + decisions in this session, newest first
+  // session activity: task/work evidence + user actions, newest first
   const history = useConductorSelector(x => x.agents.find(a => a.id === agent.id)?.history)
   const [historyOpen, setHistoryOpen] = useState(historyOpenCache.get(agent.id) ?? false)
   const [historyDock, setHistoryDock] = useState<PanelDock>(historyDockCache.get(agent.id) ?? 'right')
@@ -238,7 +238,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         )}
         <button
           className="icon-btn"
-          title={historyOpen ? 'Hide the history panel' : 'History — your actions and decisions in this session'}
+          title={historyOpen ? 'Hide activity' : 'Activity — tasks, session work, file changes, and your actions'}
           style={{ width: 27, height: 27, borderRadius: 7, color: historyOpen ? 'var(--accent)' : undefined }}
           onClick={e => { e.stopPropagation(); setHistoryOpen(v => { historyOpenCache.set(agent.id, !v); return !v }) }}
         >
@@ -383,9 +383,9 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         )
         const historyPanel = historyOpen && (
           <>
-            <DockStrip label="HISTORY" dock={historyDock} onDock={setHDock} onClose={closeHistory} full={panelFull} onToggleFull={toggleFull} />
+            <DockStrip label="ACTIVITY" dock={historyDock} onDock={setHDock} onClose={closeHistory} full={panelFull} onToggleFull={toggleFull} />
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-              <HistoryList entries={history} emptyHint="No actions or decisions yet — they'll be logged here as you use the session." />
+              <HistoryList entries={history} emptyHint="No activity yet — tasks, work milestones, file changes, and your actions will appear here." />
             </div>
           </>
         )

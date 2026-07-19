@@ -34,6 +34,14 @@ then writes the durable `SessionRecord` plus the last 200 log entries. Hydration
 restores a session as idle; the runtime then reattaches a still-live PTY or
 prints a relaunch marker.
 
+Session and task `history` arrays are nested durable fields and are capped at
+200 entries by the activity writer. A task-linked event is materialized in both
+the per-session partition and the task's main/workspace partition using the same
+event id. This preserves task history after a session is deleted and makes both
+views cheap to render. The two partitions are independently debounced, so the
+copies are convergent audit views rather than a cross-file transaction log; no
+security or authorization decision may depend on their presence.
+
 Runtime-only state includes PTY/xterm objects, provider histories, timers,
 queues, abort controllers, pending approval promises, `detachedWorkspaces`,
 keychain readiness, and search indexes.
