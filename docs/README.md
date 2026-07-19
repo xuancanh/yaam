@@ -26,6 +26,12 @@ planning document disagree, the implementation documents below are canonical.
   detached hosts, child processes, boot, reload, and shutdown.
 - [Durable agents](durable-agents.md) — identity, file brain, reflection,
   loops, dashboards, import/export, and marketplace lifecycle.
+- [Chat requirements](chat-requirements.md) — product and safety requirements
+  for conversations, tools, compaction, providers, and durable agents.
+- [Terminal streaming and watcher deep dive](tui-streaming-and-watcher.md) —
+  PTY bytes, settle detection, monitors, watchers, and their bounded flows.
+- [Addon tutorial](addons-tutorial.md) — a hands-on authoring walkthrough for
+  building and publishing a registry addon.
 - [Session sandbox audit (2026-07)](sandbox-audit-2026-07.md) — threat model,
   findings, executed hardening, lifecycle coverage, and residual limitations.
 - [Addon architecture and authoring](addons.md) — package format, permissions,

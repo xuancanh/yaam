@@ -49,8 +49,15 @@ PTY after reload; a repaint resize is used instead. Exit `code` may be null.
 
 ### Watch and close events
 
-`fs-change` carries a bounded/coalesced list of changed paths for a watched
-root. The Files pane refreshes the affected tree; browser builds use polling.
+`fs-change` carries a bounded/coalesced envelope for a watched root:
+
+```ts
+{ root: string; paths: string[] }
+```
+
+`root` is the canonical watcher key and `paths` are sorted/deduplicated visible
+paths (`.git` and `node_modules` churn is dropped). The Files pane refreshes the
+affected tree; browser builds use polling.
 `close-requested` carries the Tauri window label as a string. Rust broadcasts
 it after vetoing the OS close; the matching window flushes and then destroys
 itself.
@@ -148,11 +155,12 @@ Detached sessions run a separate `--yaam-host` process. The Unix socket frame is
 [type: u8][length: little-endian u32][payload: length bytes]
 ```
 
-The host sends `DATA` frames containing raw PTY bytes. The attach client sends
-`RESIZE` frames containing the encoded terminal dimensions and `KILL` to stop
-the host. Payload and frame lengths are bounded before allocation. A reconnect
-receives the host's bounded output ring, then live frames; no application JSON
-is mixed into the PTY byte stream.
+`DATA` frames carry raw PTY bytes in either direction: host → attach streams
+output, while attach → host forwards user input. The attach client sends
+`RESIZE` frames containing four little-endian `u16` bytes (`rows`, then `cols`)
+and `KILL` to stop the host. Payload and frame lengths are bounded before
+allocation. A reconnect receives the host's bounded output ring, then live
+frames; no application JSON is mixed into the PTY byte stream.
 
 ## MCP and provider wire formats
 
