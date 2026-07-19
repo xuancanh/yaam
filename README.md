@@ -25,7 +25,7 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 
 - Each session runs a configurable agent CLI, a plain shell (zsh/bash/sh/fish/nu), or a custom command in the working directory you choose.
 - Full terminal emulation: prompts, colors, TUIs, keystrokes to the PTY, resize handling. Commands run through a login-shell wrapper so PATH from nvm/Homebrew/Cargo resolves.
-- **Persistent split-pane layouts** — a Chrome-style menu arranges 1–4 panes (single, split, three-up, or 2×2); the layout and orientation are saved and restored on restart.
+- **Persistent split-pane layouts** — a two-level Chrome-style picker arranges 1–6 panes (single, split, three-up, rows, grid, and six-up variants); the layout and orientation are saved and restored on restart.
 - Per-pane stop/resume/exit-code status, maximize/restore, and rename.
 - **Detachable sessions** — start a session in detached mode and its PTY lives in a separate host process with its own lifecycle: it keeps running when YAAM quits, and the app reattaches later (▶) with the recent output replayed. Stop ends it for real; everything else (monitors, remote companion, resize) works as usual.
 - **Remote machines** — save SSH hosts in **Settings → Machines** and run any session on one: by default the agent runs on the host over SSH just like a local session (it ends when you disconnect), and checking **Detached** keeps it alive in a **tmux** session across disconnects and app restarts (Resume reattaches, Stop ends it). The **Files and Git** panels operate over SSH on that host, multi-repo folders included. Auth is keys/ssh-agent only (no passwords; a **Test connection** check probes tmux, `base64`, git, and the working dir). A machine can be chosen in the New Session dialog and on templates, board tasks, and schedules.
@@ -64,7 +64,7 @@ The **Chat** rail is a home for **chat agents**: in-app LLM assistants (no PTY) 
 
 - **Hands-on tools** — browse/search folders (glob + grep), read/write/surgically-edit files, manage files, run shell commands and scripts, research the web (search + fetch + raw HTTP), control macOS apps via AppleScript, drive the kanban board and schedules, save new skills, and call tools on your **MCP servers**. Built-in write/edit operations are canonically scoped to the chat's working folder; Ask mode runs reads automatically and pauses mutations or external actions for Allow once / Always allow / Deny. Tool calls render as live traces.
 - **Slash commands** — `/` opens a fuzzy menu of every skill from the chat's sources (plus `/clear`, `/compact`, `/export`); picking one injects the skill deterministically.
-- **File import** — drag & drop or attach files: text inlines, PDFs and office documents (docx/xlsx/pptx) are text-extracted, images go to vision-capable models; a Files toggle mounts the same explorer/rich viewer terminal sessions use (real system file icons, images, PDFs, office previews) — every file row has a one-click ＋ attach, and the viewer offers "Add to chat".
+- **File import** — drag & drop or attach files: text inlines, PDFs and office documents (docx/xlsx/pptx/odp/odt) are text-extracted, images go to vision-capable models; a Files toggle mounts the same explorer/rich viewer terminal sessions use (real system file icons, images, PDFs, office previews) — every file row has a one-click ＋ attach, and the viewer offers "Add to chat".
 - **Durable workspace memory** — agents read shared memory each turn and append facts via a `remember` tool; a Memory editor lets you prune what they've learned.
 - **Durable agents** — hire a project manager, researcher, cooking helper, tutor, editor, or blank identity with a stable charter, optional home folder, `LESSONS.md`, `JOURNAL.md`, ranked home-folder retrieval, and scheduled loops. Reflections distill conversations into the file brain; Git-backed brains get scoped history commits. `AGENT.json` makes an agent folder importable/exportable.
 - **Long-context compaction** — provider history can be distilled automatically at a configurable token threshold or manually with `/compact`; the full visible transcript remains while the durable summary survives restarts.
@@ -111,7 +111,7 @@ Addons live in a **marketplace** (rail → Addons): search, an installed list wi
 
 ## Workspaces
 
-Work is organized into **workspaces** (switcher in the title bar): each has its own sessions, Master chat, schedules, board, activity feed, and notifications. Background workspaces stay alive — sessions keep running and monitors keep reporting; Master events queue and are summarized when you switch in. Settings, agent types, addons, and the tool registry are global.
+Work is organized into **workspaces** (switcher in the title bar): each has its own sessions, Master chat, schedules, board, activity feed, and notifications. Background workspaces stay alive — sessions keep running and monitors keep reporting; Master events queue and are summarized when you switch in. Workspaces can be archived/restored, and sessions can move between them. A workspace can also be opened in a satellite window; the main window remains the single persistence/Master owner while the satellite syncs its workspace slice. Settings, agent types, addons, and the tool registry are global.
 
 ## More
 

@@ -13,6 +13,9 @@ planning document disagree, the implementation documents below are canonical.
   boundary.
 - [Security model](security.md) — trust zones, authorization layers, secret and
   filesystem handling, addon isolation, and known limitations.
+- [Current implementation design](design-runtime-2026-07.md) — the July 2026
+  design chapter for workspace ownership, remote control, terminal/files
+  boundaries, sandboxing, and persistence.
 - [Session sandbox audit (2026-07)](sandbox-audit-2026-07.md) — threat model,
   findings, executed hardening, lifecycle coverage, and residual limitations.
 - [Addon architecture and authoring](addons.md) — package format, permissions,
@@ -38,4 +41,5 @@ current runtime exactly:
 - [Broader rearchitecture hotspots](planning/rearchitecture-hotspots.md)
 
 The `design/` directory is the original HTML visual prototype. Runtime behavior
-is defined by `app/src` and `app/src-tauri/src`.
+is defined by `app/src` and `app/src-tauri/src`; the current implementation
+design chapter above records the decisions that the visual prototype does not.

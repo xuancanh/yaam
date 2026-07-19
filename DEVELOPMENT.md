@@ -7,6 +7,7 @@ Current implementation architecture is documented under [docs/](docs/README.md):
 - [Frontend domains](docs/frontend-domains.md)
 - [Backend domains](docs/backend-domains.md)
 - [Security model](docs/security.md)
+- [Current implementation design](docs/design-runtime-2026-07.md)
 - [Addon authoring](docs/addons.md)
 
 ## Prerequisites

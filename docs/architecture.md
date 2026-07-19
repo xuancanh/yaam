@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-This document describes the implementation on 2026-07-05. YAAM is a Tauri 2
+This document describes the implementation on 2026-07-18. YAAM is a Tauri 2
 desktop application that coordinates live coding-agent CLI processes, in-app
 LLM chat agents, task watchers, schedules, MCP servers, and installable addons.
 

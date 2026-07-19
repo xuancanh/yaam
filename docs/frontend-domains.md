@@ -210,12 +210,15 @@ ephemeral completion, and ordinary interactive exit. The coordinator then:
 
 ### File pane
 
-The file pane lists directories, polls git status, loads text or base64 binary
-content, provides image/PDF/office previews, highlights source, and derives
-changed-line markers from zero-context git diffs. It is shared by real sessions
-and chat sessions with a working folder. `FolderExplorer` is the standalone
-variant (tree + rich viewer, nothing attached) the git workbench uses as its
-non-git fallback.
+The file pane lists directories, loads text or base64 binary content, provides
+image/PDF/office previews (including pptx, odp, and odt), highlights source, and
+derives changed-line markers from zero-context git diffs. In Tauri it refreshes
+from the native recursive `watch_dir`/`fs-change` stream; browser builds use a
+polling fallback. It also offers native open/reveal/VS Code actions and a
+custom-scheme rich preview whose network and full-JavaScript modes are explicit
+opt-ins. The pane is shared by real sessions and chat sessions with a working
+folder. `FolderExplorer` is the standalone variant (tree + rich viewer, nothing
+attached) the git workbench uses as its non-git fallback.
 
 ### Worktree isolation and the git workbench
 
@@ -520,7 +523,10 @@ schedules to continue.
 ### Implementation
 
 `state.ts` contains pure snapshot/apply/switch transitions. `actions.ts`
-switches, creates, renames, and deletes workspaces. Switching replays queued
+switches, creates, renames, archives/restores, and permanently deletes archived
+workspaces. It also moves sessions between workspaces, assigns workspace accent
+colors, opens a workspace in a satellite window, and reclaims or merges
+detached workspace state when that window closes. Switching replays queued
 Master notes after loading the target slice. Deletion cancels Master, kills and
 disposes owned sessions, removes their persisted files, and removes the
 workspace data.
@@ -563,7 +569,9 @@ approval — without granting the remote any capability the desktop UI lacks.
 
 - `snapshot.ts` is the pure builder: it distills `AppState` into the JSON the
   mobile app renders — sessions with a terminal tail (alt-screen read or log
-  tail), the full non-archived board with watcher chats, chat conversations
+  tail), but only the phone-focused session's terminal buffer is serialized in
+  each snapshot; the raw `/api/term` stream remains available for live focus.
+  It also includes the full non-archived board with watcher chats, chat conversations
   (thinking excluded), and approvals from both pending Master tool approvals
   and ask-mode chat approvals. Message counts, screen lines, and text lengths
   are capped so snapshots stay small.
@@ -622,7 +630,8 @@ mirroring, debounced writes, and close flushing.
 - `loaders.ts` loads main/backup and new/legacy session layouts.
 - `hydrate.ts` defensively normalizes legacy records, layouts, usage counters,
   addons, and interrupted chats.
-- `hydrate-effect.ts` sequences load, apply, terminal restore, keychain resolve,
+- `hydrate-effect.ts` sequences load, apply, terminal restore, keychain resolve
+  (main window only),
   readiness, and integration startup.
 - `subscribe.ts` identifies changes relevant to main, session, secret, and chat
   search writers.
@@ -637,6 +646,6 @@ debounce, close flush, and cleanup.
 
 Tests are colocated with domains. Pure functions use direct fixtures; effectful
 runtimes use fake `StatePort`, `ClockPort`, process ports, frames, and abort
-signals. The current suite includes 64 files and 306 test cases in this
+signals. The current suite includes 102 files and 622 test cases in this
 snapshot. UI behavior is covered selectively with jsdom and Testing Library;
 most coverage focuses on domain and runtime invariants.
