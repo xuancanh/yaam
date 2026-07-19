@@ -111,9 +111,12 @@ Secret mirroring tracks exact account/value pairs for Master, chat, GitHub,
 remote URL/device, MCP, and durable-agent credentials. Unchanged keychain
 records are not rewritten, removed accounts are deleted, and plaintext is
 retained if a keychain write fails so a user does not silently lose credentials.
-Satellites hydrate without keychain resolution. Stable release signing remains
-necessary on macOS: ad-hoc rebuilt bundles can have a new code identity and
-therefore prompt for Keychain access again.
+Satellites hydrate without keychain resolution. The backend caches resolved
+values across webview reloads. On macOS a non-interactive ACL probe distinguishes
+missing items from rebuilt binaries that need authorization; after one allowed
+read, YAAM safely recreates the item under the current binary's ACL using a
+temporary recovery entry. Stable release signing remains necessary to avoid the
+one-time authorization after each new ad-hoc build.
 
 ## 7. Session and task activity model
 

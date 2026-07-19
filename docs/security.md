@@ -340,6 +340,16 @@ and writer. If keychain storage fails, YAAM intentionally keeps the value in
 plaintext state to avoid silent credential loss and logs the failure. Browser
 preview has no keychain and stores state in localStorage.
 
+The Rust backend caches resolved secrets for its process lifetime, so a webview
+reload does not query Keychain again. On macOS it first probes each legacy
+file-keychain item with interaction disabled. If a rebuilt binary is no longer
+in that item's ACL, the one authorized read is staged through a temporary
+recovery entry and the item is recreated by the current binary. This is the
+programmatic equivalent of making the current build a trusted application: it
+stops repeat prompts on subsequent reloads/reopens without opening the secret to
+other applications. The recovery entry is deleted after recreation; if
+recreation is interrupted, the next read restores from it before continuing.
+
 Secrets exist in frontend memory while in use. Credential commands and AWS
 refresh commands are arbitrary user-configured shell commands. Bedrock signing
 and AWS credential-chain handling occur in Rust.
@@ -368,10 +378,10 @@ is not signed.
 
 Local development and ad-hoc bundles use the configured ad-hoc signing identity
 (`signingIdentity: "-"`). macOS may therefore associate each rebuilt bundle
-with a different code identity, causing Keychain to ask for access again even
-when the account was previously allowed. Release distribution should use one
-stable Developer ID/application signing identity across updates; this is an
-operational signing requirement, not a keychain retry fix.
+with a different code identity. YAAM repairs the legacy ACL after one authorized
+read, so the same build does not ask again; a newly rebuilt ad-hoc binary may
+still require one authorization per existing credential. Release distribution
+should use one stable Developer ID/application signing identity across updates.
 
 ## Main webview and IPC boundary
 
