@@ -35,6 +35,8 @@ export interface SettleApi {
   armResponseWatch: (id: string) => void
   /** reset a session's quiet-period timer on raw PTY activity */
   bumpSettle: (id: string) => void
+  /** buffer one decoded output line for periodic/final monitor checkpoints */
+  bufferOutput: (id: string, line: string) => void
   /** drop a session's last-flagged question (user answered/handled it) */
   clearFlagged: (id: string) => void
   /** tear down all settle state + timer for a session */
@@ -61,10 +63,12 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   const armed = new Map<string, { snapshot: string; at: number; continuation?: boolean }>()
   const settle = new Map<string, { since: number; timer: Disposable }>()
   const lastFlagged = new Map<string, string>()
-  // normalized key of the last settled screen we handed the task watcher, so an
-  // unchanged screen (a redraw, or a second settle on the same final output)
-  // does not wake the watcher LLM again for nothing.
-  const lastReported = new Map<string, string>()
+  // Plain terminals accumulate decoded lines here. Long-running output is
+  // forwarded in bounded checkpoints; settle always sends one final snapshot.
+  const outputBuffers = new Map<string, string[]>()
+  const outputTimers = new Map<string, Disposable>()
+  const lastOutputKey = new Map<string, string>()
+  const lastFinalKey = new Map<string, string>()
   let scan: Disposable | undefined
 
   // "responding" indicator: a session is streaming while raw output keeps
@@ -75,6 +79,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   // throttle for the live status refresh below — bumpSettle runs at PTY speed
   const lastLive = new Map<string, number>()
   const LIVE_STATUS_MS = 1200
+  const OUTPUT_CHECKPOINT_MS = 8000
   const setResponding = (id: string, on: boolean) => {
     if (on === streaming.has(id)) return
     if (on) streaming.add(id)
@@ -97,9 +102,53 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     clock.setTimeout(() => bumpSettle(id), 4000)
   }
 
+  const bufferOutput = (id: string, line: string) => {
+    const lines = outputBuffers.get(id) ?? []
+    lines.push(line)
+    // Bound both dimensions: enough evidence for a progress checkpoint, never
+    // an unbounded copy of terminal scrollback.
+    while (lines.length > 80 || lines.reduce((n, x) => n + x.length, 0) > 16_000) lines.shift()
+    outputBuffers.set(id, lines)
+  }
+
+  const flushOutput = (id: string, final: boolean, fallback: string[] = []) => {
+    const agent = state.get().agents.find(a => a.id === id)
+    if (!agent) return
+    const alt = isAltScreen(id)
+    const buffered = outputBuffers.get(id) ?? []
+    outputBuffers.delete(id)
+    const content = (alt ? readScreen(id) : (buffered.length ? buffered : fallback)).filter(Boolean).slice(-40)
+    if (!content.length) return
+    const key = stableScreenKey(content)
+    if (final && !buffered.length && key && lastFinalKey.get(id) === key) return
+    if (!final && key && lastOutputKey.get(id) === key) return
+    if (key) lastOutputKey.set(id, key)
+    if (final && key) lastFinalKey.set(id, key)
+    const text = content.join('\n').slice(-12_000)
+    const phase = final ? 'finished sending output' : 'is still running; this is a buffered checkpoint'
+    const taskFor = taskForSession(id)
+    const note = `${NOTE_PROGRESS} The session "${agent.name}" ${phase}. ${alt ? 'Current rendered screen' : 'New terminal output'}:\n${text}\n\n` +
+      (final
+        ? 'Update the tracked session/task history and status from this evidence. Treat completion as proven only by the process/task state and acceptance criteria.'
+        : 'Update progress/history from new evidence, but do not claim completion from this intermediate checkpoint.')
+    if (taskFor) runWatcherRef.current(taskFor.task.id, note)
+    else runMonitor(id, note)
+  }
+
+  const scheduleOutputCheckpoint = (id: string) => {
+    if (outputTimers.has(id)) return
+    outputTimers.set(id, clock.setTimeout(() => {
+      outputTimers.delete(id)
+      flushOutput(id, false)
+      if (streaming.has(id)) scheduleOutputCheckpoint(id)
+    }, OUTPUT_CHECKPOINT_MS))
+  }
+
   // Inspect a stable rendered screen for prompts, completion, monitors, and watchers.
   const onSettle = (id: string, since: number) => {
     settle.delete(id)
+    outputTimers.get(id)?.dispose()
+    outputTimers.delete(id)
     // output went quiet — the session is no longer actively responding
     setResponding(id, false)
     const agent = state.get().agents.find(a => a.id === id)
@@ -113,7 +162,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     // of the raw output stream; plain sessions use the new stream tail.
     const streamLines = agent.log.slice(since).map(l => l.x).filter(Boolean)
     const content = alt ? readScreen(id) : streamLines.slice(-14)
-    if (!content.length) return
+    if (!content.length) { flushOutput(id, true); return }
     const lastLine = content[content.length - 1] ?? ''
     // Never flag input, and never relay half-answers, while the TUI busy marker
     // is visible — any question-looking text on screen is transient then.
@@ -139,6 +188,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
             'Unblock it from the task spec when safe; otherwise ask the user one focused question and update the card note.')
         }
       }
+      outputBuffers.delete(id) // the prompt note above carries the relevant screen
       return
     }
 
@@ -201,13 +251,6 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
               (digest?.actionNeeded ?? lastLine).slice(0, 90), id)
           }
         }
-        // task sessions are watched by their task's watcher (the mini master
-        // assigns itself as monitor) — the generic session monitor skips them
-        if (llm && !taskForSession(id)) {
-          void runMonitor(id,
-            `The session finished responding. ${alt ? 'Current screen' : 'New output since last check'}:\n${content.slice(-14).join('\n')}\n\n` +
-            'It was given a task by Master or the user, so a completed response IS noteworthy — update the status and report a digest to Master.')
-        }
         // Keep an actively-running session under watch: re-arm with the screen
         // we just reported as the new baseline, so the NEXT meaningful change
         // refreshes its status too. Arming otherwise only happens on user input,
@@ -219,21 +262,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       }
     }
 
-    // Task watchers own progress independently of the global follow-mode
-    // monitor. Feed stable output snapshots to the watcher — but only when the
-    // settled screen actually changed since the last one we sent, so a redraw or
-    // a second settle on the same final screen doesn't wake the watcher LLM for
-    // nothing. Tagged [progress] so its note queue can collapse duplicates.
-    const taskFor = taskForSession(id)
-    if (taskFor) {
-      const reportKey = stableScreenKey(content)
-      if (reportKey && lastReported.get(id) !== reportKey) {
-        lastReported.set(id, reportKey)
-        runWatcherRef.current(taskFor.task.id,
-          `${NOTE_PROGRESS} The task's session "${agent.name}" produced stable output. ${alt ? 'Current screen' : 'New output'}:\n` +
-          `${content.slice(-14).join('\n')}\n\nTrack progress against the acceptance criteria, update the card note, and move the task only if the evidence supports it.`)
-      }
-    }
+    flushOutput(id, true, content)
   }
 
   // (re)start the settle watcher — checks only run once output goes quiet.
@@ -249,6 +278,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     const since = prev?.since ?? Math.max(0, (agent?.log.length ?? 1) - 1)
     const timer = clock.setTimeout(() => onSettle(id, since), 3000)
     settle.set(id, { since, timer })
+    scheduleOutputCheckpoint(id)
   }
 
   // While a session streams, keep its status line tracking the latest output in
@@ -283,7 +313,11 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     settle.delete(id)
     armed.delete(id)
     lastFlagged.delete(id)
-    lastReported.delete(id)
+    outputBuffers.delete(id)
+    outputTimers.get(id)?.dispose()
+    outputTimers.delete(id)
+    lastOutputKey.delete(id)
+    lastFinalKey.delete(id)
     lastLive.delete(id)
     setResponding(id, false)
   }
@@ -326,12 +360,13 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   }
 
   return {
-    armResponseWatch, bumpSettle, clearFlagged, disposeSettle,
+    armResponseWatch, bumpSettle, bufferOutput, clearFlagged, disposeSettle,
     start() { scan ??= clock.setInterval(scanTui, 4000) },
     dispose() {
       scan?.dispose(); scan = undefined
       for (const { timer } of settle.values()) timer.dispose()
-      settle.clear(); armed.clear(); lastFlagged.clear(); lastReported.clear(); streaming.clear(); lastLive.clear()
+      for (const timer of outputTimers.values()) timer.dispose()
+      settle.clear(); armed.clear(); lastFlagged.clear(); outputBuffers.clear(); outputTimers.clear(); lastOutputKey.clear(); lastFinalKey.clear(); streaming.clear(); lastLive.clear()
     },
   }
 }

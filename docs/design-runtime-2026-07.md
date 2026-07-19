@@ -140,10 +140,23 @@ Work evidence comes from three sources:
 Working-tree snapshots are observations at a session milestone, not exclusive
 attribution: non-isolated folders can be shared, and follow-up task sessions
 reuse one cumulative worktree. The UI labels the snapshot accordingly. Direct
-terminal Enter records that input was submitted without trying to reconstruct
-or persist the xterm input buffer; explicit chat/task instructions can retain a
-bounded preview. Legacy 0.6.1 history entries without actor/link fields remain
-readable as user events.
+terminal input is reconstructed from xterm's user-only `onData` stream and is
+recorded only when Enter submits it. Cursor edits, deletion, and bracketed paste
+are handled best-effort; programmatic writes never enter this path. The bounded
+submission is copied to the linked task timeline and immediately sent to its
+watcher (or the session monitor) as user intent. Password/token prompts are
+detected from the visible screen before Enter reaches the PTY, and their input
+is replaced by a redacted marker. Legacy 0.6.1 history entries without
+actor/link fields remain readable as user events.
+
+Decoded terminal output follows the same causal path without persisting raw
+scrollback in activity history. Plain-session lines accumulate in an in-memory
+80-line/16 KiB buffer; while output continues, a bounded checkpoint is sent to
+the watcher/monitor every eight seconds. Three seconds of quiet cancels the
+checkpoint timer and sends a final snapshot. Alternate-screen TUIs use their
+current rendered screen instead of decoded lines. Routine progress notes are
+latest-wins in the watcher queue, and stable-screen keys suppress duplicate
+snapshots.
 
 The timeline is capped at 200 entries per entity. Consecutive identical status
 polls coalesce; user actions and intervening milestones do not. Deleting an

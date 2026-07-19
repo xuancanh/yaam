@@ -18,6 +18,9 @@ import { createLaunchRuntime } from '../../domains/session/launch-runtime'
 import { createMonitorRuntime } from '../../domains/master/monitor-runtime'
 import { resolveDecision } from '../../domains/master/harness-stats'
 import { createWatcherRuntime } from '../../domains/board/watcher-runtime'
+import { readScreen } from '../../core/terminals'
+import { terminalSubmissionNote, trackedTerminalSubmission } from '../../domains/session/terminal-tracking'
+import { createSessionActivity, withActivityTargets } from '../../domains/activity/history'
 import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
 
@@ -34,6 +37,8 @@ export interface SessionRuntime {
   disposeWatcher: (taskId: string) => void
   armResponseWatch: (id: string) => void
   bumpSettle: (id: string) => void
+  bufferOutput: (id: string, line: string) => void
+  recordTerminalSubmit: (id: string, text: string) => void
   clearFlagged: (id: string) => void
   disposeSettle: (id: string) => void
   clearNeeds: (id: string) => void
@@ -92,7 +97,7 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
     state, clock: browserClock, notify, setNeedsInput, runMonitor, taskForSession,
     masterEventRef, monitorEventRef, runWatcherRef,
   })
-  const { armResponseWatch, bumpSettle, clearFlagged, disposeSettle } = settle
+  const { armResponseWatch, bumpSettle, bufferOutput, clearFlagged, disposeSettle } = settle
   const clearNeeds = (id: string) => {
     clearFlagged(id)
     dispatch(s => ({
@@ -116,6 +121,24 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
     }))
   }
 
+  const recordTerminalSubmit = (id: string, text: string) => {
+    const st = stateRef.current
+    const agent = st.agents.find(a => a.id === id)
+    if (!agent) return
+    const task = taskForSession(id)
+    const tracked = trackedTerminalSubmission(text, readScreen(id))
+    const event = createSessionActivity(st, id, {
+      category: 'action', actor: 'user', kind: 'send', text: tracked.historyText, detail: tracked.detail,
+    }, task?.task.id)
+    dispatch(s => withActivityTargets(s, event, {
+      sessionId: id, taskId: task?.task.id, workspaceId: task?.workspaceId,
+    }))
+    armResponseWatch(id)
+    const note = terminalSubmissionNote(agent.name, tracked)
+    if (task) void runWatcher(task.task.id, note)
+    else runMonitor(id, note)
+  }
+
   const exitCtx = {
     stateRef,
     takeUserStopped: (id: string) => userStoppedRef.current.delete(id),
@@ -126,7 +149,7 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
   }
 
   const { probeCliSession, launchSession, launchFromTemplate, spawnTaskSession, spawnSessionForTask, startTaskViaWatcher } = createLaunchRuntime({
-    stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch,
+    stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, bufferOutput, armResponseWatch, recordTerminalSubmit,
     pushTaskChat, runWatcher, taskSessions: taskSessionsRef,
   })
   spawnTaskSessionRef.current = (taskId, extraInstructions) => spawnTaskSession(taskId, { extraInstructions })
@@ -137,7 +160,7 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
     runMonitor, disposeMonitor: (id: string) => monitor.dispose(id),
     taskForSession, pushTaskChat,
     runWatcher, disposeWatcher: (tid: string) => watcher.dispose(tid),
-    armResponseWatch, bumpSettle, clearFlagged, disposeSettle, clearNeeds,
+    armResponseWatch, bumpSettle, bufferOutput, recordTerminalSubmit, clearFlagged, disposeSettle, clearNeeds,
     launchSession, launchFromTemplate, spawnTaskSession, spawnSessionForTask, startTaskViaWatcher, probeCliSession,
     start() { settle.start(); offExit ??= subscribeSessionExits(exitCtx) },
     dispose() { settle.dispose(); offExit?.(); offExit = undefined },

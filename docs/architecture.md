@@ -341,6 +341,20 @@ rendered alternate screen for TUIs or new plain-output lines otherwise. It
 detects prompt/dialog patterns, extracts numbered options, and deduplicates
 repeat detections.
 
+User keystrokes are reconstructed in a bounded, per-terminal input buffer, but
+are recorded and routed only when Enter submits them. This captures direct
+terminal decisions in the session/task activity timeline without mistaking
+programmatic writes or navigation keys for user instructions. Credential-like
+prompts redact the submitted value before it reaches persisted state or an LLM.
+
+Decoded output is buffered separately from durable terminal logs. A continuing
+stream sends a bounded progress checkpoint every eight seconds; the quiet-period
+settle sends the final checkpoint. Plain terminals contribute up to 80 buffered
+lines/16 KiB (40 lines/12 KiB per note), while alternate-screen TUIs contribute
+the current rendered screen. Task-bound output goes to its watcher; other output
+goes to the session monitor. Stable-screen keys and latest-wins progress notes
+prevent unchanged redraws from accumulating.
+
 An armed response watch compares the stable output with the screen snapshot at
 send time. If content changed and the session is not actively viewed, it marks
 attention and notifies. A four-second TUI scan is an additional safety net for

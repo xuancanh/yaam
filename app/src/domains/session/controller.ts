@@ -23,6 +23,6 @@ export function useSessionController(ctx: SessionControllerCtx): SessionControll
   return useMemo(() => createSessionController(ctx), [
     ctx.stateRef, ctx.flash, ctx.logEvent, ctx.markUserStopped, ctx.disposeSessionRuntime,
     ctx.launchSession, ctx.probeCliSession, ctx.armResponseWatch, ctx.appendTail, ctx.clearNeeds,
-    ctx.bumpSettle, ctx.clearFlagged, ctx.port, ctx.execCommand,
+    ctx.bumpSettle, ctx.bufferOutput, ctx.recordTerminalSubmit, ctx.clearFlagged, ctx.port, ctx.execCommand,
   ])
 }

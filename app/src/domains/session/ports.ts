@@ -41,7 +41,7 @@ export interface SessionProcessPort {
     onPlainLine: (line: string) => void,
     onUserInput: () => void,
     onActivity: () => void,
-    onUserSubmit: () => void,
+    onUserSubmit: (text: string) => void,
   ) => TerminalHandle
   /** free a session's xterm buffer */
   disposeTerminal: (id: string) => void

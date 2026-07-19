@@ -286,7 +286,8 @@ describe('createSessionActions', () => {
     expect(writeln).toHaveBeenCalledWith(expect.stringContaining('line one'))
     expect(get('a1')?.archived).toBeFalsy()
     const submit = vi.mocked(port.attachTerminal).mock.calls[0][4]
-    submit()
+    submit('typed directly')
     expect(get('a1')?.history?.[0]).toMatchObject({ actor: 'user', text: 'Submitted terminal input' })
+    expect(get('a1')?.history?.[0]?.detail).toBe('typed directly')
   })
 })

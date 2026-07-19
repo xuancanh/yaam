@@ -69,6 +69,8 @@ export interface ConductorActionsDeps {
   appendTail: (id: string, line: string) => void
   clearNeeds: (id: string) => void
   bumpSettle: (id: string) => void
+  bufferOutput: (id: string, line: string) => void
+  recordTerminalSubmit: (id: string, text: string) => void
   notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
   // application command registry entry point (actor-scoped use cases + policy)
   execCommand: CommandRegistry['execute']
@@ -113,6 +115,7 @@ export function createConductorActions(d: ConductorActionsDeps): ConductorAction
       stateRef: d.stateRef, flash: d.flash, logEvent: d.logEvent, markUserStopped: d.markUserStopped,
       disposeSessionRuntime: d.disposeSessionRuntime, launchSession: d.launchSession, probeCliSession: d.probeCliSession,
       armResponseWatch: d.armResponseWatch, appendTail: d.appendTail, clearNeeds: d.clearNeeds, bumpSettle: d.bumpSettle,
+      bufferOutput: d.bufferOutput, recordTerminalSubmit: d.recordTerminalSubmit,
       clearFlagged: d.clearFlagged, execCommand: d.execCommand,
     }),
   }

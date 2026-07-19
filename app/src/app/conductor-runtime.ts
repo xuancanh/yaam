@@ -75,6 +75,7 @@ function assembleRuntimeDeps(
     armResponseWatch: session.armResponseWatch, clearFlagged: session.clearFlagged,
     launchSession: session.launchSession, probeCliSession: session.probeCliSession,
     appendTail: session.appendTail, clearNeeds: session.clearNeeds, bumpSettle: session.bumpSettle,
+    bufferOutput: session.bufferOutput, recordTerminalSubmit: session.recordTerminalSubmit,
   }
 }
 

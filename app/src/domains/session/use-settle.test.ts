@@ -136,6 +136,41 @@ describe('createSessionSettle', () => {
     expect(runWatcher).toHaveBeenCalledTimes(2)
   })
 
+  it('flushes bounded output checkpoints during a long stream and once more at settle', () => {
+    const runWatcher = vi.fn()
+    const state = createFakeStatePort({
+      agents: [agent({ log: [] })], activeWorkspace: 'ws', settings: {}, groups: [], activeGroup: null,
+    } as unknown as AppState)
+    const clock = new FakeClock()
+    const deps: SettleDeps = {
+      state, clock, notify: vi.fn(), setNeedsInput: vi.fn(), runMonitor: vi.fn(),
+      taskForSession: () => ({ task: { id: 't1' } }) as unknown as ReturnType<SettleDeps['taskForSession']>,
+      masterEventRef: ref(() => {}), monitorEventRef: ref(() => {}), runWatcherRef: ref(runWatcher),
+    }
+    const rt = createSessionSettle(deps)
+    const output = (line: string) => {
+      state.update(s => ({ ...s, agents: s.agents.map(a => a.id === 'a1' ? { ...a, log: [...a.log, { t: 'out', x: line }] } : a) }))
+      rt.bufferOutput('a1', line)
+      rt.bumpSettle('a1')
+    }
+
+    output('step 1')
+    clock.advance(2500); output('step 2')
+    clock.advance(2500); output('step 3')
+    clock.advance(2500); output('step 4')
+    clock.advance(500) // first 8-second checkpoint
+    expect(runWatcher).toHaveBeenCalledTimes(1)
+    expect(runWatcher.mock.calls[0][1]).toContain('buffered checkpoint')
+    expect(runWatcher.mock.calls[0][1]).toContain('step 1')
+    expect(runWatcher.mock.calls[0][1]).toContain('step 4')
+
+    output('final result')
+    clock.advance(3000)
+    expect(runWatcher).toHaveBeenCalledTimes(2)
+    expect(runWatcher.mock.calls[1][1]).toContain('finished sending output')
+    expect(runWatcher.mock.calls[1][1]).toContain('final result')
+  })
+
   it('start() arms the TUI scan and dispose() stops it and cancels timers', () => {
     const h = harness([agent()])
     h.rt.start()

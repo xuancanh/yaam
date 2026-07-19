@@ -51,7 +51,7 @@ get raw bytes over **SSE** and render them in their own xterm.
                                             │                    │
                                             │         SETTLE STATE MACHINE (use-settle.ts)
                                             │        streaming / settled / needs-input
-                                            │                    │ prose snapshot (last 14 lines)
+                                            │                    │ bounded checkpoints + final snapshot
                                             │        ┌───────────┴───────────┐
                                             │   session monitor          task watcher
                                             │   (follow mode, LLM)       (per task, LLM)
@@ -226,8 +226,11 @@ onSessionData(e => {
 
 Key per-session state (`Entry`): a streaming `TextDecoder` (partial UTF-8 must
 not mix across PTYs), a `pending` line buffer, an optional lazily-loaded
-`SerializeAddon`, and four callbacks. Keystrokes go the other way via
-`term.onData → writeSession(id, data)`; Enter triggers `onUserSubmit`.
+`SerializeAddon`, and callbacks. Keystrokes go the other way via
+`term.onData → writeSession(id, data)`. A bounded `TerminalInputBuffer`
+best-effort reconstructs only user-originated input (including cursor edits and
+bracketed paste); Enter triggers `onUserSubmit(text)` before it is written to
+the PTY. Programmatic session writes never pass through this tracker.
 
 ### 4.2 Signal extraction functions
 - `readScreen(id, maxRows=30)`: the currently *rendered* visible rows
@@ -254,10 +257,10 @@ This is where raw activity becomes semantic events. The wiring
 (`hydrate-effect.ts`, `launch-runtime.ts`, `actions.ts`) attaches:
 
 ```
-onPlainLine  → appendTail(id, line)      // into agent.log (batched, capped)
+onPlainLine  → appendTail(id, line) + bufferOutput(id, line)
 onUserInput  → clearNeeds(id)
 onActivity   → bumpSettle(id)            // EVERY raw chunk
-onUserSubmit → armResponseWatch(id)      // user pressed Enter
+onUserSubmit → recordTerminalSubmit(id,text) // history + watcher/monitor + arm
 ```
 
 ### 5.1 The log (`attention.ts`)
@@ -278,11 +281,15 @@ Per-session maps/sets:
 | `streaming: Set<id>` | drives the `responding` flag; touched only on false→true / true→false edges |
 | `lastFlagged: Map<id,string>` | dedup of the last question already surfaced |
 | `lastLive: Map<id,number>` | throttle for the live status line |
+| `outputBuffers: Map<id,string[]>` | bounded decoded output awaiting checkpoint/final delivery |
+| `outputTimers: Map<id,Disposable>` | one eight-second progress timer per streaming session |
+| `lastOutputKey` / `lastFinalKey` | suppress unchanged checkpoint/final snapshots |
 
 Constants: `bumpSettle` quiet window **3000 ms**; `onSettle` re-check when
 still busy/unchanged **3500 ms**; `armResponseWatch` forced check **4000 ms**;
 `scanTui` interval **4000 ms**; `LIVE_STATUS_MS` **1200 ms**; armed **expiry 15
-min**.
+min**. Output checkpoints run every **8000 ms** while the session remains
+streaming.
 
 ### 5.3 `bumpSettle` (runs at PTY speed, per chunk)
 1. Cancel the previous settle timer.
@@ -319,17 +326,18 @@ if armed:
         update card (attention, summary, actionNeeded from digest)
         if not watching and (fresh arm or digest.actionNeeded):
             notify(done|escalate)                               // bell/tab flash
-    if follow-mode LLM and not task: runMonitor(id, "finished responding: …")
     if still running: re-arm as {continuation:true}             // keep tracking
 
-if task session:                                                // ALWAYS for tasks
-    runWatcher(taskId, "produced stable output: <last 14 lines>")
+flushOutput(id, final=true, content)  // watcher for task sessions; monitor otherwise
 ```
 
 Notes:
 - **TUIs are judged by the rendered screen** (`readScreen`, stable) because they
-  redraw constantly with no newlines; plain sessions use the **new log tail
-  since `since`**, capped to the **last 14 lines**.
+  redraw constantly with no newlines; plain sessions use a bounded decoded-line
+  buffer. Each watcher/monitor note carries at most the last 40 lines / 12 KiB.
+- **Long streams checkpoint every eight seconds.** Settle cancels that timer and
+  emits one final snapshot; the in-memory source buffer is capped at 80 lines /
+  16 KiB and cleared after delivery.
 - The **`busy` marker** (`/esc to interrupt|ctrl\+c to interrupt/`) suppresses
   false completions and false prompts while a known TUI is still generating.
 - **Change detection is string equality** of the joined content vs the armed
@@ -363,7 +371,8 @@ Two LLM consumers receive settle notes. Both are per-key serialized loops
 (`busy` set + `queue`), re-reading live state each turn.
 
 ### 6.1 Session monitor (`monitor-runner.ts`, follow mode, per session)
-- Trigger: `runMonitor(id, note)` from `onSettle` (non-task sessions only).
+- Triggers: submitted user terminal input plus bounded output checkpoints/final
+  snapshots for non-task sessions.
 - **Queue policy: latest-wins** — `queue.set(id, note)` overwrites. While a turn
   runs, only the most recent note survives.
 - Tools: `update_status`, `flag_needs_input`, `report_to_master`, …
@@ -371,8 +380,10 @@ Two LLM consumers receive settle notes. Both are per-key serialized loops
 ### 6.2 Task watcher (`watcher.ts` + `watcher-runner.ts`, per task — the mini-orchestrator)
 - Triggers (all funnel to `runWatcher(taskId, note)`):
   - `onSettle` prompt → "waiting at this prompt: <14 lines>"
-  - `onSettle` stable output → "produced stable output: <14 lines>" (**every**
-    settle, incl. routine progress)
+  - continuing output → bounded progress checkpoint every eight seconds
+  - `onSettle` stable output → final bounded output/screen snapshot
+  - submitted user terminal input → bounded user intent (credential values
+    are redacted before persistence or LLM delivery)
   - **`session-exit`** (`exit-handler.ts`) → "exited with code N. Final
     output: <12 lines>" — a first-class event carrying the exit code and the
     final tail, with instructions to assess against criteria and move the card
@@ -396,11 +407,12 @@ Two LLM consumers receive settle notes. Both are per-key serialized loops
   after.
 
 ### 6.3 What the watcher actually "sees" of the output
-The **only** raw-output signal reaching the watcher is short line-tails:
-`content.slice(-14)` in settle notes and `slice(-12)` in `check_session`. It
-never receives the full scrollback, the raw bytes, colors, or a diff of what
-changed. Everything else (progress %, criteria evidence) is inferred by the LLM
-from those tails plus its own memory.
+The watcher receives bounded decoded-output checkpoints (last 40 lines / 12 KiB)
+and a final settle snapshot. Alternate-screen sessions supply the rendered
+screen instead. `check_session` remains an independent ground-truth read capped
+at 12 lines. The watcher never receives full scrollback, raw bytes, or colors.
+It also receives user input only on submission, so it can correlate each
+terminal decision with the output that follows.
 
 ---
 
@@ -421,7 +433,10 @@ from those tails plus its own memory.
 | live status | throttle | 1 200 ms |
 | scanTui | interval | 4 000 ms |
 | armed snapshot | expiry | 15 min |
-| watcher note window | slice | last **14** lines |
+| output source buffer | queue | last **80** lines / **16 KiB** |
+| output checkpoint | timer | **8 000 ms** while streaming |
+| watcher/monitor output note | slice | last **40** lines / **12 KiB** |
+| submitted terminal input | buffer | **4 000** codepoints; **2 000** sent to LLM |
 | check_session window | slice | last **12** lines |
 | watcher tool loop | rounds | 5 |
 | watcher history | cap | 20 messages |
@@ -475,7 +490,7 @@ period**, with an accumulating queue that concatenates near-duplicate snapshots.
 > `board/watcher-notes.ts` (`enqueueWatcherNote` — progress notes are
 > latest-wins, events accumulate), `prompt-detection.ts::stableScreenKey`
 > (spinner/noise-insensitive screen identity), and `use-settle.ts` (arm
-> comparison + a `lastReported` gate so an unchanged settled screen no longer
+> comparison + stable output/final keys so an unchanged settled screen no longer
 > wakes the task watcher). The remaining items below (deltas, on-demand
 > `read_output`, adaptive settle, structured payloads, widened exit output) are
 > still open.
@@ -497,10 +512,16 @@ right thing (latest-wins).
   in `use-settle.ts` so the queue can reason about them instead of parsing
   prose.
 
-### P0 — Send deltas, not tails (removes redundancy at the source)
+### P0 — Send bounded checkpoints, then evolve them into exact deltas (partly done)
 **Problem.** `content.slice(-14)` is an arbitrary, overlapping window; the
 watcher can't tell what is *new* since it last looked, and long/one-shot output
 that prints >14 lines at the end is truncated.
+
+**Current state.** Plain output is now collected between deliveries and sent in
+bounded eight-second checkpoints plus a final settle snapshot. This removes the
+old 14-line settle bottleneck and gives long-running commands periodic evidence.
+Stable keys suppress identical snapshots, but log offsets/typed delta metadata
+are not yet persisted across deliveries.
 
 **Fix.** Track a per-(task,session) **reported offset** into `agent.log` (and a
 last-serialized-screen hash for alt-screen). On settle, compute the **new lines

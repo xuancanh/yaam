@@ -31,6 +31,8 @@ export interface SessionActionsCtx {
   appendTail: (id: string, line: string) => void
   clearNeeds: (id: string) => void
   bumpSettle: (id: string) => void
+  bufferOutput?: (id: string, line: string) => void
+  recordTerminalSubmit?: (id: string, text: string) => void
   /** native PTY + terminal capability; defaults to the real IPC-backed port */
   port?: SessionProcessPort
   /** application command registry entry point (routes the PTY write + policy) */
@@ -59,7 +61,7 @@ export interface SessionActions {
 
 export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => createSessionActions(ctx), [ctx.stateRef, ctx.flash, ctx.logEvent, ctx.markUserStopped, ctx.disposeSessionRuntime, ctx.launchSession, ctx.probeCliSession, ctx.armResponseWatch, ctx.appendTail, ctx.clearNeeds, ctx.bumpSettle, ctx.port, ctx.execCommand])
+  return useMemo(() => createSessionActions(ctx), [ctx.stateRef, ctx.flash, ctx.logEvent, ctx.markUserStopped, ctx.disposeSessionRuntime, ctx.launchSession, ctx.probeCliSession, ctx.armResponseWatch, ctx.appendTail, ctx.clearNeeds, ctx.bumpSettle, ctx.bufferOutput, ctx.recordTerminalSubmit, ctx.port, ctx.execCommand])
 }
 
 /** The session lifecycle actions as a plain factory (no React), so they can be
@@ -67,17 +69,18 @@ export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
 export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
   const { stateRef, flash, logEvent, markUserStopped, disposeSessionRuntime, launchSession, probeCliSession, armResponseWatch, appendTail, clearNeeds, bumpSettle } = ctx
   const port = ctx.port ?? realSessionProcessPort
-  const recordTerminalSubmit = (id: string) => {
+  const recordTerminalSubmit = ctx.recordTerminalSubmit ?? ((id: string, text: string) => {
     const st = stateRef.current
     const task = findTaskForAgentInState(st, id)
     const event = createSessionActivity(st, id, {
-      category: 'action', actor: 'user', kind: 'send', text: 'Submitted terminal input',
+      category: 'action', actor: 'user', kind: 'send', text: text.trim() ? 'Submitted terminal input' : 'Pressed Enter in terminal',
+      detail: text.trim().slice(0, 1000) || undefined,
     }, task?.task.id)
     dispatch(s => withActivityTargets(s, event, {
       sessionId: id, taskId: task?.task.id, workspaceId: task?.workspaceId,
     }))
     armResponseWatch(id)
-  }
+  })
   return {
     mergeSessionWorktree: async (id, message) => {
       const agent = ctx.stateRef.current.agents.find(a => a.id === id)
@@ -157,7 +160,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       const agent = stateRef.current.agents.find(a => a.id === id)
       if (agent && agent.kind !== 'chat') {
         port.disposeTerminal(id)
-        const term = port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => recordTerminalSubmit(id))
+        const term = port.attachTerminal(id, line => { appendTail(id, line); ctx.bufferOutput?.(id, line) }, () => clearNeeds(id), () => bumpSettle(id), text => recordTerminalSubmit(id, text))
         for (const l of agent.log) term.writeln(`\x1b[90m${l.x}\x1b[0m`)
         term.writeln('\x1b[33m── unarchived · press ▶ to relaunch ──\x1b[0m')
       }

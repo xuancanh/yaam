@@ -10,6 +10,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { onSessionData, openExternal, resizeSession, writeSession } from './native'
 import { filePathMatches } from './terminal-links'
+import { TerminalInputBuffer } from './terminal-input'
 
 export interface Entry {
   term: Terminal
@@ -22,8 +23,9 @@ export interface Entry {
   gl?: WebglAddon
   onPlainLine: ((line: string) => void) | null
   onUserInput: (() => void) | null
-  /** Enter pressed — the user submitted something to the session */
-  onUserSubmit: (() => void) | null
+  /** Enter pressed — the text reconstructed from user keystrokes is submitted */
+  onUserSubmit: ((text: string) => void) | null
+  input: TerminalInputBuffer
   /** called on every raw output chunk — TUI redraws often contain no newlines */
   onActivity: (() => void) | null
   /** the mounted pane's find bar opener (Cmd/Ctrl+F inside the terminal) */
@@ -123,7 +125,7 @@ export function getTerminal(
   onPlainLine?: (line: string) => void,
   onUserInput?: () => void,
   onActivity?: () => void,
-  onUserSubmit?: () => void,
+  onUserSubmit?: (text: string) => void,
 ): Entry {
   ensureListener()
   let entry = entries.get(id)
@@ -171,15 +173,15 @@ export function getTerminal(
       return true
     })
     term.onData(data => {
+      const entry = entries.get(id)
       // scroll/mouse/arrow escape sequences are not the user answering a prompt
       if (!data.startsWith('\x1b[')) {
-        const entry = entries.get(id)
         entry?.onUserInput?.()
-        if (data.includes('\r') || data.includes('\n')) entry?.onUserSubmit?.()
       }
+      for (const text of entry?.input.feed(data) ?? []) entry?.onUserSubmit?.(text)
       writeSession(id, data).catch(() => {})
     })
-    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, onActivity: onActivity ?? null, onUserSubmit: onUserSubmit ?? null, onSearchOpen: null, onOpenFile: null, onSearchResults: null, pending: '', decoder: new TextDecoder() }
+    entry = { term, fit, onPlainLine: onPlainLine ?? null, onUserInput: onUserInput ?? null, onActivity: onActivity ?? null, onUserSubmit: onUserSubmit ?? null, input: new TerminalInputBuffer(), onSearchOpen: null, onOpenFile: null, onSearchResults: null, pending: '', decoder: new TextDecoder() }
     entries.set(id, entry)
   } else {
     if (onPlainLine) entry.onPlainLine = onPlainLine

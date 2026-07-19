@@ -29,7 +29,9 @@ export interface LaunchRuntimeCtx {
   appendTail: (id: string, line: string) => void
   clearNeeds: (id: string) => void
   bumpSettle: (id: string) => void
+  bufferOutput?: (id: string, line: string) => void
   armResponseWatch: (id: string) => void
+  recordTerminalSubmit?: (id: string, text: string) => void
   pushTaskChat: (taskId: string, role: TaskChatMsg['role'], text: string) => void
   runWatcher: (taskId: string, note: string) => Promise<void> | void
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
@@ -47,9 +49,9 @@ export interface LaunchRuntime {
 }
 
 export function useLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
-  const { stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch, pushTaskChat, runWatcher, taskSessions, port } = ctx
+  const { stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, bufferOutput, armResponseWatch, recordTerminalSubmit, pushTaskChat, runWatcher, taskSessions, port } = ctx
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => createLaunchRuntime(ctx), [stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch, pushTaskChat, runWatcher, taskSessions, port])
+  return useMemo(() => createLaunchRuntime(ctx), [stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, bufferOutput, armResponseWatch, recordTerminalSubmit, pushTaskChat, runWatcher, taskSessions, port])
 }
 
 /** The launch runtime as a plain factory (no React), so it can be unit-tested
@@ -57,17 +59,18 @@ export function useLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
 export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
   const { stateRef, later, flash, logEvent, appendTail, clearNeeds, bumpSettle, armResponseWatch, pushTaskChat, runWatcher, taskSessions } = ctx
   const port = ctx.port ?? realSessionProcessPort
-  const recordTerminalSubmit = (id: string) => {
+  const recordSubmit = ctx.recordTerminalSubmit ?? ((id: string, text: string) => {
     const st = stateRef.current
     const bound = taskSessions.current.get(id)
     const event = createSessionActivity(st, id, {
-      category: 'action', actor: 'user', kind: 'send', text: 'Submitted terminal input',
+      category: 'action', actor: 'user', kind: 'send', text: text.trim() ? 'Submitted terminal input' : 'Pressed Enter in terminal',
+      detail: text.trim().slice(0, 1000) || undefined,
     }, bound?.taskId)
     dispatch(s => withActivityTargets(s, event, {
       sessionId: id, taskId: bound?.taskId, workspaceId: bound?.workspaceId,
     }))
     armResponseWatch(id)
-  }
+  })
   {
     // Poll native session files until the launched CLI's resume id is discoverable.
     const probeCliSession = (id: string, command: string, cwd: string, isResume: boolean) => {
@@ -122,7 +125,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         if (agent.workspaceId !== s.activeWorkspace) return withAgent
         return { ...focusSessionIn(withAgent, id), newSessionOpen: false }
       })
-      port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), () => recordTerminalSubmit(id))
+      port.attachTerminal(id, line => { appendTail(id, line); ctx.bufferOutput?.(id, line) }, () => clearNeeds(id), () => bumpSettle(id), text => recordSubmit(id, text))
       const fail = (err: unknown) => {
         dispatch(s => ({
           ...s,
