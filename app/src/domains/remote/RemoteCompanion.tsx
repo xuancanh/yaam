@@ -162,16 +162,23 @@ export function RemoteCompanion() {
     let debounce: ReturnType<typeof setTimeout> | null = null
 
     let wasActive = false
+    // Sessions a phone is actually viewing (session_focus/blur). The phone's
+    // terminal rides the live /api/term byte stream; the snapshot screen is
+    // only its fallback — so serialize just the focused session(s) instead of
+    // paying a full serialize of EVERY terminal on every publish (felt as
+    // typing lag in busy fleets).
+    const focusedRemote = new Set<string>()
+    const snapTermFor = (id: string): { data: string; cols: number } =>
+      (focusedRemote.has(id) ? termFor(id) : { data: '', cols: terminalSize(id)?.cols ?? 80 })
     const publish = () => {
       if (dead) return
-      // snapshots serialize every session's terminal — skip all of it while
-      // no phone is connected, or the desktop pays that tax on every store
-      // change for nobody (felt as typing lag in busy terminals)
+      // skip snapshot building entirely while no phone is connected, or the
+      // desktop pays that tax on every store change for nobody
       void remoteActive().then(active => {
         if (dead) return
         wasActive = active
         if (!active) return
-        void remotePublish(JSON.stringify(buildRemoteSnapshot(useAppStore.getState(), termFor)))
+        void remotePublish(JSON.stringify(buildRemoteSnapshot(useAppStore.getState(), snapTermFor)))
       }).catch(() => {})
     }
 
@@ -228,15 +235,21 @@ export function RemoteCompanion() {
         case 'prompt_answer': return a.answerPrompt(c.id, Number(c.text))
         case 'prompt_approve': return a.approve(c.id)
         case 'prompt_deny': return a.deny(c.id)
-        // exclusive terminal focus: the focused device owns the PTY size
+        // exclusive terminal focus: the focused device owns the PTY size, and
+        // snapshots start carrying this session's serialized screen (the
+        // fallback for its live byte stream)
         case 'session_focus': {
+          focusedRemote.add(c.id)
           try {
             const d = JSON.parse(c.text || '{}') as { rows?: number; cols?: number }
             if (d.rows && d.cols) remoteResize(c.id, d.rows, d.cols)
           } catch { /* malformed dims */ }
           return
         }
-        case 'session_blur': return fitTerminal(c.id) // desktop reclaims its size
+        case 'session_blur': {
+          focusedRemote.delete(c.id)
+          return fitTerminal(c.id) // desktop reclaims its size
+        }
         case 'session_stop': return a.stopSession(c.id)
         case 'session_resume': return a.resume(c.id)
         case 'approve_master': return a.resolveToolApproval(c.id, c.ok)
