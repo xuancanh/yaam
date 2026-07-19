@@ -76,9 +76,9 @@ describe('remote command authorization', () => {
     expect(remoteCommandAllowed(scoped, command('workspace_switch', 'no-such-workspace'))).toBe(false)
   })
 
-  it('rejects switching onto a workspace a satellite window owns', () => {
+  it('allows switching to a detached workspace (the switch action reclaims it)', () => {
     const withDetached = { ...scoped, detachedWorkspaces: ['background'] } as AppState
-    expect(remoteCommandAllowed(withDetached, command('workspace_switch', 'background'))).toBe(false)
+    expect(remoteCommandAllowed(withDetached, command('workspace_switch', 'background'))).toBe(true)
     expect(remoteCommandAllowed(withDetached, command('workspace_switch', 'active'))).toBe(true)
   })
 })

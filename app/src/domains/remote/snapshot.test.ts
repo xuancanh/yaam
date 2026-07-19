@@ -127,11 +127,13 @@ describe('buildRemoteSnapshot', () => {
 })
 
 describe('buildRemoteSnapshot workspace list', () => {
-  it('hides detached (windowed) workspaces from the phone switcher', () => {
+  it('keeps detached workspaces selectable, flagged as windowed', () => {
     const snap = buildRemoteSnapshot(state({
       workspaces: [{ id: 'w1', name: 'acme' }, { id: 'w2', name: 'side' }, { id: 'w3', name: 'windowed' }],
       detachedWorkspaces: ['w3'],
     } as unknown as Partial<AppState>))
-    expect(snap.workspaces.map(w => w.id)).toEqual(['w1', 'w2'])
+    expect(snap.workspaces.map(w => w.id)).toEqual(['w1', 'w2', 'w3'])
+    expect(snap.workspaces.find(w => w.id === 'w3')?.windowed).toBe(true)
+    expect(snap.workspaces.find(w => w.id === 'w1')?.windowed).toBeUndefined()
   })
 })

@@ -688,6 +688,7 @@ function WorkspaceSwitcher({ snap, onSwitched }: { snap: RemoteSnapshot; onSwitc
               <button
                 key={w.id}
                 className={w.id === snap.workspaceId ? 'on' : ''}
+                title={w.windowed ? 'Open in its own desktop window — switching pulls it back into the main window' : undefined}
                 onClick={() => {
                   setOpen(false)
                   if (w.id === snap.workspaceId) return
@@ -697,6 +698,7 @@ function WorkspaceSwitcher({ snap, onSwitched }: { snap: RemoteSnapshot; onSwitc
               >
                 <span className="wsdot" style={{ opacity: w.id === snap.workspaceId ? 1 : 0 }}>●</span>
                 <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+                {w.windowed && <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.65, flexShrink: 0 }}>⧉ window</span>}
               </button>
             ))}
           </div>

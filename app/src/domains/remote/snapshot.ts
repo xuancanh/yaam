@@ -41,7 +41,8 @@ export interface RemoteSnapshot {
   /** active workspace id + the full list, so the phone can switch (the
    *  desktop and every paired device share ONE active workspace) */
   workspaceId: string
-  workspaces: { id: string; name: string }[]
+  /** windowed = open in its own OS window; switching reclaims it into main */
+  workspaces: { id: string; name: string; windowed?: boolean }[]
   sessions: {
     id: string
     name: string
@@ -170,12 +171,13 @@ export function buildRemoteSnapshot(
     ts: Date.now(),
     workspace: s.workspaces.find(w => w.id === s.activeWorkspace)?.name ?? 'yaam',
     workspaceId: s.activeWorkspace,
-    // a detached workspace lives in its own OS window whose satellite owns its
-    // state — offering it as a phone switch target would put the main window
-    // and the satellite in charge of the same sessions at once
-    workspaces: s.workspaces
-      .filter(w => !(s.detachedWorkspaces ?? []).includes(w.id))
-      .map(w => ({ id: w.id, name: w.name })),
+    // a detached workspace lives in its own OS window; switching to it from
+    // the phone RECLAIMS it (the satellite closes and hands its state back),
+    // so it stays selectable — flagged so the phone can hint at that
+    workspaces: s.workspaces.map(w => ({
+      id: w.id, name: w.name,
+      ...((s.detachedWorkspaces ?? []).includes(w.id) ? { windowed: true } : {}),
+    })),
     sessions: live
       .filter(a => a.kind !== 'chat')
       .map(a => ({

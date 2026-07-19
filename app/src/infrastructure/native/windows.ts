@@ -31,6 +31,17 @@ export async function closeWorkspaceWindow(workspaceId: string): Promise<void> {
   await w?.destroy().catch(() => {})
 }
 
+/** Ask a satellite to close GRACEFULLY via the close-request handshake: the
+ *  satellite forwards its final slice over ws:reattach, then destroys itself.
+ *  Use this to reclaim a workspace; destroy skips the handshake and loses the
+ *  satellite's unsynced edits. Resolves without effect if the window is gone. */
+export async function requestWorkspaceWindowClose(workspaceId: string): Promise<void> {
+  if (!isTauri) return
+  const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+  const w = await WebviewWindow.getByLabel(workspaceWindowLabel(workspaceId))
+  await w?.close().catch(() => {})
+}
+
 // ---- cross-window event protocol ----
 export interface WsSyncPayload {
   workspaceId: string

@@ -287,10 +287,34 @@ describe('createWorkspaceActions.moveSessionToWorkspace', () => {
 })
 
 describe('createWorkspaceActions.switchWorkspace', () => {
-  it('refuses to activate a workspace owned by a satellite window', () => {
-    const h = harness(baseState({ detachedWorkspaces: ['ws-b'] }), fakePort())
+  it('reclaims a detached workspace: waits for the satellite handoff, then switches', () => {
+    const laterCalls: Array<() => void> = []
+    const h = harness(baseState({ detachedWorkspaces: ['ws-b'] }), fakePort(), {
+      later: (_ms, fn) => laterCalls.push(fn),
+    })
     h.actions.switchWorkspace('ws-b')
+    // not switched yet — the satellite still owns the workspace
     expect(h.state().activeWorkspace).toBe('ws-a')
-    expect(h.ctx.flash).toHaveBeenCalledWith('That workspace is open in its own window')
+    expect(h.ctx.flash).toHaveBeenCalledWith('Pulling the workspace back from its window…')
+    laterCalls.shift()!() // first poll: satellite has not reattached yet
+    expect(h.state().activeWorkspace).toBe('ws-a')
+    // the satellite closed and handed its slice back (ws:reattach)
+    h.actions.reattachWorkspace('ws-b', undefined, undefined)
+    laterCalls.shift()!() // next poll sees the handoff and completes the switch
+    expect(h.state().activeWorkspace).toBe('ws-b')
+  })
+
+  it('falls back to the synced copy when the satellite never responds', () => {
+    const laterCalls: Array<() => void> = []
+    const h = harness(baseState({ detachedWorkspaces: ['ws-b'] }), fakePort(), {
+      later: (_ms, fn) => laterCalls.push(fn),
+    })
+    const now = vi.spyOn(Date, 'now')
+    h.actions.switchWorkspace('ws-b')
+    now.mockReturnValue(Date.now() + 10_000) // past the reclaim deadline
+    laterCalls.shift()!()
+    expect(h.state().activeWorkspace).toBe('ws-b')
+    expect(h.state().detachedWorkspaces).not.toContain('ws-b')
+    now.mockRestore()
   })
 })

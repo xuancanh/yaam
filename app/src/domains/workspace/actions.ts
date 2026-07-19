@@ -12,7 +12,7 @@ import { realSessionProcessPort } from '../session/ports'
 import type { SessionProcessPort } from '../session/ports'
 import { killRemote } from '../session/remote-machine'
 import { execCommand } from '../../core/native'
-import { openWorkspaceWindow, closeWorkspaceWindow } from '../../infrastructure/native/windows'
+import { openWorkspaceWindow, closeWorkspaceWindow, requestWorkspaceWindowClose } from '../../infrastructure/native/windows'
 
 export interface WorkspaceActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -80,23 +80,48 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
     }
   }
 
+  // The plain switch: stash the current workspace, hydrate the target, and
+  // replay any Master events that queued while it was in the background.
+  const doSwitch = (id: string) => {
+    const pending = stateRef.current.workspaceData[id]?.pendingMasterNotes ?? []
+    dispatch(s => switchWorkspaceIn(s, id, MASTER_GREETING))
+    if (pending.length) {
+      later(600, () => {
+        if (stateRef.current.activeWorkspace !== id) return
+        void ctx.runMaster(`[events queued while this workspace was in the background]\n${pending.join('\n\n')}\n\nSummarize these for the user (grouped, brief).`)
+      })
+    }
+  }
+
   return {
     switchWorkspace: id => {
-      // a detached workspace is owned by its satellite window — activating it
-      // here too would have two windows driving the same sessions and PTYs
+      // A detached workspace is owned by its satellite window — activating it
+      // here too would have two windows driving the same sessions and PTYs.
+      // Instead RECLAIM it: ask the satellite to close gracefully (it hands
+      // its final slice back over ws:reattach), then finish the switch here.
       if ((stateRef.current.detachedWorkspaces ?? []).includes(id)) {
-        flash('That workspace is open in its own window')
+        flash('Pulling the workspace back from its window…')
+        void requestWorkspaceWindowClose(id)
+        const t0 = Date.now()
+        const poll = () => {
+          if (!(stateRef.current.detachedWorkspaces ?? []).includes(id)) {
+            doSwitch(id)
+            return
+          }
+          if (Date.now() - t0 > 4000) {
+            // window gone or unresponsive — reattach from the last synced
+            // copy and make sure no orphan window survives
+            dispatch(s => ({ ...s, detachedWorkspaces: (s.detachedWorkspaces ?? []).filter(w => w !== id) }))
+            void closeWorkspaceWindow(id)
+            doSwitch(id)
+            return
+          }
+          later(150, poll)
+        }
+        later(150, poll)
         return
       }
-      // Master events that queued while this workspace was inactive
-      const pending = stateRef.current.workspaceData[id]?.pendingMasterNotes ?? []
-      dispatch(s => switchWorkspaceIn(s, id, MASTER_GREETING))
-      if (pending.length) {
-        later(600, () => {
-          if (stateRef.current.activeWorkspace !== id) return
-          void ctx.runMaster(`[events queued while this workspace was in the background]\n${pending.join('\n\n')}\n\nSummarize these for the user (grouped, brief).`)
-        })
-      }
+      doSwitch(id)
     },
 
     createWorkspace: name => {
