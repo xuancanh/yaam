@@ -281,7 +281,7 @@ satellite pinned to one workspace. `store.tsx` passes the role into
 
 - **Main** runs everything: persistence (the sole writer), Master + scheduler,
   addon hooks, integrations, plus a listener for the satellite protocol.
-- **A satellite** hydrates from disk and runs session I/O (terminals render live
+- **A satellite** hydrates from disk (without resolving keychain secrets) and runs session I/O (terminals render live
   off the global `session-data` broadcast) and its own workspace's watchers, but
   **does not start** persistence, Master/scheduler, addon hooks, or integrations
   (`chat.ts` gates these on `role.kind === 'main'`; `conductor-runtime.ts` skips
