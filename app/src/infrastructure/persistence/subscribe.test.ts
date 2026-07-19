@@ -47,16 +47,22 @@ describe('sessionsChanged', () => {
 })
 
 describe('secretsChanged', () => {
-  it('is true only for credential-bearing slices', () => {
+  it('tracks credential account/values but ignores non-secret metadata', () => {
     const a = baseState()
     expect(secretsChanged(a, { ...a, toast: 'x' } as AppState)).toBe(false)
     expect(secretsChanged(a, { ...a, settings: { apiKey: 'sk-1' } } as AppState)).toBe(true)
     expect(secretsChanged(a, { ...a, settings: { ...a.settings, githubToken: 'ghp-1' } } as AppState)).toBe(true)
     expect(secretsChanged(a, { ...a, settings: { ...a.settings, remoteToken: 'remote-1' } } as AppState)).toBe(true)
-    expect(secretsChanged(a, { ...a, settings: { ...a.settings, remoteDevices: [] } } as AppState)).toBe(true)
-    expect(secretsChanged(a, { ...a, settings: { ...a.settings, brainProfiles: [] } } as AppState)).toBe(true)
-    expect(secretsChanged(a, { ...a, mcpServers: [{ id: 'm' }] as unknown as AppState['mcpServers'] } as AppState)).toBe(true)
-    expect(secretsChanged(a, { ...a, chatAgentTypes: [{ id: 'c' }] as unknown as AppState['chatAgentTypes'] } as AppState)).toBe(true)
+    expect(secretsChanged(a, { ...a, settings: { ...a.settings, remoteDevices: [] } } as AppState)).toBe(false)
+    expect(secretsChanged(a, { ...a, settings: { ...a.settings, brainProfiles: [] } } as AppState)).toBe(false)
+    expect(secretsChanged(a, { ...a, mcpServers: [{ id: 'm', headers: 'Bearer token' }] as unknown as AppState['mcpServers'] } as AppState)).toBe(true)
+
+    const mcp = { id: 'm', headers: 'Bearer token', toolCount: 1 } as unknown as AppState['mcpServers'][number]
+    const withMcp = baseState({ mcpServers: [mcp] })
+    expect(secretsChanged(withMcp, {
+      ...withMcp,
+      mcpServers: [{ ...mcp, toolCount: 8 }],
+    } as AppState)).toBe(false)
   })
 })
 

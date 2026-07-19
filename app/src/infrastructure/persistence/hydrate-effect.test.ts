@@ -31,12 +31,13 @@ const detachedAgent = (): Agent => ({
   launchedAt: 1, detached: true, log: [], memory: [], tools: [],
 } as unknown as Agent)
 
-function context() {
+function context(resolveSecrets = true) {
   const stateRef = { get current() { return useAppStore.getState() } } as { current: AppState }
   return {
     stateRef,
     persistence: { keychainReady: new Set<string>(), markReady: vi.fn(), start: vi.fn(), flush: vi.fn(async () => {}), dispose: vi.fn() },
     startIntegrations: vi.fn(), appendTail: vi.fn(), clearNeeds: vi.fn(), bumpSettle: vi.fn(), armResponseWatch: vi.fn(),
+    resolveSecrets,
   }
 }
 
@@ -75,5 +76,12 @@ describe('detached runtime hydration', () => {
     runHydration(context())
     await vi.waitFor(() => expect(useAppStore.getState().agents[0]?.status).toBe('running'))
     expect(nativeMocks.spawnSession).not.toHaveBeenCalled()
+  })
+
+  it('does not access Keychain while hydrating a satellite window', async () => {
+    const ctx = context(false)
+    runHydration(ctx)
+    await vi.waitFor(() => expect(ctx.persistence.markReady).toHaveBeenCalled())
+    expect(nativeMocks.secretGet).not.toHaveBeenCalled()
   })
 })

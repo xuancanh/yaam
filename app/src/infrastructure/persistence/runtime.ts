@@ -37,6 +37,10 @@ export function createPersistenceRuntime(
   opts: { onToast: (msg: string) => void },
 ): PersistenceRuntime {
   const keychainReady = new Set<string>()
+  // Last values confirmed to match Keychain. This prevents an update to one
+  // credential from rewriting every other item (and re-triggering macOS ACL
+  // prompts for unchanged items after an app update).
+  const mirroredSecrets = new Map<string, string>()
   const savedAgents = new Map<string, Agent>()
   let ready = false
   let saveFailed = false
@@ -132,6 +136,7 @@ export function createPersistenceRuntime(
           try {
             await native.secretDelete(account)
             keychainReady.delete(account)
+            mirroredSecrets.delete(account)
             changed = true
           } catch (e) {
             console.error(`[yaam] keychain cleanup failed for ${account}:`, e)
@@ -140,10 +145,14 @@ export function createPersistenceRuntime(
         for (const { account, value } of entries) {
           try {
             if (value) {
+              if (keychainReady.has(account) && mirroredSecrets.get(account) === value) continue
               await native.secretSet(account, value)
+              mirroredSecrets.set(account, value)
               if (!keychainReady.has(account)) { keychainReady.add(account); changed = true }
             } else if (keychainReady.delete(account)) {
               await native.secretDelete(account)
+              mirroredSecrets.delete(account)
+              changed = true
             }
           } catch (e) {
             console.error(`[yaam] keychain write failed for ${account}:`, e) // stays plaintext
@@ -174,7 +183,17 @@ export function createPersistenceRuntime(
 
   return {
     keychainReady,
-    markReady() { ready = true },
+    markReady() {
+      ready = true
+      // Hydration has already resolved these accounts from Keychain, so their
+      // in-memory values are known mirrors and must not be written back. Any
+      // legacy plaintext credential is migrated once after boot.
+      const entries = secretEntries(store.getState())
+      for (const { account, value } of entries) {
+        if (keychainReady.has(account) && value) mirroredSecrets.set(account, value)
+      }
+      if (entries.some(({ account, value }) => value && !keychainReady.has(account))) armSecret()
+    },
     start() {
       if (started) return
       started = true

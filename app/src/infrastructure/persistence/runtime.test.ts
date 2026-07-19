@@ -165,6 +165,42 @@ describe('createPersistenceRuntime', () => {
     rt.dispose()
   })
 
+  it('does not rewrite unchanged keychain credentials', async () => {
+    const store = fakeStore(baseState({ settings: {
+      ...baseState().settings,
+      apiKey: 'master-key', githubToken: 'github-key',
+    } }))
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.keychainReady.add('master.apiKey')
+    rt.keychainReady.add('github.token')
+    rt.start(); rt.markReady()
+
+    store.set({
+      ...store.getState(),
+      settings: { ...store.getState().settings, remoteToken: 'new-remote-token' },
+    })
+    await vi.advanceTimersByTimeAsync(900)
+
+    expect(native.secretSet).toHaveBeenCalledTimes(1)
+    expect(native.secretSet).toHaveBeenCalledWith('remote.urlToken', 'new-remote-token')
+    rt.dispose()
+  })
+
+  it('migrates a legacy plaintext credential once after hydration', async () => {
+    const store = fakeStore(baseState({ settings: { ...baseState().settings, apiKey: 'legacy-key' } }))
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+
+    await vi.advanceTimersByTimeAsync(900)
+    expect(native.secretSet).toHaveBeenCalledTimes(1)
+    expect(native.secretSet).toHaveBeenCalledWith('master.apiKey', 'legacy-key')
+
+    store.set({ ...store.getState(), settings: { ...store.getState().settings } })
+    await vi.advanceTimersByTimeAsync(900)
+    expect(native.secretSet).toHaveBeenCalledTimes(1)
+    rt.dispose()
+  })
+
   it('retries failed session writes and removals without another state change', async () => {
     const agent = { id: 'retry-1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
     const store = fakeStore(baseState())

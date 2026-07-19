@@ -93,6 +93,7 @@ export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: S
           stateRef, persistence, startIntegrations: isMain ? () => startIntegrationsRef.current() : () => {},
           appendTail: session.appendTail, clearNeeds: session.clearNeeds,
           bumpSettle: session.bumpSettle, armResponseWatch: session.armResponseWatch,
+          resolveSecrets: isMain,
         })
       }
     },

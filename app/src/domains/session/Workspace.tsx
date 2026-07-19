@@ -105,7 +105,7 @@ function LayoutMenu({ group }: { group: TabGroup | undefined }) {
         <>
           <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 44 }} />
           <div style={{
-            position: 'absolute', top: 34, right: 0, width: 232, background: 'var(--panel2)',
+            position: 'absolute', top: 34, right: 0, width: 188, background: 'var(--panel2)',
             border: '1px solid var(--line2)', borderRadius: 12, boxShadow: '0 18px 50px rgba(0,0,0,.55)',
             zIndex: 45, overflow: 'hidden', padding: 8,
           }}>
@@ -142,22 +142,23 @@ function LayoutMenu({ group }: { group: TabGroup | undefined }) {
             <div className="mono" style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.4, color: 'var(--faint)', padding: '0 6px 5px' }}>
               ARRANGEMENT
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(variants.length, 4)}, 1fr)`, gap: 3 }}>
               {variants.map(v => {
                 const active = selCount === currentCount && sameRows(v.rows, currentRows)
                 return (
                   <button
                     key={v.rows.join('-')}
                     className={active ? '' : 'palette-item'}
+                    title={v.label}
+                    aria-label={v.label}
                     onClick={() => { setPaneLayout(v.rows); setOpen(false) }}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px',
+                      height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
                       background: active ? 'rgba(245,196,81,.08)' : 'transparent', border: 'none', borderRadius: 8,
-                      color: active ? 'var(--accent)' : 'var(--text)', textAlign: 'left',
+                      color: active ? 'var(--accent)' : 'var(--text)',
                     }}
                   >
                     <LayoutGlyph rows={v.rows} color={active ? 'var(--accent)' : 'var(--mut2)'} />
-                    <span style={{ flex: 1, fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap' }}>{v.label}</span>
                   </button>
                 )
               })}

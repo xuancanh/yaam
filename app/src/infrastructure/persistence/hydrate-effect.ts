@@ -22,6 +22,8 @@ export interface HydrationCtx {
   clearNeeds: (id: string) => void
   bumpSettle: (id: string) => void
   armResponseWatch: (id: string) => void
+  /** Satellites render a workspace slice only; the main window owns secrets. */
+  resolveSecrets?: boolean
 }
 
 export function useHydration(ctx: HydrationCtx): void {
@@ -104,18 +106,20 @@ export function runHydration(ctx: HydrationCtx): void {
         console.error('[yaam] hydration failed — starting fresh:', e)
         dispatch(s => ({ ...s, toast: 'Saved state was unreadable — starting fresh', bootStatus: 'failed' }))
       }
-      // fill credential fields the file no longer holds from the OS keychain,
-      // and mark anything already present (legacy plaintext) as keychain-bound
-      try {
-        const resolved: Record<string, string> = {}
-        for (const { account, value } of secretEntries(stateRef.current)) {
-          if (value) continue // legacy plaintext still in the loaded file
-          const v = await native.secretGet(account)
-          if (v) { resolved[account] = v; persistence.keychainReady.add(account) }
+      // Fill credential fields the file no longer holds from the OS keychain.
+      // markReady() seeds those mirrors and migrates any legacy plaintext.
+      if (ctx.resolveSecrets !== false) {
+        try {
+          const resolved: Record<string, string> = {}
+          for (const { account, value } of secretEntries(stateRef.current)) {
+            if (value) continue // legacy plaintext still in the loaded file
+            const v = await native.secretGet(account)
+            if (v) { resolved[account] = v; persistence.keychainReady.add(account) }
+          }
+          if (Object.keys(resolved).length) dispatch(s => applyResolvedSecrets(s, resolved))
+        } catch (e) {
+          console.error('[yaam] keychain resolve failed:', e)
         }
-        if (Object.keys(resolved).length) dispatch(s => applyResolvedSecrets(s, resolved))
-      } catch (e) {
-        console.error('[yaam] keychain resolve failed:', e)
       }
       // restored state is fully applied — enable saves, mark the runtime ready
       // (unless restoration hard-failed above), then connect integrations. Gating
