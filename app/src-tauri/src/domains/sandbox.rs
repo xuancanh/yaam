@@ -146,7 +146,6 @@ fn writable_roots(cwd: &str, extra_paths: &[String]) -> Result<Vec<String>, Stri
 fn render_profile(roots: &[String], deny_network: bool) -> String {
     let mut p = String::from(
         "(version 1)\n(allow default)\n(deny file-write*)\n(deny appleevent-send)\n(deny lsopen)\n\
-         (deny file-write* (regex #\".*/\\.git/config$\") (regex #\".*/\\.git/hooks(/.*)?$\"))\n\
          (deny network-outbound (remote unix-socket \
            (path-regex #\".*/(docker|podman)(/podman)?\\.sock$\") \
            (path-regex #\".*/\\.yaam/detached/.*\\.sock$\")))\n",
@@ -162,6 +161,12 @@ fn render_profile(roots: &[String], deny_network: bool) -> String {
             sbpl_escape(root)
         ));
     }
+    // SBPL is last-match-wins: the .git/config + .git/hooks denies MUST come
+    // after the writable-root allows above, or an allow for the session cwd
+    // would silently re-allow rewriting git config/hooks inside a repo.
+    p.push_str(
+        "(deny file-write* (regex #\".*/\\.git/config$\") (regex #\".*/\\.git/hooks(/.*)?$\"))\n",
+    );
     if deny_network {
         p.push_str("(deny network*)\n");
     }
@@ -305,6 +310,14 @@ mod tests {
         assert!(p.contains("(allow file-write* (subpath \"/Users/x/proj\"))"));
         assert!(p.contains("(allow file-write* (subpath \"/private/tmp\"))"));
         assert!(!p.contains("(deny network*)"));
+        // SBPL is last-match-wins: the git config/hooks denies must come AFTER
+        // every writable-root allow, or the cwd allow would override them.
+        let git_deny = p.find("\\.git/config").unwrap();
+        let last_allow = p.rfind("(allow file-write* (subpath ").unwrap();
+        assert!(
+            git_deny > last_allow,
+            "git deny rules must be emitted after the writable-root allows"
+        );
     }
 
     #[test]
@@ -447,6 +460,48 @@ mod tests {
         assert!(result.success());
         assert_eq!(std::fs::read_to_string(allowed.join("ok")).unwrap(), "ok");
         assert!(!blocked.join("bad").exists());
+        std::fs::remove_dir_all(base).ok();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    /// The .git/config + .git/hooks denies survive the writable-cwd allow: a
+    /// sandboxed process inside a repo under its writable root still cannot
+    /// rewrite git config/hooks, while normal writes to the cwd succeed.
+    fn macos_profile_blocks_git_config_and_hooks_writes() {
+        use std::process::Command;
+
+        let base = std::env::temp_dir().join(format!(
+            "yaam-sandbox-git-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let repo = base.join("repo");
+        std::fs::create_dir_all(repo.join(".git/hooks")).unwrap();
+        std::fs::write(repo.join(".git/config"), "[core]\n").unwrap();
+        let repo = std::fs::canonicalize(&repo).unwrap();
+        let profile = render_profile(&[repo.to_string_lossy().into_owned()], false);
+        // All three writes attempted in one sandboxed run: the two git writes
+        // must fail, the ordinary cwd write must succeed.
+        let script = format!(
+            "! printf evil > {} 2>/dev/null && ! printf evil > {} 2>/dev/null && printf ok > {}",
+            shq(&repo.join(".git/config").to_string_lossy()),
+            shq(&repo.join(".git/hooks/pre-commit").to_string_lossy()),
+            shq(&repo.join("ok").to_string_lossy()),
+        );
+        let result = Command::new("/usr/bin/sandbox-exec")
+            .args(["-p", &profile, "/bin/sh", "-c", &script])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(result.success());
+        assert_eq!(
+            std::fs::read_to_string(repo.join(".git/config")).unwrap(),
+            "[core]\n"
+        );
+        assert!(!repo.join(".git/hooks/pre-commit").exists());
+        assert_eq!(std::fs::read_to_string(repo.join("ok")).unwrap(), "ok");
         std::fs::remove_dir_all(base).ok();
     }
 
