@@ -52,11 +52,16 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
     const now = new Date(clock.now())
     const minuteKey = now.toISOString().slice(0, 16)
     const timeLabel = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    // schedules fire in every workspace, active or not
+    // schedules fire in every workspace this window owns, active or not —
+    // EXCEPT detached (spun-out) ones: a satellite owns that slice, and its
+    // next ws:sync merge would wipe our dedupe marker (refire every tick) and
+    // any task we appended, so a detached workspace's schedules pause until it
+    // reattaches
+    const detached = new Set(st.detachedWorkspaces ?? [])
     const pools: Array<{ wid: string; crons: typeof st.crons }> = [
       { wid: st.activeWorkspace, crons: st.crons },
       ...Object.entries(st.workspaceData ?? {}).map(([wid, d]) => ({ wid, crons: d.crons ?? [] })),
-    ]
+    ].filter(p => !detached.has(p.wid))
     for (const pool of pools) {
       const due = collectDueSchedules(pool.crons, now)
       if (!due.length) continue
@@ -173,10 +178,11 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
     // scheduled tasks: spawn a session when their time arrives, in whatever
     // workspace the task lives in. Both active and background go through the
     // one canonical launch path (spawnTaskSession) — no duplicated logic.
+    // Detached workspaces are skipped for the same ws:sync reason as above.
     const taskPools: Array<{ wid: string; tasks: typeof st.tasks }> = [
       { wid: st.activeWorkspace, tasks: st.tasks },
       ...Object.entries(st.workspaceData ?? {}).map(([wid, d]) => ({ wid, tasks: d.tasks ?? [] })),
-    ]
+    ].filter(p => !detached.has(p.wid))
     for (const pool of taskPools) {
       for (const t of collectDueTasks(pool.tasks, now)) {
         // spawnTaskSession clears scheduleAt on success; clear it on failure

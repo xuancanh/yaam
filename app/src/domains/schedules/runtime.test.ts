@@ -102,6 +102,52 @@ describe('createSchedulerRuntime', () => {
     expect(h.deps.wakeAddonAgent).not.toHaveBeenCalled()
   })
 
+  it('fires a due cron in a background (non-detached) workspace', () => {
+    const h = harness(baseState({
+      workspaceData: { 'ws-bg': { crons: [dueCron()] } } as unknown as AppState['workspaceData'],
+    }))
+    h.rt.start()
+    h.clock.advance(15000)
+    expect(h.deps.launchSession).toHaveBeenCalledWith('echo hi', '/x', 'Nightly', undefined, 'ws-bg')
+    expect(h.port.get().workspaceData['ws-bg'].crons[0].lastFiredMinute).toBeTruthy()
+  })
+
+  it('does not fire a due cron in a detached workspace, and leaves its marker untouched', () => {
+    // a satellite owns a detached workspace's slice; its ws:sync merge would
+    // wipe our lastFiredMinute, refiring the cron every tick — so we skip it
+    const h = harness(baseState({
+      detachedWorkspaces: ['ws-out'],
+      workspaceData: { 'ws-out': { crons: [dueCron()] } } as unknown as AppState['workspaceData'],
+    } as Partial<AppState>))
+    h.rt.start()
+    h.clock.advance(15000)
+    expect(h.deps.launchSession).not.toHaveBeenCalled()
+    expect(h.deps.fireAddonHook).not.toHaveBeenCalled()
+    expect(h.port.get().workspaceData['ws-out'].crons[0].lastFiredMinute).toBeUndefined()
+  })
+
+  it('does not start a due scheduled task in a detached workspace, and keeps its scheduleAt', () => {
+    const task = { id: 't1', title: 'x', col: 'backlog', agentId: null, scheduleAt: 500 } as unknown as BoardTask
+    const h = harness(baseState({
+      detachedWorkspaces: ['ws-out'],
+      workspaceData: { 'ws-out': { tasks: [task] } } as unknown as AppState['workspaceData'],
+    } as Partial<AppState>))
+    h.rt.start()
+    h.clock.advance(15000)
+    expect(h.deps.spawnTaskSession).not.toHaveBeenCalled()
+    expect(h.port.get().workspaceData['ws-out'].tasks[0].scheduleAt).toBe(500)
+  })
+
+  it('starts a due scheduled task in a background (non-detached) workspace', () => {
+    const task = { id: 't1', title: 'x', col: 'backlog', agentId: null, scheduleAt: 500 } as unknown as BoardTask
+    const h = harness(baseState({
+      workspaceData: { 'ws-bg': { tasks: [task] } } as unknown as AppState['workspaceData'],
+    }))
+    h.rt.start()
+    h.clock.advance(15000)
+    expect(h.deps.spawnTaskSession).toHaveBeenCalledWith('t1', { workspaceId: 'ws-bg', briefWatcher: true })
+  })
+
   it('dispose() stops the interval', () => {
     const h = harness(baseState({ crons: [dueCron()] }))
     h.rt.start()

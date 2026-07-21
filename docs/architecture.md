@@ -311,7 +311,9 @@ flowchart LR
 reattached) and **hidden from the main switcher**; if it was active, main
 switches away first, guaranteeing one window per workspace. Closing the
 satellite emits `ws:reattach` with its final slice — main merges it, clears the
-detached flag, and the workspace reappears in the switcher.
+detached flag, and the workspace reappears in the switcher. Main's scheduler
+also skips detached workspaces (firing there would be wiped by the next
+`ws:sync` merge), so a spun-out workspace's schedules pause until it reattaches.
 
 **Why no double autonomous actions.** The task watcher/monitor act on the
 *active* workspace's flat `tasks`; main is showing a different workspace than

@@ -166,7 +166,9 @@ forwards its slice to main via `ws:sync`/`ws:reattach` events
 (`infrastructure/native/windows.ts`), so there is never a second writer of
 `conductor-state.json`. Never start persistence or the autonomous loops in a
 satellite. `detachedWorkspaces` is runtime-only (NOT in `selectMainState`) and
-hides spun-out workspaces from that window's switcher. See
+hides spun-out workspaces from that window's switcher; main's scheduler skips
+detached workspaces, so a spun-out workspace's schedules pause until it
+reattaches. See
 `docs/architecture.md` § Multi-window workspace satellites.
 
 **Terminals are a module-level registry, not React state.** `terminals.ts` owns
