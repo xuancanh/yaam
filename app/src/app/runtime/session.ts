@@ -21,6 +21,7 @@ import { createWatcherRuntime } from '../../domains/board/watcher-runtime'
 import { readScreen } from '../../core/terminals'
 import { terminalSubmissionNote, trackedTerminalSubmission } from '../../domains/session/terminal-tracking'
 import { createSessionActivity, withActivityTargets } from '../../domains/activity/history'
+import { isDetachedAgent } from '../../domains/workspace/state'
 import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
 
@@ -68,7 +69,13 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
     masterEvent: (n, a) => masterEventRef.current(n, a),
   })
   const runMonitor = monitor.run
-  monitorEventRef.current = (id, note) => runMonitor(id, note)
+  monitorEventRef.current = (id, note) => {
+    // a detached workspace's sessions are owned by the satellite window — main
+    // must not spend monitor turns on them (its writes are clobbered by ws:sync)
+    const agent = stateRef.current.agents.find(a => a.id === id)
+    if (agent && isDetachedAgent(stateRef.current, agent)) return
+    runMonitor(id, note)
+  }
 
   const taskForSession = (sessionId: string): LocatedTask | undefined => {
     const binding = taskSessionsRef.current.get(sessionId)
@@ -90,7 +97,13 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
     spawnTaskSession: (id, extra) => spawnTaskSessionRef.current(id, extra),
   })
   const runWatcher = watcher.run
-  runWatcherRef.current = (taskId, note) => { void runWatcher(taskId, note) }
+  runWatcherRef.current = (taskId, note) => {
+    // a detached workspace's tasks are owned by the satellite window — main's
+    // watcher would act on a slice the next ws:sync merge overwrites
+    const located = findTaskInState(stateRef.current, taskId)
+    if (located && (stateRef.current.detachedWorkspaces ?? []).includes(located.workspaceId)) return
+    void runWatcher(taskId, note)
+  }
 
   const state: StatePort = { get: () => stateRef.current, update: dispatch, subscribe: () => () => {} }
   const settle = createSessionSettle({

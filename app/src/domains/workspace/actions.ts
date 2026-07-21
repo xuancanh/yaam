@@ -164,6 +164,13 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
         }
         return { ...next, detachedWorkspaces: [...(next.detachedWorkspaces ?? []), id] }
       })
+      // This window stops tracking the workspace's sessions: drop their xterm
+      // entries so session-data broadcasts no longer decode (or drive settle
+      // timers) here. The satellite renders its own terminals; on reattach
+      // main's entries are recreated lazily when the panes mount again.
+      for (const a of s0.agents) {
+        if ((a.workspaceId ?? s0.activeWorkspace) === id) port.disposeTerminal(a.id)
+      }
       void openWorkspaceWindow(id, name)
       flash(`Opened “${name}” in a new window`)
     },

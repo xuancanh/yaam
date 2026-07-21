@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MutableRefObject } from 'react'
 
-vi.mock('../../core/terminals', () => ({ isAltScreen: () => false, readScreen: () => [] as string[] }))
+// per-test control over the terminal registry: which sessions are full-screen
+// TUIs and what their rendered screen shows
+const tui = vi.hoisted(() => ({ alt: new Set<string>(), screens: new Map<string, string[]>() }))
+vi.mock('../../core/terminals', () => ({
+  isAltScreen: (id: string) => tui.alt.has(id),
+  readScreen: (id: string) => tui.screens.get(id) ?? ([] as string[]),
+}))
 vi.mock('../../master', () => ({ hasCreds: () => false }))
 
 import { createSessionSettle } from './use-settle'
@@ -11,9 +17,10 @@ import type { AppState, Agent } from '../../core/types'
 
 const ref = <T,>(v: T) => ({ current: v }) as MutableRefObject<T>
 
-function harness(agents: Agent[]) {
+function harness(agents: Agent[], extra: Partial<AppState> = {}) {
   const state = createFakeStatePort({
     agents, activeWorkspace: 'ws', settings: {}, groups: [], activeGroup: null,
+    ...extra,
   } as unknown as AppState)
   const clock = new FakeClock()
   const deps: SettleDeps = {
@@ -181,5 +188,48 @@ describe('createSessionSettle', () => {
     h.rt.bumpSettle('a1')
     h.rt.dispose()
     expect(h.clock.pending).toBe(0) // scan + settle timers all cleared
+  })
+})
+
+describe('createSessionSettle detached workspaces', () => {
+  const PROMPT_SCREEN = ['Do you want to proceed?', '❯ 1. Yes', '  2. No']
+
+  it('the TUI scan skips agents of a detached workspace (no flag, no monitor note)', () => {
+    tui.alt.add('a1'); tui.alt.add('a2')
+    tui.screens.set('a1', PROMPT_SCREEN); tui.screens.set('a2', PROMPT_SCREEN)
+    const monitorEvent = vi.fn()
+    const h = harness([
+      agent({ id: 'a1', workspaceId: 'ws-b' }), // spun out into a satellite
+      agent({ id: 'a2', workspaceId: 'ws' }),   // still owned by this window
+    ], { detachedWorkspaces: ['ws-b'] })
+    h.deps.monitorEventRef.current = monitorEvent
+    h.rt.start()
+    h.clock.advance(4000)
+    h.rt.dispose()
+
+    expect(h.deps.setNeedsInput).not.toHaveBeenCalledWith('a1', expect.anything(), expect.anything(), expect.anything())
+    expect(monitorEvent).not.toHaveBeenCalledWith('a1', expect.anything())
+    expect(h.state.get().agents.find(a => a.id === 'a1')?.status).toBe('running') // untouched
+    // the non-detached agent is scanned exactly as before
+    expect(h.deps.setNeedsInput).toHaveBeenCalledWith('a2', expect.any(String), expect.anything(), expect.anything())
+    expect(monitorEvent).toHaveBeenCalledWith('a2', expect.any(String))
+  })
+
+  it('settle arms no timers and feeds no monitor for a detached workspace\'s session', () => {
+    const h = harness(
+      [agent({ id: 'a1', workspaceId: 'ws-b', log: [{ t: 'out', x: 'working' }] as Agent['log'] })],
+      { detachedWorkspaces: ['ws-b'] },
+    )
+    h.rt.armResponseWatch('a1')
+    h.rt.bufferOutput('a1', 'step one')
+    h.rt.bumpSettle('a1')
+    // only the arm's no-output fallback remains — bumpSettle armed no
+    // quiet-period or output-checkpoint timers for the detached session
+    expect(h.clock.pending).toBe(1)
+    h.clock.advance(30_000)
+    expect(h.deps.runMonitor).not.toHaveBeenCalled()
+    expect(h.deps.notify).not.toHaveBeenCalled()
+    expect(h.state.get().agents[0].status).toBe('running') // no status writes
+    expect(h.state.get().agents[0].responding).toBeUndefined()
   })
 })

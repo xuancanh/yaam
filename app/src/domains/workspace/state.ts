@@ -1,8 +1,16 @@
 // Workspace scoping: swap the active workspace's flat AppState fields with a
 // stored per-workspace slice. Pure state transitions.
-import type { AppState, WorkspaceData } from '../../core/types'
+import type { AppState, Agent, WorkspaceData } from '../../core/types'
 import { mkId } from '../../shared/id'
 import { groupsFromLegacy, removeFromGroups } from '../session/layout-state'
+
+/** True when the session's home workspace is currently spun out into a
+ *  satellite OS window. This window must not run settle/scan/monitor/watcher
+ *  work for it — the satellite owns that workspace's slice, and any flag
+ *  written here is clobbered by the next ws:sync merge anyway. */
+export function isDetachedAgent(s: AppState, agent: Pick<Agent, 'workspaceId'>): boolean {
+  return (s.detachedWorkspaces ?? []).includes(agent.workspaceId ?? s.activeWorkspace)
+}
 
 /** Create the isolated state slice for a new workspace. */
 export function emptyScoped(greeting: string): WorkspaceData {

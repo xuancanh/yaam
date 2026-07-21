@@ -12,6 +12,7 @@ import { mkId } from '../../shared/id'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { estimateLogUsage, estimateOutputUsage } from '../../core/usage'
 import { findTaskForAgentInState } from '../board/task-state'
+import { isDetachedAgent } from '../workspace/state'
 import { createSessionActivity, withActivityTargets } from '../activity/history'
 
 export interface SessionAttentionCtx {
@@ -82,6 +83,9 @@ export function createSessionAttention(ctx: SessionAttentionCtx): SessionAttenti
     setNeedsInput: (id, question, options, cursorNum) => {
       const agent = stateRef.current.agents.find(a => a.id === id)
       if (!agent || agent.status !== 'running') return
+      // a detached workspace's sessions are flagged in the satellite window —
+      // flagging here writes state the next ws:sync merge would clobber
+      if (isDetachedAgent(stateRef.current, agent)) return
       dispatch(s => {
         const msg = {
           id: mkId('m'), role: 'master' as const, kind: 'escalate' as const, escFor: id,

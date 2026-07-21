@@ -13,6 +13,7 @@ import { hasCreds } from '../../master'
 import { dispatch } from '../../core/store'
 import { browserClock, type ClockPort, type Disposable, type StatePort } from '../../core/ports'
 import { activeGroupOf } from './layout-state'
+import { isDetachedAgent } from '../workspace/state'
 import {
   detectPrompt, extractOptions, stableScreenKey, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
 } from './prompt-detection'
@@ -110,7 +111,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
 
   const flushOutput = (id: string, final: boolean, fallback: string[] = []) => {
     const agent = state.get().agents.find(a => a.id === id)
-    if (!agent) return
+    if (!agent || isDetachedAgent(state.get(), agent)) return
     const alt = isAltScreen(id)
     const buffered = outputBuffers.get(id) ?? []
     outputBuffers.delete(id)
@@ -149,7 +150,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     // output went quiet — the session is no longer actively responding
     setResponding(id, false)
     const agent = state.get().agents.find(a => a.id === id)
-    if (!agent || (agent.status !== 'running' && agent.status !== 'needs')) return
+    // a detached (spun-out) workspace is owned by its satellite window — this
+    // window must not flag/notify/monitor its sessions
+    if (!agent || isDetachedAgent(state.get(), agent) || (agent.status !== 'running' && agent.status !== 'needs')) return
     const st = state.get().settings
     const llm = Boolean(st.masterEnabled && hasCreds(st) && st.followMode)
     const alt = isAltScreen(id)
@@ -254,6 +257,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     const prev = settle.get(id)
     if (prev) prev.timer.dispose()
     const agent = state.get().agents.find(a => a.id === id)
+    // sessions of a detached workspace are owned by the satellite window:
+    // don't arm quiet-period/output-checkpoint timers for them here
+    if (agent && isDetachedAgent(state.get(), agent)) return
     if (agent?.status === 'running') {
       setResponding(id, true)
     }
@@ -281,8 +287,10 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   // every running alt-buffer session for approval dialogs / selection menus.
   // Settle timing doesn't matter here; dedupe prevents refiring on redraws.
   const scanTui = () => {
-    for (const a of state.get().agents) {
+    const s = state.get()
+    for (const a of s.agents) {
       if (a.kind !== 'real') continue
+      if (isDetachedAgent(s, a)) continue
       if (a.status !== 'running' && a.status !== 'needs') continue
       if (!isAltScreen(a.id)) continue
       const screen = readScreen(a.id)

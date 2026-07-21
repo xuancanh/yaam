@@ -206,6 +206,26 @@ describe('createWorkspaceActions spin-out / restore', () => {
     expect(h.state().detachedWorkspaces).not.toContain('ws-a')
   })
 
+  it('detaching disposes this window\'s terminal entries for the workspace\'s sessions', () => {
+    const port = fakePort()
+    const h = harness(baseState({
+      agents: [agent('a1', 'ws-b'), agent('a2', 'ws-b'), agent('keep', 'ws-a')],
+    }), port)
+    h.actions.openWorkspaceInWindow('ws-b')
+    expect(port.disposeTerminal).toHaveBeenCalledWith('a1')
+    expect(port.disposeTerminal).toHaveBeenCalledWith('a2')
+    expect(port.disposeTerminal).not.toHaveBeenCalledWith('keep')
+    expect(h.state().detachedWorkspaces).toContain('ws-b')
+  })
+
+  it('detaching the ACTIVE workspace also disposes sessions without an explicit workspaceId', () => {
+    const port = fakePort()
+    const loose = { ...agent('loose', 'ws-a'), workspaceId: undefined } as unknown as Agent
+    const h = harness(baseState({ agents: [loose] }), port)
+    h.actions.openWorkspaceInWindow('ws-a')
+    expect(port.disposeTerminal).toHaveBeenCalledWith('loose')
+  })
+
   it('reattach (satellite closed) restores it and merges its final slice', () => {
     const h = harness(baseState({ detachedWorkspaces: ['ws-b'] }), fakePort())
     const data = { tasks: [{ id: 't1' }] } as unknown as Parameters<typeof h.actions.reattachWorkspace>[1]
