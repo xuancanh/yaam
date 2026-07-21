@@ -15,7 +15,12 @@ const baseIdx = process.argv.indexOf('--base')
 const BASE = baseIdx >= 0 ? process.argv[baseIdx + 1] : null
 
 const PERMISSIONS = ['state:read', 'sessions:send', 'sessions:launch', 'tasks', 'schedules', 'agent', 'master:prompt', 'ui', 'storage', 'http', 'secrets', 'exec']
-const HOST_RE = /^(\*\.)?[a-z0-9.-]+$/i
+// must mirror validHostPattern in app/src/core/addons.ts — labels are
+// alphanumerics + inner hyphens, and `*.` wildcards need ≥2 labels (`*.com`
+// would match every .com host)
+const HOST_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?'
+const HOST_RE = new RegExp(`^(\\*\\.)?${HOST_LABEL}(\\.${HOST_LABEL})*$`, 'i')
+const validHost = h => { const p = String(h).trim(); return HOST_RE.test(p) && (!p.startsWith('*.') || p.slice(2).includes('.')) }
 const SECRET_RE = /^[A-Za-z0-9_]+$/
 const HOOKS = ['onSessionExit', 'onNeedsInput', 'onTaskMoved', 'onCronFired', 'masterPromptAppend']
 
@@ -61,7 +66,7 @@ for (const entry of index.packages) {
   }
   for (const p of pack.permissions ?? []) if (!PERMISSIONS.includes(p)) err(`${label}: unknown permission "${p}"`)
   if (!Array.isArray(pack.permissions)) err(`${label}: no permissions array — legacy packages request EVERY scope`)
-  for (const h of pack.hosts ?? []) if (!HOST_RE.test(String(h).trim())) err(`${label}: bad host "${h}"`)
+  for (const h of pack.hosts ?? []) if (!validHost(h)) err(`${label}: bad host "${h}"`)
   for (const s of names(pack.secrets)) if (!SECRET_RE.test(s)) err(`${label}: bad secret name "${s}"`)
   for (const k of Object.keys(pack.hooks ?? {})) if (!HOOKS.includes(k)) err(`${label}: unknown hook "${k}"`)
 

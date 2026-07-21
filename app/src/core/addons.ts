@@ -308,6 +308,18 @@ export function addonSnapshot(s: AppState): Record<string, unknown> {
 
 // ---------- addon HTTP: host allowlist + secret templating ----------
 
+/** Allowlist entry shape: hostname labels (alphanumerics + inner hyphens),
+ *  optional leading `*.` wildcard. The wildcard must cover at least two
+ *  labels — `*.com` would match every .com host, so it is not a valid
+ *  pattern and never matches in `hostAllowed` either. */
+const HOST_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?'
+const HOST_PATTERN_RE = new RegExp(`^(\\*\\.)?${HOST_LABEL}(\\.${HOST_LABEL})*$`, 'i')
+export function validHostPattern(pat: string): boolean {
+  const p = pat.trim()
+  if (!HOST_PATTERN_RE.test(p)) return false
+  return !p.startsWith('*.') || p.slice(2).includes('.')
+}
+
 /** Is this URL reachable for an addon with the given `hosts` allowlist?
  *  https only (plain http allowed just for localhost); hosts match exactly or
  *  via a leading `*.` wildcard (`*.example.com` also matches example.com). */
@@ -320,7 +332,12 @@ export function hostAllowed(hosts: string[] | undefined, url: string): boolean {
   return (hosts ?? []).some(pat => {
     const p = pat.trim().toLowerCase()
     if (!p) return false
-    if (p.startsWith('*.')) return h === p.slice(2) || h.endsWith(p.slice(1))
+    if (p.startsWith('*.')) {
+      const suffix = p.slice(2)
+      // inert for TLD wildcards (`*.com`) — see validHostPattern
+      if (!suffix.includes('.')) return false
+      return h === suffix || h.endsWith(p.slice(1))
+    }
     return h === p
   })
 }
@@ -557,7 +574,7 @@ export function parseAddonPackage(json: string): Omit<Addon, 'id' | 'enabled' | 
     throw new Error('agent.every must be a valid 5-field cron expression')
   }
   const hosts = Array.isArray(raw.hosts)
-    ? (raw.hosts as unknown[]).filter((x): x is string => typeof x === 'string' && /^(\*\.)?[a-z0-9.-]+$/i.test(x.trim())).map(x => x.trim())
+    ? (raw.hosts as unknown[]).filter((x): x is string => typeof x === 'string' && validHostPattern(x)).map(x => x.trim())
     : undefined
   const secrets = Array.isArray(raw.secrets)
     ? (raw.secrets as unknown[]).flatMap(x => {

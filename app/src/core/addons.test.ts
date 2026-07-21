@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ADDON_RPC_METHODS, ALL_PERMISSIONS, METHOD_PERMISSION,
   appCompat, cmpSemver, hostAllowed, inlineIncludes, parseAddonPackage, resolveSecretRefs,
+  validHostPattern,
 } from './addons'
 
 describe('hostAllowed', () => {
@@ -33,6 +34,43 @@ describe('hostAllowed', () => {
     expect(hostAllowed(hosts, 'not a url')).toBe(false)
     expect(hostAllowed(undefined, 'https://api.github.com/')).toBe(false)
     expect(hostAllowed([], 'https://api.github.com/')).toBe(false)
+  })
+
+  it('never matches a TLD wildcard, even if one slipped into a saved manifest', () => {
+    expect(hostAllowed(['*.com'], 'https://anything.com/')).toBe(false)
+    expect(hostAllowed(['*.com'], 'https://com/')).toBe(false)
+  })
+})
+
+describe('validHostPattern', () => {
+  it('accepts plain hosts and proper wildcards', () => {
+    expect(validHostPattern('api.github.com')).toBe(true)
+    expect(validHostPattern('localhost')).toBe(true)
+    expect(validHostPattern('*.example.com')).toBe(true)
+    expect(validHostPattern('*.deep.example.co.uk')).toBe(true)
+    expect(validHostPattern('my-host.dev')).toBe(true)
+  })
+
+  it('rejects bare-TLD wildcards', () => {
+    expect(validHostPattern('*.com')).toBe(false)
+    expect(validHostPattern('*.co.uk'.replace('co.uk', 'uk'))).toBe(false)
+  })
+
+  it('rejects junk the old regex allowed', () => {
+    expect(validHostPattern('-')).toBe(false)
+    expect(validHostPattern('..')).toBe(false)
+    expect(validHostPattern('-bad.com')).toBe(false)
+    expect(validHostPattern('bad-.com')).toBe(false)
+    expect(validHostPattern('bad..com')).toBe(false)
+    expect(validHostPattern('')).toBe(false)
+    expect(validHostPattern('*.')).toBe(false)
+  })
+
+  it('parseAddonPackage drops invalid hosts from the manifest', () => {
+    const pkg = parseAddonPackage(JSON.stringify({
+      name: 'x', version: '1.0.0', html: '<p>hi</p>', hosts: ['api.github.com', '*.com', '*.example.com'],
+    }))
+    expect(pkg.hosts).toEqual(['api.github.com', '*.example.com'])
   })
 })
 
