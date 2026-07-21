@@ -20,6 +20,7 @@ import { mkId } from '../../shared/id'
 import { formatHits, memoryDigest, searchMemory, wsMemory } from '../master/assistant-memory'
 import { calibrationNote, recordDecision } from '../master/harness-stats'
 import { createTaskActivity, withActivityTargets } from '../activity/history'
+import { untrustedBlock } from '../../llm/untrusted'
 
 export interface WatcherCtx {
   stateRef: MutableRefObject<AppState>
@@ -204,7 +205,7 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
               a.ephemeral ? 'kind: one-shot — it exits by itself when done; while running it prints little or nothing' : 'kind: interactive',
               a.launchedAt ? `runtime: ${Math.round((Date.now() - a.launchedAt) / 1000)}s` : '',
               a.summary ? `last summary: ${a.summary}` : '',
-              `latest output:\n${tail || '(no output yet)'}`,
+              `latest output:\n${tail ? untrustedBlock(tail, a.name) : '(no output yet)'}`,
             ].filter(Boolean).join('\n')
           }).join('\n\n---\n\n')
         },

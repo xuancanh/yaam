@@ -16,6 +16,7 @@ import { PERM_ORDER, SHELLS } from '../../core/data'
 import { isAbortError } from '../../core/abort-registry'
 import * as native from '../../core/native'
 import { MEMORY_FILE_NAMES, formatHits, searchMemory, withMemoryAppend, wsMemory } from './assistant-memory'
+import { untrustedBlock } from '../../llm/untrusted'
 
 export interface MasterCtx {
   stateRef: MutableRefObject<AppState>
@@ -112,7 +113,7 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
       }))
       ctx.logEvent('route', sid, `Master → ${agent.name}: ${text.slice(0, 48)}`)
       await wait(1600)
-      return `sent to ${agent.name}. screen now:\n${ctx.sessionScreenTail(sid)}`
+      return `sent to ${agent.name}. screen now:\n${untrustedBlock(ctx.sessionScreenTail(sid), agent.name)}`
     },
     pressKeys: async (sid, keys) => {
       const gated = catalogGate('send_to_session') || sessionGate(sid, 'send')
@@ -129,7 +130,7 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
       ctx.logEvent('route', sid, `Master pressed ${keys.join(' ')} in ${agent.name}`)
       ctx.armResponseWatch(sid)
       await wait(900)
-      return `pressed ${keys.join(' ')}. screen now:\n${ctx.sessionScreenTail(sid)}`
+      return `pressed ${keys.join(' ')}. screen now:\n${untrustedBlock(ctx.sessionScreenTail(sid), agent.name)}`
     },
     configureSetting: (key, value) => {
       const gated = catalogGate('configure_setting')
@@ -280,7 +281,7 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
       if (!agent) return `no session with id ${sid}`
       const n = Math.min(Math.max(lines ?? 40, 1), 120)
       const tail = agent.log.slice(-n).map(l => l.x).join('\n')
-      return tail || '(no output yet)'
+      return tail ? untrustedBlock(tail, agent.name) : '(no output yet)'
     },
     stopSession: sid => {
       const gated = catalogGate('stop_session') || sessionGate(sid, 'stop')

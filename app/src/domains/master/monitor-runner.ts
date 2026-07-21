@@ -15,6 +15,7 @@ import { isAltScreen, readScreen } from '../../core/terminals'
 import { extractOptions } from '../session/prompt-detection'
 import type { AbortRegistry } from '../../core/abort-registry'
 import { isAbortError } from '../../core/abort-registry'
+import { untrustedBlock } from '../../llm/untrusted'
 
 export interface MonitorCtx {
   stateRef: MutableRefObject<AppState>
@@ -91,7 +92,7 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
           ctx.logEvent(importance === 'info' ? 'done' : 'escalate', id, `Monitor: ${digest.slice(0, 96)}`)
           if (importance === 'critical' && a) ctx.notify('escalate', `${a.name} needs attention`, digest.slice(0, 90), id)
           ctx.masterEvent(
-            `[monitor report · ${importance}] session "${a?.name ?? id}" (${id}): ${digest}\n\n` +
+            `[monitor report · ${importance}] session "${a?.name ?? id}" (${id}):\n${untrustedBlock(digest, a?.name ?? id)}\n\n` +
             'This came from the session\'s dedicated monitor. Relay it to the user in 1-2 sentences ending with "Next action:", and act with your tools if needed.',
             id,
           )

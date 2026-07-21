@@ -20,6 +20,7 @@ import type { LocatedTask } from '../board/task-state'
 import { hasCreds } from '../../llm/client'
 import { createSessionActivity, withActivityTargets } from '../activity/history'
 import { captureSessionChanges } from './change-history'
+import { untrustedBlock } from '../../llm/untrusted'
 
 /** The native process-exit event we react to. */
 export interface SessionExitEvent {
@@ -163,7 +164,7 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
       } else {
         runWatcher(taskFor.task.id, userStopped
           ? `The user manually STOPPED the task's session "${agent.name}". This is a pause, not a failure — do not move the task to failed or claim completion. Update your note and wait for instructions.`
-          : `The task's session "${agent.name}" exited ${failed ? `with code ${e.code} (failure)` : 'cleanly'}. Final output:\n${tail}\n\n` +
+          : `The task's session "${agent.name}" exited ${failed ? `with code ${e.code} (failure)` : 'cleanly'}. Final output:\n${untrustedBlock(tail, agent.name)}\n\n` +
             'Assess the result against the acceptance criteria and move the task (review when it looks complete, failed if the attempt is dead), then update your note. ' +
             'Post ONE message to the user in the task chat that (1) summarizes concretely what was accomplished — files changed, checks run, criteria met or missed — and ' +
             '(2) when the task moved to review, explicitly asks them to review and approve the changes (the Review button on the card shows the diff). ' +

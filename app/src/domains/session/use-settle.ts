@@ -18,6 +18,7 @@ import {
   detectPrompt, extractOptions, stableScreenKey, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
 } from './prompt-detection'
 import { NOTE_PROGRESS } from '../board/watcher-notes'
+import { untrustedBlock } from '../../llm/untrusted'
 
 export interface SettleDeps {
   state: StatePort
@@ -122,7 +123,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     if (!final && key && lastOutputKey.get(id) === key) return
     if (key) lastOutputKey.set(id, key)
     if (final && key) lastFinalKey.set(id, key)
-    const text = content.join('\n').slice(-12_000)
+    const text = untrustedBlock(content.join('\n').slice(-12_000), agent.name)
     const phase = final ? 'finished sending output' : 'is still running; this is a buffered checkpoint'
     const taskFor = taskForSession(id)
     const note = `${NOTE_PROGRESS} The session "${agent.name}" ${phase}. ${alt ? 'Current rendered screen' : 'New terminal output'}:\n${text}\n\n` +
@@ -176,14 +177,14 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
         if (llm) {
           masterEventRef.current(
             `[event] session "${agent.name}" (${id}) is showing a dialog (approval or selection menu) and has been flagged as needing input:\n` +
-            `${content.slice(-14).join('\n')}\n\nTell the user what it is asking — include the options if it is a menu. Approve sends Enter (selects the highlighted option), Deny sends Escape; for other choices the user should click into the terminal.`,
+            `${untrustedBlock(content.slice(-14).join('\n'), agent.name)}\n\nTell the user what it is asking — include the options if it is a menu. Approve sends Enter (selects the highlighted option), Deny sends Escape; for other choices the user should click into the terminal.`,
             id,
           )
         }
         const taskFor = taskForSession(id)
         if (taskFor) {
           runWatcherRef.current(taskFor.task.id,
-            `The task's session "${agent.name}" is waiting at this prompt:\n${content.slice(-14).join('\n')}\n\n` +
+            `The task's session "${agent.name}" is waiting at this prompt:\n${untrustedBlock(content.slice(-14).join('\n'), agent.name)}\n\n` +
             'Unblock it from the task spec when safe; otherwise ask the user one focused question and update the card note.')
         }
       }
@@ -308,7 +309,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
         const { options, cursorNum } = extractOptions(screen)
         setNeedsInput(a.id, question, options, cursorNum)
         void monitorEventRef.current(a.id,
-          `A dialog was detected on the session's screen (already flagged as needing input):\n${screen.slice(-14).join('\n')}\n\n` +
+          `A dialog was detected on the session's screen (already flagged as needing input):\n${untrustedBlock(screen.slice(-14).join('\n'), a.name)}\n\n` +
           'This needs the user — report_to_master with what it is asking, including the options if it is a menu.')
       } else if (a.status === 'needs') {
         lastFlagged.delete(a.id)
