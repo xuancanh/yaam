@@ -86,7 +86,7 @@ export const TOOLS = [
   },
   {
     name: 'set_tool_permission',
-    description: 'Set the permission of one of your global tools in the Tools registry. perm: Off | Ask first | Auto | Approval.',
+    description: 'Set the permission of one of your global tools in the Tools registry. perm: Off | Ask first | Auto | Approval. You cannot GRANT Auto (raising a tool to Auto is refused — only the user can do that in Settings → Tools); lowering permissions is always allowed.',
     input_schema: {
       type: 'object',
       properties: { tool_id: { type: 'string' }, perm: { type: 'string' } },

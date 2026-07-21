@@ -120,6 +120,92 @@ describe('Master create_addon permission grants (SEC-2)', () => {
   })
 })
 
+// SEC-11: set_tool_permission may LOWER a tool's gate and may raise it to
+// Ask first / Approval (both keep a human in the loop), but raising a tool to
+// Auto removes the only check between prompt injection and the tool — that is
+// reserved for the user in Settings → Tools. The seeded catalog has
+// set_tool_permission at "Ask first", so these tests flip that entry to Auto
+// to reach the tool body itself.
+describe('Master set_tool_permission Auto ceiling (SEC-11)', () => {
+  beforeEach(() => { captured.exec = null })
+
+  /** Seed state with set_tool_permission itself unlocked (Auto). */
+  function stateWithGateOpen(): AppState {
+    const state = seedState()
+    state.toolsCatalog = state.toolsCatalog.map(t =>
+      t.id === 'set_tool_permission' ? { ...t, perm: 'Auto' as const } : t)
+    return state
+  }
+
+  it('raising a tool to Auto is refused and the permission is unchanged', async () => {
+    const state = stateWithGateOpen()
+    // stop_session starts at "Ask first" — raising it to Auto must be refused
+    const ctx = makeCtx(state)
+    const exec = await execOf(ctx)
+    const result = exec.setToolPermission('stop_session', 'Auto')
+
+    expect(result).toContain('refused')
+    expect(result).toContain('Settings → Tools')
+    expect(ctx.stateRef.current.toolsCatalog.find(t => t.id === 'stop_session')?.perm).toBe('Ask first')
+  })
+
+  it('raising a tool from Off to Auto is also refused', async () => {
+    const state = stateWithGateOpen()
+    state.toolsCatalog = state.toolsCatalog.map(t =>
+      t.id === 'launch_session' ? { ...t, perm: 'Off' as const } : t)
+    const ctx = makeCtx(state)
+    const exec = await execOf(ctx)
+    const result = exec.setToolPermission('launch_session', 'Auto')
+
+    expect(result).toContain('refused')
+    expect(ctx.stateRef.current.toolsCatalog.find(t => t.id === 'launch_session')?.perm).toBe('Off')
+  })
+
+  it('lowering Auto → Ask first works', async () => {
+    const state = stateWithGateOpen()
+    // launch_session starts at Auto
+    const ctx = makeCtx(state)
+    const exec = await execOf(ctx)
+    const result = exec.setToolPermission('launch_session', 'Ask first')
+
+    expect(result).toBe('set launch_session to Ask first')
+    expect(ctx.stateRef.current.toolsCatalog.find(t => t.id === 'launch_session')?.perm).toBe('Ask first')
+  })
+
+  it('lowering Ask first → Off works', async () => {
+    const state = stateWithGateOpen()
+    // stop_session starts at "Ask first"
+    const ctx = makeCtx(state)
+    const exec = await execOf(ctx)
+    const result = exec.setToolPermission('stop_session', 'Off')
+
+    expect(result).toBe('set stop_session to Off')
+    expect(ctx.stateRef.current.toolsCatalog.find(t => t.id === 'stop_session')?.perm).toBe('Off')
+  })
+
+  it('raising Off → Ask first is allowed (a human stays in the loop)', async () => {
+    const state = stateWithGateOpen()
+    state.toolsCatalog = state.toolsCatalog.map(t =>
+      t.id === 'launch_session' ? { ...t, perm: 'Off' as const } : t)
+    const ctx = makeCtx(state)
+    const exec = await execOf(ctx)
+    const result = exec.setToolPermission('launch_session', 'Ask first')
+
+    expect(result).toBe('set launch_session to Ask first')
+    expect(ctx.stateRef.current.toolsCatalog.find(t => t.id === 'launch_session')?.perm).toBe('Ask first')
+  })
+
+  it('re-asserting Auto on a tool already at Auto is a harmless no-op', async () => {
+    const state = stateWithGateOpen()
+    const ctx = makeCtx(state)
+    const exec = await execOf(ctx)
+    const result = exec.setToolPermission('launch_session', 'Auto')
+
+    expect(result).toBe('set launch_session to Auto')
+    expect(ctx.stateRef.current.toolsCatalog.find(t => t.id === 'launch_session')?.perm).toBe('Auto')
+  })
+})
+
 // SEC-5: read_session hands raw terminal output straight into Master's tool
 // history — it must arrive wrapped as untrusted data, and embedded closing
 // tags must not break out of the block.

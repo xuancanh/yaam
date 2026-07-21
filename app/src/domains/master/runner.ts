@@ -176,6 +176,15 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
       if (!(PERM_ORDER as readonly string[]).includes(perm)) return `invalid perm "${perm}" — use Off | Ask first | Auto | Approval`
       const tool = stateRef.current.toolsCatalog.find(t => t.id === toolId)
       if (!tool) return `no tool with id ${toolId}`
+      // SEC-11: Master may LOWER a tool's gate (Auto→Ask/Off, Ask→Off, …) and
+      // may raise it to Ask/Approval (both keep a human in the loop), but
+      // Auto removes the only check between prompt injection and the tool —
+      // granting it is a privilege escalation reserved for the user in
+      // Settings → Tools. Per-session overrides are not Master-reachable, so
+      // this catalog tool is the only path to gate.
+      if (perm === 'Auto' && tool.perm !== 'Auto') {
+        return `refused: only the user can grant "${toolId}" Auto permission — ask them to set it in Settings → Tools. You may lower permissions or set Ask first / Approval`
+      }
       dispatch(s2 => ({
         ...s2,
         toolsCatalog: s2.toolsCatalog.map(t => (t.id === toolId ? { ...t, perm: perm as typeof t.perm } : t)),
