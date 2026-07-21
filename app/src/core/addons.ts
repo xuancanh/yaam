@@ -257,6 +257,7 @@ export const ADDON_RPC_METHODS = [
   'storage.get', 'storage.set', 'storage.list', 'storage.remove',
   'http.request',
   'secrets.list',
+  'exec',
 ] as const
 
 /** Validate and invoke one whitelisted dotted addon RPC method. */

@@ -220,11 +220,12 @@ three entry points.
 | `storage` | `storage.get/set/list/remove` |
 | `http` | `http.request` against the manifest's `hosts` allowlist (https only) |
 | `secrets` | `secrets.list` + `{{secret:NAME}}` templating inside `http.request` |
+| `exec` | `exec(cmd, cwd?)` — run shell commands on this machine (translated Claude plugin hooks) |
 
 Scopes split into **low-risk** (`state:read`, `ui`, `storage`) and **dangerous**
 — those that act on the machine, reach the network, or steer LLMs
 (`sessions:send`, `sessions:launch`, `tasks`, `schedules`, `agent`,
-`master:prompt`, `http`, `secrets`).
+`master:prompt`, `http`, `secrets`, `exec`).
 
 Grant lifecycle:
 

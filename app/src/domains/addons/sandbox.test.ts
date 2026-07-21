@@ -50,8 +50,9 @@ function fakeFrame(): SandboxFrame {
   }
 }
 
-function fakeApi(granted: AddonPermission[]): { api: AddonApi; flash: ReturnType<typeof vi.fn> } {
+function fakeApi(granted: AddonPermission[]): { api: AddonApi; flash: ReturnType<typeof vi.fn>; exec: ReturnType<typeof vi.fn> } {
   const flash = vi.fn()
+  const exec = vi.fn(async () => ({ code: 0, output: 'ok' }))
   const raw = {
     getState: () => ({ sessions: [{ id: 's1' }] }),
     sendToSession: vi.fn(), launchSession: vi.fn(() => 'new-id'), focusSession: vi.fn(),
@@ -64,8 +65,9 @@ function fakeApi(granted: AddonPermission[]): { api: AddonApi; flash: ReturnType
     storage: { get: vi.fn(), set: vi.fn(), list: vi.fn(() => []), remove: vi.fn() },
     http: { request: vi.fn(async () => ({ status: 200, contentType: 'text/plain', text: 'ok' })) },
     secrets: { list: vi.fn(async () => []) },
+    exec,
   } as unknown as AddonApi
-  return { api: enforcePermissions(raw, granted), flash }
+  return { api: enforcePermissions(raw, granted), flash, exec }
 }
 
 describe('addon sandbox — isolation attributes', () => {
@@ -112,6 +114,21 @@ describe('addon sandbox — host RPC routing', () => {
     const out = await sb.run('try { await api.launchSession("x"); return "ALLOWED" } catch (e) { return "denied:" + e.message }', null, api)
     expect(out).toMatch(/^denied:/)
     expect(out).toContain('sessions:launch')
+  })
+
+  it('exposes api.exec in the sandbox and routes it to the host when granted', async () => {
+    const { api, exec } = fakeApi(['exec'])
+    const out = await sb.run(
+      'const r = await api.exec("echo hi", "/tmp"); return r.code + ":" + r.output', null, api)
+    expect(out).toBe('0:ok')
+    expect(exec).toHaveBeenCalledWith('echo hi', '/tmp')
+  })
+
+  it('denies api.exec without the exec scope', async () => {
+    const { api } = fakeApi([]) // 'exec' is a dangerous scope — never auto-granted
+    const out = await sb.run('try { await api.exec("rm -rf /"); return "ALLOWED" } catch (e) { return "denied:" + e.message }', null, api)
+    expect(out).toMatch(/^denied:/)
+    expect(out).toContain('exec')
   })
 
   it('propagates a handler throw as a rejection', async () => {

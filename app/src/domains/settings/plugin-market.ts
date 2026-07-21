@@ -79,7 +79,7 @@ export function translateHooksToAddon(pluginName: string, cfg: ClaudeHooksConfig
   if (!entries.length) return { addonJson: null, unmapped }
   const body = (cmds: string[]) => [
     // hook body runs in the addon sandbox; api.exec is the only machine access
-    `const payload = JSON.stringify(event).replace(/'/g, "'\\\\''")`,
+    `const payload = JSON.stringify(input).replace(/'/g, "'\\\\''")`,
     `for (const cmd of ${JSON.stringify(cmds)}) {`,
     `  const r = await api.exec("YAAM_HOOK_EVENT='" + payload + "' " + cmd)`,
     `  if (r.code !== 0) api.logEvent('plugin hook "' + cmd.slice(0, 60) + '" exited ' + r.code)`,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { translateHooksToAddon } from './plugin-market'
 import { parseAddonPackage } from '../../core/addons'
 
@@ -24,6 +24,45 @@ describe('translateHooksToAddon', () => {
     expect(addon.hooks.onSessionExit).toContain('notify-send done')
     expect(addon.hooks.onSessionExit).toContain('api.exec')
     expect(addon.hooks.onSessionExit).toContain('YAAM_HOOK_EVENT')
+  })
+
+  it('binds the hook event as `input` (the sandbox handler argument), not `event`', () => {
+    const { addonJson } = translateHooksToAddon('my-plugin', cfg)
+    const addon = JSON.parse(addonJson!) as { hooks: Record<string, string> }
+    for (const body of Object.values(addon.hooks)) {
+      expect(body).toContain('JSON.stringify(input)')
+      expect(body).not.toMatch(/\bevent\b/)
+    }
+  })
+
+  it('generates a body that actually runs against the sandbox (input, api) binding', async () => {
+    const { addonJson } = translateHooksToAddon('my-plugin', cfg)
+    const addon = JSON.parse(addonJson!) as { hooks: Record<string, string> }
+    const exec = vi.fn(async (_cmd: string) => ({ code: 0, output: '' }))
+    const logEvent = vi.fn()
+    const api = { exec, logEvent }
+    // compile the handler exactly the way the addon sandbox does
+    // (addons/sandbox.ts): new Function('input', 'api', ...)
+    const run = (source: string, input: unknown) =>
+      (new Function('input', 'api', '"use strict"; return (async () => {\n' + source + '\n})();') as
+        (i: unknown, a: unknown) => Promise<unknown>)(input, api)
+
+    await run(addon.hooks.onSessionExit, { hook: 'Stop' })
+    expect(exec).toHaveBeenCalledTimes(2)
+    expect(exec.mock.calls[0][0]).toBe(`YAAM_HOOK_EVENT='${JSON.stringify({ hook: 'Stop' })}' ./scripts/on-stop.sh`)
+    expect(exec.mock.calls[1][0]).toContain('notify-send done')
+    expect(logEvent).not.toHaveBeenCalled()
+
+    exec.mockClear()
+    await run(addon.hooks.onNeedsInput, { message: 'hi' })
+    expect(exec).toHaveBeenCalledTimes(1)
+    expect(exec.mock.calls[0][0]).toContain('./scripts/ping.sh')
+
+    // a failing command surfaces via logEvent instead of throwing
+    exec.mockClear()
+    exec.mockResolvedValueOnce({ code: 3, output: 'nope' })
+    await run(addon.hooks.onNeedsInput, {})
+    expect(logEvent).toHaveBeenCalledWith(expect.stringContaining('exited 3'))
   })
 
   it('produces a package the addon validator accepts, with exec requested (never auto-granted)', () => {

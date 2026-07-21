@@ -1,5 +1,5 @@
 // Bridge ↔ host-stub round trips over real (jsdom) postMessage.
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createYaamClient } from '../src/bridge'
 import type { YaamClient } from '../src/bridge'
 import { createHostStub } from '../src/testing'
@@ -37,8 +37,18 @@ describe('bridge RPC', () => {
   it('rejects unknown methods like the host whitelist does', async () => {
     stub = createHostStub()
     client = connect()
-    await expect(client.call('exec', 'rm -rf /')).rejects.toThrow('unknown method exec')
     await expect(client.call('nope.nope')).rejects.toThrow('unknown method nope.nope')
+  })
+
+  it('gates exec behind the exec scope like the host does', async () => {
+    const exec = vi.fn(async () => ({ code: 0, output: 'ok' }))
+    stub = createHostStub({ granted: ['state:read'], handlers: { exec } }) // dangerous scopes withheld
+    client = connect()
+    await expect(client.call('exec', 'rm -rf /')).rejects.toThrow('permission "exec" not granted')
+    expect(exec).not.toHaveBeenCalled()
+    stub.setGranted(['state:read', 'exec'])
+    await expect(client.call('exec', 'echo hi')).resolves.toEqual({ code: 0, output: 'ok' })
+    expect(exec).toHaveBeenCalledWith('echo hi')
   })
 
   it('delivers state pushes to onState subscribers', async () => {

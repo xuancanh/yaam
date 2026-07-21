@@ -47,7 +47,6 @@ export const METHOD_PERMISSION: Record<string, AddonPermission> = {
   exec: 'exec',
 }
 
-/** Every RPC-callable dotted method name. Note `exec` is deliberately absent:
- *  it exists in METHOD_PERMISSION (translated plugin hooks run on it host-side)
- *  but is never callable over the view/handler RPC bridge. */
-export const ADDON_RPC_METHODS: string[] = Object.keys(METHOD_PERMISSION).filter(m => m !== 'exec')
+/** Every RPC-callable dotted method name — exactly the keys of METHOD_PERMISSION
+ *  (the host-compat test fails if either table drifts). */
+export const ADDON_RPC_METHODS: string[] = Object.keys(METHOD_PERMISSION)

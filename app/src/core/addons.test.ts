@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { appCompat, cmpSemver, hostAllowed, inlineIncludes, parseAddonPackage, resolveSecretRefs } from './addons'
+import {
+  ADDON_RPC_METHODS, ALL_PERMISSIONS, METHOD_PERMISSION,
+  appCompat, cmpSemver, hostAllowed, inlineIncludes, parseAddonPackage, resolveSecretRefs,
+} from './addons'
 
 describe('hostAllowed', () => {
   const hosts = ['api.github.com', '*.example.com']
@@ -127,5 +130,25 @@ describe('appCompat', () => {
     expect(r.ok).toBe(false)
     expect(r.reason).toMatch(/0\.7\.0/)
     expect(r.reason).toMatch(/0\.6\.0/)
+  })
+})
+
+describe('ADDON_RPC_METHODS ↔ METHOD_PERMISSION', () => {
+  // The sandbox bootstrap only builds api proxies for whitelisted names and the
+  // host rejects anything else — so a method missing from the whitelist is dead
+  // code (this was exactly how the exec scope drifted: permission + impl present,
+  // never reachable). The whitelist must be exactly the permission-mapped set.
+  it('the RPC whitelist is exactly the permission-mapped method set', () => {
+    expect([...ADDON_RPC_METHODS].sort()).toEqual(Object.keys(METHOD_PERMISSION).sort())
+  })
+
+  it('includes exec, mapped to the exec scope', () => {
+    expect(ADDON_RPC_METHODS).toContain('exec')
+    expect(METHOD_PERMISSION.exec).toBe('exec')
+  })
+
+  it('every whitelisted method maps to a declared permission', () => {
+    const ids = new Set(ALL_PERMISSIONS.map(p => p.id))
+    for (const m of ADDON_RPC_METHODS) expect(ids.has(METHOD_PERMISSION[m])).toBe(true)
   })
 })
