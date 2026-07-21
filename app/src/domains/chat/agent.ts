@@ -11,6 +11,14 @@ import type { Agent, ChatToolEvent } from '../../core/types'
 import { callApiStream } from '../../llm/client'
 import type { ApiContentBlock, ApiMessage, ApiUsage, LlmConfig } from '../../llm/client'
 
+/** Turn usage: inputTokens/outputTokens are the CUMULATIVE billed sum across
+ *  all tool rounds (each round re-sends the full history); contextInputTokens
+ *  is the final round's input size — the actual context occupancy, used for
+ *  the auto-compact trigger. */
+export interface ChatTurnUsage extends ApiUsage {
+  contextInputTokens: number
+}
+
 export interface ChatTurnEvent {
   /** delta = streamed text chunk · thinking = streamed reasoning chunk ·
    *  round = current stream bubble is complete (a tool round follows) ·
@@ -705,7 +713,7 @@ export async function runChatTurn(
   contextSummary?: string,
   custom?: string,
   durable?: string,
-): Promise<ApiUsage | undefined> {
+): Promise<ChatTurnUsage | undefined> {
   // a stopped/aborted turn can leave the history mid-tool-round (assistant
   // tool_use without its tool_result) — providers reject that; drop the debris
   // and cap through the sanitizing helper (attachment block arrays are kept).
@@ -714,9 +722,12 @@ export async function runChatTurn(
   history.push({ role: 'user', content: userText })
   const tools = [...builtinTools(skills), ...mcpToolDefs(mcp)]
   let usage: ApiUsage | undefined
+  // the compaction trigger needs the actual context size — the LAST round's
+  // input tokens — not the billed sum (every round re-sends the full history)
+  let contextInputTokens = 0
   for (let i = 0; i < 24; i++) {
     const agent = getAgent()
-    if (!agent) return usage
+    if (!agent) return usage ? { ...usage, contextInputTokens } : undefined
     const stream = () => callApiStream(cfg, chatSystem(agent, skills, mcp, persona, memory, contextSummary, custom, durable), history, tools,
       (d, ch) => onEvent({ kind: ch === 'thinking' ? 'thinking' : 'delta', text: d }), signal)
     let res: Awaited<ReturnType<typeof callApiStream>>
@@ -734,9 +745,12 @@ export async function runChatTurn(
         throw e
       }
     }
-    if (res.usage) usage = {
-      inputTokens: (usage?.inputTokens ?? 0) + res.usage.inputTokens,
-      outputTokens: (usage?.outputTokens ?? 0) + res.usage.outputTokens,
+    if (res.usage) {
+      usage = {
+        inputTokens: (usage?.inputTokens ?? 0) + res.usage.inputTokens,
+        outputTokens: (usage?.outputTokens ?? 0) + res.usage.outputTokens,
+      }
+      contextInputTokens = res.usage.inputTokens
     }
     if (res.stop_reason !== 'tool_use') {
       const text = res.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join('\n').trim()
@@ -817,5 +831,5 @@ export async function runChatTurn(
   }
   // cap the persistent conversation so long chats stay affordable
   capChatHistory(history, 60)
-  return usage
+  return usage ? { ...usage, contextInputTokens } : undefined
 }

@@ -9,7 +9,7 @@ import type { CatalogSkill } from '../../core/skills'
 import { buildChatCfg, callApi, chatTypeHasCreds } from '../../llm/client'
 import type { ApiContentBlock } from '../../llm/client'
 import { ALWAYS_ASK_TOOLS, runChatTurn } from './agent'
-import type { ChatAppPort } from './agent'
+import type { ChatAppPort, ChatTurnUsage } from './agent'
 import { mkId } from '../../shared/id'
 import type { AbortRegistry } from '../../core/abort-registry'
 import { isAbortError } from '../../core/abort-registry'
@@ -549,7 +549,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
         }))
       }
     }
-    updateTurn({ status: 'complete', completedAt: Date.now(), ...(usage ? { usage } : {}) })
+    updateTurn({ status: 'complete', completedAt: Date.now(), ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } } : {}) })
     if (usage) {
       ctx.dispatch(s2 => ({
         ...s2,
@@ -573,7 +573,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     // auto-compact: when this turn's input context reached the limit, distill
     // the API history into a summary in the background (0 disables)
     const compactAt = ctx.stateRef.current.settings.chatCompactTokens ?? DEFAULT_COMPACT_TOKENS
-    if (usage && compactAt > 0 && usage.inputTokens >= compactAt) {
+    if (shouldAutoCompact(usage, compactAt)) {
       autoCompact = true
     }
     // auto-title: after a successful turn, chats still carrying the default
@@ -659,8 +659,16 @@ export async function reflectDurableConversation(ctx: ChatCtx, conversationId: s
   }
 }
 
-/** Default auto-compact trigger: one turn's input tokens reaching this. */
+/** Default auto-compact trigger: the last round's input (actual context size)
+ *  reaching this. */
 export const DEFAULT_COMPACT_TOKENS = 80_000
+
+/** Auto-compact gate: fire on the ACTUAL context size (the final round's input
+ *  tokens), never on the cumulative billed sum — a multi-round tool turn sums
+ *  every re-send of the full history and would compact far below the limit. */
+export function shouldAutoCompact(usage: ChatTurnUsage | undefined, compactAt: number): boolean {
+  return !!usage && compactAt > 0 && usage.contextInputTokens >= compactAt
+}
 
 /** Compact a conversation's API context: distill the transcript into a
  *  structured summary, reseed the private history with it, and persist it as

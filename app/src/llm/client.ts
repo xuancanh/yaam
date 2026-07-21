@@ -243,6 +243,49 @@ function anthropicAuthHeaders(key: string): Record<string, string> {
   return { 'x-api-key': key }
 }
 
+// ---------------------------------------------------------------- transient retry
+// 429 (rate limit) and 5xx (provider hiccup, incl. Anthropic's 529 overload)
+// get ONE bounded retry with backoff; other 4xx are real request errors and
+// fail immediately; 401/403 keep their credential-refresh retry below.
+
+const TRANSIENT_RETRY_DELAY_MS = 1_000
+const RETRY_AFTER_CAP_MS = 5_000
+
+function isTransientStatus(status: number): boolean {
+  return status === 429 || status >= 500
+}
+
+/** Backoff for the transient retry: Retry-After when the server sends one
+ *  (seconds or HTTP-date, capped), else a fixed delay. */
+function transientDelayMs(res: Response): number {
+  const header = res.headers.get('retry-after')?.trim()
+  if (header) {
+    const seconds = Number(header)
+    if (Number.isFinite(seconds)) return Math.min(Math.max(seconds, 0) * 1000, RETRY_AFTER_CAP_MS)
+    const at = Date.parse(header)
+    if (!Number.isNaN(at)) return Math.min(Math.max(at - Date.now(), 0), RETRY_AFTER_CAP_MS)
+  }
+  return TRANSIENT_RETRY_DELAY_MS
+}
+
+/** Send with the shared retry policy: a 401/403 refreshes the credential
+ *  command once, a transient 429/5xx gets one backoff retry. The rejected
+ *  response body is cancelled before re-sending so it doesn't leak. */
+async function sendWithRetry(cfg: LlmConfig, send: (key: string) => Promise<Response>): Promise<Response> {
+  let res = await send(await resolveKey(cfg))
+  if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
+    // stale credential — re-run the credential command and retry once
+    await res.body?.cancel().catch(() => {})
+    res = await send(await resolveKey(cfg, true))
+  }
+  if (isTransientStatus(res.status)) {
+    await res.body?.cancel().catch(() => {})
+    await new Promise(resolve => setTimeout(resolve, transientDelayMs(res)))
+    res = await send(await resolveKey(cfg))
+  }
+  return res
+}
+
 /** Send one Anthropic-shaped request through direct HTTP or the Bedrock bridge. */
 async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], signal?: AbortSignal): Promise<ApiResponse> {
   const wireMessages = forAnthropicWire(messages, !!cfg.thinking)
@@ -265,11 +308,7 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
     body: JSON.stringify({ model: cfg.model, ...anthropicTuning(cfg.thinking), system, messages: wireMessages, tools }),
     signal,
   })
-  let res = await send(await resolveKey(cfg))
-  if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
-    // stale credential — re-run the credential command and retry once
-    res = await send(await resolveKey(cfg, true))
-  }
+  const res = await sendWithRetry(cfg, send)
   const data = await readJsonBounded<ApiResponse>(res)
   if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`)
   return withNormalizedUsage(normalizeThinkingBlocks(data))
@@ -357,11 +396,7 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
     }),
     signal,
   })
-  let res = await send(await resolveKey(cfg))
-  if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
-    // stale credential — re-run the credential command and retry once
-    res = await send(await resolveKey(cfg, true))
-  }
+  const res = await sendWithRetry(cfg, send)
   const data = await readJsonBounded<{
     choices?: Array<{ message: OaiMessage; finish_reason: string }>
     usage?: { prompt_tokens?: number; completion_tokens?: number }
@@ -508,10 +543,7 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
     body: JSON.stringify({ model: cfg.model, ...anthropicTuning(cfg.thinking), system, messages: forAnthropicWire(messages, !!cfg.thinking), tools, stream: true }),
     signal,
   })
-  let res = await send(await resolveKey(cfg))
-  if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
-    res = await send(await resolveKey(cfg, true))
-  }
+  const res = await sendWithRetry(cfg, send)
   if (!res.ok) {
     const data = await readJsonBounded<ApiResponse>(res, 256 * 1024).catch(() => null)
     throw new Error(data?.error?.message || `API error ${res.status}`)
@@ -591,10 +623,7 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
     }),
     signal,
   })
-  let res = await send(await resolveKey(cfg))
-  if ((res.status === 401 || res.status === 403) && cfg.credCmd.trim()) {
-    res = await send(await resolveKey(cfg, true))
-  }
+  const res = await sendWithRetry(cfg, send)
   if (!res.ok) {
     const data = await readJsonBounded<{ error?: { message?: string } }>(res, 256 * 1024).catch(() => null)
     throw new Error(data?.error?.message || `API error ${res.status}`)
