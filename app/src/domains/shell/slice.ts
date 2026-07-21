@@ -7,6 +7,9 @@ export interface ShellUiSlice {
   composer: string
   panel: Panel | null
   toast: string | null
+  /** sticky save-failure signal from the persistence runtime (transient — not
+   *  persisted; set while any partition's writes fail, cleared on recovery) */
+  saveError: string | null
   drawer: Drawer | null
   paletteOpen: boolean
   paletteQuery: string
@@ -22,6 +25,7 @@ export function freshShellUiSlice(): ShellUiSlice {
     composer: '',
     panel: null,
     toast: null,
+    saveError: null,
     drawer: null,
     paletteOpen: false,
     paletteQuery: '',

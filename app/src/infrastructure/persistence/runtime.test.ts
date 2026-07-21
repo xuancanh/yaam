@@ -316,4 +316,80 @@ describe('createPersistenceRuntime', () => {
     expect(native.removeSession).toHaveBeenCalledTimes(2)
     rt.dispose()
   })
+
+  it('sets the sticky save-error signal on a session failure and clears it once a write lands', async () => {
+    const agent = { id: 'sig-1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
+    const store = fakeStore(baseState())
+    const onSaveStatus = vi.fn()
+    const rt = createPersistenceRuntime(store, { onToast: () => {}, onSaveStatus })
+    rt.start(); rt.markReady()
+    vi.mocked(native.saveSession)
+      .mockRejectedValueOnce(new Error('disk full'))
+      .mockResolvedValue(undefined)
+
+    store.set({ ...store.getState(), agents: [agent] }) // structural → immediate attempt
+    await vi.advanceTimersByTimeAsync(0) // let the rejection settle
+    expect(onSaveStatus).toHaveBeenLastCalledWith(expect.stringContaining("aren't being saved"))
+
+    await vi.advanceTimersByTimeAsync(800) // backoff retry succeeds
+    expect(native.saveSession).toHaveBeenCalledTimes(2)
+    expect(onSaveStatus).toHaveBeenLastCalledWith(null)
+    rt.dispose()
+  })
+
+  it('sets the signal on a main-partition failure and clears it on the next main save', async () => {
+    const store = fakeStore(baseState())
+    const onSaveStatus = vi.fn()
+    const rt = createPersistenceRuntime(store, { onToast: () => {}, onSaveStatus })
+    rt.start(); rt.markReady()
+    vi.mocked(native.saveStateFile).mockRejectedValueOnce(new Error('read-only fs'))
+
+    store.set({ ...store.getState(), tasks: [{ id: 't' }] as unknown as AppState['tasks'] })
+    await vi.advanceTimersByTimeAsync(800)
+    expect(onSaveStatus).toHaveBeenLastCalledWith(expect.stringContaining("aren't being saved"))
+
+    vi.mocked(native.saveStateFile).mockResolvedValue(undefined)
+    store.set({ ...store.getState(), tasks: [{ id: 't2' }] as unknown as AppState['tasks'] })
+    await vi.advanceTimersByTimeAsync(800)
+    expect(onSaveStatus).toHaveBeenLastCalledWith(null)
+    rt.dispose()
+  })
+
+  it('keeps the signal set after the retry streak gives up, and a session success does not clear a failing main partition', async () => {
+    const agent = { id: 'sig-2', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
+    const store = fakeStore(baseState())
+    const onSaveStatus = vi.fn()
+    const rt = createPersistenceRuntime(store, { onToast: () => {}, onSaveStatus })
+    rt.start(); rt.markReady()
+    vi.mocked(native.saveSession).mockRejectedValue(new Error('disk full'))
+
+    store.set({ ...store.getState(), agents: [agent] })
+    await vi.advanceTimersByTimeAsync(0) // let the rejection settle
+    // exhaust the backoff streak: 800 → 1600 → 3200 → 6400, then give up
+    await vi.advanceTimersByTimeAsync(800 + 1600 + 3200 + 6400 + 120_000)
+    expect(native.saveSession).toHaveBeenCalledTimes(5)
+    // gave up, but the failure is unresolved — the sticky signal must stay
+    expect(onSaveStatus).toHaveBeenCalledTimes(1)
+    expect(onSaveStatus).toHaveBeenLastCalledWith(expect.stringContaining("aren't being saved"))
+
+    // a later failure on the OTHER partition, then a session success: the main
+    // partition is still known-failing, so the signal survives the session win
+    vi.mocked(native.saveStateFile).mockRejectedValue(new Error('read-only fs'))
+    store.set({ ...store.getState(), tasks: [{ id: 't' }] as unknown as AppState['tasks'] })
+    await vi.advanceTimersByTimeAsync(800) // main save fails
+    vi.mocked(native.saveSession).mockResolvedValue(undefined)
+    const agent2 = { ...agent, log: [{ t: 'out', x: 'hi' }] } as unknown as AppState['agents'][number]
+    store.set({ ...store.getState(), agents: [agent2] }) // re-arms the dirty session
+    await vi.advanceTimersByTimeAsync(800) // session write lands
+    expect(native.saveSession).toHaveBeenCalledTimes(6)
+    expect(onSaveStatus).toHaveBeenLastCalledWith(expect.stringContaining("aren't being saved"))
+    expect(onSaveStatus).not.toHaveBeenLastCalledWith(null)
+
+    // main recovers → both partitions healthy → signal clears
+    vi.mocked(native.saveStateFile).mockResolvedValue(undefined)
+    store.set({ ...store.getState(), tasks: [{ id: 't2' }] as unknown as AppState['tasks'] })
+    await vi.advanceTimersByTimeAsync(800)
+    expect(onSaveStatus).toHaveBeenLastCalledWith(null)
+    rt.dispose()
+  })
 })

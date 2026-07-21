@@ -8,6 +8,7 @@ import { SlideOver } from './domains/shell/SlideOver'
 import { Drawer } from './domains/shell/Drawer'
 import { CommandPalette } from './domains/shell/CommandPalette'
 import { Toast } from './domains/shell/Toast'
+import { SaveErrorBanner } from './domains/shell/SaveErrorBanner'
 import { RemoteCompanion } from './domains/remote/RemoteCompanion'
 
 // Keep the terminal workspace responsive at startup. Secondary product areas
@@ -58,6 +59,7 @@ function Shell() {
   return (
     <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <TitleBar />
+      <SaveErrorBanner />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <IconRail />
         <Sidebar />

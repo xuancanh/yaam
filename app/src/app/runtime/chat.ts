@@ -49,7 +49,9 @@ export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: S
 
   const persistence = createPersistenceRuntime(
     { getState: useAppStore.getState, subscribe: useAppStore.subscribe },
-    { onToast: msg => dispatch(s => ({ ...s, toast: msg })), isMain },
+    { onToast: msg => dispatch(s => ({ ...s, toast: msg })),
+      onSaveStatus: msg => dispatch(s => (s.saveError === msg ? s : { ...s, saveError: msg })),
+      isMain },
   )
   const { mcpSessions, skillCatalogs, connectMcp, refreshSkillCatalog } = createIntegrationRuntime(state)
   const { updateChatLog, pushChatLog } = createChatLog()

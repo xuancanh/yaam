@@ -34,7 +34,7 @@ export interface PersistenceRuntime {
 
 export function createPersistenceRuntime(
   store: PersistenceStorePort,
-  opts: { onToast: (msg: string) => void; isMain?: boolean },
+  opts: { onToast: (msg: string) => void; onSaveStatus?: (msg: string | null) => void; isMain?: boolean },
 ): PersistenceRuntime {
   // Only the main window owns the on-disk state; a workspace satellite forwards
   // its slice to main over ws:sync and must never write files — not even the
@@ -61,9 +61,34 @@ export function createPersistenceRuntime(
   let started = false
   const unsubs: Array<() => void> = []
 
+  // Sticky save-error signal: toasts auto-dismiss, so a missed one would leave
+  // a failing disk invisible. Per-partition flags (a session success must not
+  // clear a still-failing main partition) collapse to one message, emitted only
+  // on change. Set on the first failure of a streak, cleared by that
+  // partition's next success — including after the retry streak gives up, so
+  // the signal outlives the backoff and dies only when a write truly lands.
+  let mainFailing = false
+  let sessionFailing = false
+  let lastSignal: string | null = null
+  const emitSaveSignal = () => {
+    const msg = mainFailing || sessionFailing
+      ? "Changes aren't being saved to disk — recent work may be lost on restart"
+      : null
+    if (msg === lastSignal) return
+    lastSignal = msg
+    opts.onSaveStatus?.(msg)
+  }
+  const onSaveOk = (partition: 'main' | 'session') => {
+    saveFailed = false
+    if (partition === 'main') mainFailing = false; else sessionFailing = false
+    emitSaveSignal()
+  }
+
   // warn once per failure streak, not on every debounced save
-  const onSaveError = (where: string, e: unknown) => {
+  const onSaveError = (where: string, partition: 'main' | 'session', e: unknown) => {
     console.error(`[yaam] ${where} save failed:`, e)
+    if (partition === 'main') mainFailing = true; else sessionFailing = true
+    emitSaveSignal()
     if (!saveFailed) {
       saveFailed = true
       opts.onToast('Could not save state to disk — recent changes may be lost on restart')
@@ -77,7 +102,7 @@ export function createPersistenceRuntime(
     if (mainTimer) window.clearTimeout(mainTimer)
     mainTimer = window.setTimeout(() => {
       const main = redactSecrets(selectMainState(store.getState()), keychainReady)
-      native.saveStateFile(JSON.stringify(main)).then(() => { saveFailed = false }).catch(e => onSaveError('main', e))
+      native.saveStateFile(JSON.stringify(main)).then(() => onSaveOk('main')).catch(e => onSaveError('main', 'main', e))
     }, 800)
   }
 
@@ -107,8 +132,8 @@ export function createPersistenceRuntime(
     for (const a of store.getState().agents) {
       next.set(a.id, a)
       if (savedAgents.get(a.id) !== a) {
-        native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { saveFailed = false; sessionAttempt = 0 }).catch(e => {
-          onSaveError('session', e)
+        native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { onSaveOk('session'); sessionAttempt = 0 }).catch(e => {
+          onSaveError('session', 'session', e)
           // This identity was optimistically recorded below. Remove it only if
           // it is still current, so the unchanged session remains dirty and a
           // retry cannot overwrite a newer in-flight revision.
@@ -120,8 +145,8 @@ export function createPersistenceRuntime(
     for (const id of savedAgents.keys()) {
       if (!next.has(id)) {
         const removed = savedAgents.get(id)!
-        native.removeSession(id).then(() => { saveFailed = false; sessionAttempt = 0 }).catch(e => {
-          onSaveError('session removal', e)
+        native.removeSession(id).then(() => { onSaveOk('session'); sessionAttempt = 0 }).catch(e => {
+          onSaveError('session removal', 'session', e)
           // Keep a tombstone-like old identity so the next sweep retries the
           // delete. Do not restore it if a session with this id was re-added.
           if (!store.getState().agents.some(a => a.id === id)) savedAgents.set(id, removed)
@@ -200,10 +225,14 @@ export function createPersistenceRuntime(
     if (!ownsWrites) return // satellites never write — main owns the files
     const st = store.getState()
     const writes: Array<Promise<unknown>> = [
-      native.saveStateFile(JSON.stringify(redactSecrets(selectMainState(st), keychainReady))).catch(e => onSaveError('main', e)),
+      native.saveStateFile(JSON.stringify(redactSecrets(selectMainState(st), keychainReady)))
+        .then(() => onSaveOk('main')).catch(e => onSaveError('main', 'main', e)),
     ]
     for (const a of st.agents) {
-      if (savedAgents.get(a.id) !== a) writes.push(native.saveSession(a.id, JSON.stringify(selectSession(a))).catch(e => onSaveError('session', e)))
+      if (savedAgents.get(a.id) !== a) {
+        writes.push(native.saveSession(a.id, JSON.stringify(selectSession(a)))
+          .then(() => onSaveOk('session')).catch(e => onSaveError('session', 'session', e)))
+      }
     }
     await Promise.allSettled(writes)
   }
