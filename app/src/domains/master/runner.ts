@@ -18,11 +18,19 @@ import * as native from '../../core/native'
 import { MEMORY_FILE_NAMES, formatHits, searchMemory, withMemoryAppend, wsMemory } from './assistant-memory'
 import { untrustedBlock } from '../../llm/untrusted'
 
+/** Max event notes held while Master is busy. Beyond this the oldest are
+ *  dropped (with a log) so a monitor/cron flood can't grow the queue
+ *  unboundedly. */
+const MASTER_QUEUE_CAP = 16
+
 export interface MasterCtx {
   stateRef: MutableRefObject<AppState>
   dispatch: (f: (s: AppState) => AppState) => void
   masterBusyRef: MutableRefObject<boolean>
-  masterQueued: MutableRefObject<{ note?: string } | null>
+  /** events queued while busy: null = no follow-up turn requested; [] = run
+   *  one more turn with no note (the user message is already in chat history);
+   *  non-empty = notes joined into the next turn */
+  masterQueued: MutableRefObject<string[] | null>
   lastEventRef: MutableRefObject<{ note: string; at: number } | null>
   toolApprovalsRef: MutableRefObject<Set<string>>
   userStoppedRef: MutableRefObject<Set<string>>
@@ -57,7 +65,16 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
     ctx.lastEventRef.current = { note: eventNote, at: Date.now() }
   }
   if (ctx.masterBusyRef.current) {
-    ctx.masterQueued.current = { note: eventNote ?? ctx.masterQueued.current?.note }
+    const q = ctx.masterQueued.current ?? []
+    if (eventNote) {
+      q.push(eventNote)
+      if (q.length > MASTER_QUEUE_CAP) {
+        const dropped = q.length - MASTER_QUEUE_CAP
+        q.splice(0, dropped)
+        ctx.logEvent('escalate', null, `Master event queue overflow — dropped ${dropped} oldest queued note(s)`)
+      }
+    }
+    ctx.masterQueued.current = q
     return
   }
   ctx.masterBusyRef.current = true
@@ -372,8 +389,9 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
         }]),
       }))
     }
-    pendingTurn = ctx.masterQueued.current
+    const queued = ctx.masterQueued.current
     ctx.masterQueued.current = null
+    pendingTurn = queued ? { note: queued.length ? queued.join('\n\n') : undefined } : null
   }
 
   ctx.masterBusyRef.current = false

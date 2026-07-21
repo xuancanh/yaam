@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { enqueueWatcherNote, isProgressNote, NOTE_PROGRESS } from './watcher-notes'
+import { enqueueWatcherNote, isProgressNote, NOTE_PROGRESS, WATCHER_QUEUE_CAP } from './watcher-notes'
 
 const progress = (s: string) => `${NOTE_PROGRESS} ${s}`
 
@@ -31,5 +31,25 @@ describe('enqueueWatcherNote', () => {
   it('classifies notes', () => {
     expect(isProgressNote(progress('x'))).toBe(true)
     expect(isProgressNote('[user message] x')).toBe(false)
+  })
+
+  // REL-12: notes queued while the watcher is busy must be capped — a stuck
+  // turn otherwise accumulates them forever and drains as one huge message.
+  it('caps the queue, keeping the newest notes', () => {
+    let q: string[] = []
+    for (let i = 1; i <= WATCHER_QUEUE_CAP + 4; i++) q = enqueueWatcherNote(q, `event ${i}`)
+    expect(q).toHaveLength(WATCHER_QUEUE_CAP)
+    expect(q[0]).toBe('event 5') // oldest dropped
+    expect(q[q.length - 1]).toBe(`event ${WATCHER_QUEUE_CAP + 4}`) // newest kept
+  })
+
+  it('the cap still lets a fresh progress note supersede a stale one', () => {
+    let q: string[] = []
+    for (let i = 0; i < WATCHER_QUEUE_CAP; i++) q = enqueueWatcherNote(q, `event ${i}`)
+    q = enqueueWatcherNote(q, progress('stale'))
+    q = enqueueWatcherNote(q, progress('fresh'))
+    expect(q).toHaveLength(WATCHER_QUEUE_CAP)
+    expect(q.some(n => n.includes('stale'))).toBe(false)
+    expect(q[q.length - 1]).toBe(progress('fresh'))
   })
 })

@@ -7,6 +7,7 @@ import type { AppState, EventType, NotifKind, TaskChatMsg } from '../../core/typ
 import type { ApiMessage } from '../../master'
 import { AbortRegistry } from '../../core/abort-registry'
 import { runWatcherLoop } from './watcher-runner'
+import type { SpawnBudget } from './watcher-runner'
 
 export interface WatcherPorts {
   stateRef: MutableRefObject<AppState>
@@ -29,14 +30,16 @@ export function createWatcherRuntime(ports: WatcherPorts): WatcherRuntime {
   const histories = new Map<string, ApiMessage[]>()
   const busy = new Set<string>()
   const queue = new Map<string, string[]>()
+  const spawns = new Map<string, SpawnBudget>()
   const aborts = new AbortRegistry()
   return {
-    run: (taskId, note) => runWatcherLoop({ ...ports, histories, busy, queue, aborts }, taskId, note),
+    run: (taskId, note) => runWatcherLoop({ ...ports, histories, busy, queue, spawns, aborts }, taskId, note),
     dispose: (taskId) => {
       aborts.abort(taskId) // cancel any in-flight watcher turn for this task
       histories.delete(taskId)
       busy.delete(taskId)
       queue.delete(taskId)
+      spawns.delete(taskId)
     },
   }
 }

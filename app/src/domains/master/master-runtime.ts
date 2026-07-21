@@ -16,7 +16,7 @@ export interface MasterRuntime {
 
 export function createMasterRuntime(ports: MasterPorts): MasterRuntime {
   const masterBusyRef = { current: false }
-  const masterQueued: { current: { note?: string } | null } = { current: null }
+  const masterQueued: { current: string[] | null } = { current: null }
   const lastEventRef: { current: { note: string; at: number } | null } = { current: null }
   const aborts = new AbortRegistry()
   return {

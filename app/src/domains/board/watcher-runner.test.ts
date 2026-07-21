@@ -25,6 +25,7 @@ function ctx(over: Partial<WatcherCtx> = {}): WatcherCtx {
     histories: new Map<string, ApiMessage[]>(),
     busy: new Set<string>(),
     queue: new Map<string, string[]>(),
+    spawns: new Map(),
     aborts: new AbortRegistry(),
     taskSessions: { current: new Map() } as MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>,
     applyAgentStatus: vi.fn(),
@@ -105,6 +106,68 @@ describe('runWatcherLoop failure surfacing (a silent watcher reads as a broken c
     resolveNew('done')
     await replacement
     expect(c.busy.has('t1')).toBe(false)
+  })
+})
+
+// REL-13: the watcher caps CONCURRENT sessions at 3 but could respawn
+// sequentially forever — a misjudging watcher burns money in a respawn loop.
+// Total spawns per task are capped at TASK_SPAWN_BUDGET; once exhausted the
+// watcher is refused and the user is told in the task thread; a user reply in
+// the thread resets the budget.
+describe('spawn budget per task (REL-13)', () => {
+  type Exec = { spawnSession: (extra?: string) => string }
+  /** run one loop, capturing the WatcherExec handed to the turn */
+  async function runCapturingExec(c: WatcherCtx, note: string): Promise<Exec> {
+    let exec!: Exec
+    turn.mockImplementationOnce(async (...a: unknown[]) => {
+      exec = a[5] as Exec
+      return 'ok'
+    })
+    await runWatcherLoop(c, 't1', note)
+    return exec
+  }
+
+  it('stops spawning after the budget and tells the user in the task thread', async () => {
+    const c = ctx({ spawnTaskSession: vi.fn(() => 'sid') })
+    const exec = await runCapturingExec(c, 'work the task')
+
+    for (let i = 0; i < 5; i++) expect(exec.spawnSession()).toContain('spawned one-shot session')
+    expect(c.spawnTaskSession).toHaveBeenCalledTimes(5)
+
+    const refusal = exec.spawnSession()
+    expect(refusal).toContain('refused: spawn budget exhausted')
+    expect(c.spawnTaskSession).toHaveBeenCalledTimes(5) // no sixth spawn
+    expect(c.pushTaskChat).toHaveBeenCalledWith('t1', 'system', expect.stringContaining('Spawn budget exhausted'))
+  })
+
+  it('does not re-post the exhausted notice on repeat refusals', async () => {
+    const c = ctx({ spawnTaskSession: vi.fn(() => 'sid') })
+    const exec = await runCapturingExec(c, 'work the task')
+    for (let i = 0; i < 5; i++) exec.spawnSession()
+
+    exec.spawnSession()
+    exec.spawnSession()
+    const notices = (c.pushTaskChat as ReturnType<typeof vi.fn>).mock.calls
+      .filter(call => String(call[2]).includes('Spawn budget exhausted'))
+    expect(notices).toHaveLength(1)
+  })
+
+  it('a user reply in the task thread resets the budget', async () => {
+    const c = ctx({ spawnTaskSession: vi.fn(() => 'sid') })
+    const exec = await runCapturingExec(c, 'work the task')
+    for (let i = 0; i < 5; i++) exec.spawnSession()
+    expect(exec.spawnSession()).toContain('refused')
+
+    const exec2 = await runCapturingExec(c, '[user message] approved — try again')
+    expect(exec2.spawnSession()).toContain('spawned one-shot session')
+    expect(c.spawnTaskSession).toHaveBeenCalledTimes(6)
+  })
+
+  it('failed launches do not consume the budget', async () => {
+    const c = ctx({ spawnTaskSession: vi.fn(() => null) })
+    const exec = await runCapturingExec(c, 'work the task')
+    for (let i = 0; i < 6; i++) expect(exec.spawnSession()).toContain('failed to spawn')
+    expect(exec.spawnSession()).not.toContain('budget exhausted')
   })
 })
 

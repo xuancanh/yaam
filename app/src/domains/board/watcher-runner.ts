@@ -22,12 +22,31 @@ import { calibrationNote, recordDecision } from '../master/harness-stats'
 import { createTaskActivity, withActivityTargets } from '../activity/history'
 import { untrustedBlock } from '../../llm/untrusted'
 
+/** Total one-shot sessions a watcher may spawn for one task before it must
+ *  stop and ask the user. The concurrent cap (3) doesn't bound SEQUENTIAL
+ *  respawns — a watcher that keeps misjudging exits would otherwise burn money
+ *  in a respawn loop. Runtime-only by design: an app restart resets the count,
+ *  which is acceptable since the cap's job is to stop a hot loop, not to keep
+ *  a permanent ledger. Reset rule: a user reply in the task thread (a
+ *  `[user message]` note) zeroes the count — that reply IS the explicit
+ *  approval for further attempts. */
+export const TASK_SPAWN_BUDGET = 5
+
+/** Per-task spawn-budget state: sessions spawned so far + whether the user was
+ *  already told the budget is exhausted (so repeat refusals don't spam). */
+export interface SpawnBudget {
+  used: number
+  notified: boolean
+}
+
 export interface WatcherCtx {
   stateRef: MutableRefObject<AppState>
   dispatch: (f: (s: AppState) => AppState) => void
   histories: Map<string, ApiMessage[]>
   busy: Set<string>
   queue: Map<string, string[]>
+  /** per-task spawn counts enforcing TASK_SPAWN_BUDGET (runtime-only) */
+  spawns: Map<string, SpawnBudget>
   /** per-task cancellation — aborted when the task is deleted */
   aborts: AbortRegistry
   taskSessions: MutableRefObject<Map<string, { taskId: string; workspaceId: string }>>
@@ -78,6 +97,9 @@ export function makeStreamingCall(ctx: Pick<WatcherCtx, 'dispatch'>, taskId: str
 export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: string) {
   const st = ctx.stateRef.current.settings
   const isUserMessage = note.startsWith('[user message]') || note.startsWith('[review]')
+  // a reply in the task thread is explicit approval for more attempts —
+  // reset the spawn budget (see TASK_SPAWN_BUDGET)
+  if (note.startsWith('[user message]')) ctx.spawns.delete(taskId)
   if (!(st.masterEnabled && hasCreds(st))) {
     // never go silent on a human: say WHY there is no reply
     if (isUserMessage && findTaskInState(ctx.stateRef.current, taskId)) {
@@ -214,8 +236,23 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
           if (!t) return 'task no longer exists'
           const live = getAgents().filter(a => a.status === 'running' || a.status === 'needs')
           if (live.length >= 3) return 'refused: 3 sessions are already running for this task — steer or stop one instead'
+          const budget = ctx.spawns.get(taskId) ?? { used: 0, notified: false }
+          if (budget.used >= TASK_SPAWN_BUDGET) {
+            ctx.spawns.set(taskId, budget)
+            if (!budget.notified) {
+              budget.notified = true
+              ctx.pushTaskChat(taskId, 'system',
+                `Spawn budget exhausted — this task has already burned through ${TASK_SPAWN_BUDGET} one-shot sessions without converging, so the watcher will not spawn more on its own. ` +
+                'Reply in this thread to reset the budget and explicitly approve further attempts.')
+              ctx.logEvent('escalate', t.agentId ?? null, `Watcher spawn budget exhausted for “${t.title.slice(0, 40)}”`)
+            }
+            return `refused: spawn budget exhausted (${TASK_SPAWN_BUDGET} sessions already spawned for this task) — do NOT retry on your own; ` +
+              'the user has been told in the task chat that further attempts need their explicit approval (a reply resets the budget)'
+          }
           const sid = ctx.spawnTaskSession(taskId, extra || undefined)
           if (!sid) return 'failed to spawn (no enabled agent type, or the launch was rejected)'
+          budget.used += 1
+          ctx.spawns.set(taskId, budget)
           const name = ctx.stateRef.current.agents.find(a => a.id === sid)?.name ?? sid
           return `spawned one-shot session "${name}" — its output digests will come to you; it exits by itself when done`
         },

@@ -17,6 +17,7 @@ vi.mock('../../master', () => ({
 vi.mock('../../core/native', () => ({ isTauri: false, writeSession: vi.fn(), killSession: vi.fn() }))
 
 import { runMasterLoop, type MasterCtx } from './runner'
+import { runMasterTurn } from '../../master'
 import { seedState } from '../../core/data'
 import type { Addon, AppState } from '../../core/types'
 
@@ -157,5 +158,80 @@ describe('Master read_session untrusted wrapping (SEC-5)', () => {
     const ctx = makeCtx(state)
     const exec = await execOf(ctx)
     expect(exec.readSession('s1', 10)).toBe('(no output yet)')
+  })
+})
+
+// REL-8: while Master is busy, queued events must ACCUMULATE — the old
+// single-slot queue let a second event overwrite the first, silently dropping
+// a monitor report that arrived just after a user message. The queue is
+// capped; the oldest notes are dropped (with a log) beyond the cap.
+describe('Master event queue (REL-8)', () => {
+  const turnMock = vi.mocked(runMasterTurn)
+
+  /** Block the first turn until `release()` so events can be queued mid-turn. */
+  function blockFirstTurn() {
+    let release!: () => void
+    turnMock
+      .mockImplementationOnce(() =>
+        new Promise(resolve => { release = () => resolve({ text: '', thinking: '' }) }))
+      .mockImplementation(async () => ({ text: '', thinking: '' }))
+    return { release: () => release(), started: () => turnMock.mock.calls.length >= 1 }
+  }
+
+  beforeEach(() => {
+    captured.exec = null
+    turnMock.mockReset()
+    turnMock.mockImplementation(async (_getState: unknown, exec: import('../../master').MasterExec) => {
+      captured.exec = exec
+      return { text: '', thinking: '' }
+    })
+  })
+
+  it('two events arriving while busy both reach the next turn, joined — none lost', async () => {
+    const ctx = makeCtx(seedState())
+    const gate = blockFirstTurn()
+    const first = runMasterLoop(ctx, 'user message')
+    await vi.waitFor(() => expect(gate.started()).toBe(true))
+
+    void runMasterLoop(ctx, 'monitor report A')
+    void runMasterLoop(ctx, 'monitor report B')
+    gate.release()
+    await first
+
+    const notes = turnMock.mock.calls.map(c => c[2])
+    expect(notes).toEqual(['user message', 'monitor report A\n\nmonitor report B'])
+  })
+
+  it('a note-less call while busy still schedules a continuation turn (user text is in chat history)', async () => {
+    const ctx = makeCtx(seedState())
+    const gate = blockFirstTurn()
+    const first = runMasterLoop(ctx, 'first')
+    await vi.waitFor(() => expect(gate.started()).toBe(true))
+
+    void runMasterLoop(ctx) // e.g. Master chat post with no event note
+    gate.release()
+    await first
+
+    expect(turnMock.mock.calls.map(c => c[2])).toEqual(['first', undefined])
+  })
+
+  it('drops the oldest notes beyond the cap and logs the drop', async () => {
+    const ctx = makeCtx(seedState())
+    const logEvent = vi.fn()
+    ctx.logEvent = logEvent
+    const gate = blockFirstTurn()
+    const first = runMasterLoop(ctx, 'first')
+    await vi.waitFor(() => expect(gate.started()).toBe(true))
+
+    for (let i = 1; i <= 20; i++) void runMasterLoop(ctx, `n${i}`)
+    gate.release()
+    await first
+
+    const joined = String(turnMock.mock.calls[1]?.[2] ?? '')
+    expect(joined).toContain('n20') // newest kept
+    expect(joined).toContain('n5')
+    expect(joined).not.toContain('n4') // oldest 4 dropped (cap 16)
+    const drops = logEvent.mock.calls.filter(c => c[0] === 'escalate' && String(c[2]).includes('dropped'))
+    expect(drops).toHaveLength(4)
   })
 })
