@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::Command;
 use std::sync::mpsc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 // ── remote terminal taps ─────────────────────────────────────────────────
@@ -147,7 +147,11 @@ fn session_launch_spec(
 
 struct SessionHandle {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// Per-session writer behind its own lock, shared out of the map: `write`
+    /// clones the Arc and releases the global sessions lock before writing, so
+    /// a child that stops draining its stdin wedges only its own session
+    /// instead of every kill/spawn/resize queued behind the map lock.
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     /// child pid, for graceful (SIGTERM→SIGKILL) shutdown of the process tree
     pid: Option<i32>,
@@ -291,7 +295,9 @@ impl SessionManager {
         drop(pair.slave);
 
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-        let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+        let writer = Arc::new(Mutex::new(
+            pair.master.take_writer().map_err(|e| e.to_string())?,
+        ));
         let killer = child.clone_killer();
         let pid = child.process_id().map(|p| p as i32);
 
@@ -394,13 +400,19 @@ impl SessionManager {
     }
 
     /// Write text to a session's PTY writer and flush it immediately.
+    /// The global sessions lock is only held to look up the writer; the
+    /// (potentially blocking, when the child stops draining stdin) write runs
+    /// under the session's own writer lock afterwards, so a stuck session can
+    /// never wedge kill/spawn/resize for the others.
     pub fn write(&self, id: &str, data: &str) -> Result<(), String> {
-        let mut sessions = self.sessions.lock().unwrap();
-        let handle = sessions.get_mut(id).ok_or("no such session")?;
-        handle
-            .writer
+        let writer = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions.get(id).ok_or("no such session")?.writer.clone()
+        };
+        let mut writer = writer.lock().unwrap();
+        writer
             .write_all(data.as_bytes())
-            .and_then(|_| handle.writer.flush())
+            .and_then(|_| writer.flush())
             .map_err(|e| e.to_string())
     }
 
@@ -635,9 +647,159 @@ mod tests {
     use super::{
         coalesce_output, derive_session_id, resolve_login_executable, select_session_id,
         session_launch_spec, tap_remove, tap_start, tap_subscribe, valid_session_id,
+        SessionHandle, SessionManager,
     };
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
+
+    /// A live PTY session for write/lock tests, built without an AppHandle.
+    /// `wedge` picks a child that never reads its stdin (`sleep`), so writes
+    /// block once the PTY input queue fills; otherwise the child is `/bin/cat`,
+    /// which drains normally. A reader thread drains the master output so tty
+    /// echo can't back up.
+    #[cfg(unix)]
+    fn spawn_test_session(
+        wedge: bool,
+    ) -> (SessionHandle, Box<dyn portable_pty::Child + Send + Sync>) {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+        use std::io::Read;
+        use std::sync::{Arc, Mutex};
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let cmd = if wedge {
+            let mut cmd = CommandBuilder::new("/bin/sh");
+            // raw-ish mode: canonical input would cap unterminated lines and
+            // echo would bounce every byte back at the master
+            cmd.args(["-c", "stty -echo -icanon; exec sleep 1000"]);
+            cmd
+        } else {
+            CommandBuilder::new("/bin/cat")
+        };
+        let child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+        });
+        let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
+        let killer = child.clone_killer();
+        let pid = child.process_id().map(|p| p as i32);
+        (
+            SessionHandle {
+                master: pair.master,
+                writer,
+                killer,
+                pid,
+                generation: 0,
+            },
+            child,
+        )
+    }
+
+    #[test]
+    fn write_to_unknown_session_errors() {
+        let mgr = SessionManager::default();
+        assert_eq!(mgr.write("no-such", "x").unwrap_err(), "no such session");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_to_live_session_succeeds() {
+        let mgr = SessionManager::default();
+        let (handle, mut child) = spawn_test_session(false);
+        mgr.sessions.lock().unwrap().insert("s".to_string(), handle);
+        mgr.write("s", "echo hi\n").unwrap();
+        mgr.kill("s");
+        let _ = child.wait();
+    }
+
+    /// Regression test for the global-lock wedge: a session whose child stops
+    /// draining stdin blocks its `write` forever. Other sessions' write /
+    /// resize / kill must not queue behind it (they used to, because the
+    /// global sessions lock was held across the blocking PTY write).
+    #[cfg(unix)]
+    #[test]
+    fn wedged_write_does_not_block_other_sessions() {
+        use std::sync::Arc;
+        let mgr = Arc::new(SessionManager::default());
+        let (handle_a, mut child_a) = spawn_test_session(true);
+        let (handle_b, mut child_b) = spawn_test_session(false);
+        mgr.sessions
+            .lock()
+            .unwrap()
+            .insert("wedged".to_string(), handle_a);
+        mgr.sessions
+            .lock()
+            .unwrap()
+            .insert("healthy".to_string(), handle_b);
+
+        // The wedged session's child (`sleep`) never reads stdin, so a loop of
+        // 1 MB writes eventually fills the PTY input queue and blocks inside
+        // write_all. (macOS buffers several MB before applying backpressure,
+        // so a single fixed-size write can't be trusted to wedge — stall
+        // detection can.)
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let written = Arc::new(AtomicUsize::new(0));
+        let chunk = "x".repeat(1024 * 1024);
+        let wedged_writer = {
+            let mgr = mgr.clone();
+            let written = written.clone();
+            std::thread::spawn(move || {
+                for _ in 0..32 {
+                    mgr.write("wedged", &chunk)?;
+                    written.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok::<(), String>(())
+            })
+        };
+        // Wait until the writer stops making progress: the queue is full and
+        // it is blocked mid-write.
+        let mut blocked = false;
+        for _ in 0..50 {
+            let before = written.load(Ordering::Relaxed);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if !wedged_writer.is_finished() && written.load(Ordering::Relaxed) == before {
+                blocked = true;
+                break;
+            }
+        }
+        assert!(blocked, "the wedged write never filled the PTY input queue");
+
+        // Under the old code each of these would queue behind the wedged
+        // write's global lock. They must all complete promptly.
+        let (done_tx, done_rx) = mpsc::channel();
+        {
+            let mgr = mgr.clone();
+            std::thread::spawn(move || {
+                mgr.write("healthy", "echo ok\n").unwrap();
+                mgr.resize("healthy", 40, 120).unwrap();
+                mgr.kill("healthy");
+                done_tx.send(()).unwrap();
+            });
+        }
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("healthy-session operations queued behind a wedged write");
+
+        // Unwedge: killing the child closes the slave side, which wakes the
+        // blocked write with EIO. The writer thread is expected to fail.
+        mgr.kill("wedged");
+        let _ = wedged_writer.join().unwrap();
+        let _ = child_a.wait();
+        let _ = child_b.wait();
+    }
 
     #[test]
     /// Resolve a guaranteed system shell through an explicit path.
