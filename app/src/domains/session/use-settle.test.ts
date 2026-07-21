@@ -181,6 +181,61 @@ describe('createSessionSettle', () => {
     expect(runWatcher.mock.calls[1][1]).toContain('final result')
   })
 
+  it('backs off output checkpoints exponentially while output keeps streaming', () => {
+    const h = harness([agent({ log: [] })])
+    const times: number[] = []
+    vi.mocked(h.deps.runMonitor).mockImplementation(() => { times.push(h.clock.now()) })
+
+    // one line per second for 300s: the settle timer never fires, so
+    // checkpoints must back off 8s → 16s → 32s → 64s → 120s (cap)
+    for (let i = 1; i <= 300; i++) {
+      h.rt.bufferOutput('a1', `line ${i}`)
+      h.rt.bumpSettle('a1')
+      h.clock.advance(1000)
+    }
+    expect(times).toEqual([8000, 24_000, 56_000, 120_000, 240_000])
+  })
+
+  it('skips the monitor turn when a checkpoint only changed in the tail lines', () => {
+    const h = harness([agent({ log: [] })])
+    const times: number[] = []
+    vi.mocked(h.deps.runMonitor).mockImplementation(() => { times.push(h.clock.now()) })
+    // push the burst's lines spread over `ms`, bumping every second so the
+    // settle timer never fires mid-burst
+    const burst = (lines: string[], ms: number) => {
+      const step = ms / lines.length
+      for (const line of lines) {
+        h.rt.bufferOutput('a1', line)
+        for (let t = 0; t < step; t += 1000) {
+          h.rt.bumpSettle('a1')
+          h.clock.advance(1000)
+        }
+      }
+    }
+    const head = ['build: compiling x', 'build: compiling y', 'step 1', 'step 2', 'step 3']
+    burst([...head, 'tail a', 'tail b', 'tail c'], 8000)  // first checkpoint at 8s fires
+    burst([...head, 'tail d', 'tail e', 'tail f'], 16_000) // 24s: identical modulo tail → skip
+    burst(['build: compiling z', ...head.slice(1), 'tail g', 'tail h', 'tail i'], 32_000) // 56s: new head → fires
+    expect(times).toEqual([8000, 56_000])
+  })
+
+  it('resets the checkpoint backoff after a quiet settle', () => {
+    const h = harness([agent({ log: [] })])
+    const times: number[] = []
+    vi.mocked(h.deps.runMonitor).mockImplementation(() => { times.push(h.clock.now()) })
+    const stream = (seconds: number, tag: string) => {
+      for (let i = 0; i < seconds; i++) {
+        h.rt.bufferOutput('a1', `${tag} line ${i}`)
+        h.rt.bumpSettle('a1')
+        h.clock.advance(1000)
+      }
+    }
+    stream(25, 'a')       // checkpoints at 8s and 24s; next backed off to 32s
+    h.clock.advance(3000) // quiet → settle fires at 27s with a final snapshot
+    stream(9, 'b')        // backoff reset → next checkpoint 8s into the new burst
+    expect(times).toEqual([8000, 24_000, 27_000, 36_000])
+  })
+
   it('start() arms the TUI scan and dispose() stops it and cancels timers', () => {
     const h = harness([agent()])
     h.rt.start()

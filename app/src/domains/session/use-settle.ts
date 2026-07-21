@@ -71,6 +71,14 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   const outputTimers = new Map<string, Disposable>()
   const lastOutputKey = new Map<string, string>()
   const lastFinalKey = new Map<string, string>()
+  // Token-burn guard: while output keeps streaming, checkpoints back off
+  // exponentially (8s → 16s → 32s … capped at 2min) instead of firing a
+  // monitor/watcher LLM turn every 8s per session. A quiet period (settle) or
+  // a fresh user prompt (arm) resets the schedule. `lastCheckpointKey` is the
+  // tail-trimmed screen key of the last fired checkpoint, for the cheap
+  // significance skip in flushOutput.
+  const checkpointDelay = new Map<string, number>()
+  const lastCheckpointKey = new Map<string, string>()
   let scan: Disposable | undefined
 
   // "responding" indicator: a session is streaming while raw output keeps
@@ -79,6 +87,10 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   // at PTY speed, and dispatching per chunk would defeat the output batching.
   const streaming = new Set<string>()
   const OUTPUT_CHECKPOINT_MS = 8000
+  const OUTPUT_CHECKPOINT_MAX_MS = 120_000
+  // a checkpoint whose evidence differs only in the bottom few lines (scrolling
+  // build output) is not worth an LLM turn
+  const CHECKPOINT_TAIL_LINES = 3
   const setResponding = (id: string, on: boolean) => {
     if (on === streaming.has(id)) return
     if (on) streaming.add(id)
@@ -97,6 +109,8 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       ? readScreen(id)
       : (agent?.log ?? []).slice(-14).map(l => l.x))
     armed.set(id, { snapshot, at: clock.now() })
+    // a fresh prompt restarts the checkpoint backoff from the base interval
+    checkpointDelay.delete(id)
     // ensure a settle check runs even if the session produces no output at all
     clock.setTimeout(() => bumpSettle(id), 4000)
   }
@@ -121,6 +135,18 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     const key = stableScreenKey(content)
     if (final && !buffered.length && key && lastFinalKey.get(id) === key) return
     if (!final && key && lastOutputKey.get(id) === key) return
+    if (!final) {
+      // Cheap significance gate: a scrolling build typically rewrites only the
+      // bottom lines, so if everything above the tail is identical to the last
+      // fired checkpoint, skip the LLM turn — the caller still re-arms the
+      // next (further backed-off) checkpoint.
+      const trimmedKey = stableScreenKey(content.slice(0, -CHECKPOINT_TAIL_LINES))
+      if (trimmedKey && lastCheckpointKey.get(id) === trimmedKey) {
+        if (key) lastOutputKey.set(id, key)
+        return
+      }
+      if (trimmedKey) lastCheckpointKey.set(id, trimmedKey)
+    }
     if (key) lastOutputKey.set(id, key)
     if (final && key) lastFinalKey.set(id, key)
     const text = untrustedBlock(content.join('\n').slice(-12_000), agent.name)
@@ -136,11 +162,15 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
 
   const scheduleOutputCheckpoint = (id: string) => {
     if (outputTimers.has(id)) return
+    const delay = checkpointDelay.get(id) ?? OUTPUT_CHECKPOINT_MS
     outputTimers.set(id, clock.setTimeout(() => {
       outputTimers.delete(id)
       flushOutput(id, false)
-      if (streaming.has(id)) scheduleOutputCheckpoint(id)
-    }, OUTPUT_CHECKPOINT_MS))
+      if (streaming.has(id)) {
+        checkpointDelay.set(id, Math.min(delay * 2, OUTPUT_CHECKPOINT_MAX_MS))
+        scheduleOutputCheckpoint(id)
+      }
+    }, delay))
   }
 
   // Inspect a stable rendered screen for prompts, completion, monitors, and watchers.
@@ -148,6 +178,8 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     settle.delete(id)
     outputTimers.get(id)?.dispose()
     outputTimers.delete(id)
+    // output went quiet — the checkpoint backoff starts over on the next burst
+    checkpointDelay.delete(id)
     // output went quiet — the session is no longer actively responding
     setResponding(id, false)
     const agent = state.get().agents.find(a => a.id === id)
@@ -279,6 +311,8 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     outputBuffers.delete(id)
     outputTimers.get(id)?.dispose()
     outputTimers.delete(id)
+    checkpointDelay.delete(id)
+    lastCheckpointKey.delete(id)
     lastOutputKey.delete(id)
     lastFinalKey.delete(id)
     setResponding(id, false)
@@ -330,7 +364,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       scan?.dispose(); scan = undefined
       for (const { timer } of settle.values()) timer.dispose()
       for (const timer of outputTimers.values()) timer.dispose()
-      settle.clear(); armed.clear(); lastFlagged.clear(); outputBuffers.clear(); outputTimers.clear(); lastOutputKey.clear(); lastFinalKey.clear(); streaming.clear()
+      settle.clear(); armed.clear(); lastFlagged.clear(); outputBuffers.clear(); outputTimers.clear(); lastOutputKey.clear(); lastFinalKey.clear(); checkpointDelay.clear(); lastCheckpointKey.clear(); streaming.clear()
     },
   }
 }
