@@ -51,6 +51,13 @@ export function createPersistenceRuntime(
   let mainTimer: number | undefined
   let sessionTimer: number | undefined
   let secretTimer: number | undefined
+  // Consecutive session-write failures. A persistently failing disk (full,
+  // read-only, …) must not spin an 800ms re-arm forever: back off exponentially
+  // and give up after MAX_SAVE_ATTEMPTS. On give-up the failed identity stays
+  // dirty (dropped from savedAgents below), so the next real state change
+  // re-arms a write naturally.
+  const MAX_SAVE_ATTEMPTS = 5
+  let sessionAttempt = 0
   let started = false
   const unsubs: Array<() => void> = []
 
@@ -74,44 +81,61 @@ export function createPersistenceRuntime(
     }, 800)
   }
 
+  // Bounded retry for the sessions writer: re-arm with exponential backoff
+  // (800ms → doubling, capped at 30s) up to MAX_SAVE_ATTEMPTS, then stop until
+  // the next state change. The toast was already shown on the first failure.
+  const retrySessions = (where: string) => {
+    // One re-arm per sweep: sibling failures in the same pass share the retry.
+    // (If a real state change armed a fresh debounce in the meantime, that
+    // sweep retries the still-dirty identity anyway.)
+    if (sessionTimer !== undefined) return
+    sessionAttempt += 1
+    if (sessionAttempt >= MAX_SAVE_ATTEMPTS) {
+      console.error(`[yaam] ${where} gave up after ${MAX_SAVE_ATTEMPTS} attempts; will retry on the next state change`)
+      return
+    }
+    armSession(Math.min(800 * 2 ** (sessionAttempt - 1), 30_000))
+  }
+
   // Sessions: one file per session. Diff against the last-saved set and write
   // ONLY the agents whose object identity changed (immutable updates ⇒ a changed
   // reference means changed content), and delete files for removed agents.
   const writeSessions = () => {
     if (!ownsWrites) return
+    sessionTimer = undefined // this sweep consumed the pending timer, if any
     const next = new Map<string, Agent>()
     for (const a of store.getState().agents) {
       next.set(a.id, a)
       if (savedAgents.get(a.id) !== a) {
-        native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { saveFailed = false }).catch(e => {
+        native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { saveFailed = false; sessionAttempt = 0 }).catch(e => {
           onSaveError('session', e)
           // This identity was optimistically recorded below. Remove it only if
           // it is still current, so the unchanged session remains dirty and a
           // retry cannot overwrite a newer in-flight revision.
           if (savedAgents.get(a.id) === a) savedAgents.delete(a.id)
-          armSession()
+          retrySessions('session save')
         })
       }
     }
     for (const id of savedAgents.keys()) {
       if (!next.has(id)) {
         const removed = savedAgents.get(id)!
-        native.removeSession(id).catch(e => {
+        native.removeSession(id).then(() => { saveFailed = false; sessionAttempt = 0 }).catch(e => {
           onSaveError('session removal', e)
           // Keep a tombstone-like old identity so the next sweep retries the
           // delete. Do not restore it if a session with this id was re-added.
           if (!store.getState().agents.some(a => a.id === id)) savedAgents.set(id, removed)
-          armSession()
+          retrySessions('session removal')
         })
       }
     }
     savedAgents.clear()
     for (const [id, a] of next) savedAgents.set(id, a)
   }
-  const armSession = () => {
+  const armSession = (delay = 800) => {
     if (!ready || !ownsWrites) return
     if (sessionTimer) window.clearTimeout(sessionTimer)
-    sessionTimer = window.setTimeout(writeSessions, 800)
+    sessionTimer = window.setTimeout(writeSessions, delay)
   }
   // A session was added or removed (vs the last save) — a structural change, as
   // opposed to a content update on an existing session. New/deleted sessions are

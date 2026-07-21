@@ -240,6 +240,59 @@ describe('createPersistenceRuntime', () => {
     rt.dispose()
   })
 
+  it('retries a persistently failing session write with backoff, gives up after 5 attempts, and re-arms on the next state change', async () => {
+    const agent = { id: 'fail-1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
+    const store = fakeStore(baseState())
+    const onToast = vi.fn()
+    const rt = createPersistenceRuntime(store, { onToast })
+    rt.start(); rt.markReady()
+    vi.mocked(native.saveSession).mockRejectedValue(new Error('disk full'))
+
+    store.set({ ...store.getState(), agents: [agent] }) // structural → immediate attempt #1
+    expect(native.saveSession).toHaveBeenCalledTimes(1)
+
+    // retries with doubling delays: 800, 1600, 3200, 6400 — then gives up
+    await vi.advanceTimersByTimeAsync(800)
+    expect(native.saveSession).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1600)
+    expect(native.saveSession).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(3200)
+    expect(native.saveSession).toHaveBeenCalledTimes(4)
+    await vi.advanceTimersByTimeAsync(6400)
+    expect(native.saveSession).toHaveBeenCalledTimes(5)
+
+    // gave up — no more churn, and the toast fired exactly once for the streak
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(native.saveSession).toHaveBeenCalledTimes(5)
+    expect(onToast).toHaveBeenCalledTimes(1)
+
+    // the session stayed dirty: a real state change re-arms a write naturally
+    const agent2 = { ...agent, log: [{ t: 'out', x: 'hi' }] } as unknown as AppState['agents'][number]
+    store.set({ ...store.getState(), agents: [agent2] })
+    await vi.advanceTimersByTimeAsync(800)
+    expect(native.saveSession).toHaveBeenCalledTimes(6)
+    rt.dispose()
+  })
+
+  it('recovers from a transient failure and stops retrying once the write lands', async () => {
+    const agent = { id: 'flaky-1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
+    const store = fakeStore(baseState())
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+    vi.mocked(native.saveSession)
+      .mockRejectedValueOnce(new Error('disk busy'))
+      .mockResolvedValue(undefined)
+
+    store.set({ ...store.getState(), agents: [agent] })
+    await vi.advanceTimersByTimeAsync(800)
+    expect(native.saveSession).toHaveBeenCalledTimes(2)
+
+    // success reset the retry streak — no further writes without a state change
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(native.saveSession).toHaveBeenCalledTimes(2)
+    rt.dispose()
+  })
+
   it('retries failed session writes and removals without another state change', async () => {
     const agent = { id: 'retry-1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
     const store = fakeStore(baseState())

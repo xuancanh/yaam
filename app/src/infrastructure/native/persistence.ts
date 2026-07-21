@@ -66,10 +66,18 @@ export function saveSession(id: string, json: string): Promise<void> {
   return savePartitionSerialized(`session:${id}`, 'save_session', j => ({ id, json: j }), json)
 }
 
-/** Delete one session's file. */
-export async function removeSession(id: string): Promise<void> {
-  if (!isTauri) { localStorage.removeItem(`conductor-session-${id}`); return }
-  await invoke('remove_session', { id })
+/** Delete one session's file, ordered through the same per-id chain as
+ *  saveSession: a delete must land AFTER any in-flight save for that id, or the
+ *  save would complete afterwards and resurrect the deleted session on next
+ *  boot. A queued-but-not-started save for the removed id is dropped. */
+export function removeSession(id: string): Promise<void> {
+  if (!isTauri) { localStorage.removeItem(`conductor-session-${id}`); return Promise.resolve() }
+  const partition = `session:${id}`
+  const entry = saveChains.get(partition) ?? { chain: Promise.resolve(), queued: null }
+  entry.queued = null // a pending save for a removed session must never run
+  entry.chain = entry.chain.then(() => invoke<void>('remove_session', { id }))
+  saveChains.set(partition, entry)
+  return entry.chain
 }
 
 /** Load every persisted session file (each element is one session's JSON). */
