@@ -8,7 +8,7 @@ import type { Addon, AppState } from '../../core/types'
 import type { AddonApi } from '../../core/addons'
 import type { MasterExec } from '../../master'
 import { hasCreds, runMasterTurn } from '../../master'
-import { execAddonTool, parseAddonPackage } from '../../core/addons'
+import { DANGEROUS_PERMISSIONS, execAddonTool, parseAddonPackage } from '../../core/addons'
 import { mkId } from '../../shared/id'
 import { humanizeCron } from '../schedules/cron'
 import { KEYMAP, sendLineToSession, wait } from '../session/command'
@@ -202,7 +202,13 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
       const addon: Addon = {
         ...parsed,
         id: existing?.id ?? mkId('ad'),
-        granted: (existing?.granted ?? parsed.permissions).filter(g => parsed.permissions.includes(g)),
+        // upgrades keep the user's grant choices (intersected with what's now
+        // requested); fresh installs never auto-grant dangerous scopes — Master
+        // reads untrusted terminal output, so a prompt-injected create_addon
+        // must not mint a fully-privileged addon. Same rule as installPackage.
+        granted: existing
+          ? existing.granted.filter(g => parsed.permissions.includes(g))
+          : parsed.permissions.filter(g => !DANGEROUS_PERMISSIONS.includes(g)),
         enabled: true,
         source: 'master',
         createdAt: new Date().toLocaleString(),
@@ -217,7 +223,11 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
       ctx.logEvent('build', null, `Master ${existing ? 'updated' : 'built'} addon “${name}”`)
       ctx.flash(`${existing ? 'Updated' : 'New'} addon · ${name}`)
       const parts = [addon.html ? 'view tab' : '', addon.tools?.length ? `${addon.tools.length} tool(s)` : '', addon.hooks ? 'hooks' : ''].filter(Boolean).join(', ')
-      return `${existing ? 'updated' : 'created'} addon "${name}" (${parts})`
+      const withheld = addon.permissions.filter(g => !addon.granted.includes(g))
+      return `${existing ? 'updated' : 'created'} addon "${name}" (${parts})` +
+        (withheld.length
+          ? ` — granted: ${addon.granted.join(', ') || 'none'}; withheld pending user approval in Settings → Addons: ${withheld.join(', ')} — do NOT claim those capabilities are active`
+          : addon.granted.length ? ` — granted: ${addon.granted.join(', ')}` : '')
     },
     removeAddon: name => {
       const addon = stateRef.current.addons.find(a => a.name === name)
