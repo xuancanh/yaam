@@ -5,6 +5,7 @@
 import { isTauri } from './base'
 import { onCloseRequested, currentWindowLabel } from './session'
 import { workspaceWindowLabel } from '../../core/window-role'
+import type { Disposable } from '../../core/ports'
 
 export const MAIN_WINDOW_LABEL = 'main'
 
@@ -91,6 +92,67 @@ export async function closeAllSatellites(): Promise<void> {
   for (const w of await WebviewWindow.getAll()) {
     if (w.label !== MAIN_WINDOW_LABEL) await w.destroy().catch(() => {})
   }
+}
+
+/** Ask every satellite window to close GRACEFULLY (close(), NOT destroy) so
+ *  each runs its close-request handshake and hands its final slice back over
+ *  ws:reattach. Returns the labels of the satellites asked to close, so the
+ *  caller can wait for their reattach payloads before flushing. */
+export async function requestAllSatellitesClose(): Promise<string[]> {
+  if (!isTauri) return []
+  const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+  const closing: string[] = []
+  for (const w of await WebviewWindow.getAll()) {
+    if (w.label === MAIN_WINDOW_LABEL) continue
+    closing.push(w.label)
+    await w.close().catch(() => {})
+  }
+  return closing
+}
+
+// ---- main-window close sequence ----
+export interface MainWindowCloseDeps {
+  /** ask satellites to close gracefully; resolves to the labels asked */
+  requestSatelliteClose: () => Promise<string[]>
+  /** register a cb fired (with the satellite's label) when a ws:reattach
+   *  handoff payload arrives; the caller merges the payload BEFORE calling cb */
+  onReattach: (cb: (label: string) => void) => void
+  /** persistence flush (the caller's sole-writer save) */
+  flush: () => Promise<void>
+  /** destroy any satellites still alive after the grace window */
+  destroySatellites: () => Promise<void>
+  destroyMain: () => Promise<void>
+  setTimeout: (fn: () => void, ms: number) => Disposable
+  /** how long to wait for reattach handoffs before flushing anyway */
+  graceMs?: number
+  /** cap on the flush wait */
+  flushMs?: number
+}
+
+/** Main-window quit, ordered so no satellite edits are lost: (1) ask satellites
+ *  to close gracefully so each fires ws:reattach with its final slice, (2) wait
+ *  — bounded by graceMs — until every closing satellite's handoff has arrived
+ *  (the caller merges each before notifying), (3) flush persistence, (4) destroy
+ *  stragglers + main. Bounded overall (graceMs + flushMs) so quit can't hang. */
+export async function runMainWindowClose(d: MainWindowCloseDeps): Promise<void> {
+  const graceMs = d.graceMs ?? 2000
+  const flushMs = d.flushMs ?? 3000
+  const arrived = new Set<string>()
+  let notify: (() => void) | undefined
+  d.onReattach(label => { arrived.add(label); notify?.() })
+  const closing = await d.requestSatelliteClose()
+  const pending = () => closing.some(l => !arrived.has(l))
+  if (pending()) {
+    await new Promise<void>(resolve => {
+      const timer = d.setTimeout(() => { notify = undefined; resolve() }, graceMs)
+      notify = () => {
+        if (!pending()) { notify = undefined; timer.dispose(); resolve() }
+      }
+    })
+  }
+  await Promise.race([d.flush(), new Promise<void>(r => { d.setTimeout(() => r(), flushMs) })])
+  await d.destroySatellites()
+  await d.destroyMain()
 }
 
 /** Destroy this window (bypasses the close-request veto after a flush). */

@@ -11,9 +11,10 @@ import type { AppState, EventType, NotifKind, SandboxConfig, WorkspaceData, Agen
 import { useAppStore, dispatch } from '../core/store'
 import { browserClock, createStorePort, type Disposable } from '../core/ports'
 import type { WindowRole } from '../core/window-role'
+import { workspaceWindowLabel } from '../core/window-role'
 import { MASTER_GREETING } from '../core/data'
 import { scopedFromState, switchWorkspaceIn } from '../domains/workspace/state'
-import { emitWsSync, emitWsReattach, onWsEvent, onThisWindowClose, closeAllSatellites, destroyThisWindow, type WsSyncPayload } from '../infrastructure/native/windows'
+import { emitWsSync, emitWsReattach, onWsEvent, onThisWindowClose, closeAllSatellites, requestAllSatellitesClose, runMainWindowClose, destroyThisWindow, type WsSyncPayload } from '../infrastructure/native/windows'
 import { createActivityService } from '../domains/activity/service'
 import { createRuntimeRefs } from './runtime/refs'
 import type { RuntimeRefs } from './runtime/refs'
@@ -159,6 +160,9 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
   // teardown for the multi-window wiring (satellite sync / main listeners)
   const windowDisposers: Array<() => void> = []
   let syncTimer: Disposable | undefined
+  // satellites handing their slice back during main's close sequence notify
+  // these watchers so the grace wait can end as soon as all handoffs landed
+  const reattachWatchers = new Set<(label: string) => void>()
 
   return {
     actions,
@@ -174,15 +178,24 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
         // slice into the background copy so its edits round-trip to disk.
         windowDisposers.push(onWsEvent<WsSyncPayload>('ws:sync', p =>
           actions.mergeDetachedWorkspace(p.workspaceId, p.data as WorkspaceData, p.agents as Agent[])))
-        windowDisposers.push(onWsEvent<WsSyncPayload>('ws:reattach', p =>
-          actions.reattachWorkspace(p.workspaceId, p.data as WorkspaceData, p.agents as Agent[])))
-        // closing the main window quits the app: flush (bounded), then close the
-        // workspace satellites and destroy main so no orphan window survives.
-        windowDisposers.push(onThisWindowClose(async () => {
-          await Promise.race([chat.flush(), new Promise<void>(r => browserClock.setTimeout(() => r(), 3000))])
-          await closeAllSatellites()
-          await destroyThisWindow()
+        windowDisposers.push(onWsEvent<WsSyncPayload>('ws:reattach', p => {
+          actions.reattachWorkspace(p.workspaceId, p.data as WorkspaceData, p.agents as Agent[])
+          const label = workspaceWindowLabel(p.workspaceId)
+          for (const cb of reattachWatchers) cb(label)
         }))
+        // closing the main window quits the app: FIRST close the satellites
+        // gracefully so each hands its final slice back over ws:reattach (a
+        // plain destroy would skip that handshake and silently lose every edit
+        // since the last 1.5s sync), wait (bounded) for the handoffs, THEN
+        // flush (bounded) and destroy stragglers + main so no orphan survives.
+        windowDisposers.push(onThisWindowClose(() => runMainWindowClose({
+          requestSatelliteClose: requestAllSatellitesClose,
+          onReattach: cb => { reattachWatchers.add(cb) },
+          flush: () => chat.flush(),
+          destroySatellites: closeAllSatellites,
+          destroyMain: destroyThisWindow,
+          setTimeout: (fn, ms) => browserClock.setTimeout(fn, ms),
+        })))
       } else {
         // satellite: pin to its workspace once hydration is ready, then keep main
         // in sync with a debounced forward of the workspace slice + its sessions.
@@ -220,6 +233,7 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
       syncTimer?.dispose()
       for (const d of windowDisposers) d()
       windowDisposers.length = 0
+      reattachWatchers.clear()
       toastTimer?.dispose()
       for (const d of timers) d.dispose()
       timers.clear()
