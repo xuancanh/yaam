@@ -414,8 +414,15 @@ pub fn detached_kill(id: String) -> Result<(), String> {
     if !valid_id(&id) { return Err("invalid detached session id".to_string()); }
     if let Some(spec) = std::fs::read_to_string(spec_path(&id)).ok().and_then(|s| serde_json::from_str::<DetachedSpec>(&s).ok()) {
         if let Some(pid) = spec.pid {
-            unsafe { libc::kill(-pid, libc::SIGTERM) };
-            unsafe { libc::kill(pid, libc::SIGTERM) };
+            // The spec outlives its host and the pid may since have been
+            // recycled to an unrelated process — only signal when the
+            // recorded pid is still live. (No start-time identity is recorded
+            // in the spec, so a recycled-but-live pid would still be hit; the
+            // socket probe below removing the spec makes that window small.)
+            if crate::util::process_alive(pid) {
+                unsafe { libc::kill(-pid, libc::SIGTERM) };
+                unsafe { libc::kill(pid, libc::SIGTERM) };
+            }
         }
     }
     let _ = std::fs::remove_file(sock_path(&id));
@@ -446,6 +453,34 @@ mod tests {
         assert!(!valid_id("../../outside"));
         assert!(!valid_id("nested/session"));
         assert!(detached_kill("../../outside".into()).is_err());
+    }
+
+    #[test]
+    fn kill_with_a_dead_recorded_pid_signals_nothing_and_cleans_up() {
+        let id = format!("t-dead-{}", std::process::id());
+        // beyond the platform pid ceiling: deterministically unallocated, so
+        // the liveness guard must skip the SIGTERM and only clean up the files
+        let spec = DetachedSpec { id: id.clone(), command: "sleep 1000".into(), cwd: None, command_shell: None, rows: 24, cols: 80, pid: Some(4_000_000), exit_code: None };
+        write_spec(&spec_path(&id), &spec).unwrap();
+        detached_kill(id.clone()).unwrap();
+        assert!(!spec_path(&id).exists());
+        assert!(!sock_path(&id).exists());
+
+        // a live recorded pid is still signaled and reaped by the kill
+        let id = format!("t-live-{}", std::process::id());
+        let mut child = std::process::Command::new("sleep").arg("1000").spawn().unwrap();
+        let pid = child.id() as i32;
+        let spec = DetachedSpec { id: id.clone(), pid: Some(pid), ..spec };
+        write_spec(&spec_path(&id), &spec).unwrap();
+        detached_kill(id.clone()).unwrap();
+        // SIGTERM'd (process groups differ, so only the direct signal lands)
+        for _ in 0..50 {
+            if !crate::util::process_alive(pid) { break }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let status = child.wait().unwrap();
+        assert!(status.code().is_none(), "expected death by signal: {status}");
+        assert!(!spec_path(&id).exists());
     }
 
     #[test]

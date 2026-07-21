@@ -49,15 +49,36 @@ pub struct MergeResult {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-    if !out.status.success() {
+    // timeout-bounded, capped-tail exec: a wedged git errors out instead of
+    // hanging the IPC call forever
+    let out = crate::util::run_bounded(
+        Command::new("git").args(args).current_dir(dir),
+        crate::util::GIT_TIMEOUT,
+        crate::util::GIT_OUTPUT_CAP,
+    )?;
+    if out.code != Some(0) {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Worktree diff with its truncation flag preserved, so the review UI can
+/// tell a complete diff from a capped one before a merge decision.
+fn git_diff(dir: &Path, base_ref: &str) -> Result<(String, bool), String> {
+    let out = crate::util::run_bounded(
+        Command::new("git")
+            .args(["diff", "--no-color", base_ref])
+            .current_dir(dir),
+        crate::util::GIT_TIMEOUT,
+        crate::util::GIT_OUTPUT_CAP,
+    )?;
+    if out.code != Some(0) {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok((
+        String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        out.truncated,
+    ))
 }
 
 fn is_repo(dir: &Path) -> bool {
@@ -260,8 +281,12 @@ fn diff_impl(root: &str) -> Result<Vec<RepoDiff>, String> {
         let wt = root.join(&repo.name);
         // intent-to-add so brand-new files appear in the diff
         let _ = git(&wt, &["add", "-A", "-N", "."]);
-        match git(&wt, &["diff", "--no-color", &repo.base_ref]) {
-            Ok(diff) => out.push(RepoDiff { name: repo.name.clone(), diff, error: None }),
+        match git_diff(&wt, &repo.base_ref) {
+            Ok((diff, truncated)) => out.push(RepoDiff {
+                name: repo.name.clone(),
+                diff: if truncated { format!("… (output truncated)\n{diff}") } else { diff },
+                error: None,
+            }),
             Err(e) => out.push(RepoDiff { name: repo.name.clone(), diff: String::new(), error: Some(e) }),
         }
     }

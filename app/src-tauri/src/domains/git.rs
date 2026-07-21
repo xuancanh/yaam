@@ -1,6 +1,6 @@
 //! Git inspection for the diff-review drawer: working-tree diffs and porcelain
 //! status, scoped to a session's working directory.
-use crate::util::expand_tilde;
+use crate::util::{expand_tilde, run_bounded, BoundedOutput, GIT_OUTPUT_CAP, GIT_TIMEOUT};
 use serde::Serialize;
 use std::process::Command;
 
@@ -52,53 +52,56 @@ fn parse_porcelain_status(root: String, branch: String, output: &[u8]) -> GitSta
     }
 }
 
+/// Run one git command in `cwd` under a wall-clock timeout and output cap,
+/// so a wedged git (lock contention, hung fsmonitor) errors out instead of
+/// hanging the IPC call forever.
+fn git_bounded(cwd: &str, args: &[&str]) -> Result<BoundedOutput, String> {
+    run_bounded(
+        Command::new("git").args(args).current_dir(expand_tilde(cwd)),
+        GIT_TIMEOUT,
+        GIT_OUTPUT_CAP,
+    )
+}
+
 /// Run one git command in `cwd`, mapping failures to trimmed stderr.
 fn run_git(cwd: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(expand_tilde(cwd))
-        .output()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-    if !out.status.success() {
+    let out = git_bounded(cwd, args)?;
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if out.code != Some(0) {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
         return Err(if err.is_empty() { stdout } else { err });
     }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    Ok(stdout)
+}
+
+/// Decode a possibly-truncated diff body, flagging the truncation up front.
+fn diff_text(out: &BoundedOutput) -> String {
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    if out.truncated {
+        return format!("… (output truncated)\n{text}");
+    }
+    text
 }
 
 /// Complete working-tree diff against HEAD for a session directory.
 pub fn diff(cwd: &str) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(["diff", "--no-color", "HEAD"])
-        .current_dir(expand_tilde(cwd))
-        .output()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-    if !out.status.success() {
+    let out = git_bounded(cwd, &["diff", "--no-color", "HEAD"])?;
+    if out.code != Some(0) {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    Ok(diff_text(&out))
 }
 
 /// Repo root + porcelain status (paths relative to the root).
 pub fn status(cwd: &str) -> Result<GitStatusResult, String> {
-    let dir = expand_tilde(cwd);
-    let root_out = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(&dir)
-        .output()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-    if !root_out.status.success() {
+    let root_out = git_bounded(cwd, &["rev-parse", "--show-toplevel"])?;
+    if root_out.code != Some(0) {
         return Err("not a git repository".to_string());
     }
     let root = String::from_utf8_lossy(&root_out.stdout).trim().to_string();
     let branch = run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
-    let out = Command::new("git")
-        .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
-        .current_dir(&dir)
-        .output()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-    if !out.status.success() {
+    let out = git_bounded(cwd, &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
+    if out.code != Some(0) {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
     Ok(parse_porcelain_status(root, branch, &out.stdout))
@@ -107,15 +110,11 @@ pub fn status(cwd: &str) -> Result<GitStatusResult, String> {
 /// Zero-context diff of one file vs HEAD — the frontend parses hunk headers
 /// into added/modified line markers for the gutter.
 pub fn file_diff(cwd: &str, path: &str) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(["diff", "--no-color", "-U0", "HEAD", "--", path])
-        .current_dir(expand_tilde(cwd))
-        .output()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-    if !out.status.success() {
+    let out = git_bounded(cwd, &["diff", "--no-color", "-U0", "HEAD", "--", path])?;
+    if out.code != Some(0) {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    Ok(diff_text(&out))
 }
 
 #[tauri::command]
@@ -170,6 +169,45 @@ pub fn git_commit(cwd: String, message: String) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::parse_porcelain_status;
+
+    /// End-to-end cover over the bounded exec path: status and diff still work
+    /// against a real repository.
+    #[test]
+    fn status_and_diff_run_against_a_real_repo() {
+        let dir = std::env::temp_dir().join(format!("yaam-git-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sh = |cmd: &str| {
+            let out = std::process::Command::new("/bin/sh")
+                .args(["-c", cmd])
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{cmd}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        sh("git init -q -b main && git config user.email t@t && git config user.name t && echo hi > a.txt && git add -A && git commit -qm init");
+        sh("echo more >> a.txt && echo new > b.txt");
+        let cwd = dir.to_string_lossy().to_string();
+
+        let result = super::status(&cwd).unwrap();
+        assert_eq!(result.branch, "main");
+        assert!(result.files.iter().any(|f| f.path == "a.txt" && f.work == "M"));
+        assert!(result.files.iter().any(|f| f.path == "b.txt" && f.status == "??"));
+
+        assert!(super::diff(&cwd).unwrap().contains("+more"));
+        assert!(super::file_diff(&cwd, "a.txt").unwrap().contains("+more"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn status_rejects_a_non_repo() {
+        let dir = std::env::temp_dir().join(format!("yaam-git-norepo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(matches!(super::status(&dir.to_string_lossy()), Err(e) if e == "not a git repository"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn parses_modified_staged_and_untracked_statuses() {

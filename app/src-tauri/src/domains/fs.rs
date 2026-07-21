@@ -1,9 +1,9 @@
 //! Filesystem and one-shot process execution used by chat agents and the file
 //! pane: directory listing, text read/write, credential commands, and a
 //! timeout-bounded shell exec.
-use crate::util::expand_tilde;
+use crate::util::{expand_tilde, read_capped_tail};
 use serde::Serialize;
-use std::io::{BufRead, Read};
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -190,28 +190,6 @@ fn read_text_range_impl(
         total,
         start,
     })
-}
-
-/// Drain a pipe completely while retaining only its bounded tail. Continuing
-/// to drain is essential: stopping at the cap would block the child on a full
-/// OS pipe and turn truncation into a deadlock.
-fn read_capped_tail<R: Read>(reader: &mut R, cap: usize) -> (Vec<u8>, bool) {
-    let mut kept = Vec::with_capacity(cap);
-    let mut chunk = [0u8; 8192];
-    let mut truncated = false;
-    loop {
-        let n = match reader.read(&mut chunk) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        kept.extend_from_slice(&chunk[..n]);
-        if kept.len() > cap {
-            let excess = kept.len() - cap;
-            kept.drain(..excess);
-            truncated = true;
-        }
-    }
-    (kept, truncated)
 }
 
 /// Read one file as base64 — the viewer/import path for binary formats (PDF,

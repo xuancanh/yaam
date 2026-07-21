@@ -155,6 +155,10 @@ struct SessionHandle {
     killer: Box<dyn ChildKiller + Send + Sync>,
     /// child pid, for graceful (SIGTERM→SIGKILL) shutdown of the process tree
     pid: Option<i32>,
+    /// flipped by the reaper thread once `child.wait()` returns: the delayed
+    /// force-kill checks this so it never SIGKILLs a pid the OS has already
+    /// been free to recycle
+    exited: Arc<std::sync::atomic::AtomicBool>,
     /// distinguishes a resumed session reusing the same id from the one whose
     /// exit thread is still in flight
     generation: u64,
@@ -200,9 +204,19 @@ fn coalesce_output(first: Vec<u8>, rest: &mpsc::Receiver<Vec<u8>>, max_bytes: us
 /// (SIGTERM), then force-kill after a grace period. On non-unix (or without a
 /// pid) fall back to the immediate forced kill. Runs the force step on its own
 /// thread so callers (kill / id-reuse replace) never block.
-fn shutdown_process(pid: Option<i32>, mut killer: Box<dyn ChildKiller + Send + Sync>) {
+fn shutdown_process(
+    pid: Option<i32>,
+    exited: Arc<std::sync::atomic::AtomicBool>,
+    mut killer: Box<dyn ChildKiller + Send + Sync>,
+) {
     #[cfg(unix)]
     if let Some(pid) = pid {
+        // Identity snapshot taken while the child is still believed ours; the
+        // delayed SIGKILL re-verifies it, so a pid recycled during the grace
+        // period is never signaled. (Start-time identity is macOS-only; on
+        // other unix the reaper's `exited` flag plus a liveness check bound
+        // the window to check-to-signal.)
+        let expected_start = crate::util::process_start_time(pid);
         unsafe {
             // signal the child and its process group; ESRCH (already gone) is harmless
             libc::kill(pid, libc::SIGTERM);
@@ -210,9 +224,12 @@ fn shutdown_process(pid: Option<i32>, mut killer: Box<dyn ChildKiller + Send + S
         }
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(SHUTDOWN_GRACE_MS));
-            unsafe {
-                libc::kill(pid, libc::SIGKILL);
-                libc::kill(-pid, libc::SIGKILL);
+            // Once the reaper's wait() has returned, the pid may belong to an
+            // unrelated process — skip the SIGKILL entirely in that case.
+            if !exited.load(std::sync::atomic::Ordering::Acquire)
+                && crate::util::signal_unless_recycled(pid, expected_start, libc::SIGKILL)
+            {
+                unsafe { libc::kill(-pid, libc::SIGKILL); }
             }
             let _ = killer.kill(); // drop the pty child handle / reap
         });
@@ -300,6 +317,7 @@ impl SessionManager {
         ));
         let killer = child.clone_killer();
         let pid = child.process_id().map(|p| p as i32);
+        let exited = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let generation = self
             .next_generation
@@ -312,7 +330,7 @@ impl SessionManager {
             // killer does not terminate it). The exit reaper for the old
             // generation then sees the newer handle and stays quiet.
             if let Some(old) = sessions.remove(&id) {
-                shutdown_process(old.pid, old.killer);
+                shutdown_process(old.pid, old.exited, old.killer);
             }
             sessions.insert(
                 id.clone(),
@@ -321,6 +339,7 @@ impl SessionManager {
                     writer,
                     killer,
                     pid,
+                    exited: exited.clone(),
                     generation,
                 },
             );
@@ -372,6 +391,9 @@ impl SessionManager {
         let id_exit = id;
         std::thread::spawn(move || {
             let code = child.wait().ok().map(|s| s.exit_code() as i32);
+            // flip before any bookkeeping: a delayed force-kill from kill() or
+            // an id-reuse replace consults this flag to stay off a recycled pid
+            exited.store(true, std::sync::atomic::Ordering::Release);
             let mgr = app_exit.state::<SessionManager>();
             let mut sessions = mgr.sessions.lock().unwrap();
             // a stop + relaunch can reuse this id before we get here — never
@@ -435,7 +457,7 @@ impl SessionManager {
     /// then SIGKILL after a grace period) so CLIs can flush session files.
     pub fn kill(&self, id: &str) {
         if let Some(handle) = self.sessions.lock().unwrap().remove(id) {
-            shutdown_process(handle.pid, handle.killer);
+            shutdown_process(handle.pid, handle.exited, handle.killer);
         }
     }
 
@@ -702,6 +724,7 @@ mod tests {
                 writer,
                 killer,
                 pid,
+                exited: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 generation: 0,
             },
             child,
