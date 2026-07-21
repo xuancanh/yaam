@@ -201,6 +201,45 @@ describe('createPersistenceRuntime', () => {
     rt.dispose()
   })
 
+  it('satellite: markReady() never schedules a secret-migration save, even with plaintext credentials', async () => {
+    // A satellite never resolves keychain secrets, so a legacy plaintext
+    // credential in the loaded file would otherwise trigger armSecret()'s
+    // re-save — a second writer racing the main window.
+    const store = fakeStore(baseState({ settings: { ...baseState().settings, apiKey: 'legacy-key' } }))
+    const rt = createPersistenceRuntime(store, { onToast: () => {}, isMain: false })
+    rt.start(); rt.markReady()
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(native.secretSet).not.toHaveBeenCalled()
+    expect(native.saveStateFile).not.toHaveBeenCalled()
+    rt.dispose()
+  })
+
+  it('satellite: writes no state or session files even when started + ready', () => {
+    const store = fakeStore(baseState())
+    const rt = createPersistenceRuntime(store, { onToast: () => {}, isMain: false })
+    rt.start(); rt.markReady()
+
+    store.set({ ...store.getState(), tasks: [{ id: 't' }] as unknown as AppState['tasks'] })
+    const chat = { id: 'chat-1', kind: 'chat', chatLog: [], log: [] } as unknown as AppState['agents'][number]
+    store.set({ ...store.getState(), agents: [chat] as AppState['agents'] })
+    vi.advanceTimersByTime(2000)
+
+    expect(native.saveStateFile).not.toHaveBeenCalled()
+    expect(native.saveSession).not.toHaveBeenCalled()
+    rt.dispose()
+  })
+
+  it('satellite: flush() is a no-op — main owns the files', async () => {
+    const store = fakeStore(baseState())
+    const rt = createPersistenceRuntime(store, { onToast: () => {}, isMain: false })
+    rt.start(); rt.markReady()
+    await rt.flush()
+    expect(native.saveStateFile).not.toHaveBeenCalled()
+    expect(native.saveSession).not.toHaveBeenCalled()
+    rt.dispose()
+  })
+
   it('retries failed session writes and removals without another state change', async () => {
     const agent = { id: 'retry-1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
     const store = fakeStore(baseState())

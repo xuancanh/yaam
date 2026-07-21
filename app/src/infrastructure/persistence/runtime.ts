@@ -34,8 +34,12 @@ export interface PersistenceRuntime {
 
 export function createPersistenceRuntime(
   store: PersistenceStorePort,
-  opts: { onToast: (msg: string) => void },
+  opts: { onToast: (msg: string) => void; isMain?: boolean },
 ): PersistenceRuntime {
+  // Only the main window owns the on-disk state; a workspace satellite forwards
+  // its slice to main over ws:sync and must never write files — not even the
+  // secret-migration re-save in markReady, which would race main's writer.
+  const ownsWrites = opts.isMain !== false
   const keychainReady = new Set<string>()
   // Last values confirmed to match Keychain. This prevents an update to one
   // credential from rewriting every other item (and re-triggering macOS ACL
@@ -62,7 +66,7 @@ export function createPersistenceRuntime(
   // Main (low-churn) partition: everything durable except the agents. Reads the
   // latest state at fire time and redacts keychain-safe secrets to plaintext.
   const armMain = () => {
-    if (!ready) return
+    if (!ready || !ownsWrites) return
     if (mainTimer) window.clearTimeout(mainTimer)
     mainTimer = window.setTimeout(() => {
       const main = redactSecrets(selectMainState(store.getState()), keychainReady)
@@ -74,6 +78,7 @@ export function createPersistenceRuntime(
   // ONLY the agents whose object identity changed (immutable updates ⇒ a changed
   // reference means changed content), and delete files for removed agents.
   const writeSessions = () => {
+    if (!ownsWrites) return
     const next = new Map<string, Agent>()
     for (const a of store.getState().agents) {
       next.set(a.id, a)
@@ -104,7 +109,7 @@ export function createPersistenceRuntime(
     for (const [id, a] of next) savedAgents.set(id, a)
   }
   const armSession = () => {
-    if (!ready) return
+    if (!ready || !ownsWrites) return
     if (sessionTimer) window.clearTimeout(sessionTimer)
     sessionTimer = window.setTimeout(writeSessions, 800)
   }
@@ -122,7 +127,7 @@ export function createPersistenceRuntime(
   // confirmed stored, mark it keychain-ready so the main writer redacts it from
   // the plaintext file; a keychain failure leaves it plaintext (no data loss).
   const armSecret = () => {
-    if (!ready) return
+    if (!ready || !ownsWrites) return
     if (secretTimer) window.clearTimeout(secretTimer)
     secretTimer = window.setTimeout(() => {
       void (async () => {
@@ -168,6 +173,7 @@ export function createPersistenceRuntime(
   // the debounced writers so they can never drift apart. Resolves once every
   // write settles, so teardown can await durability before closing the window.
   const flush = async (): Promise<void> => {
+    if (!ownsWrites) return // satellites never write — main owns the files
     const st = store.getState()
     const writes: Array<Promise<unknown>> = [
       native.saveStateFile(JSON.stringify(redactSecrets(selectMainState(st), keychainReady))).catch(e => onSaveError('main', e)),
@@ -192,7 +198,7 @@ export function createPersistenceRuntime(
       for (const { account, value } of entries) {
         if (keychainReady.has(account) && value) mirroredSecrets.set(account, value)
       }
-      if (entries.some(({ account, value }) => value && !keychainReady.has(account))) armSecret()
+      if (ownsWrites && entries.some(({ account, value }) => value && !keychainReady.has(account))) armSecret()
     },
     start() {
       if (started) return

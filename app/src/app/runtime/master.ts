@@ -16,6 +16,7 @@ import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
 import type { SessionRuntime } from './session'
 import type { AddonSubsystem } from './addon'
+import type { WindowRole } from '../../core/window-role'
 
 export interface MasterSubsystem {
   runMaster: MasterRuntime['run']
@@ -32,10 +33,14 @@ export type MasterSendLine = (sid: string, text: string) => void
 /** Flags + kills a session as the master actor (routes through stop_session). */
 export type MasterStopLine = (sid: string) => void
 
-export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem, runChatMessage?: (agentId: string, text: string) => void, sendLine?: MasterSendLine, stopLine?: MasterStopLine): MasterSubsystem {
+export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem, runChatMessage?: (agentId: string, text: string) => void, sendLine?: MasterSendLine, stopLine?: MasterStopLine, role: WindowRole = { kind: 'main' }): MasterSubsystem {
   const { stateRef, widOf, logEvent, notify, flash } = k
   const { masterEventRef, toolApprovalsRef, userStoppedRef, fireAddonHookRef } = refs
   const state: StatePort = { get: () => stateRef.current, update: dispatch, subscribe: () => () => {} }
+  // A satellite never runs Master — explicitly, not just because it happens to
+  // lack resolved secrets (a credential command would flip hasCreds to true and
+  // turn every satellite into a second Master driving terminals).
+  const isMain = role.kind === 'main'
 
   // a durable agent's scheduled loop: deliver the prompt into its dedicated
   // "scheduled" conversation (created lazily), running in the background
@@ -71,8 +76,8 @@ export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, ses
     applyAgentStatus: session.applyAgentStatus, setNeedsInput: session.setNeedsInput, makeAddonApi: addon.makeAddonApi,
     sendLine, stopLine,
   })
-  const runMaster = master.run
-  masterEventRef.current = (note, agentId) => {
+  const runMaster: MasterRuntime['run'] = isMain ? master.run : () => {}
+  masterEventRef.current = isMain ? (note, agentId) => {
     // the user is watching this session's pane right now: Master still gets
     // the update (context stays current) but is told not to narrate it —
     // the user already sees the terminal first-hand
@@ -87,7 +92,7 @@ export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, ses
       if (!d) return s2
       return { ...s2, workspaceData: { ...s2.workspaceData, [wid]: { ...d, pendingMasterNotes: d.pendingMasterNotes.concat([note]).slice(-10) } } }
     })
-  }
+  } : () => {}
 
   return {
     runMaster,

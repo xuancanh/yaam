@@ -147,7 +147,7 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
   const session = createSessionRuntime(kernel, refs)
   const addon = createAddonSubsystem(kernel, refs, session, addonExec)
   const chat = createChatBoot(kernel, refs, session, role)
-  const master = createMasterSubsystem(kernel, refs, session, addon, chat.runChatMessage, masterSendLine, masterStopLine)
+  const master = createMasterSubsystem(kernel, refs, session, addon, chat.runChatMessage, masterSendLine, masterStopLine, role)
 
   const actions = createConductorActions({
     ...kernel,

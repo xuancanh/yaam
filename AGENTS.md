@@ -165,7 +165,11 @@ hooks, and integrations — a `workspace` satellite gates those off
 forwards its slice to main via `ws:sync`/`ws:reattach` events
 (`infrastructure/native/windows.ts`), so there is never a second writer of
 `conductor-state.json`. Never start persistence or the autonomous loops in a
-satellite. `detachedWorkspaces` is runtime-only (NOT in `selectMainState`) and
+satellite — and the gating is defense-in-depth, not just call-site discipline:
+`createPersistenceRuntime({ isMain: false })` refuses every write path
+(including markReady's secret-migration re-save), and
+`createMasterSubsystem(..., role)` makes `runMaster`/`masterEvent` explicit
+no-ops in a satellite regardless of credentials. `detachedWorkspaces` is runtime-only (NOT in `selectMainState`) and
 hides spun-out workspaces from that window's switcher; main's scheduler skips
 detached workspaces, so a spun-out workspace's schedules pause until it
 reattaches. See
