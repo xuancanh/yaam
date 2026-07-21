@@ -8,8 +8,11 @@ import { isTauri } from './base'
 export interface RemoteInfo {
   url: string
   token: string
-  /** one connect URL per reachable interface: lan · tailscale · wireguard · vpn · public */
+  /** one connect URL per reachable PRIVATE interface: lan · tailscale · wireguard · vpn
+   *  (public interfaces are only included when nothing private exists) */
   urls: { label: string; url: string }[]
+  /** set when only public-internet interfaces were found — render next to the links */
+  warning?: string | null
 }
 
 /** One action a paired phone asked the desktop to perform. */

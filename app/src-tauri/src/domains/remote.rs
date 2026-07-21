@@ -6,6 +6,14 @@
 //! nothing and holds no credentials — it stores the latest snapshot published
 //! by the desktop frontend and a queue of commands, which the frontend drains
 //! and applies through its normal action paths.
+//!
+//! Threat model: the transport is plaintext HTTP, so this is a TRUSTED-LAN-ONLY
+//! feature — anyone on the network path (or on a hostile Wi-Fi) can read the
+//! URL token and device tokens off the wire. Advertised connect URLs therefore
+//! prefer private interfaces (LAN/Tailscale/WireGuard/VPN); public-internet
+//! interfaces are only advertised when nothing private exists, and then with an
+//! explicit warning surfaced in Settings. For exposure beyond the LAN, front it
+//! with an encrypted tunnel (Cloudflare Tunnel / Tailscale serve) instead.
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderValue, Request, StatusCode};
 use axum::middleware::{self, Next};
@@ -85,6 +93,10 @@ pub struct RemoteShared {
     commands: Mutex<Vec<RemoteCommand>>,
     devices: Mutex<HashMap<String, PairedDevice>>,
     pending: Mutex<Vec<PairRequest>>,
+    /// device id → token, held between desktop approval and the device's first
+    /// pair_status pickup — the token is handed out exactly ONCE, then the
+    /// device owns it and the base URL token alone can never recover it
+    unclaimed: Mutex<HashMap<String, String>>,
     /// bumped on every publish — SSE subscribers wake and resend the snapshot
     snap_tx: tokio::sync::watch::Sender<u64>,
     /// rpc answers keyed by request id (fs/git browsing) — small and capped
@@ -102,6 +114,7 @@ impl Default for RemoteShared {
             commands: Mutex::new(Vec::new()),
             devices: Mutex::new(HashMap::new()),
             pending: Mutex::new(Vec::new()),
+            unclaimed: Mutex::new(HashMap::new()),
             snap_tx: tokio::sync::watch::channel(0).0,
             responses: Mutex::new(HashMap::new()),
             last_seen: std::sync::atomic::AtomicU64::new(0),
@@ -301,13 +314,23 @@ async fn pair_status(State(s): Shared, Query(q): Query<AuthQuery>) -> (StatusCod
     if !check_base(&s, &q) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "bad token" })));
     }
-    if let Some(dev) = s.devices.lock().unwrap().get(&q.device) {
-        return (StatusCode::OK, Json(serde_json::json!({ "status": "paired", "token": dev.token })));
+    let devices = s.devices.lock().unwrap();
+    if devices.contains_key(&q.device) {
+        // Hand the device token out exactly once — at first pickup after the
+        // desktop approval that minted it. Afterwards the device already has
+        // its token, so answering again would let anyone holding just the base
+        // URL token (and a guessable client-chosen device id) recover a
+        // paired device's token and collapse the two-factor model.
+        drop(devices);
+        match s.unclaimed.lock().unwrap().remove(&q.device) {
+            Some(token) => (StatusCode::OK, Json(serde_json::json!({ "status": "paired", "token": token }))),
+            None => (StatusCode::OK, Json(serde_json::json!({ "status": "paired" }))),
+        }
+    } else if s.pending.lock().unwrap().iter().any(|p| p.id == q.device) {
+        (StatusCode::OK, Json(serde_json::json!({ "status": "pending" })))
+    } else {
+        (StatusCode::OK, Json(serde_json::json!({ "status": "unknown" })))
     }
-    if s.pending.lock().unwrap().iter().any(|p| p.id == q.device) {
-        return (StatusCode::OK, Json(serde_json::json!({ "status": "pending" })));
-    }
-    (StatusCode::OK, Json(serde_json::json!({ "status": "unknown" })))
 }
 
 async fn state(State(s): Shared, Query(q): Query<AuthQuery>) -> (StatusCode, String) {
@@ -404,15 +427,40 @@ pub struct RemoteUrl {
     pub url: String,
 }
 
+/// Build the advertised connect URLs from the classified interfaces. The
+/// transport is plaintext HTTP carrying bearer credentials, so public-internet
+/// interfaces are dropped whenever any private one (lan/tailscale/wireguard/
+/// vpn) can serve the link instead. If ONLY public interfaces exist the server
+/// still has to be reachable — keep them, but return a loud warning the UI
+/// surfaces next to the connect links.
+fn advertised_urls(candidates: Vec<(&'static str, String)>, port: u16, token: &str) -> (Vec<RemoteUrl>, Option<String>) {
+    let (public, private): (Vec<_>, Vec<_>) = candidates.into_iter().partition(|(label, _)| *label == "public");
+    let (chosen, warning) = if private.is_empty() {
+        (public, Some(
+            "No private LAN/Tailscale/WireGuard interface found — connect links use a public internet address over plaintext HTTP, so the URL token and all traffic are readable on the path. Prefer a trusted LAN or an encrypted tunnel.".to_string(),
+        ))
+    } else {
+        (private, None)
+    };
+    let urls = chosen
+        .into_iter()
+        .map(|(label, ip)| RemoteUrl { label: label.into(), url: format!("http://{ip}:{port}/?t={token}") })
+        .collect();
+    (urls, warning)
+}
+
 #[derive(Serialize)]
 pub struct RemoteInfo {
     pub url: String,
     pub token: String,
-    /// one connect URL per reachable interface (LAN, Tailscale, WireGuard…);
-    /// a Cloudflare-Tunnel/public hostname is layered on by the frontend via
-    /// its own URL-override setting — the app only uses relative paths, so it
-    /// works behind any reverse proxy
+    /// one connect URL per reachable PRIVATE interface (LAN, Tailscale,
+    /// WireGuard…); a Cloudflare-Tunnel/public hostname is layered on by the
+    /// frontend via its own URL-override setting — the app only uses relative
+    /// paths, so it works behind any reverse proxy
     pub urls: Vec<RemoteUrl>,
+    /// set when the only reachable interfaces are public-internet ones — the
+    /// frontend renders this next to the connect links
+    pub warning: Option<String>,
 }
 
 #[tauri::command]
@@ -481,12 +529,9 @@ pub fn remote_start(state: tauri::State<'_, RemoteManager>, port: Option<u16>, t
         });
         *stop_slot = Some(tx);
     }
-    let urls: Vec<RemoteUrl> = candidate_ips()
-        .into_iter()
-        .map(|(label, ip)| RemoteUrl { label: label.into(), url: format!("http://{ip}:{port}/?t={token}") })
-        .collect();
+    let (urls, warning) = advertised_urls(candidate_ips(), port, &token);
     let primary = urls.first().map(|u| u.url.clone()).unwrap_or_else(|| format!("http://{}:{}/?t={}", local_ip(), port, token));
-    Ok(RemoteInfo { url: primary, token, urls })
+    Ok(RemoteInfo { url: primary, token, urls, warning })
 }
 
 #[tauri::command]
@@ -534,6 +579,8 @@ pub fn remote_approve_pair(state: tauri::State<'_, RemoteManager>, device_id: St
     let req = pending.remove(idx);
     let dev = PairedDevice { id: req.id, name: req.name, token: rand_token(32)?, at: now_ms() };
     state.shared.devices.lock().unwrap().insert(dev.id.clone(), dev.clone());
+    // the device picks its token up via pair_status exactly once (see there)
+    state.shared.unclaimed.lock().unwrap().insert(dev.id.clone(), dev.token.clone());
     Ok(dev)
 }
 
@@ -660,17 +707,41 @@ mod tests {
         // status: pending until approved
         let (_, body) = pair_status(State(s.clone()), Query(q("base", "", "device-12345"))).await;
         assert_eq!(body.0["status"], "pending");
-        // desktop approves → device minted, pending cleared
+        // desktop approves → device minted, pending cleared (mirrors
+        // remote_approve_pair, incl. the one-time token claim)
         let req = s.pending.lock().unwrap()[0].clone();
         let dev = PairedDevice { id: req.id.clone(), name: req.name, token: rand_token(32).unwrap(), at: 1 };
         s.pending.lock().unwrap().clear();
         s.devices.lock().unwrap().insert(dev.id.clone(), dev.clone());
+        s.unclaimed.lock().unwrap().insert(dev.id.clone(), dev.token.clone());
+        // first status after approval hands the device its token — once
         let (_, body) = pair_status(State(s.clone()), Query(q("base", "", "device-12345"))).await;
         assert_eq!(body.0["status"], "paired");
         assert_eq!(body.0["token"], dev.token.as_str());
+        // the token is consumed: later polls say paired but never repeat it
+        let (_, body) = pair_status(State(s.clone()), Query(q("base", "", "device-12345"))).await;
+        assert_eq!(body.0["status"], "paired");
+        assert!(body.0.get("token").is_none(), "device token must be handed out exactly once");
         // and the device token now opens the API
         let (code, _) = state(State(s.clone()), Query(q("base", &dev.token, ""))).await;
         assert_eq!(code, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn pair_status_never_leaks_an_already_claimed_device_token() {
+        let s = shared_with("base");
+        // hydrated from persisted settings (remote_set_devices) — long paired,
+        // token claimed ages ago, no entry in the unclaimed map
+        s.devices.lock().unwrap().insert(
+            "old-device".into(),
+            PairedDevice { id: "old-device".into(), name: "phone".into(), token: "super-secret".into(), at: 1 },
+        );
+        let (_, body) = pair_status(State(s.clone()), Query(q("base", "", "old-device"))).await;
+        assert_eq!(body.0["status"], "paired");
+        assert!(body.0.get("token").is_none(), "base URL token alone must not recover a device token");
+        // unknown devices still answer "unknown" and reveal nothing
+        let (_, body) = pair_status(State(s.clone()), Query(q("base", "", "nobody-here"))).await;
+        assert_eq!(body.0["status"], "unknown");
     }
 
     #[tokio::test]
@@ -753,6 +824,39 @@ mod tests {
         assert_eq!(classify_ip("utun2", &Ipv4Addr::new(172, 16, 0, 5)), Some("lan"), "private beats vpn naming");
         assert_eq!(classify_ip("lo0", &Ipv4Addr::new(127, 0, 0, 1)), None);
         assert_eq!(classify_ip("en0", &Ipv4Addr::new(169, 254, 1, 1)), None, "link-local is unreachable");
+    }
+
+    #[test]
+    fn advertised_urls_exclude_public_interfaces_when_private_exist() {
+        let (urls, warning) = advertised_urls(
+            vec![
+                ("lan", "192.168.1.20".into()),
+                ("tailscale", "100.101.3.9".into()),
+                ("public", "203.0.113.9".into()),
+            ],
+            8712,
+            "tok",
+        );
+        assert!(warning.is_none());
+        assert_eq!(urls.len(), 2);
+        assert!(urls.iter().all(|u| !u.url.contains("203.0.113.9")), "plaintext HTTP is never advertised on a public interface");
+        assert_eq!(urls[0].label, "lan");
+        assert!(urls[0].url.starts_with("http://192.168.1.20:8712/?t=tok"));
+    }
+
+    #[test]
+    fn advertised_urls_keep_public_with_a_warning_when_nothing_private_exists() {
+        let (urls, warning) = advertised_urls(vec![("public", "203.0.113.9".into())], 8712, "tok");
+        assert_eq!(urls.len(), 1, "still reachable when a public interface is all there is");
+        let warning = warning.expect("public-only advertising must come with a warning");
+        assert!(warning.contains("plaintext HTTP"));
+        // mixed case: the warning disappears as soon as a private interface shows up
+        let (_, warning) = advertised_urls(
+            vec![("public", "203.0.113.9".into()), ("vpn", "10.9.9.2".into())],
+            8712,
+            "tok",
+        );
+        assert!(warning.is_none());
     }
 
     #[tokio::test]

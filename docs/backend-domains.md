@@ -231,10 +231,18 @@ repo** (multi-repo workspace); both are mirrored under
 - `worktree_remove` — `git worktree remove --force` per repo, optional branch
   deletion, then the mirror folder is removed.
 
+`.yaam-worktree.json` lives INSIDE the worktree root — the agent's writable
+cwd — so its `repo.source` paths are untrusted. Before any diff/merge/remove
+acts on the metadata, `load_info` verifies each recorded source against git
+ground truth (`rev-parse --git-common-dir` on the worktree and on the recorded
+source, canonicalized and compared): a tampered source pointing at an
+unrelated repo is refused outright, so an agent can never redirect a merge or
+`branch -D` at a repo it shouldn't touch.
+
 Tests run against real temporary git repositories: single-repo round trip
 (isolate → edit → diff shows new files → merge back), multi-repo folders with
-symlinked loose entries and per-repo skip/merge results, and the no-repo
-error.
+symlinked loose entries and per-repo skip/merge results, the tampered-metadata
+refusal, and the no-repo error.
 
 ## State domain (`domains/state.rs`)
 
@@ -348,6 +356,16 @@ token (minting one only when absent) and returns one connect URL per reachable
 interface, classified via `if-addrs` (LAN private ranges, Tailscale's CGNAT
 100.64/10, `wg*`/`utun*` for WireGuard/VPN).
 
+Threat model: the transport is **plaintext HTTP over a trusted LAN only** —
+anyone on the network path can read the URL token and device tokens off the
+wire. Advertised connect URLs therefore exclude public-internet interfaces
+whenever a private one (LAN/Tailscale/WireGuard/VPN) is available; when only
+public interfaces exist they are still advertised (the server has to be
+reachable) but `RemoteInfo.warning` is set and Settings renders it next to the
+connect links. For exposure beyond the LAN, front the server with an encrypted
+tunnel (the frontend's public-URL override, e.g. Cloudflare Tunnel / Tailscale
+serve) rather than relying on a raw public address.
+
 Routes:
 
 - `GET /` and fallback — the embedded single-file mobile app (`include_str!`
@@ -355,7 +373,12 @@ Routes:
 - `GET /api/ping?t` — URL-token check before the pairing screen;
 - `POST /api/pair/request?t` — queue a pairing request (device id validated,
   pending list capped at 5 and deduped);
-- `GET /api/pair/status?t&device` — pending / paired (+ minted device token);
+- `GET /api/pair/status?t&device` — pending / paired. The minted device token
+  is included EXACTLY ONCE: the first status read after the desktop approval
+  that minted it (one-time claim, consumed on read). After that — and for any
+  device hydrated from persisted settings — the answer is `paired` with no
+  token, so the base URL token plus a guessable client-chosen device id can
+  never recover a paired device's token;
 - `GET /api/state?t&d` — the last published snapshot, verbatim;
 - `GET /api/stream?t&d` — SSE: the snapshot pushed on every publish (watch
   channel bump);
@@ -379,8 +402,10 @@ the bounded ring backlog followed by live PTY tap chunks. The frontend snapshot
 builder serializes only the phone-focused session's terminal buffer, keeping
 ordinary workspace updates small while preserving live terminal focus.
 
-Tests cover the token/device auth matrix, the pairing flow end-to-end,
-pending-list caps/dedup, interface classification, rpc result gating, and
+Tests cover the token/device auth matrix, the pairing flow end-to-end
+(including the exactly-once token handout and that an already-claimed token is
+never re-served), pending-list caps/dedup, interface classification, the
+public-interface exclusion/warning in advertised URLs, rpc result gating, and
 command serde.
 
 ## Detach domain (`domains/detach.rs`)

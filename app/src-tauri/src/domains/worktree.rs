@@ -155,7 +155,38 @@ fn load_info(root: &str) -> Result<WorktreeInfo, String> {
     {
         return Err("worktree metadata failed provenance validation".to_string());
     }
+    verify_sources(&info)?;
     Ok(info)
+}
+
+/// `.yaam-worktree.json` sits INSIDE the worktree root — the agent's writable
+/// cwd — so `repo.source` is untrusted input even after shape validation: an
+/// agent could point merge/`branch -D`/`worktree remove` at an arbitrary repo
+/// on this machine. Worktrees created by `git worktree add` share the main
+/// checkout's git dir, so verify each recorded source against that ground
+/// truth (`rev-parse --git-common-dir` on both sides, canonicalized) and
+/// refuse to act on a mismatch.
+fn verify_sources(info: &WorktreeInfo) -> Result<(), String> {
+    let resolve_common = |dir: &Path| -> Result<PathBuf, String> {
+        let out = git(dir, &["rev-parse", "--git-common-dir"])?;
+        let path = PathBuf::from(&out);
+        let path = if path.is_absolute() { path } else { dir.join(path) };
+        std::fs::canonicalize(&path).map_err(|e| format!("{}: {e}", path.display()))
+    };
+    let root = Path::new(&info.root);
+    for repo in &info.repos {
+        let wt_common = resolve_common(&root.join(&repo.name))
+            .map_err(|e| format!("{}: could not verify worktree provenance: {e}", repo.name))?;
+        let source_common = resolve_common(Path::new(&repo.source))
+            .map_err(|e| format!("{}: source repo unavailable: {e}", repo.name))?;
+        if wt_common != source_common {
+            return Err(format!(
+                "{}: recorded source {} does not own this worktree — refusing to trust agent-writable metadata",
+                repo.name, repo.source
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The repos to isolate: the base itself, or its immediate repo subfolders.
@@ -509,6 +540,38 @@ mod tests {
         assert_eq!(std::fs::read_to_string(api.join("a.txt")).unwrap(), "api change\n");
 
         remove_impl(&info.root, true).unwrap();
+    }
+
+    #[test]
+    fn tampered_metadata_source_is_refused_by_merge_and_remove() {
+        let base = TestDir::new("tamper-base");
+        let other = TestDir::new("tamper-other");
+        init_repo(&base.0);
+        init_repo(&other.0);
+        let slug = format!("t-tamper-{}", std::process::id());
+        let info = create_impl(&base.0.to_string_lossy(), &slug).unwrap();
+        let meta = std::path::Path::new(&info.root).join(".yaam-worktree.json");
+        let original = std::fs::read_to_string(&meta).unwrap();
+
+        // the agent rewrites the metadata in its own cwd, pointing the recorded
+        // source at a different repo it wants merged/deleted
+        let mut forged: serde_json::Value = serde_json::from_str(&original).unwrap();
+        forged["repos"][0]["source"] = serde_json::Value::String(other.0.to_string_lossy().to_string());
+        std::fs::write(&meta, serde_json::to_string_pretty(&forged).unwrap()).unwrap();
+
+        let err = load_info(&info.root).unwrap_err();
+        assert!(err.contains("does not own this worktree"), "{err}");
+        let err = merge_impl(&info.root, "yaam: tamper").err().expect("tampered metadata must be refused");
+        assert!(err.contains("does not own this worktree"), "{err}");
+        let err = remove_impl(&info.root, true).unwrap_err();
+        assert!(err.contains("does not own this worktree"), "{err}");
+        // the forged source was never touched
+        assert!(other.0.join(".git").exists());
+
+        // restore honest metadata → the normal flow works again
+        std::fs::write(&meta, original).unwrap();
+        remove_impl(&info.root, true).unwrap();
+        assert!(!PathBuf::from(&info.root).exists());
     }
 
     #[test]

@@ -433,6 +433,11 @@ export function SettingsView() {
                   ).concat(s.remoteInfo.urls ?? []).map(u => (
                     <ConnectLink key={u.url} label={u.label} url={u.url} />
                   ))}
+                  {s.remoteInfo.warning ? (
+                    <div style={{ fontSize: 12, color: 'var(--amber)', marginTop: 6, lineHeight: 1.5 }}>
+                      ⚠ {s.remoteInfo.warning}
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div style={{ fontSize: 12, color: 'var(--dim)' }}>starting…</div>

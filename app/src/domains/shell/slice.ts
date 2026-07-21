@@ -15,7 +15,7 @@ export interface ShellUiSlice {
   paletteQuery: string
   notifOpen: boolean
   /** phone remote companion server, when running (transient — not persisted) */
-  remoteInfo?: { url: string; token: string; urls: { label: string; url: string }[] } | null
+  remoteInfo?: { url: string; token: string; urls: { label: string; url: string }[]; warning?: string | null } | null
 }
 
 /** Initial shell UI slice for a fresh app state. */
