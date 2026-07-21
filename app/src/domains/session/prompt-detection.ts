@@ -2,8 +2,11 @@
 // numbered TUI menu options from a settled terminal screen.
 import type { EscOption } from '../../core/types'
 
-// y/n prompts, permission questions, confirmation menus.
-export const PROMPT_RE = /(\[y\/n\]|\[y\/N\]|\[Y\/n\]|\(y\/n\)|yes\/no|do you want|would you like|allow this|allow .*\?|permission|approve\?|confirm|proceed\?|continue\?|password:|are you sure|press enter to|\(esc to cancel\))/i
+// Explicit interactive markers for plain (non-TUI) streams. These only appear
+// when a CLI is genuinely blocked on the user — looser signals (bare
+// "permission"/"confirm" substrings, a trailing colon) fired on ordinary
+// output like "permission denied", "error: …", or "Done:".
+export const PLAIN_PROMPT_MARKER_RE = /(\[y\/n\]|\[y\/N\]|\[Y\/n\]|\(y\/n\)|\(yes\/no\)|yes\/no|password:|press enter to|\(esc to cancel\))/i
 
 // Strong markers for full-screen TUI approval dialogs (Claude Code, Codex, …).
 export const TUI_PROMPT_RE = /(do you want to (proceed|make this edit|run|allow)|requires approval|don'?t ask again|yes, and|grant (access|permission)|allow this (command|tool|action)|\[y\/n\]|\(y\/n\)|password:|enter to select|[↑↓]\/[↑↓] to navigate|❯\s*\d+\.)/i
@@ -29,13 +32,16 @@ export interface PromptDetection {
  * Pure — the caller owns the surrounding session state and dedup.
  */
 export function detectPrompt(content: string[], alt: boolean): PromptDetection {
-  const lastLine = content[content.length - 1] ?? ''
+  // Plain streams are judged by their LAST non-empty line only: a real prompt
+  // is the freshest thing on screen (anything below it means the CLI moved
+  // on), and older tail lines are output, not questions.
+  const lastLine = [...content].reverse().find(l => l.trim())?.trim() ?? ''
   // TUIs show a busy marker while generating — the turn is NOT over, so any
   // question-looking text on screen is transient.
   const busy = alt && /esc to interrupt|ctrl\+c to interrupt/i.test(content.join('\n'))
   const promptDetected = !busy && (alt
     ? TUI_PROMPT_RE.test(content.join('\n'))
-    : PROMPT_RE.test(content.slice(-3).join('\n')) || /[?:]\s*$/.test(lastLine.trim()))
+    : PLAIN_PROMPT_MARKER_RE.test(lastLine) || /\?\s*$/.test(lastLine))
   const question = (
     content.find(l => QUESTION_LINE_RE.test(l)) ||
     content.find(l => QUESTION_MARK_LINE_RE.test(l.trim())) ||

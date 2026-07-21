@@ -17,6 +17,7 @@ import { isDetachedAgent } from '../workspace/state'
 import {
   detectPrompt, extractOptions, stableScreenKey, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
 } from './prompt-detection'
+import { clearNeedsFlagSource, isScannerNeedsFlag, markScannerNeedsFlag, resetNeedsFlagSources } from './needs-provenance'
 import { NOTE_PROGRESS } from '../board/watcher-notes'
 import { untrustedBlock } from '../../llm/untrusted'
 
@@ -204,6 +205,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       const already = agent.status === 'needs' && lastFlagged.get(id) === question
       if (!already) {
         lastFlagged.set(id, question)
+        // take scanner ownership only when the flag will actually be applied —
+        // an existing LLM-set 'needs' stays LLM-owned (setNeedsInput no-ops then)
+        if (agent.status === 'running') markScannerNeedsFlag(id)
         const { options, cursorNum } = extractOptions(content)
         setNeedsInput(id, question, options, cursorNum)
         if (llm) {
@@ -224,9 +228,12 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       return
     }
 
-    // prompt gone (or the session is generating again) — it was answered
-    if (agent.status === 'needs') {
+    // prompt gone (or the session is generating again) — it was answered.
+    // Only auto-clear flags the scanner set itself: a monitor/watcher flag is
+    // context-aware and must survive a regex non-match on the settled screen.
+    if (agent.status === 'needs' && isScannerNeedsFlag(id)) {
       lastFlagged.delete(id)
+      clearNeedsFlagSource(id)
       state.update(s => ({
         ...s,
         agents: s.agents.map(a => a.id === id
@@ -302,12 +309,13 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     scheduleOutputCheckpoint(id)
   }
 
-  const clearFlagged = (id: string) => { lastFlagged.delete(id) }
+  const clearFlagged = (id: string) => { lastFlagged.delete(id); clearNeedsFlagSource(id) }
   const disposeSettle = (id: string) => {
     settle.get(id)?.timer.dispose()
     settle.delete(id)
     armed.delete(id)
     lastFlagged.delete(id)
+    clearNeedsFlagSource(id)
     outputBuffers.delete(id)
     outputTimers.get(id)?.dispose()
     outputTimers.delete(id)
@@ -340,13 +348,18 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
         ).trim()
         if (lastFlagged.get(a.id) === question) continue
         lastFlagged.set(a.id, question)
+        // the scan runs only for status 'running' above, so this flag is
+        // always applied — record scanner ownership (see onSettle)
+        markScannerNeedsFlag(a.id)
         const { options, cursorNum } = extractOptions(screen)
         setNeedsInput(a.id, question, options, cursorNum)
         void monitorEventRef.current(a.id,
           `A dialog was detected on the session's screen (already flagged as needing input):\n${untrustedBlock(screen.slice(-14).join('\n'), a.name)}\n\n` +
           'This needs the user — report_to_master with what it is asking, including the options if it is a menu.')
-      } else if (a.status === 'needs') {
+      } else if (a.status === 'needs' && isScannerNeedsFlag(a.id)) {
+        // dialog gone — but only retract a flag this scanner raised itself
         lastFlagged.delete(a.id)
+        clearNeedsFlagSource(a.id)
         state.update(s2 => ({
           ...s2,
           agents: s2.agents.map(x => x.id === a.id
@@ -365,6 +378,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       for (const { timer } of settle.values()) timer.dispose()
       for (const timer of outputTimers.values()) timer.dispose()
       settle.clear(); armed.clear(); lastFlagged.clear(); outputBuffers.clear(); outputTimers.clear(); lastOutputKey.clear(); lastFinalKey.clear(); checkpointDelay.clear(); lastCheckpointKey.clear(); streaming.clear()
+      resetNeedsFlagSources()
     },
   }
 }

@@ -25,9 +25,24 @@ describe('detectPrompt', () => {
     expect(r.question).toMatch(/proceed/i)
   })
 
-  it('flags a line that merely ends in a question mark or colon', () => {
-    expect(detectPrompt(['Enter your name:'], false).promptDetected).toBe(true)
+  it('flags a last line that ends in a question mark', () => {
     expect(detectPrompt(['What is the target branch?'], false).promptDetected).toBe(true)
+    expect(detectPrompt(['Continue?'], false).promptDetected).toBe(true)
+  })
+
+  it('does not flag output that merely mentions prompt-ish words or ends in a colon', () => {
+    expect(detectPrompt(['npm error code EACCES', 'npm error permission denied'], false).promptDetected).toBe(false)
+    expect(detectPrompt(['error: something failed'], false).promptDetected).toBe(false)
+    expect(detectPrompt(['Done:'], false).promptDetected).toBe(false)
+    expect(detectPrompt(['Enter your name:'], false).promptDetected).toBe(false)
+    expect(detectPrompt(['please confirm receipt of 3 items'], false).promptDetected).toBe(false)
+  })
+
+  it('judges plain streams by the last non-empty line only', () => {
+    // a prompt that scrolled past (newer output below it) is no longer waiting
+    expect(detectPrompt(['Do you want to proceed? [y/n]', 'compiling module B'], false).promptDetected).toBe(false)
+    // trailing blank lines don't hide a real prompt
+    expect(detectPrompt(['Continue?', ''], false).promptDetected).toBe(true)
   })
 
   it('does not flag ordinary output', () => {

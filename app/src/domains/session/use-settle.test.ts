@@ -12,6 +12,7 @@ vi.mock('../../master', () => ({ hasCreds: () => false }))
 
 import { createSessionSettle } from './use-settle'
 import type { SettleDeps } from './use-settle'
+import { markScannerNeedsFlag } from './needs-provenance'
 import { createFakeStatePort, FakeClock } from '../../core/ports.fakes'
 import type { AppState, Agent } from '../../core/types'
 
@@ -35,19 +36,103 @@ const agent = (over: Partial<Agent> = {}): Agent =>
   ({ id: 'a1', name: 'W', kind: 'real', status: 'running', log: [{ t: 'out', x: 'building...' }], ...over } as unknown as Agent)
 
 describe('createSessionSettle', () => {
-  it('bumpSettle schedules a quiet-period check that clears a resolved "needs" prompt', () => {
+  it('bumpSettle schedules a quiet-period check that clears a resolved scanner-set "needs" prompt', () => {
     const h = harness([agent({
       status: 'needs',
       actionNeeded: 'Approve the command',
       suggestions: [{ id: 'sg1', label: 'Approve', send: 'yes' }],
       log: [{ t: 'out', x: 'plain output line' }] as Agent['log'],
     })])
+    markScannerNeedsFlag('a1') // this flag was raised by the deterministic scanner
     h.rt.bumpSettle('a1')
     expect(h.state.get().agents[0].status).toBe('needs') // not yet — waiting out the quiet period
     h.clock.advance(3000)
     expect(h.state.get().agents[0].status).toBe('running') // prompt gone → back to running
     expect(h.state.get().agents[0].actionNeeded).toBeUndefined()
     expect(h.state.get().agents[0].suggestions).toBeUndefined()
+  })
+
+  it('does not clear a monitor-set "needs" flag when the settle scan finds no prompt', () => {
+    // no scanner provenance: this flag came from the monitor LLM, which is
+    // context-aware — the regex heuristic must not undo it
+    const h = harness([agent({
+      status: 'needs',
+      escReason: 'The CLI is asking which environment to deploy to',
+      log: [{ t: 'out', x: 'plain output line' }] as Agent['log'],
+    })])
+    h.rt.bumpSettle('a1')
+    h.clock.advance(3000)
+    expect(h.state.get().agents[0].status).toBe('needs')
+    expect(h.state.get().agents[0].escReason).toBe('The CLI is asking which environment to deploy to')
+  })
+
+  it('a monitor-set flag survives settle, then a later scanner flag is owned and cleared by the scanner', () => {
+    const h = harness([agent({
+      status: 'needs',
+      escReason: 'monitor question',
+      log: [{ t: 'out', x: 'plain output line' }] as Agent['log'],
+    })])
+    h.rt.bumpSettle('a1')
+    h.clock.advance(3000)
+    expect(h.state.get().agents[0].status).toBe('needs') // LLM-owned: not retracted
+
+    // user handles it (the clearNeeds path): flagged state reset, back to running
+    h.rt.clearFlagged('a1')
+    h.state.update(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === 'a1' ? { ...a, status: 'running' as const, escReason: undefined } : a),
+    }))
+
+    // a real prompt appears — the scanner flags it and takes ownership
+    h.state.update(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === 'a1' ? { ...a, log: [...a.log, { t: 'out', x: 'Do you want to proceed? [y/n]' }] } : a),
+    }))
+    h.rt.bumpSettle('a1')
+    h.clock.advance(3000)
+    expect(h.deps.setNeedsInput).toHaveBeenCalledWith('a1', expect.stringMatching(/proceed/i), expect.anything(), expect.anything())
+
+    // the prompt scrolls away — the scanner may retract its OWN flag
+    h.state.update(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === 'a1' ? { ...a, status: 'needs' as const, log: [...a.log, { t: 'out', x: 'building step 2' }] } : a),
+    }))
+    h.rt.bumpSettle('a1')
+    h.clock.advance(3000)
+    expect(h.state.get().agents[0].status).toBe('running')
+    expect(h.state.get().agents[0].escReason).toBeUndefined()
+  })
+
+  it('the TUI scan retracts a scanner-set flag once the dialog disappears', () => {
+    tui.alt.add('a1')
+    tui.screens.set('a1', ['Do you want to proceed?', '❯ 1. Yes', '  2. No'])
+    const h = harness([agent()])
+    h.rt.start()
+    h.clock.advance(4000) // scan flags it (scanner provenance)
+    expect(h.deps.setNeedsInput).toHaveBeenCalledWith('a1', expect.any(String), expect.anything(), expect.anything())
+    // simulate the flag applied to the store
+    h.state.update(s => ({
+      ...s,
+      agents: s.agents.map(a => a.id === 'a1' ? { ...a, status: 'needs' as const, escReason: 'Do you want to proceed?' } : a),
+    }))
+    tui.screens.set('a1', ['working on it', 'still working'])
+    h.clock.advance(4000)
+    expect(h.state.get().agents[0].status).toBe('running')
+    expect(h.state.get().agents[0].escReason).toBeUndefined()
+    h.rt.dispose()
+    tui.alt.delete('a1'); tui.screens.delete('a1')
+  })
+
+  it('the TUI scan leaves a monitor-set flag alone when no dialog matches', () => {
+    tui.alt.add('a1')
+    tui.screens.set('a1', ['some output', 'more output'])
+    const h = harness([agent({ status: 'needs', escReason: 'LLM flagged question' })])
+    h.rt.start()
+    h.clock.advance(4000)
+    h.rt.dispose()
+    expect(h.state.get().agents[0].status).toBe('needs')
+    expect(h.state.get().agents[0].escReason).toBe('LLM flagged question')
+    tui.alt.delete('a1'); tui.screens.delete('a1')
   })
 
   it('disposeSettle cancels a pending quiet-period timer (no late fire)', () => {
