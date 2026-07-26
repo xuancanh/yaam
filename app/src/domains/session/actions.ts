@@ -267,6 +267,10 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
               ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err' as const, x: String(err) }]) }
               : a),
           }))
+          // the pane's red status dot is easy to miss — surface a toast too
+          // (phrased with "failed" so Toast.tsx gives it the longer linger
+          // it uses for errors instead of the normal 2.6s flash)
+          flash(`Resume failed for ${agent?.name ?? 'session'} · ${String(err)}`)
         }
         if (machine) {
           // rebuild the same ssh wrap around the resume command resolved above

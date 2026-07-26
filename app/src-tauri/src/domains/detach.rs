@@ -395,7 +395,12 @@ pub fn detached_list() -> Vec<DetachedInfo> {
                 if !valid_id(&spec.id) { continue; }
                 let running = UnixStream::connect(sock_path(&spec.id)).is_ok();
                 if !running {
-                    let _ = std::fs::remove_file(&p); // stale leftovers
+                    // Leave the spec on disk — it's the only surviving record of
+                    // the real launch command once the host is gone (e.g. after
+                    // an OS restart). Deleting it here breaks resume for any
+                    // session whose in-memory cmd is only the attach wrapper.
+                    // detached_spawn() overwrites/removes it once the session
+                    // actually resumes or is explicitly killed.
                     continue;
                 }
                 let attach = exe.as_ref()

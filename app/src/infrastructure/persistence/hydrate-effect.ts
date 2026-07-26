@@ -66,8 +66,12 @@ export function runHydration(ctx: HydrationCtx): void {
               .then(() => {
                 dispatch(s2 => ({
                   ...s2,
+                  // keep agent.cmd as the real launch command — `attach` is only
+                  // the wrapper used to spawn *this* terminal; persisting it here
+                  // would permanently lose the command a later resume needs if
+                  // the detached host doesn't survive to the next reattach
                   agents: s2.agents.map(agent => agent.id === a.id
-                    ? { ...agent, cmd: attach, status: 'running' as const, log: agent.log.concat([{ t: 'sys' as const, x: 'reattached · detached host still running' }]) }
+                    ? { ...agent, status: 'running' as const, log: agent.log.concat([{ t: 'sys' as const, x: 'reattached · detached host still running' }]) }
                     : agent),
                 }))
                 window.setTimeout(() => repaintSession(a.id), 1200)
@@ -76,6 +80,10 @@ export function runHydration(ctx: HydrationCtx): void {
                 term.writeln(`\x1b[31m── could not reattach detached session · ${String(e)} ──\x1b[0m`)
                 dispatch(s2 => ({
                   ...s2,
+                  // "failed" in the message so Toast.tsx gives it the longer
+                  // error linger — a red status dot alone is easy to miss on
+                  // an agent whose pane isn't the one currently in view
+                  toast: `Resume failed for ${a.name} · ${String(e)}`,
                   agents: s2.agents.map(agent => agent.id === a.id
                     ? { ...agent, status: 'error' as const, log: agent.log.concat([{ t: 'err' as const, x: `detached reattach failed · ${String(e)}` }]) }
                     : agent),

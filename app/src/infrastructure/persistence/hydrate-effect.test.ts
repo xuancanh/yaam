@@ -55,7 +55,7 @@ describe('detached runtime hydration', () => {
     })
   })
 
-  it('automatically attaches a surviving detached host with the current binary command', async () => {
+  it('automatically attaches a surviving detached host without losing the real launch command', async () => {
     nativeMocks.detachedList.mockResolvedValue([{
       id: 'det-1', command: 'claude', cwd: '/repo', running: true, attach: 'current-attach-command',
     }])
@@ -63,8 +63,10 @@ describe('detached runtime hydration', () => {
     await vi.waitFor(() => expect(nativeMocks.spawnSession).toHaveBeenCalledWith(
       'det-1', 'current-attach-command', '/repo', 31, 97, undefined, undefined,
     ))
+    // `cmd` must stay the real command, not the attach wrapper — a later
+    // resume (after e.g. an OS restart kills the host) needs it to relaunch.
     await vi.waitFor(() => expect(useAppStore.getState().agents[0]).toMatchObject({
-      id: 'det-1', cmd: 'current-attach-command', status: 'running',
+      id: 'det-1', cmd: 'old-attach-command', status: 'running',
     }))
   })
 
