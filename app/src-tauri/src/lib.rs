@@ -66,6 +66,7 @@ pub fn run() {
             domains::git::git_unstage,
             domains::git::git_commit,
             domains::fs::list_dir,
+            domains::fs::list_files_recursive,
             domains::fs::read_text_file,
             domains::fs::read_text_range,
             domains::fs::read_file_b64,

@@ -6,8 +6,8 @@
 // ControlMaster connection (via the session id) so each call is cheap.
 import type { Machine } from '../../core/types'
 import {
-  execCommand, gitCommit, gitDiff, gitFileDiff, gitFileDiffSide, gitStage, gitStatus, gitUnstage,
-  listDir, readFileB64, readTextFile, writeTextFile,
+  createDir, deletePath, execCommand, gitCommit, gitDiff, gitFileDiff, gitFileDiffSide, gitStage, gitStatus, gitUnstage,
+  listDir, listFilesRecursive, movePath, readFileB64, readTextFile, writeTextFile,
 } from '../../core/native'
 import type { DirEntryInfo, GitStatusResult } from '../../core/native'
 import { detectRepoDirs, detectRepoDirsVia } from '../../shared/git-repos'
@@ -22,6 +22,15 @@ export interface SessionFs {
   readTextFile(path: string): Promise<string>
   writeTextFile(path: string, contents: string): Promise<void>
   readFileB64(path: string): Promise<string>
+  /** create a directory (and any missing parents) */
+  createDir(path: string): Promise<void>
+  /** rename/move a file or directory within the workspace */
+  movePath(from: string, to: string): Promise<void>
+  /** permanently delete a file or directory tree */
+  deletePath(path: string): Promise<void>
+  /** every file under a root, relative '/'-separated (quick open). Optional:
+   *  adapters without it leave quick open to already-known paths. */
+  listFilesRecursive?(root: string): Promise<string[]>
   gitStatus(cwd: string): Promise<GitStatusResult>
   gitDiff(cwd: string): Promise<string>
   gitFileDiff(cwd: string, path: string): Promise<string>
@@ -36,12 +45,34 @@ export interface SessionFs {
   readonly remote: boolean
 }
 
-/** The local (in-process native) adapter — the existing behavior verbatim. */
-const localFs: SessionFs = {
-  listDir, readTextFile, readFileB64, gitStatus, gitDiff, gitFileDiff, gitFileDiffSide, gitStage, gitUnstage, gitCommit,
-  writeTextFile: (path, contents) => writeTextFile(path, contents),
-  detectRepos: detectRepoDirs,
-  remote: false,
+/** The local (in-process native) adapter — the existing behavior verbatim.
+ *  `root` scopes the mutating operations (create/move/delete) the way the
+ *  native bridge expects; without one they refuse rather than run unscoped.
+ *  Adapters are CACHED per root: several hosts use `sessionFs(undefined, …)`
+ *  as a render-time default parameter, and a fresh object each call would
+ *  re-fire every `[fs]` effect downstream (an infinite fetch→render loop). */
+const localFsCache = new Map<string, SessionFs>()
+
+function localFs(root?: string): SessionFs {
+  const key = root ?? ''
+  const hit = localFsCache.get(key)
+  if (hit) return hit
+  const needRoot = () => {
+    if (!root) throw new Error('file operations need a workspace root')
+    return root
+  }
+  const fs: SessionFs = {
+    listDir, readTextFile, readFileB64, gitStatus, gitDiff, gitFileDiff, gitFileDiffSide, gitStage, gitUnstage, gitCommit,
+    writeTextFile: (path, contents) => writeTextFile(path, contents),
+    createDir: path => createDir(needRoot(), path),
+    movePath: (from, to) => movePath(needRoot(), from, to),
+    deletePath: path => deletePath(needRoot(), path),
+    listFilesRecursive: dir => listFilesRecursive(dir, root),
+    detectRepos: detectRepoDirs,
+    remote: false,
+  }
+  localFsCache.set(key, fs)
+  return fs
 }
 
 /** Parse `git status --porcelain` exactly like the Rust parser (git.rs):
@@ -109,11 +140,38 @@ export function remoteFs(machine: Machine, id: string): SessionFs {
       const target = shq(path)
       // Decode beside the destination, then rename. A failed transfer/decode
       // leaves the original intact; copying first preserves an existing mode.
+      // mkdir -p first so "new file a/b/c.ts" creates its parents like the
+      // native write does.
       ok(await run(
-        `tmp=${target}.yaam-tmp-$$; trap 'rm -f -- "$tmp"' EXIT HUP INT TERM; `
+        `mkdir -p -- "$(dirname -- ${target})"; `
+        + `tmp=${target}.yaam-tmp-$$; trap 'rm -f -- "$tmp"' EXIT HUP INT TERM; `
         + `if [ -e ${target} ]; then cp -p -- ${target} "$tmp"; else : > "$tmp"; fi; `
         + `printf %s ${btoa(bin)} | base64 -d > "$tmp" && mv -- "$tmp" ${target}`,
       ))
+    },
+    async createDir(path) {
+      ok(await run(`mkdir -p -- ${shq(path)}`))
+    },
+    async movePath(from, to) {
+      // create the destination's parent so renames into nested names work
+      ok(await run(`mkdir -p -- "$(dirname -- ${shq(to)})" && mv -- ${shq(from)} ${shq(to)}`))
+    },
+    async deletePath(path) {
+      ok(await run(`rm -rf -- ${shq(path)}`))
+    },
+    async listFilesRecursive(root) {
+      // execCommand caps output (~40 KB), so a huge tree comes back truncated
+      // mid-list — acceptable for quick open, which just shows what arrived.
+      // head bounds the line count first; stderr (permission-denied noise) is
+      // dropped so it can't pollute the path list (exec merges it).
+      const out = ok(await run(
+        `cd ${shq(root)} && find . -type f -not -path './.git/*' -not -path './node_modules/*' 2>/dev/null | head -n 20000`,
+        30_000,
+      ))
+      return out.split('\n')
+        .map(l => l.trim())
+        .filter(l => l.startsWith('./') && l.length > 2)
+        .map(l => l.slice(2))
     },
     async readFileB64(path) {
       // execCommand caps its output (~40 KB) and base64 inflates ~4/3, so a big
@@ -161,7 +219,7 @@ export function remoteFs(machine: Machine, id: string): SessionFs {
 }
 
 /** Pick the fs/git adapter for a session: its machine's remote adapter, or the
- *  local native one. */
-export function sessionFs(machine: Machine | undefined, id: string): SessionFs {
-  return machine ? remoteFs(machine, id) : localFs
+ *  local native one. `root` scopes the local adapter's mutating operations. */
+export function sessionFs(machine: Machine | undefined, id: string, root?: string): SessionFs {
+  return machine ? remoteFs(machine, id) : localFs(root)
 }

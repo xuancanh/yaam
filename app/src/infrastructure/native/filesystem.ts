@@ -121,6 +121,13 @@ export async function listDir(path: string, root?: string): Promise<DirEntryInfo
   return entries.map(e => ({ name: e.name as string, path: e.path as string, isDir: e.is_dir as boolean }))
 }
 
+/** Recursively list every file under `path` (relative, '/'-separated) for the
+ *  quick-open picker. The backend skips .git/node_modules and caps the list. */
+export async function listFilesRecursive(path: string, root?: string): Promise<string[]> {
+  if (!isTauri) return []
+  return await invoke<string[]>('list_files_recursive', { path, root })
+}
+
 /** A coalesced batch of filesystem changes under a watched root. */
 export interface FsChange {
   root: string

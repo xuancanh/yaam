@@ -9,6 +9,9 @@ use std::process::Command;
 
 const MAX_DIR_ENTRIES: usize = 10_000;
 const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
+/// Ceiling for the quick-open recursive listing — large trees are truncated,
+/// not rejected (the picker is advisory, unlike list_dir's exactness).
+const MAX_RECURSIVE_FILES: usize = 20_000;
 
 /// Authorize a workspace-scoped path at the privileged boundary. Lexical checks
 /// in the frontend are advisory only: a symlink under the workspace can point
@@ -116,6 +119,61 @@ fn list_dir_with_limit(root: Option<&str>, path: &str, max_entries: usize) -> Re
             .cmp(&a.is_dir)
             .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
+    Ok(out)
+}
+
+/// Recursively list every file under `path`, as paths relative to `path`
+/// ('/'-separated), for the file pane's quick-open picker. `.git` and
+/// `node_modules` directories are never descended; symlinks are not followed
+/// (a symlink can point outside the scoped root, and read_dir on it would
+/// escape the confinement checked only at the base). Stops silently at the
+/// cap — quick open simply shows what was collected.
+fn list_files_recursive_impl(root: Option<&str>, path: &str) -> Result<Vec<String>, String> {
+    list_files_with_limit(root, path, MAX_RECURSIVE_FILES)
+}
+
+fn list_files_with_limit(root: Option<&str>, path: &str, max_files: usize) -> Result<Vec<String>, String> {
+    let base = scoped_path(root, path)?;
+    let mut out: Vec<String> = Vec::new();
+    let mut stack = vec![base.clone()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            // the base itself must be readable; deeper dirs may not be
+            // (permissions) — skip those instead of failing the whole walk
+            Err(e) if dir == base => return Err(e.to_string()),
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name == ".git" || name == "node_modules" {
+                continue;
+            }
+            // DirEntry::file_type does NOT follow symlinks, so a symlinked
+            // directory is neither descended nor listed — it cannot leak
+            // paths from outside the scoped root.
+            let file_type = match entry.file_type() {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            if file_type.is_dir() {
+                stack.push(entry.path());
+            } else if file_type.is_file() {
+                let rel = entry
+                    .path()
+                    .strip_prefix(&base)
+                    .map_err(|e| e.to_string())?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push(rel);
+                if out.len() >= max_files {
+                    out.sort();
+                    return Ok(out);
+                }
+            }
+        }
+    }
+    out.sort();
     Ok(out)
 }
 
@@ -450,6 +508,11 @@ pub fn list_dir(path: String, root: Option<String>) -> Result<Vec<DirEntryInfo>,
 }
 
 #[tauri::command]
+pub fn list_files_recursive(path: String, root: Option<String>) -> Result<Vec<String>, String> {
+    list_files_recursive_impl(root.as_deref(), &path)
+}
+
+#[tauri::command]
 pub fn read_text_file(path: String, root: Option<String>) -> Result<String, String> {
     read_text_impl(root.as_deref(), &path)
 }
@@ -520,7 +583,7 @@ pub async fn exec_command(
 mod tests {
     use super::{
         copy_path_impl, create_dir_impl, delete_path_impl, exec_command_impl, list_dir_impl,
-        list_dir_with_limit,
+        list_dir_with_limit, list_files_recursive_impl, list_files_with_limit,
         move_path_impl, read_text_impl, read_text_range_impl, resolve_in_root,
         run_credential_command_impl, run_credential_command_with_limits, write_text_impl,
     };
@@ -822,6 +885,59 @@ mod tests {
             .unwrap_err()
             .contains("outside"));
         assert!(!outside.path().join("new-dir").exists());
+    }
+
+    // ---- recursive file listing (quick open) ----
+
+    #[test]
+    fn recursive_listing_returns_relative_paths_and_skips_noise_dirs() {
+        let dir = TestDir::new("recursive");
+        std::fs::create_dir_all(dir.path().join("src/deep")).unwrap();
+        std::fs::write(dir.path().join("src/main.rs"), "").unwrap();
+        std::fs::write(dir.path().join("src/deep/util.ts"), "").unwrap();
+        std::fs::write(dir.path().join("README.md"), "").unwrap();
+        // noise directories are never descended
+        std::fs::create_dir_all(dir.path().join(".git/objects")).unwrap();
+        std::fs::write(dir.path().join(".git/HEAD"), "").unwrap();
+        std::fs::create_dir_all(dir.path().join("node_modules/dep")).unwrap();
+        std::fs::write(dir.path().join("node_modules/dep/index.js"), "").unwrap();
+
+        let files = list_files_recursive_impl(None, &dir.path().to_string_lossy()).unwrap();
+
+        assert_eq!(files, vec!["README.md", "src/deep/util.ts", "src/main.rs"]);
+    }
+
+    #[test]
+    fn recursive_listing_stops_at_the_cap_instead_of_failing() {
+        let dir = TestDir::new("recursive-cap");
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        let files = list_files_with_limit(None, &dir.path().to_string_lossy(), 2).unwrap();
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn recursive_listing_stays_inside_the_scoped_root() {
+        let dir = TestDir::new("recursive-scope");
+        let err = list_files_recursive_impl(Some(&dir.path().to_string_lossy()), "../../etc")
+            .unwrap_err();
+        assert!(err.contains("outside the workspace root"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recursive_listing_does_not_follow_symlinked_directories() {
+        let outside = TestDir::new("recursive-outside");
+        std::fs::write(outside.path().join("secret.txt"), "").unwrap();
+        let root = TestDir::new("recursive-symlink");
+        std::fs::write(root.path().join("local.txt"), "").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("linked")).unwrap();
+
+        let files = list_files_recursive_impl(Some(&root.path().to_string_lossy()), ".").unwrap();
+
+        // the symlinked dir is neither descended nor listed — no escape
+        assert_eq!(files, vec!["local.txt"]);
     }
 
     #[test]

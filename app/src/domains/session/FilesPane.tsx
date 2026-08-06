@@ -16,8 +16,10 @@ import type { OfficeRender } from '../../shared/office-render'
 import { IMG_MIME, viewKind } from '../../shared/file-preview'
 import { CodeEditor } from './lazy-editor'
 import { parseDiffLines } from './diff-marks'
+import { filterPaths } from './quick-open'
 import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
+import { confirmAction } from '../../components/Confirm'
 import { FileIcon } from '../../components/FileIcon'
 import { Markdown } from '../../components/Markdown'
 import { ContextMenu } from '../../components/ContextMenu'
@@ -28,9 +30,16 @@ import { Divider } from './Divider'
 
 // UI state survives tab switches / pane moves (components remount freely)
 interface FilesState {
+  /** the ACTIVE tab's path (null = no tab open) */
   file: string | null
   gutter: 'numbers' | 'git'
   expanded: string[]
+  /** open editor tabs, in order */
+  tabs: string[]
+  /** path → unsaved editor text (a draft exists ⇔ the tab shows a dirty dot) */
+  drafts: Record<string, string>
+  /** path → explicit view/edit choice (absent = kind default: text opens in edit) */
+  modes: Record<string, 'edit' | 'view'>
 }
 const stateCache = new Map<string, FilesState>()
 // drag-adjusted explorer-column share (per session / folder); absent = the
@@ -41,10 +50,35 @@ const explorerSplitCache = new Map<string, number>()
 function cached(id: string): FilesState {
   let st = stateCache.get(id)
   if (!st) {
-    st = { file: null, gutter: 'git', expanded: [] }
+    st = { file: null, gutter: 'git', expanded: [], tabs: [], drafts: {}, modes: {} }
     stateCache.set(id, st)
+  } else {
+    // entries created by an older bundle (HMR) predate the tab fields
+    st.tabs ??= []
+    st.drafts ??= {}
+    st.modes ??= {}
   }
   return st
+}
+
+/** Last path segment (basename). */
+function baseName(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1)
+}
+
+/** Rebuild a path-keyed record with remapped keys (rename retargeting), or —
+ *  with dropEmpty — drop entries whose key maps to '' (delete). Returns the
+ *  original record when nothing changed. */
+function remapKeys<V>(rec: Record<string, V>, remap: (path: string) => string, dropEmpty = false): Record<string, V> {
+  let changed = false
+  const out: Record<string, V> = {}
+  for (const [k, v] of Object.entries(rec)) {
+    const nk = remap(k)
+    if (nk !== k) changed = true
+    if (dropEmpty && nk === '') continue
+    out[nk] = v
+  }
+  return changed ? out : rec
 }
 
 const GIT_COLORS: Record<string, string> = {
@@ -80,8 +114,83 @@ const OVERSCAN = 24
  *  `dirs` limits the re-list to those directories (null = every level). */
 interface TreeRefresh { tick: number; dirs: Set<string> | null }
 
+/** Pending inline tree input: a create lands as the first child of `dir`; a
+ *  rename replaces the target row's label. */
+type TreeEditing =
+  | { kind: 'file' | 'folder'; dir: string }
+  | { kind: 'rename'; path: string; isDir: boolean }
+
+/** Explorer CRUD callbacks shared by the tree rows, the context menu, and the
+ *  header buttons. Owned by `useTreeOps`. */
+interface TreeCrud {
+  editing: TreeEditing | null
+  beginCreate(dir: string, kind: 'file' | 'folder'): void
+  beginRename(path: string, isDir: boolean): void
+  requestDelete(path: string, isDir: boolean): void
+  commit(raw: string): void
+  cancel(): void
+}
+
+/** Parent directory of a '/'-separated absolute path ('/' at the top). */
+function parentDir(path: string): string {
+  const ix = path.lastIndexOf('/')
+  return ix > 0 ? path.slice(0, ix) : '/'
+}
+
+/** VSCode-style inline name input at tree-row height: Enter commits, Esc
+ *  cancels, blur commits (VSCode behavior — a no-op commit is dropped by the
+ *  caller). `selectStem` selects the basename minus its extension (rename). */
+function TreeInputRow({ depth, isDir, name, initial, selectStem, onCommit, onCancel }: {
+  depth: number
+  isDir: boolean
+  /** display name for the icon while typing (create rows use the typed value) */
+  name: string
+  initial: string
+  selectStem?: boolean
+  onCommit: (value: string) => void
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState(initial)
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    if (selectStem) {
+      const dot = initial.lastIndexOf('.')
+      el.setSelectionRange(0, dot > 0 ? dot : initial.length)
+    } else {
+      el.select()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: `2px 8px 2px ${8 + depth * 13}px` }}>
+      <span style={{ width: 12, flexShrink: 0 }} />
+      <FileIcon name={name} path={name} isDir={isDir} size={13} />
+      <input
+        ref={ref}
+        value={value}
+        spellCheck={false}
+        onChange={e => setValue(e.target.value)}
+        onBlur={() => onCommit(value)}
+        onKeyDown={e => {
+          e.stopPropagation()
+          if (e.key === 'Enter') onCommit(value)
+          else if (e.key === 'Escape') onCancel()
+        }}
+        style={{
+          flex: 1, minWidth: 0, fontSize: 12, padding: '1px 5px', borderRadius: 4,
+          background: 'var(--panel)', border: '1px solid var(--accent)', outline: 'none',
+          color: 'var(--text)', fontFamily: 'inherit',
+        }}
+      />
+    </div>
+  )
+}
+
 /** Recursively render one directory level and lazily loaded descendants. */
-function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, refresh, onAttachFile, onMenu, fs }: {
+function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, refresh, onAttachFile, onMenu, fs, crud }: {
   dir: string
   depth: number
   expanded: Set<string>
@@ -93,10 +202,12 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
   refresh: TreeRefresh
   /** chat hosts: attach this file to the conversation (design's ＋ chip) */
   onAttachFile?: (path: string) => void
-  /** local sessions: right-click context menu (open in native app / Finder / VS Code) */
+  /** right-click context menu (CRUD everywhere; native open entries local-only) */
   onMenu?: (ev: React.MouseEvent, path: string, isDir: boolean) => void
   /** local or remote (ssh) fs adapter for the owning session */
   fs: SessionFs
+  /** explorer CRUD state — inline create/rename inputs driven by the host */
+  crud?: TreeCrud
 }) {
   const [entries, setEntries] = useState<DirEntryInfo[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -125,16 +236,40 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
   if (err) return <div style={{ padding: `3px 8px 3px ${14 + depth * 13}px`, fontSize: 11, color: 'var(--red-soft)' }}>{err}</div>
   if (!entries) return <div style={{ padding: `3px 8px 3px ${14 + depth * 13}px`, fontSize: 11, color: 'var(--faint)' }}>…</div>
 
+  const creating = crud?.editing && crud.editing.kind !== 'rename' && crud.editing.dir === dir ? crud.editing : null
+
   return (
     <>
+      {creating && (
+        <TreeInputRow
+          depth={depth}
+          isDir={creating.kind === 'folder'}
+          name={creating.kind === 'folder' ? 'new-folder' : 'new-file'}
+          initial=""
+          onCommit={crud!.commit}
+          onCancel={crud!.cancel}
+        />
+      )}
       {entries.map(e => {
         const color = e.isDir
           ? (git?.dirs.has(e.path) ? 'var(--amber)' : null)
           : gitColor(git?.byPath.get(e.path))
         const isOpen = expanded.has(e.path)
         const isSel = selected === e.path
+        const renaming = crud?.editing?.kind === 'rename' && crud.editing.path === e.path
         return (
           <div key={e.path}>
+            {renaming ? (
+              <TreeInputRow
+                depth={depth}
+                isDir={e.isDir}
+                name={e.name}
+                initial={e.name}
+                selectStem={!e.isDir}
+                onCommit={crud!.commit}
+                onCancel={crud!.cancel}
+              />
+            ) : (
             <button
               className="palette-item"
               onClick={() => (e.isDir ? toggleDir(e.path) : openFile(e.path))}
@@ -169,8 +304,9 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
                 </span>
               )}
             </button>
+            )}
             {e.isDir && isOpen && (
-              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} refresh={refresh} onAttachFile={onAttachFile} onMenu={onMenu} fs={fs} />
+              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} refresh={refresh} onAttachFile={onAttachFile} onMenu={onMenu} fs={fs} crud={crud} />
             )}
           </div>
         )
@@ -184,10 +320,11 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
 
 // ---------------------------------------------------------------- context menu
 
-interface TreeMenuState { x: number; y: number; path: string; isDir: boolean }
+interface TreeMenuState { x: number; y: number; path: string; isDir: boolean; local: boolean }
 
-/** Right-click menu for local tree rows: hand the path to the OS. */
-function TreeContextMenu({ menu, onClose }: { menu: TreeMenuState; onClose: () => void }) {
+/** Right-click menu for tree rows: CRUD everywhere (local + ssh), with the
+ *  native "open in Finder / app / VS Code" hand-offs appended for local files. */
+function TreeContextMenu({ menu, onClose, crud }: { menu: TreeMenuState; onClose: () => void; crud: TreeCrud }) {
   const items: { label: string; mode: OpenPathMode }[] = menu.isDir
     ? [
         { label: 'Open in Finder', mode: 'default' },
@@ -200,24 +337,417 @@ function TreeContextMenu({ menu, onClose }: { menu: TreeMenuState; onClose: () =
       ]
   return (
     <ContextMenu x={menu.x} y={menu.y} width={196} label={`File actions for ${menu.path}`} onClose={onClose}>
-        {items.map(it => (
-          <button
-            key={it.mode}
-            role="menuitem"
-            className="context-menu-item"
-            onClick={() => { void openPath(menu.path, it.mode); onClose() }}
-          >
-            {it.label}
+      {menu.isDir && (
+        <>
+          <button role="menuitem" className="context-menu-item" onClick={() => { crud.beginCreate(menu.path, 'file'); onClose() }}>
+            New File…
           </button>
-        ))}
+          <button role="menuitem" className="context-menu-item" onClick={() => { crud.beginCreate(menu.path, 'folder'); onClose() }}>
+            New Folder…
+          </button>
+        </>
+      )}
+      <button role="menuitem" className="context-menu-item" onClick={() => { crud.beginRename(menu.path, menu.isDir); onClose() }}>
+        Rename…
+      </button>
+      <button role="menuitem" className="context-menu-item" onClick={() => { crud.requestDelete(menu.path, menu.isDir); onClose() }}>
+        Delete
+      </button>
+      {menu.local && (
+        <>
+          <div style={{ height: 1, background: 'var(--line)', margin: '4px 8px' }} />
+          {items.map(it => (
+            <button
+              key={it.mode}
+              role="menuitem"
+              className="context-menu-item"
+              onClick={() => { void openPath(menu.path, it.mode); onClose() }}
+            >
+              {it.label}
+            </button>
+          ))}
+        </>
+      )}
     </ContextMenu>
+  )
+}
+
+// ---------------------------------------------------------------- tree CRUD
+
+/** Explorer file operations (create / rename / delete) shared by FilesPane and
+ *  FolderExplorer. Owns the inline-editing state and runs the ops through the
+ *  session's fs adapter; the host supplies how to expand/refresh the tree and
+ *  how to keep open tabs in sync (retarget on rename, close on delete). */
+function useTreeOps({ fs, expandDirs, collapsePath, refreshDirs, onAfter, onDeletePath, onRenamePath, onCreatedFile }: {
+  fs: SessionFs
+  /** add dirs to the expanded set */
+  expandDirs: (dirs: string[]) => void
+  /** drop a path (and everything under it) from the expanded set */
+  collapsePath: (path: string) => void
+  /** targeted tree re-list for the touched directories */
+  refreshDirs: (dirs: Set<string>) => void
+  /** runs after every successful op (git status refresh) */
+  onAfter?: () => void
+  /** a path (file or dir) was deleted — close tabs at/under it */
+  onDeletePath?: (path: string) => void
+  /** a path was renamed — retarget tabs at/under it */
+  onRenamePath?: (from: string, to: string, isDir: boolean) => void
+  /** a new file was created — the host opens it (VSCode parity) */
+  onCreatedFile?: (path: string) => void
+}): { crud: TreeCrud; opErr: string | null; clearOpErr: () => void } {
+  const [editing, setEditing] = useState<TreeEditing | null>(null)
+  const [opErr, setOpErr] = useState<string | null>(null)
+
+  const beginCreate = (dir: string, kind: 'file' | 'folder') => {
+    setOpErr(null)
+    expandDirs([dir]) // VSCode auto-expands the target so the input is visible
+    setEditing({ kind, dir })
+  }
+  const beginRename = (path: string, isDir: boolean) => {
+    setOpErr(null)
+    setEditing({ kind: 'rename', path, isDir })
+  }
+
+  const commit = (raw: string) => {
+    const ed = editing
+    setEditing(null)
+    const name = raw.trim().replace(/^\/+|\/+$/g, '')
+    if (!ed || !name) return
+    void (async () => {
+      try {
+        if (ed.kind === 'rename') {
+          // rename is basename-only — it can never relocate the entry
+          if (name.includes('/')) throw new Error('Rename takes a plain name — no slashes.')
+          const dir = parentDir(ed.path)
+          if (name === baseName(ed.path)) return
+          const to = `${dir}/${name}`
+          await fs.movePath(ed.path, to)
+          onRenamePath?.(ed.path, to, ed.isDir)
+          refreshDirs(new Set([dir]))
+        } else {
+          // slashes create nested paths (writeTextFile/createDir make parents)
+          const target = `${ed.dir}/${name}`
+          const chain: string[] = []
+          let d = ed.dir
+          for (const seg of name.split('/').slice(0, -1)) { d = `${d}/${seg}`; chain.push(d) }
+          if (ed.kind === 'folder') {
+            await fs.createDir(target)
+          } else {
+            await fs.writeTextFile(target, '')
+            onCreatedFile?.(target)
+          }
+          if (chain.length) expandDirs(chain)
+          refreshDirs(new Set([ed.dir, ...chain]))
+        }
+        onAfter?.()
+      } catch (e) {
+        setOpErr(e instanceof Error ? e.message : String(e))
+      }
+    })()
+  }
+
+  const requestDelete = (path: string, isDir: boolean) => {
+    void confirmAction({
+      title: `Delete ${baseName(path)} permanently?`,
+      detail: isDir
+        ? 'The folder and everything inside it will be deleted from disk. There is no trash — this cannot be undone.'
+        : 'The file will be deleted from disk. There is no trash — this cannot be undone.',
+      confirmLabel: 'Delete permanently',
+    }).then(ok => {
+      if (!ok) return
+      void (async () => {
+        try {
+          await fs.deletePath(path)
+          // the confirm above already covers any unsaved drafts in these tabs
+          onDeletePath?.(path)
+          collapsePath(path)
+          refreshDirs(new Set([parentDir(path)]))
+          onAfter?.()
+        } catch (e) {
+          setOpErr(e instanceof Error ? e.message : String(e))
+        }
+      })()
+    })
+  }
+
+  return { crud: { editing, beginCreate, beginRename, requestDelete, commit, cancel: () => setEditing(null) }, opErr, clearOpErr: () => setOpErr(null) }
+}
+
+// ---------------------------------------------------------------- explorer chrome
+
+const IC_NEW_FILE = ['M13 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V9z', 'M13 3v6h6', 'M12 13v5', 'M9.5 15.5h5']
+const IC_NEW_FOLDER = ['M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M12 11v5', 'M9.5 13.5h5']
+const IC_COLLAPSE = ['M7 11l5-5 5 5', 'M7 18l5-5 5 5']
+const IC_REFRESH = ['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']
+
+/** The EXPLORER header row with the VSCode-style action cluster. */
+function ExplorerHeader({ root, refreshTitle, onNewFile, onNewFolder, onRefresh, onCollapseAll }: {
+  root: string
+  refreshTitle: string
+  onNewFile: () => void
+  onNewFolder: () => void
+  onRefresh: () => void
+  onCollapseAll: () => void
+}) {
+  const btn = { width: 22, height: 22, borderRadius: 5 } as const
+  return (
+    <div style={{
+      height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 7, padding: '0 6px 0 10px',
+      borderBottom: '1px solid var(--line)',
+    }}>
+      <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6, color: 'var(--dim)' }}>EXPLORER</span>
+      <span className="mono" style={{ fontSize: 10, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={root}>
+        {root.slice(root.lastIndexOf('/') + 1) || root}
+      </span>
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 1, flexShrink: 0 }}>
+        <button className="icon-btn" title="New File (slashes create nested folders)" onClick={onNewFile} style={btn}>
+          <Icon paths={IC_NEW_FILE} size={12} stroke={1.7} />
+        </button>
+        <button className="icon-btn" title="New Folder" onClick={onNewFolder} style={btn}>
+          <Icon paths={IC_NEW_FOLDER} size={12} stroke={1.7} />
+        </button>
+        <button className="icon-btn" title={refreshTitle} onClick={onRefresh} style={btn}>
+          <Icon paths={IC_REFRESH} size={12} stroke={1.8} />
+        </button>
+        <button className="icon-btn" title="Collapse All" onClick={onCollapseAll} style={btn}>
+          <Icon paths={IC_COLLAPSE} size={12} stroke={1.7} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** A failed tree op surfaces as a dismissible red line under the header. */
+function TreeOpError({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <div style={{
+      flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px',
+      fontSize: 11, color: 'var(--red-soft)', borderBottom: '1px solid var(--line)',
+    }}>
+      <span style={{ flex: 1, minWidth: 0 }}>{message}</span>
+      <button className="icon-btn" title="Dismiss" onClick={onDismiss} style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0 }}>
+        <Icon paths={IC.close} size={9} stroke={2} />
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- quick open
+
+// recursive file lists per pane — re-walking on every ⌘P would be wasteful,
+// and never per keystroke; the overlay's refresh icon re-indexes on demand
+const quickOpenCache = new Map<string, string[]>()
+
+/** VSCode-style ⌘P overlay anchored to the top of the explorer column. */
+function QuickOpen({ root, fs, cacheKey, onPick, onClose }: {
+  root: string
+  fs: SessionFs
+  cacheKey: string
+  onPick: (path: string) => void
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const [sel, setSel] = useState(0)
+  const [files, setFiles] = useState<string[] | null>(quickOpenCache.get(cacheKey) ?? null)
+  const [err, setErr] = useState<string | null>(null)
+  const [indexing, setIndexing] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const reindex = useCallback(async () => {
+    if (!fs.listFilesRecursive) { setErr('file search is unavailable for this session'); return }
+    setIndexing(true)
+    try {
+      const list = await fs.listFilesRecursive(root)
+      quickOpenCache.set(cacheKey, list)
+      setFiles(list)
+      setErr(null)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setIndexing(false)
+    }
+  }, [fs, root, cacheKey])
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    if (files === null && !indexing) void reindex()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const matches = useMemo(() => filterPaths(query, files ?? []), [query, files])
+  useEffect(() => setSel(0), [query])
+  useEffect(() => {
+    listRef.current?.querySelector(`[data-ix="${sel}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [sel])
+
+  const pick = (rel: string | undefined) => {
+    if (!rel) return
+    onPick(`${root.replace(/\/+$/, '')}/${rel}`)
+    onClose()
+  }
+
+  return (
+    // mousedown is swallowed so clicks never blur the input (closing the
+    // overlay); the click handlers themselves still fire
+    <div
+      onMouseDown={e => e.preventDefault()}
+      style={{
+        position: 'absolute', top: 34, left: 6, right: 6, zIndex: 30, overflow: 'hidden',
+        background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 10,
+        boxShadow: '0 14px 40px rgba(0,0,0,.5)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 6px 5px 10px', borderBottom: '1px solid var(--line)' }}>
+        <input
+          ref={inputRef}
+          value={query}
+          placeholder="Go to file…"
+          spellCheck={false}
+          className="mono"
+          onChange={e => setQuery(e.target.value)}
+          onBlur={onClose}
+          onKeyDown={e => {
+            e.stopPropagation()
+            if (e.key === 'ArrowDown') { e.preventDefault(); setSel(s => Math.min(s + 1, matches.length - 1)) }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setSel(s => Math.max(s - 1, 0)) }
+            else if (e.key === 'Enter') { e.preventDefault(); pick(matches[sel]) }
+            else if (e.key === 'Escape') { e.preventDefault(); onClose() }
+          }}
+          style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 12 }}
+        />
+        <button className="icon-btn" title="Re-index files" onClick={() => void reindex()} style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }}>
+          <Icon paths={IC_REFRESH} size={11} stroke={1.8} />
+        </button>
+      </div>
+      <div ref={listRef} style={{ maxHeight: 280, overflowY: 'auto', padding: 4 }}>
+        {err ? (
+          <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--red-soft)' }}>{err}</div>
+        ) : files === null ? (
+          <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--faint)' }}>{indexing ? 'Indexing…' : '…'}</div>
+        ) : matches.length === 0 ? (
+          <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--faint)' }}>No matching files</div>
+        ) : matches.map((rel, i) => {
+          const name = baseName(rel)
+          const dir = rel.slice(0, rel.length - name.length)
+          return (
+            <button
+              key={rel}
+              data-ix={i}
+              className="palette-item"
+              title={rel}
+              onClick={() => pick(rel)}
+              onMouseEnter={() => setSel(i)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'baseline', gap: 6, border: 'none',
+                textAlign: 'left', padding: '4px 8px', borderRadius: 6, whiteSpace: 'nowrap', overflow: 'hidden',
+                background: i === sel ? 'rgba(245,196,81,.09)' : 'transparent',
+                color: i === sel ? 'var(--text)' : 'var(--mut)', fontSize: 12,
+              }}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <span style={{ color: i === sel ? 'var(--text)' : 'var(--text2)' }}>{name}</span>
+                {dir && <span className="mono" style={{ fontSize: 10, color: 'var(--faint)' }}> {dir}</span>}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- tabs + breadcrumbs
+
+/** VSCode-style tab strip: one tab per open file, dirty dots for drafts,
+ *  middle-click or × closes. Duplicate basenames get a parent-dir prefix. */
+function FileTabs({ tabs, active, drafts, onSelect, onClose }: {
+  tabs: string[]
+  active: string | null
+  drafts: Record<string, string>
+  onSelect: (path: string) => void
+  onClose: (path: string) => void
+}) {
+  const names = tabs.map(baseName)
+  return (
+    <div style={{
+      height: 32, flexShrink: 0, display: 'flex', alignItems: 'stretch', overflowX: 'auto',
+      background: 'var(--bg2)', borderBottom: '1px solid var(--line)',
+    }}>
+      {tabs.map((t, i) => {
+        const isActive = t === active
+        const dirty = drafts[t] !== undefined
+        // disambiguate shared basenames the way VSCode does (parent segment)
+        const dup = names.indexOf(names[i]) !== i
+        const dir = t.slice(0, t.lastIndexOf('/'))
+        return (
+          <div
+            key={t}
+            role="button"
+            tabIndex={0}
+            title={t}
+            onClick={() => onSelect(t)}
+            onAuxClick={e => { if (e.button === 1) onClose(t) }}
+            onKeyDown={e => { if (e.key === 'Enter') onSelect(t) }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px 0 10px', flexShrink: 0,
+              maxWidth: 210, cursor: 'pointer', fontSize: 11.5, whiteSpace: 'nowrap',
+              background: isActive ? 'var(--bg3)' : 'transparent',
+              color: isActive ? 'var(--text)' : 'var(--mut)',
+              borderRight: '1px solid var(--line)',
+              boxShadow: isActive ? 'inset 0 -2px 0 var(--accent)' : 'none',
+            }}
+          >
+            <FileIcon name={names[i]} path={t} isDir={false} size={13} />
+            {dup && <span className="mono" style={{ fontSize: 10, color: 'var(--faint)', flexShrink: 0 }}>{baseName(dir)}/</span>}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{names[i]}</span>
+            {dirty && <span style={{ color: 'var(--amber)', fontSize: 9, flexShrink: 0 }} title="Unsaved changes">●</span>}
+            <span
+              role="button"
+              title={dirty ? 'Close (discards unsaved changes)' : 'Close'}
+              onClick={e => { e.stopPropagation(); onClose(t) }}
+              style={{
+                width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)',
+              }}
+            >
+              <Icon paths={IC.close} size={10} stroke={2} />
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Static path breadcrumb for the active file, relative to the explorer root. */
+function Breadcrumbs({ path, root }: { path: string; root: string }) {
+  const rel = path.startsWith(root + '/') ? path.slice(root.length + 1) : path
+  const segs = rel.split('/')
+  return (
+    <div
+      className="mono"
+      style={{
+        height: 24, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, padding: '0 12px',
+        fontSize: 10.5, color: 'var(--dim)', background: 'var(--bg3)', borderBottom: '1px solid var(--line)',
+        overflow: 'hidden', whiteSpace: 'nowrap',
+      }}
+      title={path}
+    >
+      {segs.map((s, i) => (
+        <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+          {i > 0 && <span style={{ color: 'var(--faint)' }}>›</span>}
+          <span style={i === segs.length - 1 ? { color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis' } : undefined}>{s}</span>
+        </span>
+      ))}
+    </div>
   )
 }
 
 // ---------------------------------------------------------------- viewer
 
 /** Load and display one file with syntax highlighting and optional diff gutter. */
-function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, fs }: {
+function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, fs, initialMode, draft, onModeChange, onDocChange, onDiscard }: {
   path: string
   gutter: 'numbers' | 'git'
   onToggleGutter: () => void
@@ -225,7 +755,18 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   git: GitInfo | null
   onAttachFile?: (path: string) => void
   fs: SessionFs
+  /** the tab's remembered view/edit choice; absent = kind default (text → edit) */
+  initialMode?: 'edit' | 'view'
+  /** unsaved buffer restored when the tab remounts (takes precedence over disk) */
+  draft?: string
+  onModeChange?: (mode: 'edit' | 'view') => void
+  /** editor buffer changed (host mirrors it into its per-tab drafts) */
+  onDocChange?: (text: string, dirty: boolean) => void
+  /** the editor's "Discard & close" dropped the unsaved buffer */
+  onDiscard?: () => void
 }) {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const kind = viewKind(name)
   const [content, setContent] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [marks, setMarks] = useState<{ added: Set<number>; modified: Set<number>; deletedAfter: Set<number> } | null>(null)
@@ -246,17 +787,22 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   // its own policy container instead of inheriting the app CSP). null → not yet
   // stashed, or a browser build that falls back to srcDoc.
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [editing, setEditing] = useState(false)
+  // text files open straight in the editor (VSCode-style); the toggle in the
+  // header switches back to the read-only viewer. Mode is per-tab: the host
+  // remembers the choice per path and hands it back via `initialMode`.
+  const [editing, setEditingState] = useState(() => (initialMode ? initialMode === 'edit' : kind === 'text'))
+  const setEditing = (v: boolean) => { setEditingState(v); onModeChange?.(v ? 'edit' : 'view') }
   const editingRef = useRef(false)
   editingRef.current = editing
   const contentRef = useRef<string | null>(null)
+  // detects a real path change inside the load effect (vs. a git-status-driven
+  // reload of the same file, which must not reset the mode or scroll)
+  const prevPathRef = useRef(path)
   // virtualized code view: track the scroll viewport so only visible rows render
   const scrollRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState({ top: 0, h: 0 })
 
   const status = git?.byPath.get(path)
-  const name = path.slice(path.lastIndexOf('/') + 1)
-  const kind = viewKind(name)
   const lang = langForFile(name)
   const isMd = /\.(md|markdown|mdx)$/i.test(name)
   const rendered = isMd && mdView === 'rendered'
@@ -264,7 +810,9 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
 
   // Read the selected file and its diff, ignoring stale async completions.
   const load = useCallback(async () => {
-    if (editingRef.current) return // never clobber an open editor buffer
+    // never clobber an open editor buffer — but the FIRST load must always go
+    // through, since the editor needs the disk snapshot as its baseline
+    if (editingRef.current && contentRef.current !== null) return
     try {
       if (kind === 'image' || kind === 'pdf') {
         // rendered natively from a data URL; no diff/polling semantics
@@ -330,6 +878,8 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   // watch events never fire there. Images/PDFs load once (no cheap change
   // detection over base64 payloads).
   useEffect(() => {
+    const pathChanged = prevPathRef.current !== path
+    prevPathRef.current = path
     contentRef.current = null
     setContent(null)
     setErr(null)
@@ -340,13 +890,15 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
     setMdView('rendered')
     setHtmlView('rendered')
     setHtmlTrusted(false)
-    setEditing(false)
+    // reset the mode only when a different file is opened in this same viewer
+    // (no remount) — a same-file reload must never kick the user out of editing
+    if (pathChanged) setEditingState(kind === 'text')
     void load()
     if (kind === 'image' || kind === 'pdf') return
     if (isTauri) return onFsChange(() => void load())
     const iv = window.setInterval(() => void load(), 4000)
     return () => window.clearInterval(iv)
-  }, [load, kind])
+  }, [load, kind, path])
 
   // Stash the rendered HTML on the backend and load it through the custom
   // scheme so it escapes the app's inherited CSP (Tauri only). Re-stashes when
@@ -513,13 +1065,15 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
       ) : editing && content !== null ? (
         <CodeEditor
           path={path}
-          initial={content}
+          initial={draft ?? content}
+          baseline={content}
           onSave={async text => {
             await fs.writeTextFile(path, text)
             contentRef.current = text
             setContent(text)
           }}
-          onClose={() => { setEditing(false); void load() }}
+          onDocChange={onDocChange}
+          onClose={() => { onDiscard?.(); setEditing(false); void load() }}
         />
       ) : kind === 'office' && office ? (
         office.kind === 'docx' ? (
@@ -699,34 +1253,83 @@ export function FilesPane({ agent }: { agent: Agent }) {
   const [file, setFile] = useState<string | null>(init.file)
   const [gutter, setGutter] = useState<'numbers' | 'git'>(init.gutter)
   const [expanded, setExpanded] = useState<Set<string>>(new Set(init.expanded))
+  const [tabs, setTabs] = useState<string[]>(init.tabs)
+  const [drafts, setDrafts] = useState<Record<string, string>>(init.drafts)
+  const [modes, setModes] = useState<Record<string, 'edit' | 'view'>>(init.modes)
   const [git, setGit] = useState<GitInfo | null>(null)
   const [refresh, setRefresh] = useState<TreeRefresh>({ tick: 0, dirs: null })
   // explorer/viewer split — fixed default width until first dragged
   const [treeShare, setTreeShare] = useState<number | null>(explorerSplitCache.get(agent.id) ?? null)
   const root = agent.cwd || '~'
   // machine sessions browse the remote host over ssh (using the session's own
-  // connection snapshot); local sessions use native fs
-  const fs = useMemo(() => sessionFs(agent.machine, agent.id), [agent.machine, agent.id])
+  // connection snapshot); local sessions use native fs. `root` scopes the
+  // local adapter's mutating ops (create/move/delete).
+  const fs = useMemo(() => sessionFs(agent.machine, agent.id, root), [agent.machine, agent.id, root])
   // chat hosts: files can be attached to the conversation with one click —
   // the ChatPane below subscribes on the attach bus and chips the file
   const attachToChat = agent.kind === 'chat' ? (path: string) => { requestAttach(agent.id, path) } : undefined
-  // right-click → open natively; local sessions only (remote paths live on
-  // another host, and a browser build has no OS opener)
+  // right-click → CRUD everywhere; the native open entries are local-only
+  // (remote paths live on another host, and a browser build has no OS opener)
   const [menu, setMenu] = useState<TreeMenuState | null>(null)
-  const onTreeMenu = isTauri && !agent.machine
+  const onTreeMenu = isTauri
     ? (ev: React.MouseEvent, path: string, isDir: boolean) => {
         ev.preventDefault()
-        setMenu({ x: ev.clientX, y: ev.clientY, path, isDir })
+        setMenu({ x: ev.clientX, y: ev.clientY, path, isDir, local: !agent.machine })
       }
     : undefined
 
   // persist UI state across remounts
   useEffect(() => {
-    stateCache.set(agent.id, { file, gutter, expanded: [...expanded] })
-  }, [agent.id, file, gutter, expanded])
+    stateCache.set(agent.id, { file, gutter, expanded: [...expanded], tabs, drafts, modes })
+  }, [agent.id, file, gutter, expanded, tabs, drafts, modes])
+
+  // open a file in a tab (append once, then activate)
+  const openFile = useCallback((path: string) => {
+    setTabs(prev => (prev.includes(path) ? prev : [...prev, path]))
+    setFile(path)
+  }, [])
+
+  // mirror the editor's buffer into per-tab drafts (dirty dot + remount restore)
+  const handleDocChange = (path: string, text: string, dirty: boolean) => {
+    setDrafts(prev => {
+      if (dirty) return prev[path] === text ? prev : { ...prev, [path]: text }
+      if (!(path in prev)) return prev
+      const next = { ...prev }
+      delete next[path]
+      return next
+    })
+  }
+
+  const clearDraft = (path: string) => {
+    setDrafts(prev => {
+      if (!(path in prev)) return prev
+      const next = { ...prev }
+      delete next[path]
+      return next
+    })
+  }
+
+  // close a tab; an unsaved draft asks first (discard keeps the file on disk
+  // as-is and just drops the buffer). Closing the active tab activates the
+  // neighbor; closing the last one returns to the empty state.
+  const closeTab = (path: string) => {
+    const doClose = () => {
+      clearDraft(path)
+      const ix = tabs.indexOf(path)
+      const next = tabs.filter(p => p !== path)
+      setTabs(next)
+      if (file === path) setFile(next[Math.min(ix, next.length - 1)] ?? null)
+    }
+    if (drafts[path] === undefined) { doClose(); return }
+    void confirmAction({
+      title: `Discard unsaved changes to ${baseName(path)}?`,
+      detail: 'This tab has edits that were never saved. Closing it drops the changes; the file on disk stays as it was.',
+      confirmLabel: 'Discard & close',
+    }).then(ok => { if (ok) doClose() })
+  }
 
   // terminal ctrl/cmd+click on a path lands here (path already cwd-resolved)
-  useEffect(() => onOpenFileRequest(agent.id, path => setFile(path)), [agent.id])
+  useEffect(() => onOpenFileRequest(agent.id, openFile), [agent.id, openFile])
 
   // Refresh repository status and rebuild the path-to-status lookup.
   const refreshGit = useCallback(() => {
@@ -783,62 +1386,133 @@ export function FilesPane({ agent }: { agent: Agent }) {
     })
   }
 
+  // ⌘P quick-open overlay (file fuzzy search, anchored to the explorer)
+  const [quickOpen, setQuickOpen] = useState(false)
+
+  // close every tab at/under a deleted path — drafts included, no extra
+  // confirm (the permanent-delete dialog already covered them)
+  const closeTabsUnder = (target: string) => {
+    const match = (p: string) => p === target || p.startsWith(target + '/')
+    const next = tabs.filter(p => !match(p))
+    if (next.length === tabs.length) return
+    setTabs(next)
+    setDrafts(prev => remapKeys(prev, p => (match(p) ? '' : p), true))
+    setModes(prev => remapKeys(prev, p => (match(p) ? '' : p), true))
+    if (file && match(file)) setFile(next[next.length - 1] ?? null)
+  }
+
+  // retarget tabs/drafts/modes/expanded after a rename (dirs take their subtree)
+  const retargetRenamed = (from: string, to: string, isDir: boolean) => {
+    const remap = (p: string) => p === from ? to : (isDir && p.startsWith(from + '/') ? to + p.slice(from.length) : p)
+    setTabs(prev => prev.map(remap))
+    setDrafts(prev => remapKeys(prev, remap))
+    setModes(prev => remapKeys(prev, remap))
+    setExpanded(prev => new Set([...prev].map(remap)))
+    if (file) setFile(remap(file))
+  }
+
+  const { crud, opErr, clearOpErr } = useTreeOps({
+    fs,
+    expandDirs: dirs => setExpanded(prev => {
+      const next = new Set(prev)
+      for (const d of dirs) next.add(d)
+      return next
+    }),
+    collapsePath: path => setExpanded(prev => {
+      const next = new Set<string>()
+      for (const p of prev) if (p !== path && !p.startsWith(path + '/')) next.add(p)
+      return next.size === prev.size ? prev : next
+    }),
+    refreshDirs: dirs => setRefresh(r => ({ tick: r.tick + 1, dirs })),
+    onAfter: refreshGit,
+    onDeletePath: closeTabsUnder,
+    onRenamePath: retargetRenamed,
+    onCreatedFile: openFile,
+  })
+
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+    <div
+      style={{ flex: 1, minHeight: 0, display: 'flex' }}
+      onKeyDown={e => {
+        if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
+        const key = e.key.toLowerCase()
+        // ⌘W / Ctrl+W closes the active tab while the pane has focus
+        if (key === 'w' && file) {
+          e.preventDefault()
+          closeTab(file)
+        }
+        // ⌘P / Ctrl+P opens the file fuzzy-search overlay
+        else if (key === 'p') {
+          e.preventDefault()
+          setQuickOpen(true)
+        }
+      }}
+    >
       <div style={{
         ...(treeShare != null
           ? { flexBasis: `${treeShare * 100}%`, flexGrow: 0, flexShrink: 1 }
           : { width: 180, flexShrink: 0 }),
         display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: treeShare != null ? 120 : 0,
-        background: 'var(--bg2)', borderRight: '1px solid var(--line)',
+        background: 'var(--bg2)', borderRight: '1px solid var(--line)', position: 'relative',
       }}>
-        <div style={{
-          height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 7, padding: '0 10px',
-          borderBottom: '1px solid var(--line)',
-        }}>
-          <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6, color: 'var(--dim)' }}>EXPLORER</span>
-          <span className="mono" style={{ fontSize: 10, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={root}>
-            {root.slice(root.lastIndexOf('/') + 1) || root}
-          </span>
-          <button
-            className="icon-btn"
-            title="Refresh tree & git status"
-            onClick={() => { setRefresh(r => ({ tick: r.tick + 1, dirs: null })); refreshGit() }}
-            style={{ width: 22, height: 22, borderRadius: 5, marginLeft: 'auto' }}
-          >
-            <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={12} stroke={1.8} />
-          </button>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '5px 4px' }}>
+        <ExplorerHeader
+          root={root}
+          refreshTitle="Refresh tree & git status"
+          onRefresh={() => { setRefresh(r => ({ tick: r.tick + 1, dirs: null })); refreshGit() }}
+          onNewFile={() => crud.beginCreate(root, 'file')}
+          onNewFolder={() => crud.beginCreate(root, 'folder')}
+          onCollapseAll={() => setExpanded(new Set())}
+        />
+        {opErr && <TreeOpError message={opErr} onDismiss={clearOpErr} />}
+        <div
+          style={{ flex: 1, overflowY: 'auto', padding: '5px 4px' }}
+          onContextMenu={onTreeMenu ? ev => { if (ev.target === ev.currentTarget) onTreeMenu(ev, root, true) } : undefined}
+        >
           <TreeLevel
             dir={root}
             depth={0}
             expanded={expanded}
             toggleDir={toggleDir}
-            openFile={setFile}
+            openFile={openFile}
             selected={file}
             git={git}
             refresh={refresh}
             onAttachFile={attachToChat}
             onMenu={onTreeMenu}
             fs={fs}
+            crud={crud}
           />
         </div>
+        {quickOpen && (
+          <QuickOpen root={root} fs={fs} cacheKey={agent.id} onPick={openFile} onClose={() => setQuickOpen(false)} />
+        )}
       </div>
-      {menu && <TreeContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {menu && <TreeContextMenu menu={menu} onClose={() => setMenu(null)} crud={crud} />}
       <Divider dir="col" onRatio={r => { explorerSplitCache.set(agent.id, r); setTreeShare(r) }} />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        {tabs.length > 0 && (
+          <FileTabs tabs={tabs} active={file} drafts={drafts} onSelect={setFile} onClose={closeTab} />
+        )}
         {file ? (
-          <FileViewer
-            path={file}
-            gutter={gutter}
-            onToggleGutter={() => setGutter(g => (g === 'numbers' ? 'git' : 'numbers'))}
-            onClose={() => setFile(null)}
-            git={git}
-            onAttachFile={attachToChat}
-            fs={fs}
-          />
+          <>
+            <Breadcrumbs path={file} root={root} />
+            <FileViewer
+              key={file}
+              path={file}
+              gutter={gutter}
+              onToggleGutter={() => setGutter(g => (g === 'numbers' ? 'git' : 'numbers'))}
+              onClose={() => closeTab(file)}
+              git={git}
+              onAttachFile={attachToChat}
+              fs={fs}
+              initialMode={modes[file]}
+              draft={drafts[file]}
+              onModeChange={m => setModes(prev => (prev[file] === m ? prev : { ...prev, [file]: m }))}
+              onDocChange={(text, dirty) => handleDocChange(file, text, dirty)}
+              onDiscard={() => clearDraft(file)}
+            />
+          </>
         ) : (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--dim)' }}>
             Pick a file to preview
@@ -855,16 +1529,26 @@ export function FilesPane({ agent }: { agent: Agent }) {
  *  open its files (code, markdown, images, PDF, office). Used by the review
  *  workbench when the reviewed folder has no git repository — there is no diff
  *  to show, but the work itself is still reviewable. */
-export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: string; fs?: SessionFs }) {
+export function FolderExplorer({ root, fs = sessionFs(undefined, '', root) }: { root: string; fs?: SessionFs }) {
   const init = cached(`folder:${root}`)
   const [file, setFile] = useState<string | null>(init.file)
   const [gutter, setGutter] = useState<'numbers' | 'git'>('numbers')
   const [expanded, setExpanded] = useState<Set<string>>(new Set(init.expanded))
   const [refresh, setRefresh] = useState<TreeRefresh>({ tick: 0, dirs: null })
   const [treeShare, setTreeShare] = useState<number | null>(explorerSplitCache.get(`folder:${root}`) ?? null)
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [menu, setMenu] = useState<TreeMenuState | null>(null)
+  const onTreeMenu = isTauri
+    ? (ev: React.MouseEvent, path: string, isDir: boolean) => {
+        ev.preventDefault()
+        setMenu({ x: ev.clientX, y: ev.clientY, path, isDir, local: !fs.remote })
+      }
+    : undefined
 
   useEffect(() => {
-    stateCache.set(`folder:${root}`, { file, gutter, expanded: [...expanded] })
+    // single-file browser: keep whatever tab state the cache entry holds
+    const st = cached(`folder:${root}`)
+    stateCache.set(`folder:${root}`, { file, gutter, expanded: [...expanded], tabs: st.tabs, drafts: st.drafts, modes: st.modes })
   }, [root, file, gutter, expanded])
 
   const toggleDir = (path: string) => {
@@ -876,33 +1560,57 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
     })
   }
 
+  const { crud, opErr, clearOpErr } = useTreeOps({
+    fs,
+    expandDirs: dirs => setExpanded(prev => {
+      const next = new Set(prev)
+      for (const d of dirs) next.add(d)
+      return next
+    }),
+    collapsePath: path => setExpanded(prev => {
+      const next = new Set<string>()
+      for (const p of prev) if (p !== path && !p.startsWith(path + '/')) next.add(p)
+      return next.size === prev.size ? prev : next
+    }),
+    refreshDirs: dirs => setRefresh(r => ({ tick: r.tick + 1, dirs })),
+    onDeletePath: target => { if (file && (file === target || file.startsWith(target + '/'))) setFile(null) },
+    onRenamePath: (from, to, isDir) => {
+      if (file) setFile(file === from ? to : (isDir && file.startsWith(from + '/') ? to + file.slice(from.length) : file))
+    },
+    onCreatedFile: setFile,
+  })
+
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+    <div
+      style={{ flex: 1, minHeight: 0, display: 'flex' }}
+      onKeyDown={e => {
+        // ⌘P / Ctrl+P opens the file fuzzy-search overlay
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+          e.preventDefault()
+          setQuickOpen(true)
+        }
+      }}
+    >
       <div style={{
         ...(treeShare != null
           ? { flexBasis: `${treeShare * 100}%`, flexGrow: 0, flexShrink: 1 }
           : { width: 240, flexShrink: 0 }),
         display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: treeShare != null ? 120 : 0,
-        background: 'var(--bg2)', borderRight: '1px solid var(--line)',
+        background: 'var(--bg2)', borderRight: '1px solid var(--line)', position: 'relative',
       }}>
-        <div style={{
-          height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 7, padding: '0 10px',
-          borderBottom: '1px solid var(--line)',
-        }}>
-          <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6, color: 'var(--dim)' }}>EXPLORER</span>
-          <span className="mono" style={{ fontSize: 10, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={root}>
-            {root.slice(root.lastIndexOf('/') + 1) || root}
-          </span>
-          <button
-            className="icon-btn"
-            title="Refresh tree"
-            onClick={() => setRefresh(r => ({ tick: r.tick + 1, dirs: null }))}
-            style={{ width: 22, height: 22, borderRadius: 5, marginLeft: 'auto' }}
-          >
-            <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={12} stroke={1.8} />
-          </button>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '5px 4px' }}>
+        <ExplorerHeader
+          root={root}
+          refreshTitle="Refresh tree"
+          onRefresh={() => setRefresh(r => ({ tick: r.tick + 1, dirs: null }))}
+          onNewFile={() => crud.beginCreate(root, 'file')}
+          onNewFolder={() => crud.beginCreate(root, 'folder')}
+          onCollapseAll={() => setExpanded(new Set())}
+        />
+        {opErr && <TreeOpError message={opErr} onDismiss={clearOpErr} />}
+        <div
+          style={{ flex: 1, overflowY: 'auto', padding: '5px 4px' }}
+          onContextMenu={onTreeMenu ? ev => { if (ev.target === ev.currentTarget) onTreeMenu(ev, root, true) } : undefined}
+        >
           <TreeLevel
             dir={root}
             depth={0}
@@ -912,10 +1620,16 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '') }: { root: 
             selected={file}
             git={null}
             refresh={refresh}
+            onMenu={onTreeMenu}
             fs={fs}
+            crud={crud}
           />
         </div>
+        {quickOpen && (
+          <QuickOpen root={root} fs={fs} cacheKey={`folder:${root}`} onPick={setFile} onClose={() => setQuickOpen(false)} />
+        )}
       </div>
+      {menu && <TreeContextMenu menu={menu} onClose={() => setMenu(null)} crud={crud} />}
       <Divider dir="col" onRatio={r => { explorerSplitCache.set(`folder:${root}`, r); setTreeShare(r) }} />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>

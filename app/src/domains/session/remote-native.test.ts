@@ -6,6 +6,7 @@ vi.mock('../../core/native', () => ({
   execCommand: (cmd: string, cwd?: string, t?: number) => exec(cmd, cwd, t),
   // local fns — unused in these remote tests, present so the import resolves
   listDir: vi.fn(), readTextFile: vi.fn(), readFileB64: vi.fn(),
+  createDir: vi.fn(), movePath: vi.fn(), deletePath: vi.fn(), listFilesRecursive: vi.fn(),
   gitStatus: vi.fn(), gitDiff: vi.fn(), gitFileDiff: vi.fn(), gitFileDiffSide: vi.fn(),
   gitStage: vi.fn(), gitUnstage: vi.fn(), gitCommit: vi.fn(),
 }))
@@ -127,6 +128,50 @@ describe('remoteFs.detectRepos', () => {
     okOut('api/\n')          // listDir(/srv/group)
     okOut('.git/\napp.py\n') // listDir(/srv/group/api) → repo at depth 2
     expect(await remoteFs(m, 'a1').detectRepos('/srv')).toEqual(['/srv/group/api'])
+  })
+})
+
+describe('remoteFs tree CRUD', () => {
+  it('creates directories with mkdir -p', async () => {
+    okOut('')
+    await remoteFs(m, 'a1').createDir('/srv/app/new/nested')
+    const command = exec.mock.calls[0][0]
+    expect(command).toContain('mkdir -p --')
+    expect(command).toContain('/srv/app/new/nested')
+  })
+  it('moves a path, creating the destination parent first', async () => {
+    okOut('')
+    await remoteFs(m, 'a1').movePath('/srv/app/old.ts', '/srv/app/new.ts')
+    const command = exec.mock.calls[0][0]
+    expect(command).toContain('dirname --')
+    expect(command).toContain('mv --')
+    expect(command).toContain('/srv/app/old.ts')
+    expect(command).toContain('/srv/app/new.ts')
+    expect(command.indexOf('mkdir -p')).toBeLessThan(command.indexOf('mv --'))
+  })
+  it('deletes recursively with rm -rf', async () => {
+    okOut('')
+    await remoteFs(m, 'a1').deletePath('/srv/app/gone')
+    const command = exec.mock.calls[0][0]
+    expect(command).toContain('rm -rf --')
+    expect(command).toContain('/srv/app/gone')
+  })
+})
+
+describe('remoteFs.listFilesRecursive', () => {
+  it('lists files relative to the root, skipping .git and node_modules', async () => {
+    okOut('./src/main.ts\n./.git/HEAD\n./node_modules/dep/index.js\n./README.md\n')
+    // the remote find filters noise dirs itself; the canned output above still
+    // exercises the './' stripping
+    const files = await remoteFs(m, 'a1').listFilesRecursive!('/srv/app')
+    expect(files).toEqual(['src/main.ts', '.git/HEAD', 'node_modules/dep/index.js', 'README.md'])
+    const command = exec.mock.calls[0][0]
+    expect(command).toContain('cd ')
+    expect(command).toContain('/srv/app')
+    expect(command).toContain('find . -type f -not -path')
+    expect(command).toContain('.git/*')
+    expect(command).toContain('node_modules/*')
+    expect(command).toContain('head -n 20000')
   })
 })
 

@@ -24,13 +24,21 @@ const baseTheme = EditorView.theme({
   '&.cm-focused': { outline: 'none' },
 })
 
-export function CodeEditor({ path, initial, onSave, onClose }: {
+export function CodeEditor({ path, initial, baseline, onSave, onClose, onDocChange }: {
   path: string
   initial: string
+  /** the text considered "saved" for dirty tracking — defaults to `initial`.
+   *  Differs from it when the host restores an unsaved draft over the disk
+   *  snapshot, so the editor opens already dirty. */
+  baseline?: string
   /** persist the buffer (fs adapter write); throw to surface the error */
   onSave: (text: string) => Promise<void>
   /** leave the editor (host returns to its viewer) */
   onClose: () => void
+  /** fired on every doc change (and after a save) with the current text and
+   *  whether it differs from the saved baseline — hosts mirror this into
+   *  per-tab draft state */
+  onDocChange?: (text: string, dirty: boolean) => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -38,7 +46,9 @@ export function CodeEditor({ path, initial, onSave, onClose }: {
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   const [note, setNote] = useState<string | null>(null)
-  const savedRef = useRef(initial)
+  const savedRef = useRef(baseline ?? initial)
+  const onDocChangeRef = useRef(onDocChange)
+  onDocChangeRef.current = onDocChange
 
   const save = async () => {
     const view = viewRef.current
@@ -51,7 +61,9 @@ export function CodeEditor({ path, initial, onSave, onClose }: {
       await onSave(text)
       if (viewRef.current === view) {
         savedRef.current = text
-        setDirty(view.state.doc.toString() !== text)
+        const nowDirty = view.state.doc.toString() !== text
+        setDirty(nowDirty)
+        onDocChangeRef.current?.(view.state.doc.toString(), nowDirty)
         setNote('saved')
         window.setTimeout(() => {
           if (viewRef.current === view) setNote(null)
@@ -86,14 +98,19 @@ export function CodeEditor({ path, initial, onSave, onClose }: {
           ...(theme === 'light' || theme === 'paper' ? [] : [oneDark]),
           baseTheme,
           EditorView.updateListener.of(u => {
-            if (u.docChanged) setDirty(u.state.doc.toString() !== savedRef.current)
+            if (u.docChanged) {
+              const text = u.state.doc.toString()
+              const nowDirty = text !== savedRef.current
+              setDirty(nowDirty)
+              onDocChangeRef.current?.(text, nowDirty)
+            }
           }),
         ],
       }),
     })
     viewRef.current = view
-    savedRef.current = initial
-    setDirty(false)
+    savedRef.current = baseline ?? initial
+    setDirty(view.state.doc.toString() !== savedRef.current)
     void languageFor(path.slice(path.lastIndexOf('/') + 1)).then(lang => {
       if (lang && viewRef.current === view) view.dispatch({ effects: langCompartment.reconfigure(lang) })
     })
