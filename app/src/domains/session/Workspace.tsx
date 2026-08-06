@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR } from '../../core/data'
+import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR, TAB_COLORS } from '../../core/data'
 import type { Agent, BoardTask, TabGroup } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { ContextMenu } from '../../components/ContextMenu'
@@ -37,11 +37,55 @@ const sameRows = (a: number[], b: number[]) => a.length === b.length && a.every(
 
 interface TabMenuState { x: number; y: number; agent: Agent }
 
-/** Right-click menu for a session tab: re-home the session into another
- *  workspace (its process keeps running; it arrives there as a loose tab). */
+/** Row of clickable color swatches (shared by the tab and group menus). */
+function ColorSwatches({ current, onPick, onClear }: {
+  current: string | undefined
+  onPick: (color: string) => void
+  onClear?: () => void
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 9px' }}>
+      {TAB_COLORS.map(c => {
+        const selected = current?.toLowerCase() === c.toLowerCase()
+        return (
+          <button
+            key={c}
+            role="menuitem"
+            aria-label={`Color ${c}`}
+            onClick={() => onPick(c)}
+            style={{
+              width: 16, height: 16, borderRadius: '50%', background: c, cursor: 'pointer', padding: 0,
+              border: selected ? '2px solid var(--text)' : '2px solid transparent',
+              boxShadow: selected ? `0 0 0 1.5px ${c}` : 'none',
+            }}
+          />
+        )
+      })}
+      {onClear && (
+        <button
+          role="menuitem"
+          aria-label="Default color"
+          title="Theme default"
+          onClick={onClear}
+          style={{
+            width: 16, height: 16, borderRadius: '50%', background: 'transparent', cursor: 'pointer', padding: 0,
+            border: !current ? '2px solid var(--text)' : '1.5px dashed var(--dim)',
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/** Right-click menu for a session tab: pick the tab's accent color, or re-home
+ *  the session into another workspace (its process keeps running; it arrives
+ *  there as a loose tab). */
 function TabContextMenu({ menu, onClose }: { menu: TabMenuState; onClose: () => void }) {
   const s = useConductorSelector(x => ({ workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, detachedWorkspaces: x.detachedWorkspaces }), shallowEqual)
-  const { moveSessionToWorkspace } = useActions()
+  // the color highlight tracks the live agent record, not the snapshot the
+  // menu opened with
+  const liveColor = useConductorSelector(x => x.agents.find(a => a.id === menu.agent.id)?.color)
+  const { moveSessionToWorkspace, setTabColor } = useActions()
   const sourceWorkspace = menu.agent.workspaceId ?? s.activeWorkspace
   const targets = s.workspaces.filter(w => w.id !== sourceWorkspace)
   const detached = new Set(s.detachedWorkspaces ?? [])
@@ -54,11 +98,15 @@ function TabContextMenu({ menu, onClose }: { menu: TabMenuState; onClose: () => 
       onClose={onClose}
       header={(
         <>
-          <div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)' }}>MOVE SESSION</div>
+          <div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)' }}>SESSION TAB</div>
           <div style={{ marginTop: 2, fontSize: 11.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{menu.agent.name}</div>
         </>
       )}
     >
+        <div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)', padding: '6px 9px 0' }}>TAB COLOR</div>
+        <ColorSwatches current={liveColor} onPick={c => setTabColor(menu.agent.id, c)} />
+        <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0' }} />
+        <div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)', padding: '2px 9px 0' }}>MOVE TO WORKSPACE</div>
         {targets.length === 0 && (
           <div style={{ fontSize: 11.5, color: 'var(--dim)', padding: '8px 9px' }}>No other workspaces</div>
         )}
@@ -83,6 +131,30 @@ function TabContextMenu({ menu, onClose }: { menu: TabMenuState; onClose: () => 
                 </button>
               )
             })}
+    </ContextMenu>
+  )
+}
+
+interface GroupMenuState { x: number; y: number; groupId: string }
+
+/** Right-click menu for a tab-group pill: pick the group's border color. */
+function GroupContextMenu({ menu, onClose }: { menu: GroupMenuState; onClose: () => void }) {
+  const color = useConductorSelector(x => x.groups.find(g => g.id === menu.groupId)?.color)
+  const { setGroupColor } = useActions()
+  return (
+    <ContextMenu
+      x={menu.x}
+      y={menu.y}
+      width={188}
+      label="Tab group color"
+      onClose={onClose}
+      header={<div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)' }}>GROUP COLOR</div>}
+    >
+      <ColorSwatches
+        current={color}
+        onPick={c => setGroupColor(menu.groupId, c)}
+        onClear={() => setGroupColor(menu.groupId, null)}
+      />
     </ContextMenu>
   )
 }
@@ -280,6 +352,13 @@ export function Workspace() {
     e.stopPropagation()
     setTabMenu({ x: e.clientX, y: e.clientY, agent: a })
   }
+  const [groupMenu, setGroupMenu] = useState<GroupMenuState | null>(null)
+  const closeGroupMenu = useCallback(() => setGroupMenu(null), [])
+  const openGroupMenu = (e: MouseEvent, groupId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setGroupMenu({ x: e.clientX, y: e.clientY, groupId })
+  }
   const byId = new Map(s.agents.map(a => [a.id, a]))
   const taskByAgent = new Map<string, BoardTask>()
   for (const task of s.tasks) {
@@ -382,10 +461,10 @@ export function Workspace() {
                   className="tab-btn"
                   aria-label={a ? `${a.name} · ${a.repo}` : undefined}
                   onClick={() => (a ? focusTab(a.id) : activateGroup(g.id))}
-                  onContextMenu={a ? e => openTabMenu(e, a) : undefined}
+                  onContextMenu={a ? e => openTabMenu(e, a) : e => openGroupMenu(e, g.id)}
                   style={{
                     background: activeG ? 'var(--panel2)' : 'transparent',
-                    borderTop: `2px solid ${activeG ? (a?.color ?? 'var(--line2)') : 'transparent'}`,
+                    borderTop: `2px solid ${activeG ? (g.color ?? a?.color ?? 'var(--line2)') : g.color ?? 'transparent'}`,
                   }}
                 >
                   {a ? tabDot(a) : <LayoutGlyph rows={groupRows(g)} color="var(--dim)" />}
@@ -403,14 +482,17 @@ export function Workspace() {
               <div
                 key={g.id}
                 onClick={() => { if (!activeG) activateGroup(g.id) }}
+                onContextMenu={e => openGroupMenu(e, g.id)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, padding: '0 4px 0 8px',
                   height: 34, background: activeG ? 'var(--panel2)' : 'transparent', borderRadius: 9,
-                  border: `1px solid ${activeG ? hexToRgba(ACCENT, 0.35) : 'var(--line2)'}`,
+                  border: `1px solid ${g.color
+                    ? hexToRgba(g.color, activeG ? 0.75 : 0.4)
+                    : activeG ? hexToRgba(ACCENT, 0.35) : 'var(--line2)'}`,
                   cursor: activeG ? 'default' : 'pointer',
                 }}
               >
-                <span title={`Split view · ${members.length} sessions`} style={{ color: activeG ? 'var(--accent)' : 'var(--dim)', display: 'flex', marginRight: 4 }}>
+                <span title={`Split view · ${members.length} sessions`} style={{ color: g.color ?? (activeG ? 'var(--accent)' : 'var(--dim)'), display: 'flex', marginRight: 4 }}>
                   <LayoutGlyph rows={groupRows(g)} color="currentColor" />
                 </span>
                 {members.map(({ agent: a, slot }) => {
@@ -553,6 +635,7 @@ export function Workspace() {
         </div>
       )}
       {tabMenu && <TabContextMenu menu={tabMenu} onClose={closeTabMenu} />}
+      {groupMenu && <GroupContextMenu menu={groupMenu} onClose={closeGroupMenu} />}
       {s.newSessionOpen && <NewSessionDialog onClose={closeNewSession} />}
     </div>
   )

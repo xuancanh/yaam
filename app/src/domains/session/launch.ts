@@ -2,7 +2,7 @@
 // and the exact command to spawn, without touching state, terminals, or the
 // backend. The provider applies the plan (dispatch + terminal + native spawn).
 import type { Agent, AgentType, Machine, SandboxConfig } from '../../core/types'
-import { defaultDetail, mkMemory, mkTools } from '../../core/data'
+import { defaultDetail, mkMemory, mkTools, TAB_COLORS } from '../../core/data'
 import { mkId } from '../../shared/id'
 import { typeForCommand } from './command'
 
@@ -26,15 +26,13 @@ export interface LaunchPlan {
   launchType?: AgentType
 }
 
-const REAL_COLORS = ['#7FD1FF', '#F5C451', '#3DDC97', '#FF9B9B', '#C77DFF', '#E8A87C']
-
 export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeWorkspace: string, machine?: Machine): LaunchPlan | null {
   const { command, cwd, nameHint, typeId, workspaceId, opts } = input
   const trimmed = command.trim()
   if (!trimmed) return null
   const id = mkId('a')
   const bin = trimmed.split(/\s+/)[0].split('/').pop() || trimmed
-  const color = REAL_COLORS[Math.floor(Math.random() * REAL_COLORS.length)]
+  const color = TAB_COLORS[Math.floor(Math.random() * TAB_COLORS.length)]
   const dir = cwd.trim()
   const launchType = agentTypes.find(t => t.id === (typeId ?? '')) ?? typeForCommand(trimmed, agentTypes)
   // Deterministic Claude sessions: Claude Code honors `--session-id <uuid>`, so

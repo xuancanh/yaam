@@ -69,6 +69,10 @@ export const WORKSPACE_COLORS = ['#F5C451', '#3DDC97', '#7FD1FF', '#A371F7', '#F
 /** The default workspace accent (matches --accent). */
 export const DEFAULT_WORKSPACE_COLOR = WORKSPACE_COLORS[0]
 
+/** Session/tab accent swatches: assigned randomly at launch, configurable from
+ *  the tab context menu, and offered as tab-group border colors. */
+export const TAB_COLORS = ['#7FD1FF', '#F5C451', '#3DDC97', '#FF9B9B', '#C77DFF', '#E8A87C'] as const
+
 export const DIFF_COLORS: Record<string, string> = {
   add: '#7FE3B0',
   del: '#FF9B9B',

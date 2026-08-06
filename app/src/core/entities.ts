@@ -1058,6 +1058,8 @@ export interface ArchivedWorkspace {
  *  Single-slot groups render as plain tabs; multi-slot groups as merged tabs. */
 export interface TabGroup {
   id: string
+  /** border accent (hex) for this group's tab pill — absent = theme default */
+  color?: string
   /** pane slots: length = chosen layout (1–6), null = empty slot awaiting assignment */
   slots: (string | null)[]
   /** legacy 2-pane orientation flag (pre-`rows`): stacked top/bottom */

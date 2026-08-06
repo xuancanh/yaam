@@ -21,6 +21,10 @@ export interface SessionLayoutActions {
   restoreSession: (id: string) => void
   setRowSplit: (v: number) => void
   setColSplit: (row: number, v: number) => void
+  /** recolor a session's tab accent (border + tints) */
+  setTabColor: (id: string, color: string) => void
+  /** recolor a tab group's pill border; null restores the theme default */
+  setGroupColor: (gid: string, color: string | null) => void
 }
 
 export function useSessionLayoutActions(): SessionLayoutActions {
@@ -178,6 +182,16 @@ export function createSessionLayoutActions(): SessionLayoutActions {
     // restoring from the dock: focusSessionIn already prefers an empty slot of
     // the active group and otherwise opens the session as its own tab
     restoreSession: id => dispatch(s => focusSessionIn(s, id)),
+
+    setTabColor: (id, color) => dispatch(s => ({
+      ...s,
+      agents: s.agents.map(a => (a.id === id ? { ...a, color } : a)),
+    })),
+
+    setGroupColor: (gid, color) => dispatch(s => ({
+      ...s,
+      groups: s.groups.map(g => (g.id === gid ? { ...g, color: color ?? undefined } : g)),
+    })),
 
     setRowSplit: v => dispatch(s => withActiveGroup(s, g => ({ ...g, splits: { ...g.splits, row: v } }))),
     setColSplit: (row, v) => dispatch(s => withActiveGroup(s, g => {
