@@ -5,6 +5,7 @@ import { useAppStore } from '../../core/store'
 import { AddonSource } from './AddonSource'
 import { AddonDetail } from './AddonDetail'
 import { withViewCsp } from './view-csp'
+import { isTauri, previewClear, previewStash } from '../../core/native'
 import { addonSnapshot } from '../../core/addons'
 import type { Addon } from '../../core/types'
 import { IC, Icon, MasterMark, ViewHeader } from '../../components/ui'
@@ -96,6 +97,30 @@ export function AddonView() {
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
   const addon = s.addons.find(a => a.id === s.activeAddon)
+  const html = addon?.html
+
+  // Serve the view from the yaampreview origin: a srcdoc iframe INHERITS the
+  // app's strict CSP (script-src 'self'), which blocks every inline <script>
+  // an addon ships. The custom scheme gives the document its own policy
+  // container, where the prepended VIEW_CSP meta governs instead. Browser
+  // builds have no scheme and fall back to srcDoc (views degrade there).
+  const [viewUrl, setViewUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!html) { setViewUrl(null); return }
+    let alive = true
+    let stashedId: string | null = null
+    void previewStash(withViewCsp(html)).then(res => {
+      if (!res) return
+      if (!alive) { void previewClear(res.id); return }
+      stashedId = res.id
+      setViewUrl(res.url)
+    })
+    return () => {
+      alive = false
+      if (stashedId) void previewClear(stashedId)
+      setViewUrl(null)
+    }
+  }, [html])
 
   // Push the latest state snapshot into the addon iframe — only when the
   // addon actually holds state:read; otherwise it gets a denial marker.
@@ -175,7 +200,7 @@ export function AddonView() {
           key={addon.id + addon.createdAt}
           title={addon.name}
           sandbox="allow-scripts"
-          srcDoc={withViewCsp(addon.html)}
+          {...(viewUrl ? { src: viewUrl } : isTauri ? {} : { srcDoc: withViewCsp(addon.html) })}
           onLoad={push}
           style={{ flex: 1, border: 'none', background: 'var(--bg2)' }}
         />
