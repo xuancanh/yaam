@@ -3,6 +3,7 @@ import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { APP_VERSION } from '../../core/addons'
 import { isSatelliteWindow } from '../../core/window-role'
 import { NOTIF_COLORS, WORKSPACE_COLORS, DEFAULT_WORKSPACE_COLOR, hexToRgba } from '../../core/data'
+import { ColorSwatches } from '../../components/ColorSwatches'
 import { EditableName, IC, Icon, MasterMark } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
 
@@ -93,23 +94,13 @@ function WorkspaceSwitcher() {
               </div>
             ))}
             {active && (
-              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, padding: '9px 10px 7px', borderTop: '1px solid var(--line)', marginTop: 4 }}>
-                <span style={{ fontSize: 11, color: 'var(--dim)', marginRight: 2 }}>Accent</span>
-                {WORKSPACE_COLORS.map(c => {
-                  const on = (active.color ?? DEFAULT_WORKSPACE_COLOR) === c
-                  return (
-                    <button
-                      key={c}
-                      title={`Set “${active.name}” accent`}
-                      onClick={() => setWorkspaceColor(active.id, c)}
-                      style={{
-                        width: 16, height: 16, borderRadius: '50%', background: c, padding: 0, cursor: 'pointer',
-                        border: on ? '2px solid var(--text)' : '2px solid transparent',
-                        boxShadow: on ? `0 0 0 1px ${c}` : 'none',
-                      }}
-                    />
-                  )
-                })}
+              <div style={{ display: 'flex', alignItems: 'center', padding: '2px 1px 0 10px', borderTop: '1px solid var(--line)', marginTop: 4 }}>
+                <span style={{ fontSize: 11, color: 'var(--dim)', marginRight: 2, paddingTop: 4 }}>Accent</span>
+                <ColorSwatches
+                  colors={WORKSPACE_COLORS}
+                  current={active.color ?? DEFAULT_WORKSPACE_COLOR}
+                  onPick={c => setWorkspaceColor(active.id, c)}
+                />
               </div>
             )}
             <button

@@ -5,6 +5,7 @@ import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR, TAB_COLORS } from 
 import type { Agent, BoardTask, TabGroup } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { ContextMenu } from '../../components/ContextMenu'
+import { ColorSwatches } from '../../components/ColorSwatches'
 import { RunControl } from '../board/RunControl'
 import { NewSessionDialog } from './NewSessionDialog'
 import { Divider } from './Divider'
@@ -37,46 +38,6 @@ const sameRows = (a: number[], b: number[]) => a.length === b.length && a.every(
 
 interface TabMenuState { x: number; y: number; agent: Agent }
 
-/** Row of clickable color swatches (shared by the tab and group menus). */
-function ColorSwatches({ current, onPick, onClear }: {
-  current: string | undefined
-  onPick: (color: string) => void
-  onClear?: () => void
-}) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7, padding: '7px 9px' }}>
-      {TAB_COLORS.map(c => {
-        const selected = current?.toLowerCase() === c.toLowerCase()
-        return (
-          <button
-            key={c}
-            role="menuitem"
-            aria-label={`Color ${c}`}
-            onClick={() => onPick(c)}
-            style={{
-              width: 16, height: 16, borderRadius: '50%', background: c, cursor: 'pointer', padding: 0,
-              border: selected ? '2px solid var(--text)' : '2px solid transparent',
-              boxShadow: selected ? `0 0 0 1.5px ${c}` : 'none',
-            }}
-          />
-        )
-      })}
-      {onClear && (
-        <button
-          role="menuitem"
-          aria-label="Default color"
-          title="Theme default"
-          onClick={onClear}
-          style={{
-            width: 16, height: 16, borderRadius: '50%', background: 'transparent', cursor: 'pointer', padding: 0,
-            border: !current ? '2px solid var(--text)' : '1.5px dashed var(--dim)',
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
 /** Right-click menu for a session tab: pick the tab's accent color, or re-home
  *  the session into another workspace (its process keeps running; it arrives
  *  there as a loose tab). */
@@ -104,7 +65,7 @@ function TabContextMenu({ menu, onClose }: { menu: TabMenuState; onClose: () => 
       )}
     >
         <div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)', padding: '6px 9px 0' }}>TAB COLOR</div>
-        <ColorSwatches current={liveColor} onPick={c => setTabColor(menu.agent.id, c)} />
+        <ColorSwatches colors={TAB_COLORS} current={liveColor} onPick={c => setTabColor(menu.agent.id, c)} />
         <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0' }} />
         <div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)', padding: '2px 9px 0' }}>MOVE TO WORKSPACE</div>
         {targets.length === 0 && (
@@ -151,6 +112,7 @@ function GroupContextMenu({ menu, onClose }: { menu: GroupMenuState; onClose: ()
       header={<div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)' }}>GROUP COLOR</div>}
     >
       <ColorSwatches
+        colors={TAB_COLORS}
         current={color}
         onPick={c => setGroupColor(menu.groupId, c)}
         onClear={() => setGroupColor(menu.groupId, null)}
