@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import type { Agent, BoardTask } from '../../core/types'
 import { indicatorColor } from '../../core/data'
 import { readScreen } from '../../core/terminals'
+import { hasCreds } from '../../llm/client'
+import { useConductorSelector } from '../../store'
 import { sessionWorkStatus } from './session-work-status'
 
 type PreviewPlacement = 'vertical' | 'right'
@@ -15,6 +17,10 @@ function previewLines(agent: Agent): string[] {
 
 function PreviewCard({ agent, task, anchor, placement }: { agent: Agent; task?: BoardTask; anchor: HTMLElement; placement: PreviewPlacement }) {
   const status = sessionWorkStatus(agent, task)
+  // watcher/monitor briefs only exist when the Master Brain is enabled AND has
+  // credentials (the same gate every runner uses); otherwise the TASK/NOW/NEXT
+  // rows are permanent placeholders, so the preview reduces to the live terminal
+  const brainOn = useConductorSelector(x => x.settings.masterEnabled && hasCreds(x.settings))
   const card = useRef<HTMLDivElement>(null)
   const [lines, setLines] = useState(() => previewLines(agent))
   const [position, setPosition] = useState({ top: 0, left: 0, ready: false })
@@ -67,7 +73,7 @@ function PreviewCard({ agent, task, anchor, placement }: { agent: Agent; task?: 
         <strong style={{ minWidth: 0, flex: 1, fontSize: 12.5, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{agent.name}</strong>
         <span className="mono" style={{ fontSize: 9.5, color: 'var(--dim)', textTransform: 'uppercase' }}>{agent.status}</span>
       </div>
-      <div style={{ display: 'grid', gap: 7, padding: '10px 12px' }}>
+      {brainOn && <div style={{ display: 'grid', gap: 7, padding: '10px 12px' }}>
         {([
           ['TASK', status.task, 'var(--accent)'],
           ['NOW', status.current, 'var(--text)'],
@@ -83,11 +89,11 @@ function PreviewCard({ agent, task, anchor, placement }: { agent: Agent; task?: 
             {task.description}
           </div>
         )}
-      </div>
+      </div>}
       <div style={{ borderTop: '1px solid var(--line)', background: 'var(--bg)', padding: '8px 10px 9px' }}>
         <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 8.5, letterSpacing: .65, color: 'var(--dim)', marginBottom: 6 }}>
           <span style={{ width: 5, height: 5, borderRadius: '50%', background: agent.responding ? 'var(--green)' : 'var(--dim)' }} />
-          LIVE TERMINAL · EVIDENCE
+          {brainOn ? 'LIVE TERMINAL · EVIDENCE' : 'LIVE TERMINAL'}
         </div>
         <div className="mono" style={{ height: 128, overflow: 'hidden', fontSize: 9.5, lineHeight: 1.32, color: 'var(--mut2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
           {lines.length ? lines.join('\n') : 'No terminal output yet.'}
