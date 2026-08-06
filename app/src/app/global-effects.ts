@@ -33,18 +33,27 @@ export function useGlobalEffects(): void {
     }
   }, [])
 
-  // once per launch, well after startup work settles: surface a newer release
-  // via an OS notification (install stays a deliberate Settings → General click)
+  // update checks: once shortly after launch (delayed so startup work settles),
+  // then every 24h for long-running instances. A newer release only surfaces as
+  // an OS notification — install stays a deliberate Settings → General click.
   useEffect(() => {
-    const timer = window.setTimeout(async () => {
+    let notified = ''
+    const check = async () => {
       try {
         const update = await checkAppUpdate()
-        if (update && useAppStore.getState().settings.osNotifications !== false) {
+        // notify once per version per run, not on every daily re-check
+        if (update && update.version !== notified && useAppStore.getState().settings.osNotifications !== false) {
+          notified = update.version
           void osNotify('YAAM update available', `Version ${update.version} is ready — install it from Settings → General.`)
         }
       } catch { /* offline or endpoint missing — the manual check still exists */ }
-    }, 20_000)
-    return () => window.clearTimeout(timer)
+    }
+    const timer = window.setTimeout(check, 20_000)
+    const daily = window.setInterval(check, 24 * 60 * 60 * 1000)
+    return () => {
+      window.clearTimeout(timer)
+      window.clearInterval(daily)
+    }
   }, [])
 
   // surface background failures that would otherwise vanish (the webview console
