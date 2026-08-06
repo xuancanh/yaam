@@ -99,8 +99,11 @@ export function indicatorColor(a: Agent): string {
   return (STATUS_META[a.status] || STATUS_META.idle).color
 }
 
-/** Convert a six-digit hex color to an rgba() value with the requested alpha. */
-export function hexToRgba(hex: string, a: number): string {
+/** Convert a six-digit hex color to an rgba() value with the requested alpha.
+ *  Optional-color fields (Agent.color, TabGroup.color) are typed `string?` —
+ *  a missing color degrades to transparent rather than throwing on slice. */
+export function hexToRgba(hex: string | undefined, a: number): string {
+  if (!hex) return 'transparent'
   const n = parseInt(hex.slice(1), 16)
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
 }
