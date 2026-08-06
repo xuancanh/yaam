@@ -31,7 +31,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFCMTRBNDA0OTQ2MEJFQgpSV1RyQzBaSlFFcXhDcysxYUVGd254SUFkbnpLeUp3aEpBM0RwTUtORlpER05UU1VJOEcxQU92eAo=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYxQTQ4NTA5M0M0MEQ3QzUKUldURjEwQThDWVdrWVV0Rm5VQXpLNEM4S3ZKMHdxc0JpS2FzRlMvMmM1SnkxemFQenJ0L1dPZ3UK",
       "endpoints": [
         "https://github.com/xuancanh/yaam/releases/latest/download/latest.json"
       ]
