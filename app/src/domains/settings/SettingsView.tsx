@@ -7,6 +7,7 @@ import { Icon, Switch, ViewHeader } from '../../components/ui'
 import { DraftInput } from '../../components/DraftInput'
 import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
+import { UpdateSection } from './UpdateSection'
 
 /** One connect link with a copy button (transient ✓ feedback). */
 function ConnectLink({ label, url }: { label: string; url: string }) {
@@ -283,6 +284,7 @@ export function SettingsView() {
           {tab === 'assistants' && <AssistantsSection />}
 
           {tab === 'general' && <>
+          <UpdateSection />
           <SectionLabel>SESSION DEFAULTS</SectionLabel>
           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 13, padding: '5px 16px', marginBottom: 26 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>

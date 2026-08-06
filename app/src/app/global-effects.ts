@@ -6,6 +6,8 @@ import { dispatch, useAppStore } from '../core/store'
 import { setGithubTokenSource } from '../infrastructure/native/http'
 import { focusSessionIn, workspaceTabOrder, activeSessionId } from '../domains/session/layout-state'
 import { applyAppearance, steppedUiScale } from './appearance'
+import { checkAppUpdate } from '../infrastructure/native/app-update'
+import { osNotify } from '../infrastructure/native/notify'
 
 // GitHub fetchers read the PAT lazily from the live store (set once, module scope)
 setGithubTokenSource(() => useAppStore.getState().settings.githubToken ?? '')
@@ -29,6 +31,20 @@ export function useGlobalEffects(): void {
       unsub()
       mq?.removeEventListener?.('change', onScheme)
     }
+  }, [])
+
+  // once per launch, well after startup work settles: surface a newer release
+  // via an OS notification (install stays a deliberate Settings → General click)
+  useEffect(() => {
+    const timer = window.setTimeout(async () => {
+      try {
+        const update = await checkAppUpdate()
+        if (update && useAppStore.getState().settings.osNotifications !== false) {
+          void osNotify('YAAM update available', `Version ${update.version} is ready — install it from Settings → General.`)
+        }
+      } catch { /* offline or endpoint missing — the manual check still exists */ }
+    }, 20_000)
+    return () => window.clearTimeout(timer)
   }, [])
 
   // surface background failures that would otherwise vanish (the webview console

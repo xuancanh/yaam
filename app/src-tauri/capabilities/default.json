@@ -19,6 +19,8 @@
     "core:event:allow-listen",
     "dialog:default",
     "notification:default",
+    "updater:default",
+    "process:allow-restart",
     {
       "identifier": "http:default",
       "allow": [

@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.7.0"
+version = "0.7.2"
 description = "YAAM — Yet Another Agent Manager: a desktop manager for live coding-agent sessions"
 authors = ["xuancanh"]
 license = "MIT"
@@ -40,6 +40,8 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 if-addrs = "0.14"
 tokio-stream = { version = "0.1.18", features = ["sync"] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

@@ -23,6 +23,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // Give the webview a chance to flush persisted state before teardown:
         // veto the OS close, tell the frontend, and let it destroy the window
         // once its flush settles (it applies its own timeout so a stuck flush
