@@ -30,7 +30,24 @@ fi
 
 echo "── building ${TAG}"
 npm run build:mobile
-npm run tauri build
+if ! npm run tauri build; then
+  # The DMG's Finder icon-layout AppleScript fails without Automation
+  # permission (sandboxed/CI shells). The app bundle and updater artifacts
+  # are already built at that point — regenerate just the DMG with the
+  # plain layout, which needs no Finder scripting.
+  echo "── full build failed; rebuilding without DMG, then plain-layout DMG"
+  # updater artifacts are emitted after the DMG step, so the failed run never
+  # produced them — this app-only build does (fast: everything is cached)
+  npm run tauri build -- --bundles app
+  (
+    cd "${BUNDLE}/macos"
+    rm -f ../dmg/*.dmg rw.*.dmg
+    bash ../dmg/bundle_dmg.sh --skip-jenkins --volname YAAM \
+      --icon YAAM.app 180 170 --app-drop-link 480 170 --window-size 660 400 \
+      --hide-extension YAAM.app --volicon ../dmg/icon.icns \
+      "../dmg/YAAM_${VERSION}_aarch64.dmg" YAAM.app
+  )
+fi
 
 APP_TGZ="${BUNDLE}/macos/YAAM.app.tar.gz"
 SIG_FILE="${APP_TGZ}.sig"
