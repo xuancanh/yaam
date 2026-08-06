@@ -44,6 +44,9 @@ export function ContextMenu({ x, y, width = 224, label, header, onClose, childre
 
   const moveFocus = (event: ReactKeyboardEvent) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    // inputs inside the menu (e.g. the color picker's hue slider / hex field)
+    // own these keys — don't steal them for item navigation
+    if ((event.target as HTMLElement).closest('input, textarea, select')) return
     const items = Array.from(menu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])
     if (!items.length) return
     event.preventDefault()
