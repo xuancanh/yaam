@@ -30,15 +30,10 @@ fi
 
 echo "── building ${TAG}"
 npm run build:mobile
-if ! npm run tauri build; then
-  # The DMG's Finder icon-layout AppleScript fails without Automation
-  # permission (sandboxed/CI shells). The app bundle and updater artifacts
-  # are already built at that point — regenerate just the DMG with the
-  # plain layout, which needs no Finder scripting.
-  echo "── full build failed; rebuilding without DMG, then plain-layout DMG"
-  # updater artifacts are emitted after the DMG step, so the failed run never
-  # produced them — this app-only build does (fast: everything is cached)
-  npm run tauri build -- --bundles app
+
+# Regenerate just the DMG with the plain layout (no Finder scripting). Assumes
+# the app bundle and updater artifacts already exist under ${BUNDLE}.
+plain_dmg() {
   (
     cd "${BUNDLE}/macos"
     rm -f ../dmg/*.dmg rw.*.dmg
@@ -47,6 +42,25 @@ if ! npm run tauri build; then
       --hide-extension YAAM.app --volicon ../dmg/icon.icns \
       "../dmg/YAAM_${VERSION}_aarch64.dmg" YAAM.app
   )
+}
+
+if [[ -n "${SKIP_DMG_LAYOUT:-}" ]]; then
+  echo "── SKIP_DMG_LAYOUT=1: app-only build, then plain-layout DMG"
+  npm run tauri build -- --bundles app
+  plain_dmg
+elif ! npm run tauri build; then
+  # The DMG's Finder icon-layout AppleScript fails without Automation
+  # permission (sandboxed/CI shells), but so does everything earlier in the
+  # build — only treat it as the DMG step when the app bundle made it out.
+  # Updater artifacts are emitted after the DMG step, so the failed run never
+  # produced them; the app-only rebuild does (fast: everything is cached).
+  if [[ ! -d "${BUNDLE}/macos/YAAM.app" ]]; then
+    echo "build failed before the DMG step — not a Finder-permission issue" >&2
+    exit 1
+  fi
+  echo "── DMG layout scripting denied; rebuilding app-only, then plain-layout DMG"
+  npm run tauri build -- --bundles app
+  plain_dmg
 fi
 
 APP_TGZ="${BUNDLE}/macos/YAAM.app.tar.gz"
