@@ -663,6 +663,9 @@ export interface OrchestrationSettings {
   chatListWidth?: number
   /** Work view mode: tab groups & split panes, or the runs triage rail */
   workMode?: 'tabs' | 'runs'
+  /** Developer mode: in-app debug log (HTTP failures, console errors) and the
+   *  Web Inspector button in Settings → General */
+  devMode?: boolean
   /** Runs rail density: compact rows auto-open only when user action is needed */
   runListMode?: 'compact' | 'full'
   /** auto-compact a chat once one turn's input reaches this many tokens:

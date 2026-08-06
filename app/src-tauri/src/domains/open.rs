@@ -145,3 +145,10 @@ mod tests {
         }
     }
 }
+
+/// Open the webview's Web Inspector (Settings -> General -> Developer mode).
+/// The `devtools` cargo feature compiles the inspector into release builds.
+#[tauri::command]
+pub fn open_devtools(window: tauri::WebviewWindow) {
+    window.open_devtools();
+}

@@ -9,6 +9,7 @@ import { DraftInput } from '../../components/DraftInput'
 import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
 import { UpdateSection } from './UpdateSection'
+import { DeveloperSection } from './DeveloperSection'
 
 /** One connect link with a copy button (transient ✓ feedback). */
 function ConnectLink({ label, url }: { label: string; url: string }) {
@@ -376,6 +377,7 @@ export function SettingsView() {
             </div>
           </div>
 
+          <DeveloperSection />
           </>}
 
           {tab === 'types' && <TerminalAgentsSection />}

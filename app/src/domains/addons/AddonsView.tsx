@@ -6,6 +6,7 @@ import { ALL_PERMISSIONS, APP_VERSION, DANGEROUS_PERMISSIONS } from '../../core/
 import { IC, Icon, ViewHeader } from '../../components/ui'
 import { AddonDetail } from './AddonDetail'
 import { brainOn } from '../../llm/client'
+import { debugLog } from '../../core/debug-log'
 
 const PERM_LABEL = new Map(ALL_PERMISSIONS.map(p => [p.id, p.label]))
 
@@ -225,6 +226,7 @@ export function AddonsView() {
         for (const p of packages) all.push({ ...p, url: resolvePkgUrl(p.url, base), registry: reg.name })
       } catch (e) {
         errors[reg.name] = e instanceof Error ? e.message : String(e)
+        debugLog('registry', `addon registry '${reg.name}' (${reg.url}) failed: ${errors[reg.name]}`)
       }
     }))
     setMarket(all)

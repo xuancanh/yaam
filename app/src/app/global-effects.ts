@@ -7,10 +7,14 @@ import { setGithubTokenSource } from '../infrastructure/native/http'
 import { focusSessionIn, workspaceTabOrder, activeSessionId } from '../domains/session/layout-state'
 import { applyAppearance, steppedUiScale } from './appearance'
 import { checkAppUpdate } from '../infrastructure/native/app-update'
+import { hookConsole } from '../core/debug-log'
 import { osNotify } from '../infrastructure/native/notify'
 
 // GitHub fetchers read the PAT lazily from the live store (set once, module scope)
 setGithubTokenSource(() => useAppStore.getState().settings.githubToken ?? '')
+
+// mirror console.error/warn into the in-app debug log (Settings → Developer)
+hookConsole()
 
 export function useGlobalEffects(): void {
   // appearance: stamp theme/density/typography onto <html> now and on every
