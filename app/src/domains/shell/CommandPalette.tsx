@@ -101,6 +101,10 @@ export function CommandPalette() {
   const [sel, setSel] = useState(0)
   useEffect(() => setSel(0), [s.paletteQuery, s.paletteOpen])
   const selected = Math.min(sel, commands.length - 1)
+  // last real pointer position — keyboard-driven scrollIntoView re-fires
+  // mousemove on the row under the stationary cursor; same-coords events are
+  // scroll artifacts, not the user pointing, and must not steal the selection
+  const pointer = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     if (s.paletteOpen) inputRef.current?.focus()
@@ -166,7 +170,12 @@ export function CommandPalette() {
               key={c.id}
               className="palette-item"
               onClick={() => runCommand(c)}
-              onMouseMove={() => setSel(i)}
+              onMouseMove={e => {
+                const p = pointer.current
+                if (p && p.x === e.clientX && p.y === e.clientY) return
+                pointer.current = { x: e.clientX, y: e.clientY }
+                setSel(i)
+              }}
               ref={el => { if (i === selected) el?.scrollIntoView({ block: 'nearest' }) }}
               style={{
                 width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12,
