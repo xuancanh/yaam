@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { steppedUiScale } from '../../app/appearance'
 import type { View } from '../../core/types'
 import { Icon } from '../../components/ui'
+import { activeSessionId, workspaceTabOrder } from '../session/layout-state'
 
 const ICONS: Record<string, string[]> = {
   route: ['M4 6h9', 'M4 18h6', 'M13 6l3 3-3 3', 'M20 6v12'],
@@ -13,6 +14,7 @@ const ICONS: Record<string, string[]> = {
   play: ['M8 5l11 7-11 7z'],
   diff: ['M6 3v6a3 3 0 003 3h6', 'M18 21v-6a3 3 0 00-3-3H9', 'M4 5l2-2 2 2', 'M20 19l-2 2-2-2'],
   go: ['M5 12h14', 'M13 6l6 6-6 6'],
+  term: ['M4 5h16v14H4z', 'M7.5 9.5l3 2.5-3 2.5', 'M12.5 15h4'],
 }
 
 const NAV_COMMANDS: Array<[View, string, string?]> = [
@@ -37,7 +39,7 @@ interface Command {
 
 /** Filter keyboard actions and dispatch the selected command or session focus. */
 export function CommandPalette() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery, settings: x.settings }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery, settings: x.settings }), shallowEqual)
   const a = useActions()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -62,6 +64,21 @@ export function CommandPalette() {
       { id: 'master', label: `${s.settings.sidebarHidden ? 'Show' : 'Hide'} Master panel`, hint: '⌘B', icon: 'split', run: () => a.updateSettings({ sidebarHidden: !s.settings.sidebarHidden }) },
       { id: 'build', label: 'Build a tool or panel', hint: 'compose', icon: 'build', run: a.focusComposer },
     ]
+    // terminal navigation: jump to any session by name (⌘1–9 order), or cycle
+    const order = workspaceTabOrder({ agents: s.agents, groups: s.groups, activeWorkspace: s.activeWorkspace })
+    const byId = new Map(s.agents.map(x => [x.id, x]))
+    if (order.length > 1) {
+      const at = Math.max(0, order.indexOf(activeSessionId({ groups: s.groups, activeGroup: s.activeGroup }) ?? ''))
+      const step = (d: number) => a.focusTab(order[(at + d + order.length) % order.length])
+      cmds.push({ id: 'term-next', label: 'Focus next terminal', hint: 'navigate', icon: 'term', run: () => step(1) })
+      cmds.push({ id: 'term-prev', label: 'Focus previous terminal', hint: 'navigate', icon: 'term', run: () => step(-1) })
+    }
+    order.forEach((id, i) => {
+      const x = byId.get(id)
+      if (!x) return
+      const kbd = i < 9 ? `⌘${i + 1} · ` : ''
+      cmds.push({ id: `focus-${id}`, label: `Focus terminal · ${x.name}`, hint: `${kbd}${x.repo}`, icon: 'term', run: () => a.focusTab(id) })
+    })
     const workspaceAgents = s.agents.filter(x => !x.archived
       && x.kind !== 'chat'
       && (x.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
@@ -73,7 +90,12 @@ export function CommandPalette() {
       cmds.push({ id: `nav-${v}`, label, hint: kbd ?? 'navigate', icon: 'go', run: () => a.setView(v) }))
     const q = s.paletteQuery.toLowerCase().trim()
     return q ? cmds.filter(c => c.label.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q)) : cmds
-  }, [a, s.agents, s.activeWorkspace, s.settings.appearance, s.settings.sidebarHidden, s.paletteQuery])
+  }, [a, s.agents, s.activeWorkspace, s.groups, s.activeGroup, s.settings.appearance, s.settings.sidebarHidden, s.paletteQuery])
+
+  // keyboard cursor over the filtered list; follows the query, resets on open
+  const [sel, setSel] = useState(0)
+  useEffect(() => setSel(0), [s.paletteQuery, s.paletteOpen])
+  const selected = Math.min(sel, commands.length - 1)
 
   useEffect(() => {
     if (s.paletteOpen) inputRef.current?.focus()
@@ -89,9 +111,15 @@ export function CommandPalette() {
 
   // Navigate filtered commands and run the active row from the keyboard.
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (!commands.length) return
+      const d = e.key === 'ArrowDown' ? 1 : -1
+      setSel((selected + d + commands.length) % commands.length)
+    }
     if (e.key === 'Enter') {
       e.preventDefault()
-      if (commands[0]) runCommand(commands[0])
+      if (commands[selected]) runCommand(commands[selected])
     }
   }
 
@@ -128,14 +156,17 @@ export function CommandPalette() {
           <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)', border: '1px solid var(--line)', borderRadius: 5, padding: '2px 7px' }}>esc</span>
         </div>
         <div style={{ maxHeight: '52vh', overflowY: 'auto', padding: 8 }}>
-          {commands.map(c => (
+          {commands.map((c, i) => (
             <button
               key={c.id}
               className="palette-item"
               onClick={() => runCommand(c)}
+              onMouseMove={() => setSel(i)}
+              ref={el => { if (i === selected) el?.scrollIntoView({ block: 'nearest' }) }}
               style={{
                 width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12,
-                padding: '11px 12px', background: 'transparent', border: 'none', borderRadius: 9, color: 'var(--text)',
+                padding: '11px 12px', background: i === selected ? 'var(--bg2)' : 'transparent',
+                border: 'none', borderRadius: 9, color: 'var(--text)',
               }}
             >
               <span style={{
