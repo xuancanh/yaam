@@ -64,14 +64,20 @@ export const NOTIF_COLORS: Record<string, string> = {
 }
 
 /** Accent swatches a workspace can pick from; the first (yellow) is the default. */
-export const WORKSPACE_COLORS = ['#F5C451', '#3DDC97', '#7FD1FF', '#A371F7', '#FF7A7A', '#FFB020', '#8B93A1'] as const
+export const WORKSPACE_COLORS = [
+  '#F5C451', '#3DDC97', '#7FD1FF', '#A371F7', '#FF7A7A', '#FFB020',
+  '#FF7AC6', '#5EEAD4', '#A3E635', '#6C8CFF', '#E8A87C', '#8B93A1',
+] as const
 
 /** The default workspace accent (matches --accent). */
 export const DEFAULT_WORKSPACE_COLOR = WORKSPACE_COLORS[0]
 
 /** Session/tab accent swatches: assigned randomly at launch, configurable from
  *  the tab context menu, and offered as tab-group border colors. */
-export const TAB_COLORS = ['#7FD1FF', '#F5C451', '#3DDC97', '#FF9B9B', '#C77DFF', '#E8A87C'] as const
+export const TAB_COLORS = [
+  '#7FD1FF', '#F5C451', '#3DDC97', '#FF9B9B', '#C77DFF', '#E8A87C',
+  '#FFB020', '#FF7AC6', '#5EEAD4', '#A3E635', '#6C8CFF', '#8B93A1',
+] as const
 
 export const DIFF_COLORS: Record<string, string> = {
   add: '#7FE3B0',

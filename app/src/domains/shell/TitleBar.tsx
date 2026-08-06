@@ -93,7 +93,7 @@ function WorkspaceSwitcher() {
               </div>
             ))}
             {active && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 10px 7px', borderTop: '1px solid var(--line)', marginTop: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, padding: '9px 10px 7px', borderTop: '1px solid var(--line)', marginTop: 4 }}>
                 <span style={{ fontSize: 11, color: 'var(--dim)', marginRight: 2 }}>Accent</span>
                 {WORKSPACE_COLORS.map(c => {
                   const on = (active.color ?? DEFAULT_WORKSPACE_COLOR) === c

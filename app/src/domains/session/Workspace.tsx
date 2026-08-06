@@ -44,7 +44,7 @@ function ColorSwatches({ current, onPick, onClear }: {
   onClear?: () => void
 }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 9px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7, padding: '7px 9px' }}>
       {TAB_COLORS.map(c => {
         const selected = current?.toLowerCase() === c.toLowerCase()
         return (
@@ -456,6 +456,8 @@ export function Workspace() {
             if (members.length <= 1) {
               const a = members[0]?.agent
               if (!a && !activeG) return null
+              // the accent stays visible on inactive tabs, just dimmed
+              const accent = g.color ?? a?.color
               const button = (
                 <button
                   className="tab-btn"
@@ -464,7 +466,9 @@ export function Workspace() {
                   onContextMenu={a ? e => openTabMenu(e, a) : e => openGroupMenu(e, g.id)}
                   style={{
                     background: activeG ? 'var(--panel2)' : 'transparent',
-                    borderTop: `2px solid ${activeG ? (g.color ?? a?.color ?? 'var(--line2)') : g.color ?? 'transparent'}`,
+                    borderTop: `2px solid ${activeG
+                      ? accent ?? 'var(--line2)'
+                      : accent ? hexToRgba(accent, 0.45) : 'transparent'}`,
                   }}
                 >
                   {a ? tabDot(a) : <LayoutGlyph rows={groupRows(g)} color="var(--dim)" />}
@@ -533,7 +537,7 @@ export function Workspace() {
               aria-label={`${a.name} · ${a.repo}`}
               onClick={() => focusTab(a.id)}
               onContextMenu={e => openTabMenu(e, a)}
-              style={{ background: 'transparent', borderTop: '2px solid transparent' }}
+              style={{ background: 'transparent', borderTop: `2px solid ${hexToRgba(a.color, 0.45)}` }}
             >
               {tabDot(a)}
               <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--mut2)', whiteSpace: 'nowrap' }}>{a.name}</span>
