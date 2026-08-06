@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { DragEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { brainOn } from '../../llm/client'
 import { ACCENT } from '../../core/data'
 import type { Agent, BoardCol, BoardTask } from '../../core/types'
 import { IC, Icon, ViewHeader } from '../../components/ui'
@@ -371,6 +372,7 @@ function SchedulePopover({ card, onClose }: { card: BoardTask; onClose: () => vo
 /** Render a draggable task summary with worker and watcher status. */
 function Card({ card, agent, onOpen, onReview }: { card: BoardTask; agent: Agent | null; onOpen: () => void; onReview: () => void }) {
   const s = useConductorSelector(x => ({ templates: x.templates }), shallowEqual)
+  const watcherOn = useConductorSelector(x => brainOn(x.settings))
   const { startCardDrag, archiveTask, startTask } = useActions()
   const [scheduling, setScheduling] = useState(false)
   const unread = (card.chat ?? []).length
@@ -434,7 +436,7 @@ function Card({ card, agent, onOpen, onReview }: { card: BoardTask; agent: Agent
           <span style={{ fontSize: 11, color: 'var(--mut2)', whiteSpace: 'nowrap' }}>{agent.name}</span>
         ) : (
           <button
-            title="Spawn a one-shot session; the task's watcher drives it"
+            title={watcherOn ? "Spawn a one-shot session; the task's watcher drives it" : 'Spawn a one-shot session (no watcher — Master Brain is off)'}
             onClick={e => { e.stopPropagation(); startTask(card.id) }}
             style={{
               display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none',
@@ -491,6 +493,7 @@ const COLS: Array<{ id: BoardCol; label: string; dot: string }> = [
 /** Render the active workspace's draggable watcher-driven kanban board. */
 export function Board() {
   const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, dragOverCol: x.dragOverCol, newTaskOpen: x.newTaskOpen, focusTaskId: x.focusTaskId }), shallowEqual)
+  const watcherOn = useConductorSelector(x => brainOn(x.settings))
   const { enterCol, dropTo, closeNewTask, clearBoardFocus } = useActions()
   const [creating, setCreating] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
@@ -517,7 +520,9 @@ export function Board() {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <ViewHeader title="Task board">
         <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>
-          Each started task gets a one-shot session driven by its own watcher — click a card for details & chat
+          {watcherOn
+            ? 'Each started task gets a one-shot session driven by its own watcher — click a card for details & chat'
+            : 'Each started task gets a one-shot session — add a Master Brain in Settings for a watcher that steers and judges it'}
         </span>
         <div style={{ flex: 1 }} />
         <button

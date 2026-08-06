@@ -5,6 +5,7 @@ import type { Addon } from '../../core/types'
 import { ALL_PERMISSIONS, APP_VERSION, DANGEROUS_PERMISSIONS } from '../../core/addons'
 import { IC, Icon, ViewHeader } from '../../components/ui'
 import { AddonDetail } from './AddonDetail'
+import { brainOn } from '../../llm/client'
 
 const PERM_LABEL = new Map(ALL_PERMISSIONS.map(p => [p.id, p.label]))
 
@@ -258,7 +259,13 @@ export function AddonsView() {
       <ViewHeader title="Addons">
         <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>Views, Master tools, hooks, and agents — installable, permission-scoped, LLM-generatable</span>
         <div style={{ flex: 1 }} />
-        <button className="approve-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12 }} onClick={() => setGenerating(true)}>✦ Generate…</button>
+        <button
+          className="approve-btn"
+          disabled={!brainOn(s.settings)}
+          title={brainOn(s.settings) ? 'Describe an addon and let the Master Brain build it' : 'Needs the Master Brain — enable it with credentials in Settings'}
+          style={{ flex: 'none', padding: '6px 14px', fontSize: 12, opacity: brainOn(s.settings) ? 1 : 0.45 }}
+          onClick={() => setGenerating(true)}
+        >✦ Generate…</button>
         <button className="open-btn" style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={installAddonFromFile}>Install file…</button>
         <button className="open-btn" title="Multi-file addon: addon.yaml + view.html / tools/*.js / hooks/*.js" style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={installAddonFromFolder}>Install folder…</button>
         <button className="open-btn" title="Install a folder AND watch it — edits (or yaam-addon rebuilds into it) hot-reload the addon" style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={installAddonForDev}>Dev install…</button>

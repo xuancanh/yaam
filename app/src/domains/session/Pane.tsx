@@ -10,6 +10,7 @@ import { HistoryList } from '../../components/HistoryList'
 import { ContextMenu } from '../../components/ContextMenu'
 import { ChatPane } from '../chat/ChatPane'
 import { TaskReviewFooter, WatcherChat } from '../board/WatcherChat'
+import { brainOn } from '../../llm/client'
 import { Divider } from './Divider'
 import { FilesPane } from './FilesPane'
 import { GitPopup, GitWorkbench } from './GitPanel'
@@ -119,6 +120,9 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
   // the board task this session is working (drives the review footer in Changes)
   const task = useConductorSelector(x => x.tasks.find(t =>
     !t.archived && (t.agentId === agent.id || (t.agentIds ?? []).includes(agent.id))))
+  // watcher chat is only worth a toggle when the brain can answer — or when an
+  // earlier brain-on run already left a conversation worth reading
+  const watcherAvailable = useConductorSelector(x => brainOn(x.settings))
   const fs = useMemo(() => sessionFs(agent.machine, agent.id), [agent.machine, agent.id])
   const machineLabel = agent.machine ? (agent.machine.label || 'remote') : ''
   const [filesOpen, setFilesOpen] = useState(filesOpenCache.get(agent.id) ?? false)
@@ -221,7 +225,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={15} stroke={1.7} />
           </button>
         )}
-        {task && (
+        {task && (watcherAvailable || (task.chat ?? []).some(m => m.role !== 'system')) && (
           <button
             className="icon-btn"
             title={watcherOpen ? 'Hide the watcher chat' : "Watcher — the task's monitor conversation: progress notes, questions, and your replies"}

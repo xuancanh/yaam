@@ -6,6 +6,7 @@ import { Pane } from '../session/Pane'
 import { SessionHoverPreview } from '../session/SessionHoverPreview'
 import { sessionWorkStatus } from '../session/session-work-status'
 import { useDiffStats } from '../session/diff-stats'
+import { brainOn } from '../../llm/client'
 import { groupRuns, runNeedsUserAction, runStatusLabel } from './run-state'
 import type { RunFilter, RunRef } from './run-state'
 import { WatcherChat } from './WatcherChat'
@@ -32,13 +33,15 @@ function runCwd(run: RunRef): string | undefined {
 
 /** One selectable run row: status dot, title, working folder, live diff stats,
  *  and an inline start for unstarted tasks (backlog). */
-function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, onSelect }: {
+function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, briefsOn, onSelect }: {
   run: RunRef
   linkedTask?: BoardTask
   stats?: { add: number; del: number; files: number }
   selected: boolean
   shortcut?: number
   showDetails: boolean
+  /** Master Brain on: TASK/NOW/NEXT briefs exist and are worth the rows */
+  briefsOn: boolean
   onSelect: () => void
 }) {
   const { startTask } = useActions()
@@ -47,7 +50,8 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, onSel
   const st = runStatusLabel(run)
   const work = sessionWorkStatus(agent, task)
   const flash = st.tone === 'amber'
-  const expanded = showDetails || runNeedsUserAction(run)
+  // without the brain the briefs are permanent placeholders — never expand
+  const expanded = briefsOn && (showDetails || runNeedsUserAction(run))
   const startable = !!task && !agent && task.col !== 'done' && task.col !== 'failed'
   const cwd = runCwd(run)
   const folder = cwd?.replace(/\/+$/, '').split('/').pop()
@@ -171,6 +175,7 @@ export function RunControl() {
   const s = useConductorSelector(x => ({
     tasks: x.tasks, agents: x.agents, activeWorkspace: x.activeWorkspace,
     runListMode: x.settings.runListMode ?? 'compact',
+    briefsOn: brainOn(x.settings),
   }), shallowEqual)
   const { updateSettings } = useActions()
   const [filter, setFilter] = useState<RunFilter>('all')
@@ -241,7 +246,7 @@ export function RunControl() {
             </button>
           ))}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '0 7px 5px' }}>
+        {s.briefsOn && <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '0 7px 5px' }}>
           <span className="mono" style={{ flex: 1, fontSize: 8.5, letterSpacing: .55, color: 'var(--faint)' }}>VIEW</span>
           {(['compact', 'full'] as const).map(mode => (
             <button
@@ -258,7 +263,7 @@ export function RunControl() {
               {mode}
             </button>
           ))}
-        </div>
+        </div>}
         {!flat.length && (
           <div style={{ padding: '18px 10px', fontSize: 11.5, color: 'var(--dim)', textAlign: 'center' }}>
             No runs match this filter.
@@ -284,6 +289,7 @@ export function RunControl() {
                   selected={selected?.key === run.key}
                   shortcut={ix <= 9 ? ix : undefined}
                   showDetails={s.runListMode === 'full'}
+                  briefsOn={s.briefsOn}
                   onSelect={() => setSelKey(run.key)}
                 />
               )

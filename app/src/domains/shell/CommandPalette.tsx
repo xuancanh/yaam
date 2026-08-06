@@ -5,6 +5,7 @@ import { steppedUiScale } from '../../app/appearance'
 import type { View } from '../../core/types'
 import { Icon } from '../../components/ui'
 import { activeSessionId, workspaceTabOrder } from '../session/layout-state'
+import { brainOn } from '../../llm/client'
 
 const ICONS: Record<string, string[]> = {
   route: ['M4 6h9', 'M4 18h6', 'M13 6l3 3-3 3', 'M20 6v12'],
@@ -47,8 +48,10 @@ export function CommandPalette() {
   const commands = useMemo<Command[]>(() => {
     const zoom = (dir: -1 | 0 | 1) =>
       a.updateSettings({ appearance: { ...s.settings.appearance, uiScale: steppedUiScale(s.settings.appearance?.uiScale, dir) } })
+    const master = brainOn(s.settings)
     const cmds: Command[] = [
-      { id: 'route', label: 'Route a task…', hint: 'compose', icon: 'route', run: a.focusComposer },
+      // the master composer can only refuse without a brain — route to Settings
+      ...(master ? [{ id: 'route', label: 'Route a task…', hint: 'compose', icon: 'route', run: a.focusComposer }] : []),
       { id: 'new', label: 'New agent session', hint: '⌘T', icon: 'plus', run: a.openNewSession },
       { id: 'newtask', label: 'New board task', hint: '⌘N', icon: 'plus', run: a.openNewTask },
       { id: 'layout-1', label: 'Layout: single pane', hint: 'layout', icon: 'split', run: () => a.setPaneLayout([1]) },
@@ -62,7 +65,9 @@ export function CommandPalette() {
       { id: 'zoom-out', label: 'Zoom out', hint: '⌘−', icon: 'go', run: () => zoom(-1) },
       { id: 'zoom-reset', label: 'Reset zoom', hint: '⌘0', icon: 'go', run: () => zoom(0) },
       { id: 'master', label: `${s.settings.sidebarHidden ? 'Show' : 'Hide'} Master panel`, hint: '⌘B', icon: 'split', run: () => a.updateSettings({ sidebarHidden: !s.settings.sidebarHidden }) },
-      { id: 'build', label: 'Build a tool or panel', hint: 'compose', icon: 'build', run: a.focusComposer },
+      ...(master
+        ? [{ id: 'build', label: 'Build a tool or panel', hint: 'compose', icon: 'build', run: a.focusComposer }]
+        : [{ id: 'brain', label: 'Set up the Master Brain…', hint: 'settings', icon: 'build', run: () => a.setView('settings') }]),
     ]
     // terminal navigation: jump to any session by name (⌘1–9 order), or cycle
     const order = workspaceTabOrder({ agents: s.agents, groups: s.groups, activeWorkspace: s.activeWorkspace })
@@ -90,7 +95,7 @@ export function CommandPalette() {
       cmds.push({ id: `nav-${v}`, label, hint: kbd ?? 'navigate', icon: 'go', run: () => a.setView(v) }))
     const q = s.paletteQuery.toLowerCase().trim()
     return q ? cmds.filter(c => c.label.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q)) : cmds
-  }, [a, s.agents, s.activeWorkspace, s.groups, s.activeGroup, s.settings.appearance, s.settings.sidebarHidden, s.paletteQuery])
+  }, [a, s.agents, s.activeWorkspace, s.groups, s.activeGroup, s.settings, s.paletteQuery])
 
   // keyboard cursor over the filtered list; follows the query, resets on open
   const [sel, setSel] = useState(0)

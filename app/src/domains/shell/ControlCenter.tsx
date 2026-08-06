@@ -4,6 +4,7 @@ import { AgentAvatar, EditableName, IC, Icon, StatusPill, ViewHeader } from '../
 import { UsageSummary } from './UsageSummary'
 import { confirmAction } from '../../components/Confirm'
 import { sessionWorkStatus } from '../session/session-work-status'
+import { brainOn } from '../../llm/client'
 import type { SessionWorkStatus } from '../session/session-work-status'
 
 /** Compact inline token/cost readout with a slim budget bar for one agent row. */
@@ -72,7 +73,7 @@ export function ControlCenter() {
 /** The fleet as an ops console: aggregate stats, Master's routing, live
  *  session/chat/watcher cards, and the archived shelf. */
 function FleetView() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, tasks: x.tasks }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, tasks: x.tasks, briefsOn: brainOn(x.settings) }), shallowEqual)
   const { focusTab, resume, openPanel, openAgent, openDiff, renameSession, archiveSession, unarchiveSession, deleteSession, openChat, setView } = useActions()
   // Keep legacy sessions without workspaceId in the active workspace.
   const inWs = (a: typeof s.agents[number]) => (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace
@@ -101,6 +102,12 @@ function FleetView() {
         </div>
 
         <UsageSummary />
+        {!s.briefsOn && active.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: '9px 13px', marginBottom: 14, fontSize: 11.5, color: 'var(--mut)' }}>
+            <span style={{ flex: 1 }}>Status briefs are off — add a Master Brain for live Task / Now / Next summaries on every card.</span>
+            <button className="open-btn" style={{ flex: 'none', padding: '5px 11px', fontSize: 11 }} onClick={() => setView('settings')}>Open Settings</button>
+          </div>
+        )}
         <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))' }}>
           {active.map(a => {
             const memOn = a.memory.filter(m => m.on).length
@@ -118,7 +125,7 @@ function FleetView() {
                   </div>
                   <StatusPill agent={a} small />
                 </div>
-                <WorkBrief work={work} needsAction={needsAction} updatedAt={a.summaryAt} />
+                {s.briefsOn && <WorkBrief work={work} needsAction={needsAction} updatedAt={a.summaryAt} />}
                 <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, fontSize: 11, color: 'var(--dim)' }}>
                   <span>{memOn} mem</span><span>{toolOn} tools</span>
                   <InlineUsage agent={a} />
@@ -155,12 +162,12 @@ function FleetView() {
                     <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tk.title}</span>
                     {tk.awaitingUser && <span className="mono" style={{ fontSize: 9, fontWeight: 700, color: 'var(--amber)', flexShrink: 0 }}>WAITING ON YOU</span>}
                   </div>
-                  <div style={{ marginTop: 9 }}>
+                  {s.briefsOn && <div style={{ marginTop: 9 }}>
                     <WorkBrief
                       work={sessionWorkStatus(tk.agentId ? s.agents.find(a => a.id === tk.agentId) : undefined, tk)}
                       needsAction={Boolean(tk.awaitingUser || tk.col === 'review')}
                     />
-                  </div>
+                  </div>}
                   <button className="open-btn" style={{ marginTop: 9, padding: '5px 0', fontSize: 11.5, width: '100%' }} onClick={() => setView('board')}>
                     Open board
                   </button>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { pickFolder } from '../../core/native'
 import { PROVIDERS, providerFor } from '../../master'
+import { hasCreds } from '../../llm/client'
 import { SHELLS } from '../../core/data'
 import { Icon, Switch, ViewHeader } from '../../components/ui'
 import { DraftInput } from '../../components/DraftInput'
@@ -119,6 +120,12 @@ export function SettingsView() {
               </div>
               <Switch on={s.settings.masterEnabled} onToggle={() => updateSettings({ masterEnabled: !s.settings.masterEnabled })} />
             </div>
+            {s.settings.masterEnabled && !hasCreds(s.settings) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderBottom: '1px solid var(--line-soft)', fontSize: 12, color: 'var(--amber)' }}>
+                <span style={{ flexShrink: 0 }}>⚠</span>
+                Enabled, but no credentials yet — Master stays offline until you add an API key below (or pick Bedrock to use your AWS credential chain).
+              </div>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Provider</div>

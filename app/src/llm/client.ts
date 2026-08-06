@@ -679,6 +679,12 @@ export function callApiStream(cfg: LlmConfig, system: string, messages: ApiMessa
     : streamOpenAi(cfg, system, messages, tools, onDelta, signal)
 }
 
+/** The full Master Brain gate: the feature is switched on AND credentialed.
+ *  Every watcher/monitor/master surface keys off this exact predicate. */
+export function brainOn(settings: AppState['settings']): boolean {
+  return settings.masterEnabled && hasCreds(settings)
+}
+
 /** Whether the settings hold usable credentials for the chosen provider.
  *  Bedrock has no API key — it authenticates via the AWS credential chain. */
 export function hasCreds(settings: AppState['settings']): boolean {

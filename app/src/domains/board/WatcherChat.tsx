@@ -5,6 +5,7 @@ import { ACCENT, hexToRgba } from '../../core/data'
 import type { BoardTask, TaskChatMsg } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { Markdown } from '../../components/Markdown'
+import { brainOn } from '../../llm/client'
 
 // The task-watcher conversation, shared by the board's TaskDrawer and Mission
 // Control's Watcher tab: bubbles + live stream + composer. Also hosts the
@@ -65,6 +66,7 @@ export function ChatBubble({ m, taskId }: { m: TaskChatMsg; taskId?: string }) {
 /** Scrolling watcher conversation with live stream and a composer. */
 export function WatcherChat({ task }: { task: BoardTask }) {
   const stream = useConductorSelector(x => x.taskStreams?.[task.id] ?? '')
+  const watcherOn = useConductorSelector(x => brainOn(x.settings))
   const { sendTaskChat } = useActions()
   const [draft, setDraft] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -89,7 +91,9 @@ export function WatcherChat({ task }: { task: BoardTask }) {
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '14px 17px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {chat.length === 0 && (
           <div style={{ fontSize: 12, color: 'var(--dim)', textAlign: 'center', paddingTop: 20, lineHeight: 1.6 }}>
-            This task's watcher chats here once a session is started —<br />progress notes, questions, and your replies.
+            {watcherOn
+              ? <>This task's watcher chats here once a session is started —<br />progress notes, questions, and your replies.</>
+              : <>No Master Brain configured — this task runs as a plain session.<br />Enable it in Settings → Master Brain to get a watcher here.</>}
           </div>
         )}
         {chat.map(m => <ChatBubble key={m.id} m={m} taskId={task.id} />)}
@@ -112,12 +116,13 @@ export function WatcherChat({ task }: { task: BoardTask }) {
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={onKey}
-            placeholder="Message the task's watcher…"
+            disabled={!watcherOn}
+            placeholder={watcherOn ? "Message the task's watcher…" : 'Watcher offline — enable the Master Brain in Settings'}
             rows={2}
             style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none', color: 'var(--text)', fontFamily: 'var(--font-sans)', fontSize: 12.5, lineHeight: 1.5 }}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button className="send-btn" onClick={send} style={{ width: 30, height: 30 }}>
+            <button className="send-btn" onClick={send} disabled={!watcherOn} style={{ width: 30, height: 30, opacity: watcherOn ? 1 : 0.4 }}>
               <Icon paths={IC.send} size={15} stroke={2.2} />
             </button>
           </div>

@@ -12,6 +12,7 @@ import { Divider } from './Divider'
 import { groupRows, LAYOUT_VARIANTS } from './layout-state'
 import { Pane } from './Pane'
 import { SessionHoverPreview } from './SessionHoverPreview'
+import { brainOn } from '../../llm/client'
 
 /** Draw a compact visual preview of a row partition (panes per row). */
 function LayoutGlyph({ rows, color }: { rows: number[]; color: string }) {
@@ -304,7 +305,7 @@ function EmptySlot({ index }: { index: number }) {
 /** Compose the mode toggle, group/loose tabs, the active group's split grid,
  *  and the dock — or, in Runs mode, the triage rail + session pane. */
 export function Workspace() {
-  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen, workMode: x.settings.workMode ?? 'tabs' }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen, workMode: x.settings.workMode ?? 'tabs', brainConfigured: brainOn(x.settings) }), shallowEqual)
   const { focusTab, activateGroup, closeGroup, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit, updateSettings } = useActions()
   const runsMode = s.workMode === 'runs'
   const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null)
@@ -526,6 +527,11 @@ export function Workspace() {
             <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={openNewSession}>
               New agent session
             </button>
+            {!s.brainConfigured && (
+              <div style={{ fontSize: 11.5, color: 'var(--faint)', maxWidth: 340, textAlign: 'center', lineHeight: 1.55 }}>
+                Optional: add a Master Brain in Settings for task routing, watchers, and live status briefs.
+              </div>
+            )}
           </div>
         ) : (
           rows.map((row, ri) => (

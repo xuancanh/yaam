@@ -235,7 +235,8 @@ export function Sidebar() {
     agents: x.agents, composer: x.composer, masterBusy: x.masterBusy,
     messages: x.messages, pendingToolApprovals: x.pendingToolApprovals, settings: x.settings,
   }), shallowEqual)
-  const { setComposer, send, updateSettings, resolveToolApproval } = useActions()
+  const { setComposer, send, updateSettings, resolveToolApproval, setView } = useActions()
+  const on = s.settings.masterEnabled && hasCreds(s.settings)
   const scrollRef = useRef<HTMLDivElement>(null)
   // stick-to-bottom scrolling: follow new messages only while the user is near
   // the bottom; when they scroll up to read, stop following and offer a jump
@@ -358,7 +359,9 @@ export function Sidebar() {
             <span style={{ fontSize: 11.5, color: 'var(--mut)' }}>
               {s.masterBusy
                 ? 'thinking…'
-                : `${runningCount} session${runningCount === 1 ? '' : 's'} running${s.settings.masterEnabled && hasCreds(s.settings) ? ` · ${s.settings.masterModel}` : ' · brain off — configure in Settings'}`}
+                : <>{runningCount} session{runningCount === 1 ? '' : 's'} running{on
+                  ? ` · ${s.settings.masterModel}`
+                  : <> · brain off — <button onClick={() => setView('settings')} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--amber)', cursor: 'pointer', fontSize: 11.5, textDecoration: 'underline' }}>configure in Settings</button></>}</>}
             </span>
           </div>
         </div>
@@ -414,7 +417,7 @@ export function Sidebar() {
             value={s.composer}
             onChange={e => setComposer(e.target.value)}
             onKeyDown={onKey}
-            placeholder="Tell Master what you need — it routes tasks, answers questions, and builds tools automatically…"
+            placeholder={on ? 'Tell Master what you need — it routes tasks, answers questions, and builds tools automatically…' : 'Master is offline — add a brain in Settings → Master Brain to route tasks from here'}
             rows={2}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none',
@@ -423,7 +426,7 @@ export function Sidebar() {
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
             <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>
-              ↩ send · Master picks the right action{isMac ? '' : ' · Ctrl+K to focus'}
+              {on ? <>↩ send · Master picks the right action{isMac ? '' : ' · Ctrl+K to focus'}</> : 'terminal sessions work without it — this chat needs credentials'}
             </span>
             <button className="send-btn" onClick={send}>
               <Icon paths={IC.send} size={17} stroke={2.2} />

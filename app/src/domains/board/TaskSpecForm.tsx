@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { isTauri, pickFolder } from '../../core/native'
+import { brainOn } from '../../llm/client'
 
 // Shared task-spec editor: the SAME fields, AI drafting, and reject-with-
 // questions gate everywhere a task can be created (board "New task" dialog,
@@ -88,7 +89,8 @@ export function useTaskSpecAssist(v: TaskSpecValue) {
   const { draftTask } = useActions()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const llmOn = s.settings.masterEnabled
+  // enabled AND credentialed — a keyless toggle-on must not promise verification
+  const llmOn = brainOn(s.settings)
 
   const verifyForCreate = async (): Promise<VerifyOutcome | null> => {
     if (!v.title.trim() || busy) return null
