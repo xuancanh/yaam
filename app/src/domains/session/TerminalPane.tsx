@@ -110,7 +110,6 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
   return (
     <div style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
       <div
-        ref={ref}
         onMouseDown={() => {
           // interacting with the pane steals terminal focus back from any
           // remote device — refit to the desktop's own size
@@ -119,9 +118,16 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
         }}
         style={{
           flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden',
-          background: 'var(--bg2)',
+          background: 'var(--bg2)', padding: '8px 2px 2px 10px',
         }}
-      />
+      >
+        {/* FitAddon measures xterm's parent but only subtracts the .xterm
+            element's own padding — the pane inset must live on the outer div
+            (an absolutely-positioned xterm viewport would paint over it) and
+            xterm attaches to this padding-free inner box so the fit is exact
+            and the last row isn't clipped */}
+        <div ref={ref} style={{ width: '100%', height: '100%' }} />
+      </div>
       {findOpen && (
         <div style={{
           position: 'absolute', top: 6, right: 14, zIndex: 5,

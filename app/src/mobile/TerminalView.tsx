@@ -215,5 +215,5 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
     })
   }, [data, live])
 
-  return <div ref={hostRef} className="termfill" />
+  return <div className="termfill"><div ref={hostRef} className="termfill-inner" /></div>
 })
