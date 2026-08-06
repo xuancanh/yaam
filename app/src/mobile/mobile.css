@@ -384,8 +384,12 @@ button.card.slim:active { background: var(--panel2); }
 .subtabs { display: flex; gap: 6px; margin: 13px 0 11px; }
 .subtabs.bar { margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0; background: var(--bg); }
 .termarea { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 8px 4px; }
-.termfill { flex: 1; min-height: 0; width: 100%; background: #0A0B0F; border: 1px solid var(--line-soft); border-radius: 12px; padding: 6px; overflow: hidden; }
-.termfill .xterm { height: 100%; }
+/* FitAddon measures this parent's computed (border-box) height and subtracts
+   only the .xterm element's own padding — so the inset lives on .xterm, and the
+   frame is an inset box-shadow instead of a border. Either on .termfill would
+   inflate the measured height and clip the terminal's last line. */
+.termfill { flex: 1; min-height: 0; width: 100%; background: #0A0B0F; box-shadow: inset 0 0 0 1px var(--line-soft); border-radius: 12px; overflow: hidden; }
+.termfill .xterm { height: 100%; padding: 6px; }
 /* touch scrolling is handled manually (drag → scrollLines); stop the browser
    from panning/bouncing the page underneath */
 .termfill, .termfill .xterm, .termfill .xterm-screen { touch-action: none; }
