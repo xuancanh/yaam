@@ -663,8 +663,6 @@ export interface OrchestrationSettings {
   githubToken?: string
   /** Master chat panel width (px, drag-resizable) */
   sidebarWidth?: number
-  /** Mission Control chat column width (px, drag-resizable) */
-  missionChatWidth?: number
   /** Master chat panel collapsed to a slim rail */
   sidebarHidden?: boolean
   /** Chat view conversation-list width (px, drag-resizable) */

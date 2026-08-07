@@ -250,27 +250,19 @@ function MessageRow({ msg, onFocusSession, focusLabel }: { msg: Message; onFocus
 
 /** The shared conversation surface: scrollable messages with stick-to-bottom
  *  behavior, pending tool approvals, and the composer. Hosts provide their own
- *  chrome (header, width, resize).
- *
- *  `directTarget`: brainless fallback for Mission Control — when the Master
- *  Brain is off and a session is on stage, the composer becomes a direct line
- *  to that session's terminal instead of a dead end. Escalation cards in the
- *  stream stay fully answerable either way (they never needed the brain). */
-export function MasterChat({ directTarget, onFocusSession, focusLabel }: {
-  directTarget?: { id: string; name: string } | null
+ *  chrome (header, width, resize). */
+export function MasterChat({ onFocusSession, focusLabel }: {
   /** host-provided jump from an escalation card to its session */
   onFocusSession?: (id: string) => void
-  /** label for that jump ('STAGE' in Mission Control, 'OPEN' in the sidebar) */
+  /** label for that jump (the sidebar uses 'OPEN ↗') */
   focusLabel?: string
 }) {
   const s = useConductorSelector(x => ({
     composer: x.composer, masterBusy: x.masterBusy, messages: x.messages,
     pendingToolApprovals: x.pendingToolApprovals, settings: x.settings,
   }), shallowEqual)
-  const { setComposer, send, resolveToolApproval, sendInput } = useActions()
+  const { setComposer, send, resolveToolApproval } = useActions()
   const on = s.settings.masterEnabled && hasCreds(s.settings)
-  const direct = !on && directTarget ? directTarget : null
-  const [sentNote, setSentNote] = useState('')
   // decisions lens: collapse the stream to just the escalation cards — the
   // things that actually need a human — one click, one click back
   const [lens, setLens] = useState<'all' | 'decisions'>('all')
@@ -308,23 +300,11 @@ export function MasterChat({ directTarget, onFocusSession, focusLabel }: {
     scrollToBottom()
   }, [])
 
-  // Brain on: a Master turn. Brain off with a staged session: the line goes
-  // straight to that session's terminal (and the composer clears).
-  const submit = () => {
-    if (!direct) { send(); return }
-    const text = s.composer.trim()
-    if (!text) return
-    sendInput(direct.id, text)
-    setComposer('')
-    setSentNote(`↳ sent to ${direct.name}`)
-    window.setTimeout(() => setSentNote(''), 1800)
-  }
-
   // Send on Enter while preserving Shift+Enter for multiline input.
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      submit()
+      send()
     }
   }
 
@@ -390,9 +370,9 @@ export function MasterChat({ directTarget, onFocusSession, focusLabel }: {
       <div style={{ borderTop: '1px solid var(--line)', padding: '12px 14px' }}>
         <div style={{ background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 12, padding: '10px 12px' }}>
           {/* routing indicator: WHO receives what you type — never a mystery */}
-          <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9, fontWeight: 700, letterSpacing: 0.5, marginBottom: 5, color: on ? 'var(--accent)' : direct ? 'var(--green)' : 'var(--dim)' }}>
+          <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9, fontWeight: 700, letterSpacing: 0.5, marginBottom: 5, color: on ? 'var(--accent)' : 'var(--dim)' }}>
             <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor' }} />
-            {on ? 'TO MASTER — routes, answers, builds' : direct ? `DIRECT LINE → ${direct.name.toUpperCase()}` : 'OFFLINE — no brain configured'}
+            {on ? 'TO MASTER — routes, answers, builds' : 'OFFLINE — no brain configured'}
           </div>
           <textarea
             data-composer="1"
@@ -401,9 +381,7 @@ export function MasterChat({ directTarget, onFocusSession, focusLabel }: {
             onKeyDown={onKey}
             placeholder={on
               ? 'Tell Master what you need — it routes tasks, answers questions, and builds tools automatically…'
-              : direct
-                ? `Brain off — this line goes straight to ${direct.name}'s terminal…`
-                : 'Master is offline — add a brain in Settings → Master Brain to route tasks from here'}
+              : 'Master is offline — add a brain in Settings → Master Brain to route tasks from here'}
             rows={2}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none',
@@ -411,14 +389,10 @@ export function MasterChat({ directTarget, onFocusSession, focusLabel }: {
             }}
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
-            <span className="mono" style={{ fontSize: 10.5, color: sentNote ? 'var(--green)' : 'var(--dim)' }}>
-              {sentNote
-                ? sentNote
-                : on ? <>↩ send · Master picks the right action{isMac ? '' : ' · Ctrl+K to focus'}</>
-                : direct ? '↩ sends to the staged session · decision cards above still work'
-                : 'terminal sessions work without it — this chat needs credentials'}
+            <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>
+              {on ? <>↩ send · Master picks the right action{isMac ? '' : ' · Ctrl+K to focus'}</> : 'terminal sessions work without it — this chat needs credentials'}
             </span>
-            <button className="send-btn" onClick={submit}>
+            <button className="send-btn" onClick={send}>
               <Icon paths={IC.send} size={17} stroke={2.2} />
             </button>
           </div>

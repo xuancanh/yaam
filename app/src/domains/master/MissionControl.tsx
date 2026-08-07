@@ -1,6 +1,5 @@
-// Mission Control: the full-screen command deck. ONE Master chat on the right
-// (the same conversation as the sidebar — MasterChat is shared), and a dynamic
-// stage on the left that follows whatever matters most right now: sessions
+// Mission Control: the full-screen command deck. A dynamic stage plus a
+// priority rail that follow whatever matters most right now: sessions
 // needing a decision outrank running ones, running outrank idle — and when
 // SEVERAL need a decision at once, the stage splits into a grid (up to four
 // interactive panes, one per escalated session). Staged sessions are full
@@ -16,7 +15,6 @@ import type { Agent } from '../../core/types'
 import { Icon, MasterMark } from '../../components/ui'
 import { Pane } from '../session/Pane'
 import { requestQuickShellToggle } from '../session/QuickShell'
-import { MasterChat } from './MasterChat'
 
 // faint blueprint grid painted under the stage and rail — reads as a deck,
 // costs nothing (two repeating gradients, no elements)
@@ -123,8 +121,7 @@ export function MissionControl() {
     events: x.events,
   }), shallowEqual)
   const on = useConductorSelector(x => brainOn(x.settings))
-  const chatWidth = useConductorSelector(x => Math.max(320, Math.min(640, x.settings.missionChatWidth ?? 400)))
-  const { setView, focusTab, switchWorkspace, updateSettings } = useActions()
+  const { setView, focusTab, switchWorkspace } = useActions()
   const [pinned, setPinned] = useState<string | null>(null)
   // the deck follows the workspace model: switching workspaces re-scopes the
   // whole view, and a pin never carries across
@@ -134,10 +131,6 @@ export function MissionControl() {
   useEffect(() => {
     const iv = window.setInterval(() => setTick(t => t + 1), 1500)
     return () => window.clearInterval(iv)
-  }, [])
-  // entering the deck lands you in the command channel, ready to type
-  useEffect(() => {
-    document.querySelector<HTMLTextAreaElement>('textarea[data-composer]')?.focus()
   }, [])
 
   // Deck keyboard: ⌘1–9 stage the nth tile, ⌘⇧]/⌘⇧[ cycle the stage through
@@ -327,7 +320,7 @@ export function MissionControl() {
               <MasterMark size={40} glow={false} />
               <div style={{ fontSize: 13 }}>
                 {on
-                  ? 'No live sessions. Ask Master for something below, or launch one from the Work view.'
+                  ? 'No live sessions. Ask Master in the sidebar chat, or launch one from the Work view.'
                   : 'No live sessions. Launch one from the Work view — the deck lights up as sessions run.'}
               </div>
             </div>
@@ -351,59 +344,6 @@ export function MissionControl() {
           )}
         </div>
 
-        {/* ── the one chat ── */}
-        <div style={{
-          width: chatWidth, flexShrink: 0, borderLeft: '1px solid var(--line)', background: 'var(--panel)',
-          display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative',
-        }}>
-          <div
-            title="Drag to resize"
-            onPointerDown={e => {
-              e.preventDefault()
-              const startX = e.clientX
-              const startW = chatWidth
-              const move = (ev: PointerEvent) =>
-                updateSettings({ missionChatWidth: Math.max(320, Math.min(640, startW - (ev.clientX - startX))) })
-              const up = () => {
-                window.removeEventListener('pointermove', move)
-                window.removeEventListener('pointerup', up)
-                document.body.style.cursor = ''
-              }
-              document.body.style.cursor = 'col-resize'
-              window.addEventListener('pointermove', move)
-              window.addEventListener('pointerup', up)
-            }}
-            style={{ position: 'absolute', top: 0, left: -3, bottom: 0, width: 7, cursor: 'col-resize', zIndex: 5 }}
-          />
-          <div style={{
-            position: 'absolute', top: 0, left: 0, bottom: 0, width: 2,
-            background: 'linear-gradient(180deg, rgba(245,196,81,.5), transparent 60%)',
-          }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 15px', borderBottom: '1px solid var(--line)' }}>
-            <MasterMark size={26} />
-            <div style={{ flex: 1 }}>
-              <div className="grotesk" style={{ fontSize: 13.5, fontWeight: 600 }}>Master</div>
-              <div className="mono" style={{ fontSize: 9, letterSpacing: 0.6, color: s.masterBusy ? 'var(--accent)' : on ? 'var(--dim)' : 'var(--amber)' }}>
-                {s.masterBusy ? 'THINKING…' : on ? 'COMMAND CHANNEL' : 'DIRECT CHANNEL · BRAIN OFF'}
-              </div>
-            </div>
-            {!on && (
-              <button
-                className="mono"
-                title="Escalations and direct input work without it — add a brain to route free-form orders"
-                onClick={() => setView('settings')}
-                style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.4, cursor: 'pointer', background: 'none', border: '1px solid var(--line2)', borderRadius: 5, color: 'var(--mut)', padding: '2px 7px' }}
-              >
-                ADD BRAIN
-              </button>
-            )}
-          </div>
-          <MasterChat
-            directTarget={staged && staged.kind !== 'chat' ? { id: staged.id, name: staged.name } : null}
-            onFocusSession={id => setPinned(id)}
-            focusLabel="STAGE"
-          />
-        </div>
       </div>
     </div>
   )

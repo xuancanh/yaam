@@ -58,16 +58,13 @@ function MainArea() {
 
 /** Compose the persistent title bar, navigation, Master sidebar, and active view. */
 function Shell() {
-  // Mission Control embeds the (single, shared) Master chat itself — the
-  // docked sidebar would duplicate the conversation beside it
-  const mission = useConductorSelector(x => x.view === 'mission')
   return (
     <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <TitleBar />
       <SaveErrorBanner />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <IconRail />
-        {!mission && <Sidebar />}
+        <Sidebar />
         <MainArea />
       </div>
       <SlideOver />
