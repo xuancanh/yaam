@@ -31,9 +31,14 @@ const fileColSplitCache = new Map<string, number>()
 // component. Multi-repo working folders get a repo picker.
 
 interface FileRow {
+  /** display path — repo-prefixed when the folder holds several repos */
   path: string
   status: string
   staged: boolean
+  /** owning repo root (absent only in tests that exercise buildTree alone) */
+  root?: string
+  /** path relative to `root` — what the git commands take */
+  rel?: string
 }
 
 /** paths → nested tree rows (dirs expanded, depth-indented) for one section */
@@ -102,7 +107,7 @@ function FileRowView({ row, selected, onSelect, onToggle }: {
       onClick={onSelect}
       style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: `2px 8px 2px ${10 + row.depth * 12}px`,
-        borderRadius: 6, cursor: 'pointer', background: selected ? 'rgba(245,196,81,.09)' : 'transparent',
+        borderRadius: 6, cursor: 'pointer', background: selected ? 'rgba(245,196,81,.14)' : 'transparent',
       }}
     >
       <button
@@ -114,7 +119,7 @@ function FileRowView({ row, selected, onSelect, onToggle }: {
         <span className="mono" style={{ fontSize: 11, fontWeight: 700, lineHeight: 1 }}>{f.staged ? '−' : '+'}</span>
       </button>
       <span className="mono" title={f.status} style={{ width: 12, flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: STATUS_COLORS[c] ?? 'var(--mut)' }}>{c}</span>
-      <span style={{ fontSize: 12, color: selected ? 'var(--text)' : 'var(--mut2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.path}>
+      <span style={{ fontSize: 12.5, color: selected ? 'var(--text)' : 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.path}>
         {row.label}
       </span>
     </div>
@@ -168,8 +173,8 @@ function Section({ title, files, bulkLabel, onBulk, selectedPath, selectedStaged
 }
 
 const CELL_STYLE: Record<string, { color: string; bg: string }> = {
-  add: { color: 'var(--green)', bg: 'rgba(61,220,151,.06)' },
-  del: { color: 'var(--red-soft)', bg: 'rgba(255,92,92,.06)' },
+  add: { color: 'var(--green)', bg: 'rgba(61,220,151,.10)' },
+  del: { color: 'var(--red-soft)', bg: 'rgba(255,92,92,.10)' },
   ctx: { color: 'var(--mut)', bg: 'transparent' },
   empty: { color: 'var(--mut)', bg: 'var(--bg2)' },
   hunk: { color: 'var(--accent)', bg: 'transparent' },
@@ -206,7 +211,7 @@ function DiffView({ diff, split, path }: { diff: string; split?: boolean; path?:
   if (split) {
     const rows = splitDiffRows(diff)
     return (
-      <div className="mono" style={{ padding: '8px 0', fontSize: 11.5, lineHeight: 1.55 }}>
+      <div className="mono" style={{ padding: '8px 0', fontSize: 12, lineHeight: 1.6 }}>
         {rows.map((row, i) => row.left.kind === 'hunk' || row.left.kind === 'meta' ? (
           <div key={i} style={{ padding: '0 14px', color: CELL_STYLE[row.left.kind].color, background: CELL_STYLE[row.left.kind].bg, whiteSpace: 'pre-wrap', fontWeight: row.left.kind === 'meta' ? 700 : 400 }}>
             {row.left.text}
@@ -222,14 +227,14 @@ function DiffView({ diff, split, path }: { diff: string; split?: boolean; path?:
     )
   }
   return (
-    <pre className="mono" style={{ margin: 0, padding: '8px 0', fontSize: 11.5, lineHeight: 1.55 }}>
+    <pre className="mono" style={{ margin: 0, padding: '8px 0', fontSize: 12, lineHeight: 1.6 }}>
       {diff.split('\n').map((line, i) => {
         const isMeta = line.startsWith('+++') || line.startsWith('---')
         const isAdd = line.startsWith('+') && !isMeta
         const isDel = line.startsWith('-') && !isMeta
         const isHunk = line.startsWith('@@')
         const markColor = isMeta ? 'var(--text)' : isAdd ? 'var(--green)' : isDel ? 'var(--red-soft)' : isHunk ? 'var(--accent)' : 'var(--mut)'
-        const bg = isAdd ? 'rgba(61,220,151,.06)' : isDel ? 'rgba(255,92,92,.06)' : 'transparent'
+        const bg = isAdd ? 'rgba(61,220,151,.10)' : isDel ? 'rgba(255,92,92,.10)' : 'transparent'
         // meta/hunk lines are diff chrome — literal, no highlight. code lines
         // keep their +/-/space marker colored, with the tokens highlighted.
         if (isMeta || isHunk || !line) {
@@ -269,16 +274,16 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
   compact?: boolean
 }) {
   const settings = useConductorSelector(x => x.settings)
-  const [repos, setRepos] = useState<string[]>([])
-  const [repo, setRepo] = useState<string>(cwd ?? "")
+  /** every repo under the reviewed folder, loaded together — a folder of
+   *  sub-repos reviews as ONE pane (no picker), paths prefixed per repo */
+  const [statuses, setStatuses] = useState<{ dir: string; label: string; st: GitStatusResult }[]>([])
   /** the reviewed folder contains no git repository at all — fall back to a
    *  plain folder browse (rich file viewer) instead of an empty diff view */
   const [noRepo, setNoRepo] = useState(false)
-  const [status, setStatus] = useState<GitStatusResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   // file-list/diff split — fixed default width until first dragged
   const [fileColShare, setFileColShare] = useState<number | null>(fileColSplitCache.get(cwd ?? '') ?? null)
-  const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null)
+  const [selected, setSelected] = useState<FileRow | null>(null)
   const [diff, setDiff] = useState('')
   /** single = one file at a time · all = continuous scroll of every diff
    *  (worktree sessions review vs their fork point in all-files mode) */
@@ -291,16 +296,23 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
   const [sections, setSections] = useState<DiffSection[]>([])
   const sectionRefs = useRef(new Map<string, HTMLDivElement>())
 
-  const refresh = useCallback(async (dir = repo) => {
-    try {
-      const st = await fs.gitStatus(dir)
-      setStatus(st)
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setStatus(null)
-    }
-  }, [repo, fs])
+  const loadStatuses = useCallback(async (dirs: string[]) => {
+    const loaded = await Promise.all(dirs.map(async dir => {
+      try {
+        return { dir, label: repoLabel(cwd ?? '', dir), st: await fs.gitStatus(dir), err: null as string | null }
+      } catch (e) {
+        return { dir, label: repoLabel(cwd ?? '', dir), st: null, err: e instanceof Error ? e.message : String(e) }
+      }
+    }))
+    const ok = loaded.filter(r => r.st !== null) as { dir: string; label: string; st: GitStatusResult }[]
+    setStatuses(ok)
+    setError(ok.length ? null : loaded[0]?.err ?? 'no repository')
+  }, [cwd, fs])
+
+  const dirsRef = useRef<string[]>([])
+  const refresh = useCallback(async () => {
+    if (dirsRef.current.length) await loadStatuses(dirsRef.current)
+  }, [loadStatuses])
 
   // resolve the repo (or, for a multi-repo folder cwd, the repo list) through the
   // session's adapter, so a remote folder of repos is detected on the host too
@@ -308,8 +320,8 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
     let live = true
     void fs.detectRepos(cwd ?? "").then(candidates => {
       if (!live) return
-      setRepos(candidates)
-      if (candidates.length) { setRepo(candidates[0]); void refresh(candidates[0]) }
+      dirsRef.current = candidates
+      if (candidates.length) void loadStatuses(candidates)
       else setNoRepo(true)
     })
     return () => { live = false }
@@ -317,29 +329,43 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
   }, [cwd, fs])
 
   // one file's diff for its side; untracked files show their contents
-  const loadFileDiff = useCallback(async (st: GitStatusResult, path: string, staged: boolean): Promise<string> => {
-    const f = st.files.find(x => x.path === path)
-    if (!staged && f?.status === '??') {
-      const text = await fs.readTextFile(`${st.root}/${path}`).catch(() => '(binary or unreadable file)')
-      return `+++ ${path} (untracked)\n${text.split('\n').slice(0, 800).map(l => `+${l}`).join('\n')}`
+  const loadFileDiff = useCallback(async (f: FileRow): Promise<string> => {
+    const root = f.root ?? cwd ?? ''
+    const rel = f.rel ?? f.path
+    if (!f.staged && f.status === '??') {
+      const text = await fs.readTextFile(`${root}/${rel}`).catch(() => '(binary or unreadable file)')
+      return `+++ ${f.path} (untracked)\n${text.split('\n').slice(0, 800).map(l => `+${l}`).join('\n')}`
     }
-    return await fs.gitFileDiffSide(st.root, path, staged)
-  }, [fs])
+    return await fs.gitFileDiffSide(root, rel, f.staged)
+  }, [fs, cwd])
 
   // single-file view: load the selected file's diff
   useEffect(() => {
-    if (viewMode !== 'single' || !selected || !status) { setDiff(''); return }
+    if (viewMode !== 'single' || !selected || !statuses.length) { setDiff(''); return }
     let live = true
-    loadFileDiff(status, selected.path, selected.staged)
+    loadFileDiff(selected)
       .then(d => { if (live) setDiff(d) })
       .catch(e => { if (live) setDiff(String(e)) })
     return () => { live = false }
-  }, [selected, status, viewMode, loadFileDiff])
+  }, [selected, statuses, viewMode, loadFileDiff])
+
+  // aggregated rows across every repo; the display path carries the repo
+  // prefix when there is more than one, so the tree nests repos naturally
+  const multi = statuses.length > 1
+  const stagedFiles: FileRow[] = statuses.flatMap(r =>
+    r.st.files.filter(f => f.index !== ' ' && f.index !== '?').map(f => ({
+      path: multi ? `${r.label}/${f.path}` : f.path, status: f.index, staged: true, root: r.st.root, rel: f.path,
+    })))
+  const unstagedFiles: FileRow[] = statuses.flatMap(r =>
+    r.st.files.filter(f => f.work !== ' ').map(f => ({
+      path: multi ? `${r.label}/${f.path}` : f.path, status: f.status === '??' ? '??' : f.work, staged: false, root: r.st.root, rel: f.path,
+    })))
+  const allRows = [...stagedFiles, ...unstagedFiles]
 
   // all-files view: every diff in one scroll. Worktree sessions review against
   // the fork point (committed + uncommitted — exactly what a merge brings back)
   useEffect(() => {
-    if (viewMode !== 'all' || !status) { setSections([]); return }
+    if (viewMode !== 'all' || !statuses.length) { setSections([]); return }
     let live = true
     const load = async (): Promise<DiffSection[]> => {
       if (worktree) {
@@ -352,26 +378,23 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
           }))
         })
       }
-      const wanted = [
-        ...status.files.filter(f => f.index !== ' ' && f.index !== '?').map(f => ({ path: f.path, staged: true })),
-        ...status.files.filter(f => f.work !== ' ').map(f => ({ path: f.path, staged: false })),
-      ]
-      return await Promise.all(wanted.slice(0, 60).map(async w => ({
-        key: `${w.staged}:${w.path}`,
-        label: w.path,
-        staged: w.staged,
-        diff: await loadFileDiff(status, w.path, w.staged).catch(e => String(e)),
+      return await Promise.all(allRows.slice(0, 60).map(async f => ({
+        key: `${f.staged}:${f.path}`,
+        label: f.path,
+        staged: f.staged,
+        diff: await loadFileDiff(f).catch(e => String(e)),
       })))
     }
     void load().then(secs => { if (live) setSections(secs) })
     return () => { live = false }
-  }, [viewMode, status, worktree, loadFileDiff])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, statuses, worktree, loadFileDiff])
 
   // open the selected file in the inline editor (fix-as-you-review)
   const startEdit = async () => {
-    if (!status || !selected) return
+    if (!selected?.root) return
     try {
-      setEditText(await fs.readTextFile(`${status.root}/${selected.path}`))
+      setEditText(await fs.readTextFile(`${selected.root}/${selected.rel ?? selected.path}`))
       setEditing(true)
     } catch (e) {
       setDiff(e instanceof Error ? e.message : String(e))
@@ -382,16 +405,12 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
   const selectFile = (f: FileRow) => {
     setEditing(false)
     setEditText(null)
-    setSelected({ path: f.path, staged: f.staged })
+    setSelected(f)
     if (viewMode !== 'all') return
-    const repoPrefix = worktree && repos.length > 1 ? `${repo.slice(repo.lastIndexOf('/') + 1)}/` : ''
-    const key = worktree ? `wt:${repoPrefix}${f.path}` : `${f.staged}:${f.path}`
+    const repoPrefix = worktree && multi && f.root ? `${f.root.slice(f.root.lastIndexOf('/') + 1)}/` : ''
+    const key = worktree ? `wt:${repoPrefix}${f.rel ?? f.path}` : `${f.staged}:${f.path}`
     sectionRefs.current.get(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
-
-  const files = status?.files ?? []
-  const stagedFiles: FileRow[] = files.filter(f => f.index !== ' ' && f.index !== '?').map(f => ({ path: f.path, status: f.index, staged: true }))
-  const unstagedFiles: FileRow[] = files.filter(f => f.work !== ' ').map(f => ({ path: f.path, status: f.status === '??' ? '??' : f.work, staged: false }))
 
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -411,22 +430,47 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
     }
   }
 
-  const toggle = (f: FileRow) => act(() => f.staged ? fs.gitUnstage(status!.root, [f.path]) : fs.gitStage(status!.root, [f.path]))
+  /** group rows by their repo root for the per-repo git commands */
+  const byRoot = (rows: FileRow[]): Map<string, string[]> => {
+    const m = new Map<string, string[]>()
+    for (const f of rows) {
+      const root = f.root ?? cwd ?? ''
+      m.set(root, [...(m.get(root) ?? []), f.rel ?? f.path])
+    }
+    return m
+  }
 
+  const toggle = (f: FileRow) => act(() =>
+    f.staged ? fs.gitUnstage(f.root ?? cwd ?? '', [f.rel ?? f.path]) : fs.gitStage(f.root ?? cwd ?? '', [f.rel ?? f.path]))
+
+  const bulk = (rows: FileRow[], op: 'stage' | 'unstage') => act(async () => {
+    for (const [root, paths] of byRoot(rows)) {
+      if (op === 'stage') await fs.gitStage(root, paths)
+      else await fs.gitUnstage(root, paths)
+    }
+  })
+
+  // one message, committed into every repo that has something staged
   const commit = () => act(async () => {
-    const summary = await fs.gitCommit(status!.root, message.trim())
+    const roots = [...byRoot(stagedFiles).keys()]
+    const summaries: string[] = []
+    for (const root of roots) {
+      const summary = await fs.gitCommit(root, message.trim())
+      const line = summary.split('\n')[0] ?? 'committed'
+      summaries.push(roots.length > 1 ? `${repoLabel(cwd ?? '', root)}: ${line}` : line)
+    }
     setMessage('')
-    setNote(summary.split('\n')[0] ?? 'committed')
+    setNote(summaries.join('\n') || 'committed')
   })
 
   const generate = async () => {
-    if (!status) return
+    if (!statuses.length) return
     setGenBusy(true)
     setNote(null)
     try {
       const staged = stagedFiles.length > 0
       const parts = await Promise.all(
-        (staged ? stagedFiles : unstagedFiles).slice(0, 25).map(f => fs.gitFileDiffSide(status.root, f.path, staged).catch(() => '')),
+        (staged ? stagedFiles : unstagedFiles).slice(0, 25).map(f => fs.gitFileDiffSide(f.root ?? cwd ?? '', f.rel ?? f.path, staged).catch(() => '')),
       )
       const diffText = parts.join('\n').slice(0, 24_000)
       if (!diffText.trim()) throw new Error('nothing to describe — stage some changes first')
@@ -444,9 +488,6 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
       setGenBusy(false)
     }
   }
-
-  // nested repos keep their intermediate folders in the picker (group/team/api)
-  const repoName = (p: string) => repoLabel(cwd ?? '', p)
 
   // no repository anywhere under the reviewed folder: there is no diff to
   // stage or commit, but the work is still reviewable — browse the whole
@@ -468,19 +509,11 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
         <span className="mono" style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {status ? `${status.root} · ⎇ ${status.branch || 'detached'}` : cwd}
+          {statuses.length === 1
+            ? `${statuses[0].st.root} · ⎇ ${statuses[0].st.branch || 'detached'}`
+            : statuses.length > 1 ? `${cwd} · ${statuses.length} repos` : cwd}
           {worktree ? ' · isolated worktree' : ''}
         </span>
-        {repos.length > 1 && (
-          <select
-            value={repo}
-            onChange={e => { setRepo(e.target.value); setSelected(null); void refresh(e.target.value) }}
-            className="select-field"
-            style={{ background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 8, padding: '4px 8px', color: 'var(--text)', fontSize: 11.5, outline: 'none' }}
-          >
-            {repos.map(r => <option key={r} value={r}>{repoName(r)}</option>)}
-          </select>
-        )}
         <button
           className="icon-btn"
           title={sideBySide ? 'Side-by-side diff — click for unified' : 'Unified diff — click for side-by-side (old | new)'}
@@ -522,7 +555,7 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
                     title="STAGED"
                     files={stagedFiles}
                     bulkLabel="unstage all"
-                    onBulk={() => { void act(() => fs.gitUnstage(status!.root, stagedFiles.map(f => f.path))) }}
+                    onBulk={() => { void bulk(stagedFiles, 'unstage') }}
                     selectedPath={selected?.path ?? null}
                     selectedStaged={selected?.staged ?? false}
                     onSelect={selectFile}
@@ -533,7 +566,7 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
                     title="CHANGES"
                     files={unstagedFiles}
                     bulkLabel="stage all"
-                    onBulk={() => { void act(() => fs.gitStage(status!.root, unstagedFiles.map(f => f.path))) }}
+                    onBulk={() => { void bulk(unstagedFiles, 'stage') }}
                     selectedPath={selected?.path ?? null}
                     selectedStaged={selected?.staged ?? true}
                     onSelect={selectFile}
@@ -600,12 +633,12 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
                   )}
                 </div>
               )}
-              {editing && editText !== null && selected && status ? (
+              {editing && editText !== null && selected?.root ? (
                 <CodeEditor
-                  path={`${status.root}/${selected.path}`}
+                  path={`${selected.root}/${selected.rel ?? selected.path}`}
                   initial={editText}
                   onSave={async text => {
-                    await fs.writeTextFile(`${status.root}/${selected.path}`, text)
+                    await fs.writeTextFile(`${selected.root}/${selected.rel ?? selected.path}`, text)
                     await refresh()
                   }}
                   onClose={() => { setEditing(false); setEditText(null); void refresh() }}
