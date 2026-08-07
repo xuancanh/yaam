@@ -10,6 +10,7 @@ import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
 import { UpdateSection } from './UpdateSection'
 import { DeveloperSection } from './DeveloperSection'
+import { PowerSection } from './PowerSection'
 
 /** One connect link with a copy button (transient ✓ feedback). */
 function ConnectLink({ label, url }: { label: string; url: string }) {
@@ -377,6 +378,7 @@ export function SettingsView() {
             </div>
           </div>
 
+          <PowerSection />
           <DeveloperSection />
           </>}
 

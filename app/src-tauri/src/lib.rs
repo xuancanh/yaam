@@ -46,6 +46,7 @@ pub fn run() {
         .manage(McpManager::default())
         .manage(RemoteManager::default())
         .manage(WatchManager::default())
+        .manage(domains::power::PowerState::default())
         .manage(domains::preview::PreviewStore::default())
         // serve rich HTML previews on their own origin so they escape the app's
         // inherited CSP without weakening the privileged WebView (see preview.rs)
@@ -98,6 +99,8 @@ pub fn run() {
             domains::mcp::mcp_stdio_stop,
             domains::icons::file_icon,
             domains::open::open_external,
+            domains::power::keep_awake_set,
+            domains::power::keep_awake_active,
             domains::open::open_devtools,
             domains::open::open_path,
             domains::preview::preview_stash,

@@ -86,6 +86,18 @@ export function CommandPalette() {
         cmds.push({ id: 'quick-shell', label: 'Toggle quick shell', hint: '⌘J · scratch terminal in this session', icon: 'term', run: () => requestQuickShellToggle(sid) })
       }
     }
+    {
+      // keep awake: quick flip between off and always (the per-session mode
+      // lives in Settings → General → Power)
+      const awake = (s.settings.keepAwake ?? 'off') !== 'off'
+      cmds.push({
+        id: 'keep-awake',
+        label: awake ? 'Keep Awake: turn off' : 'Keep Awake: keep the Mac from sleeping',
+        hint: awake ? `currently ${s.settings.keepAwake}` : 'blocks idle sleep · screen still locks',
+        icon: 'build',
+        run: () => a.updateSettings({ keepAwake: awake ? 'off' : 'always' }),
+      })
+    }
     order.forEach((id, i) => {
       const x = byId.get(id)
       if (!x) return

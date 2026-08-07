@@ -654,6 +654,10 @@ export interface OrchestrationSettings {
   /** native desktop notifications for escalations/finished work when the app
    *  is unfocused (default on) */
   osNotifications?: boolean
+  /** hold a system idle-sleep assertion so a locked/dark screen doesn't pause
+   *  running sessions. 'sessions' asserts only while one is running; the
+   *  display still sleeps/locks, and a closed lid still sleeps the machine. */
+  keepAwake?: 'off' | 'sessions' | 'always'
   /** GitHub personal access token for registry/marketplace fetches (lifts the
    *  unauthenticated 60 req/h API limit; keychain-backed like API keys) */
   githubToken?: string

@@ -8,6 +8,7 @@ import { focusSessionIn, workspaceTabOrder, activeSessionId } from '../domains/s
 import { requestQuickShellToggle } from '../domains/session/QuickShell'
 import { applyAppearance, steppedUiScale } from './appearance'
 import { checkAppUpdate } from '../infrastructure/native/app-update'
+import { driveKeepAwake } from './keep-awake'
 import { hookConsole } from '../core/debug-log'
 import { osNotify } from '../infrastructure/native/notify'
 
@@ -60,6 +61,10 @@ export function useGlobalEffects(): void {
       window.clearInterval(daily)
     }
   }, [])
+
+  // keep-awake: hold/release the idle-sleep assertion as settings and session
+  // activity change (Settings → General → POWER)
+  useEffect(() => driveKeepAwake(() => useAppStore.getState(), fn => useAppStore.subscribe(fn)), [])
 
   // surface background failures that would otherwise vanish (the webview console
   // reaches the dev log / devtools — the app shows no crash UI)

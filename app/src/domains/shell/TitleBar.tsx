@@ -5,6 +5,7 @@ import { isSatelliteWindow } from '../../core/window-role'
 import { NOTIF_COLORS, WORKSPACE_COLORS, DEFAULT_WORKSPACE_COLOR, hexToRgba } from '../../core/data'
 import { ColorSwatches } from '../../components/ColorSwatches'
 import { EditableName, IC, Icon, MasterMark } from '../../components/ui'
+import { keepAwakeDesired } from '../../app/keep-awake'
 import { confirmAction } from '../../components/Confirm'
 
 /** Switch, create, rename, delete, and spin workspace-scoped state pools out
@@ -135,6 +136,24 @@ function WorkspaceSwitcher() {
 }
 
 /** Render workspace notifications and actions from the title-bar bell. */
+/** Small lightning chip shown while the keep-awake assertion is held —
+ *  transparency for a mode that changes power behavior. Click opens Settings. */
+function KeepAwakeChip() {
+  const active = useConductorSelector(x => keepAwakeDesired(x))
+  const { setView } = useActions()
+  if (!active) return null
+  return (
+    <button
+      className="icon-btn"
+      title="Keep Awake is holding the Mac out of idle sleep (Settings → General → Power)"
+      style={{ width: 30, height: 30, color: 'var(--green)' }}
+      onClick={() => setView('settings')}
+    >
+      <Icon paths={['M13 2L5 13h5l-1 9 8-11h-5z']} size={14} stroke={1.6} />
+    </button>
+  )
+}
+
 function NotifPopover() {
   const s = useConductorSelector(x => ({ notifications: x.notifications }), shallowEqual)
   const { readAllNotif, clickNotif } = useActions()
@@ -219,6 +238,7 @@ export function TitleBar() {
           {needsCount} needs action
         </button>
       )}
+      <KeepAwakeChip />
       <button className="icon-btn" title="Activity timeline" style={{ width: 30, height: 30 }} onClick={() => setView('timeline')}>
         <Icon paths={['M3 12h4l2.5 6 5-12 2.5 6h4']} />
       </button>
