@@ -5,6 +5,7 @@ import { IC, Icon, MasterMark } from '../../components/ui'
 
 const NAV: Array<{ id: View; label: string; title?: string; paths: string[] }> = [
   { id: 'workspace', label: 'Work', paths: ['M3 5.5h18v13H3z', 'M9.5 5.5v13'] },
+  { id: 'mission', label: 'Mission', title: 'Mission Control — one chat, the deck follows what matters', paths: ['M12 3a9 9 0 100 18 9 9 0 000-18z', 'M12 8a4 4 0 100 8 4 4 0 000-8z', 'M12 12h6.5'] },
   { id: 'chat', label: 'Chat', paths: ['M4 5h16v11H9l-5 4z', 'M8 9h8', 'M8 12h5'] },
   // rail keeps the short "Agents" label; the view itself is the Control Center
   { id: 'overview', label: 'Agents', title: 'Control Center', paths: ['M4 4h6.5v6.5H4z', 'M13.5 4H20v6.5h-6.5z', 'M4 13.5h6.5V20H4z', 'M13.5 13.5H20V20h-6.5z'] },

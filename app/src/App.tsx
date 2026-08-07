@@ -24,6 +24,7 @@ const ChatView = lazy(() => import('./domains/chat/ChatView').then(m => ({ defau
 const SettingsView = lazy(() => import('./domains/settings/SettingsView').then(m => ({ default: m.SettingsView })))
 const AddonView = lazy(() => import('./domains/addons/AddonView').then(m => ({ default: m.AddonView })))
 const ArchivedWorkspacesView = lazy(() => import('./domains/workspace/ArchivedWorkspacesView').then(m => ({ default: m.ArchivedWorkspacesView })))
+const MissionControl = lazy(() => import('./domains/master/MissionControl').then(m => ({ default: m.MissionControl })))
 
 function ViewFallback() {
   return <div style={{ padding: 24, color: 'var(--dim)', fontSize: 13 }}>Loading view…</div>
@@ -48,6 +49,7 @@ function MainArea() {
           {view === 'settings' && <SettingsView />}
           {view === 'addon' && <AddonView />}
           {view === 'archived-workspaces' && <ArchivedWorkspacesView />}
+          {view === 'mission' && <MissionControl />}
         </Suspense>
       )}
     </div>
@@ -56,13 +58,16 @@ function MainArea() {
 
 /** Compose the persistent title bar, navigation, Master sidebar, and active view. */
 function Shell() {
+  // Mission Control embeds the (single, shared) Master chat itself — the
+  // docked sidebar would duplicate the conversation beside it
+  const mission = useConductorSelector(x => x.view === 'mission')
   return (
     <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <TitleBar />
       <SaveErrorBanner />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <IconRail />
-        <Sidebar />
+        {!mission && <Sidebar />}
         <MainArea />
       </div>
       <SlideOver />

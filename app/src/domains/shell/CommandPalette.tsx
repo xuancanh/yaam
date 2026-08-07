@@ -21,6 +21,7 @@ const ICONS: Record<string, string[]> = {
 
 const NAV_COMMANDS: Array<[View, string, string?]> = [
   ['workspace', 'Go to Workspace'],
+  ['mission', 'Go to Mission Control'],
   ['chat', 'Go to Chat'],
   ['overview', 'Go to Agents'],
   ['board', 'Go to Board'],

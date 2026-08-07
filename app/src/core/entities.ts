@@ -874,6 +874,7 @@ export interface Addon {
 
 export type View =
   | 'workspace'
+  | 'mission'
   | 'overview'
   | 'board'
   | 'timeline'
