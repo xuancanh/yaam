@@ -112,7 +112,7 @@ export function CommandPalette() {
       cmds.push({ id: `res-${x.id}`, label: `Resume ${x.name}`, hint: x.repo, icon: 'play', run: () => a.resume(x.id) }))
     workspaceAgents.filter(x => x.status === 'needs' || x.status === 'running').forEach(x =>
       cmds.push({ id: `rev-${x.id}`, label: `Review changes · ${x.name}`, hint: x.repo, icon: 'diff', run: () => a.openDiff(x.id) }))
-    NAV_COMMANDS.forEach(([v, label, kbd]) =>
+    NAV_COMMANDS.filter(([v]) => v !== 'mission' || s.settings.missionControlBeta === true).forEach(([v, label, kbd]) =>
       cmds.push({ id: `nav-${v}`, label, hint: kbd ?? 'navigate', icon: 'go', run: () => a.setView(v) }))
     const q = s.paletteQuery.toLowerCase().trim()
     return q ? cmds.filter(c => c.label.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q)) : cmds

@@ -32,7 +32,11 @@ function ViewFallback() {
 
 /** Select the active top-level view from the centralized navigation state. */
 function MainArea() {
-  const view = useConductorSelector(x => x.view)
+  let view = useConductorSelector(x => x.view)
+  const missionBeta = useConductorSelector(x => x.settings.missionControlBeta === true)
+  // Mission Control is behind the beta flag — flipping it off while the deck
+  // is open (or having it persisted as the last view) falls back to Work
+  if (view === 'mission' && !missionBeta) view = 'workspace'
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       {view === 'workspace' && <Workspace />}

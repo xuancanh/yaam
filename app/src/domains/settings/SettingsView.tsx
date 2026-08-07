@@ -11,6 +11,7 @@ import { SectionLabel } from './SectionLabel'
 import { UpdateSection } from './UpdateSection'
 import { DeveloperSection } from './DeveloperSection'
 import { PowerSection } from './PowerSection'
+import { BetaSection } from './BetaSection'
 
 /** One connect link with a copy button (transient ✓ feedback). */
 function ConnectLink({ label, url }: { label: string; url: string }) {
@@ -379,6 +380,7 @@ export function SettingsView() {
           </div>
 
           <PowerSection />
+          <BetaSection />
           <DeveloperSection />
           </>}
 

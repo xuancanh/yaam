@@ -17,8 +17,9 @@ const NAV: Array<{ id: View; label: string; title?: string; paths: string[] }> =
 
 /** Render primary navigation plus enabled addon views for the active workspace. */
 export function IconRail() {
-  const s = useConductorSelector(x => ({ view: x.view, addons: x.addons, activeAddon: x.activeAddon }), shallowEqual)
+  const s = useConductorSelector(x => ({ view: x.view, addons: x.addons, activeAddon: x.activeAddon, missionBeta: x.settings.missionControlBeta === true }), shallowEqual)
   const { setView, openAddon } = useActions()
+  const nav = NAV.filter(n => n.id !== 'mission' || s.missionBeta)
 
   return (
     <div style={{
@@ -28,7 +29,7 @@ export function IconRail() {
       <div style={{ marginBottom: 8 }}>
         <MasterMark size={34} />
       </div>
-      {NAV.map(n => {
+      {nav.map(n => {
         const active = n.id === s.view
         return (
           <button

@@ -658,6 +658,9 @@ export interface OrchestrationSettings {
    *  running sessions. 'sessions' asserts only while one is running; the
    *  display still sleeps/locks, and a closed lid still sleeps the machine. */
   keepAwake?: 'off' | 'sessions' | 'always'
+  /** Mission Control (beta): the full-screen command deck view. Off by default
+   *  while the UX bakes — the flag gates every entry point. */
+  missionControlBeta?: boolean
   /** GitHub personal access token for registry/marketplace fetches (lifts the
    *  unauthenticated 60 req/h API limit; keychain-backed like API keys) */
   githubToken?: string

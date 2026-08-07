@@ -99,14 +99,16 @@ export function Sidebar() {
             </span>
           </div>
         </div>
-        <button
-          className="icon-btn"
-          title="Open Mission Control — the full-screen command deck"
-          style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0 }}
-          onClick={() => setView('mission')}
-        >
-          <Icon paths={['M12 3a9 9 0 100 18 9 9 0 000-18z', 'M12 8a4 4 0 100 8 4 4 0 000-8z', 'M12 12h6.5']} size={14} stroke={1.6} />
-        </button>
+        {s.settings.missionControlBeta === true && (
+          <button
+            className="icon-btn"
+            title="Open Mission Control (beta) — the full-screen command deck"
+            style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0 }}
+            onClick={() => setView('mission')}
+          >
+            <Icon paths={['M12 3a9 9 0 100 18 9 9 0 000-18z', 'M12 8a4 4 0 100 8 4 4 0 000-8z', 'M12 12h6.5']} size={14} stroke={1.6} />
+          </button>
+        )}
         <button
           className="icon-btn"
           title="Hide Master chat"
