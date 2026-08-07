@@ -96,16 +96,34 @@ export function termThemeFor(theme: string): typeof DARK_TERM {
   return DARK_TERM // dark + midnight
 }
 
-/** The theme currently stamped on <html> by the appearance system. */
+// custom accent (Settings → Appearance): tints the cursor + selection of every
+// terminal, current and future — xterm paints to canvas, so CSS vars can't
+let termAccent: string | null = null
+
+/** Remember the app's accent override for terminal palettes (null = theme default). */
+export function setTerminalAccent(accent: string | null) {
+  termAccent = accent && /^#[0-9a-fA-F]{6}$/.test(accent) ? accent : null
+}
+
+/** A theme palette with the user's accent applied (pure given module state). */
+export function accentedTermTheme(theme: string): typeof DARK_TERM {
+  const base = termThemeFor(theme)
+  if (!termAccent) return base
+  // 8-digit hex alpha ≈ the app's --selection opacity
+  return { ...base, cursor: termAccent, selectionBackground: `${termAccent}48` }
+}
+
+/** The TERMINAL theme stamped on <html> by the appearance system — separate
+ *  from the app theme, since terminals default to dark on any app look. */
 function currentAppTheme(): string {
-  return typeof document !== 'undefined'
-    ? document.documentElement.getAttribute('data-theme') ?? 'dark'
-    : 'dark'
+  if (typeof document === 'undefined') return 'dark'
+  const root = document.documentElement
+  return root.getAttribute('data-term-theme') ?? root.getAttribute('data-theme') ?? 'dark'
 }
 
 /** Repaint every open terminal for a theme change (xterm ignores CSS vars). */
 export function applyTerminalTheme(theme: string) {
-  const palette = termThemeFor(theme)
+  const palette = accentedTermTheme(theme)
   for (const entry of entries.values()) entry.term.options.theme = palette
 }
 let listenerStarted = false
@@ -152,7 +170,7 @@ export function getTerminal(
       lineHeight: 1.25,
       cursorBlink: true,
       scrollback: 5000,
-      theme: termThemeFor(currentAppTheme()),
+      theme: accentedTermTheme(currentAppTheme()),
     })
     const fit = new FitAddon()
     term.loadAddon(fit)

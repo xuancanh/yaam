@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { APPEARANCE_DEFAULTS, SCALE_MAX, SCALE_MIN, SCALE_STEP } from '../../app/appearance'
+import { ACCENT_PRESETS, APPEARANCE_DEFAULTS, SCALE_MAX, SCALE_MIN, SCALE_STEP } from '../../app/appearance'
 import type { AppearanceSettings } from '../../core/types'
+import { ColorSwatches } from '../../components/ColorSwatches'
+import { Switch } from '../../components/ui'
 import { FIELD_STYLE } from './common'
 import { SectionLabel } from './SectionLabel'
 
@@ -62,6 +64,32 @@ export function AppearanceSection() {
             <option value="paper">Paper</option>
             <option value="sakura">Sakura</option>
             <option value="system">System</option>
+          </select>
+        </AppearanceRow>
+        <AppearanceRow label="Accent color" detail="Overrides the theme's accent everywhere — buttons, highlights, selection, the terminal cursor. The rainbow well opens a full picker.">
+          <div style={{ maxWidth: 280 }}>
+            <ColorSwatches
+              colors={ACCENT_PRESETS}
+              current={a.accent || undefined}
+              onPick={c => patch({ accent: c })}
+              onClear={a.accent ? () => patch({ accent: '', accentTint: false }) : undefined}
+            />
+          </div>
+        </AppearanceRow>
+        {!!a.accent && (
+          <AppearanceRow label="Tint surfaces" detail="Wash backgrounds, panels, and borders with the accent's hue — a whole look derived from one color.">
+            <Switch on={a.accentTint} onToggle={() => patch({ accentTint: !a.accentTint })} />
+          </AppearanceRow>
+        )}
+        <AppearanceRow label="Terminal theme" detail="Terminals keep their own palette, independent of the app theme — dark stays readable on a light app.">
+          <select value={a.terminalTheme} onChange={e => patch({ terminalTheme: e.target.value as AppearanceSettings['terminalTheme'] })} style={{ ...FIELD_STYLE, width: 160 }}>
+            <option value="dark">Dark (default)</option>
+            <option value="auto">Follow app theme</option>
+            <option value="midnight">Midnight</option>
+            <option value="forest">Forest</option>
+            <option value="light">Light</option>
+            <option value="paper">Paper</option>
+            <option value="sakura">Sakura</option>
           </select>
         </AppearanceRow>
         <AppearanceRow label="File viewer syntax" detail="Syntax-highlight palette for code in the file viewer and editor. Auto follows the theme; the named palettes look best on dark themes.">

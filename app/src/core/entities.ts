@@ -563,6 +563,15 @@ export interface AppearanceSettings {
   theme?: 'dark' | 'light' | 'paper' | 'midnight' | 'forest' | 'sakura' | 'system'
   /** syntax palette for the file viewer / code editor; 'auto' follows the theme */
   viewerTheme?: 'auto' | 'ocean' | 'violet' | 'ember'
+  /** custom accent color (hex) — overrides the theme's accent everywhere,
+   *  including the terminal cursor/selection; empty = theme default */
+  accent?: string
+  /** wash the theme's surfaces (backgrounds, panels, lines) with the accent's
+   *  hue — a whole look derived from one color */
+  accentTint?: boolean
+  /** terminal palette, independent of the app theme — terminals default to
+   *  dark (light terminal chrome reads wrong); 'auto' follows the app */
+  terminalTheme?: 'dark' | 'auto' | 'midnight' | 'light' | 'paper' | 'forest' | 'sakura'
   /** whole-UI scale in percent (80–140) */
   uiScale?: number
   density?: 'compact' | 'normal' | 'comfortable'

@@ -1,7 +1,7 @@
 // Appearance: stamps the user's theme/typography/density choices onto <html>
 // so index.css palettes and variables take effect. Pure DOM — no React.
 import type { AppearanceSettings } from '../core/types'
-import { applyTerminalTheme } from '../core/terminals'
+import { accentedTermTheme, applyTerminalTheme, setTerminalAccent } from '../core/terminals'
 import { isTauri } from '../infrastructure/native/base'
 import { setWebviewZoom } from '../infrastructure/native/windows'
 
@@ -33,12 +33,65 @@ export function steppedUiScale(current: number | undefined, dir: -1 | 0 | 1): nu
 export const APPEARANCE_DEFAULTS: Required<AppearanceSettings> = {
   theme: 'dark',
   viewerTheme: 'auto',
+  accent: '',
+  accentTint: false,
+  terminalTheme: 'dark',
   uiScale: 100,
   density: 'normal',
   uiFont: 'plex',
   monoFont: 'jetbrains',
   tableFontSize: 13,
   tableFont: 'sans',
+}
+
+/** Accent presets shown in Settings → Appearance (custom well appended). */
+export const ACCENT_PRESETS = ['#F5C451', '#6FA8FF', '#3DDC97', '#C77DFF', '#FF7A7A', '#5BD8C8'] as const
+
+// surface variables the accent tint rewrites (strongest on lines/hover, where
+// a hue read as "chrome" rather than "background wash")
+const TINT_VARS: Array<[name: string, amount: number]> = [
+  ['--bg', 0.05], ['--bg2', 0.05], ['--bg3', 0.04],
+  ['--panel', 0.06], ['--panel2', 0.07], ['--panel3', 0.08],
+  ['--line', 0.1], ['--line2', 0.1], ['--line3', 0.1], ['--line-soft', 0.08],
+  ['--hover', 0.1],
+]
+
+function parseHex(hex: string): [number, number, number] | null {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+/** Blend `amount` of `tint` into `base` (both #rrggbb). */
+function mixHex(base: string, tint: string, amount: number): string {
+  const b = parseHex(base)
+  const t = parseHex(tint)
+  if (!b || !t) return base
+  const c = b.map((v, i) => Math.round(v + (t[i] - v) * amount))
+  return `#${c.map(v => v.toString(16).padStart(2, '0')).join('')}`
+}
+
+/** Apply (or clear) the custom accent: the accent/selection variables, the
+ *  terminal cursor palette, and — with tint on — a wash of the accent's hue
+ *  over every surface variable, derived from the active theme's own values. */
+function applyAccent(root: HTMLElement, accent: string, tint: boolean): void {
+  // always start from the theme's baseline so switching/clearing never stacks
+  root.style.removeProperty('--accent')
+  root.style.removeProperty('--selection')
+  for (const [name] of TINT_VARS) root.style.removeProperty(name)
+  const rgb = parseHex(accent)
+  setTerminalAccent(rgb ? accent : null)
+  if (!rgb) return
+  root.style.setProperty('--accent', accent)
+  root.style.setProperty('--selection', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.28)`)
+  if (!tint) return
+  // read each surface's theme value (overrides were just cleared) and blend
+  const computed = getComputedStyle(root)
+  for (const [name, amount] of TINT_VARS) {
+    const base = computed.getPropertyValue(name).trim()
+    if (base) root.style.setProperty(name, mixHex(base, accent, amount))
+  }
 }
 
 /** 'system' resolves against the OS scheme; everything else is explicit. */
@@ -54,7 +107,14 @@ export function applyAppearance(a?: AppearanceSettings): void {
   const root = document.documentElement
   const theme = resolveTheme(cfg.theme)
   root.setAttribute('data-theme', theme)
-  applyTerminalTheme(theme) // xterm canvases can't read CSS variables
+  applyAccent(root, cfg.accent, cfg.accentTint)
+  // terminals keep their OWN palette (dark by default): a light app theme
+  // shouldn't force a light terminal. The attr is what newly-created xterms
+  // read; --term-bg lets the pane's padding chrome match the canvas.
+  const termTheme = cfg.terminalTheme === 'auto' ? theme : cfg.terminalTheme
+  root.setAttribute('data-term-theme', termTheme)
+  applyTerminalTheme(termTheme) // xterm canvases can't read CSS variables (accent included above)
+  root.style.setProperty('--term-bg', accentedTermTheme(termTheme).background)
   root.setAttribute('data-density', cfg.density)
   // viewer syntax palette: 'auto' clears the attribute so the theme's own
   // token colors apply; anything else overrides just the --hl-* variables

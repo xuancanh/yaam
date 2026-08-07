@@ -118,7 +118,7 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
         }}
         style={{
           flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden',
-          background: 'var(--bg2)', padding: '8px 2px 2px 10px',
+          background: 'var(--term-bg, var(--bg2))', padding: '8px 2px 2px 10px',
         }}
       >
         {/* FitAddon measures xterm's parent but only subtracts the .xterm
