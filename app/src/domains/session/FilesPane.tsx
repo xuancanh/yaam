@@ -81,6 +81,21 @@ function remapKeys<V>(rec: Record<string, V>, remap: (path: string) => string, d
   return changed ? out : rec
 }
 
+/** escape a literal string for use inside a RegExp */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Wrap case-insensitive `query` matches in <mark> inside highlighted HTML,
+ *  touching only the text between tags so the token markup stays intact. */
+function markMatches(html: string, query: string, current: boolean): string {
+  const re = new RegExp(escapeRe(query), 'gi')
+  const cls = current ? 'find-mark find-mark-current' : 'find-mark'
+  return html.split(/(<[^>]*>)/g).map(seg =>
+    seg.startsWith('<') ? seg : seg.replace(re, m => `<mark class="${cls}">${m}</mark>`),
+  ).join('')
+}
+
 const GIT_COLORS: Record<string, string> = {
   '??': 'var(--green)', A: 'var(--green)', M: 'var(--amber)', AM: 'var(--amber)',
   MM: 'var(--amber)', D: 'var(--red-soft)', R: 'var(--amber)', UU: 'var(--red-soft)',
@@ -105,7 +120,7 @@ interface GitInfo {
 // full-render cap. ROW_H is the fixed per-row height the windowing math relies
 // on; it must match the row styles below.
 const MAX_LINES = 200_000
-const ROW_H = 19
+const ROW_H = 20
 const OVERSCAN = 24
 
 // ---------------------------------------------------------------- tree
@@ -277,9 +292,9 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 6, border: 'none',
                 textAlign: 'left', padding: `3px 8px 3px ${8 + depth * 13}px`, borderRadius: 6,
-                background: isSel ? 'rgba(245,196,81,.09)' : 'transparent',
-                color: color ?? (isSel ? 'var(--text)' : 'var(--mut)'),
-                fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                background: isSel ? 'rgba(245,196,81,.14)' : 'transparent',
+                color: color ?? (isSel ? 'var(--text)' : 'var(--mut2)'),
+                fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}
               title={e.path}
             >
@@ -691,9 +706,9 @@ function FileTabs({ tabs, active, drafts, onSelect, onClose }: {
             onKeyDown={e => { if (e.key === 'Enter') onSelect(t) }}
             style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px 0 10px', flexShrink: 0,
-              maxWidth: 210, cursor: 'pointer', fontSize: 11.5, whiteSpace: 'nowrap',
+              maxWidth: 210, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap',
               background: isActive ? 'var(--bg3)' : 'transparent',
-              color: isActive ? 'var(--text)' : 'var(--mut)',
+              color: isActive ? 'var(--text)' : 'var(--mut2)',
               borderRight: '1px solid var(--line)',
               boxShadow: isActive ? 'inset 0 -2px 0 var(--accent)' : 'none',
             }}
@@ -747,7 +762,7 @@ function Breadcrumbs({ path, root }: { path: string; root: string }) {
 // ---------------------------------------------------------------- viewer
 
 /** Load and display one file with syntax highlighting and optional diff gutter. */
-function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, fs, initialMode, draft, onModeChange, onDocChange, onDiscard }: {
+function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, fs, bare, initialMode, draft, onModeChange, onDocChange, onDiscard }: {
   path: string
   gutter: 'numbers' | 'git'
   onToggleGutter: () => void
@@ -755,6 +770,9 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   git: GitInfo | null
   onAttachFile?: (path: string) => void
   fs: SessionFs
+  /** hosted under a tab strip + breadcrumbs that already show the file name —
+   *  drop the header's own icon/name/close so it reads once, not three times */
+  bare?: boolean
   /** the tab's remembered view/edit choice; absent = kind default (text → edit) */
   initialMode?: 'edit' | 'view'
   /** unsaved buffer restored when the tab remounts (takes precedence over disk) */
@@ -767,6 +785,7 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
 }) {
   const name = path.slice(path.lastIndexOf('/') + 1)
   const kind = viewKind(name)
+  const isMdFile = /\.(md|markdown|mdx)$/i.test(name)
   const [content, setContent] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [marks, setMarks] = useState<{ added: Set<number>; modified: Set<number>; deletedAfter: Set<number> } | null>(null)
@@ -790,7 +809,9 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   // text files open straight in the editor (VSCode-style); the toggle in the
   // header switches back to the read-only viewer. Mode is per-tab: the host
   // remembers the choice per path and hands it back via `initialMode`.
-  const [editing, setEditingState] = useState(() => (initialMode ? initialMode === 'edit' : kind === 'text'))
+  // markdown defaults to the rendered preview (view mode) — the pencil opens
+  // the editor; every other text file still opens straight into the editor
+  const [editing, setEditingState] = useState(() => (initialMode ? initialMode === 'edit' : kind === 'text' && !isMdFile))
   const setEditing = (v: boolean) => { setEditingState(v); onModeChange?.(v ? 'edit' : 'view') }
   const editingRef = useRef(false)
   editingRef.current = editing
@@ -802,9 +823,16 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState({ top: 0, h: 0 })
 
+  // in-file search (⌘F / the toolbar loupe) over the virtualized code view:
+  // Enter / Shift+Enter step through matching lines, Esc closes
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQ, setFindQ] = useState('')
+  const [findIx, setFindIx] = useState(0)
+  const findInputRef = useRef<HTMLInputElement>(null)
+
   const status = git?.byPath.get(path)
   const lang = langForFile(name)
-  const isMd = /\.(md|markdown|mdx)$/i.test(name)
+  const isMd = isMdFile
   const rendered = isMd && mdView === 'rendered'
   const rel = git && path.startsWith(git.root + '/') ? path.slice(git.root.length + 1) : null
 
@@ -892,13 +920,18 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
     setHtmlTrusted(false)
     // reset the mode only when a different file is opened in this same viewer
     // (no remount) — a same-file reload must never kick the user out of editing
-    if (pathChanged) setEditingState(kind === 'text')
+    if (pathChanged) {
+      setEditingState(kind === 'text' && !isMdFile)
+      setFindOpen(false)
+      setFindQ('')
+      setFindIx(0)
+    }
     void load()
     if (kind === 'image' || kind === 'pdf') return
     if (isTauri) return onFsChange(() => void load())
     const iv = window.setInterval(() => void load(), 4000)
     return () => window.clearInterval(iv)
-  }, [load, kind, path])
+  }, [load, kind, path, isMdFile])
 
   // Stash the rendered HTML on the backend and load it through the custom
   // scheme so it escapes the app's inherited CSP (Tauri only). Re-stashes when
@@ -942,6 +975,46 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   const first = Math.max(0, Math.floor(view.top / ROW_H) - OVERSCAN)
   const last = Math.min(lines.length, Math.ceil((view.top + (view.h || 600)) / ROW_H) + OVERSCAN)
 
+  // true when the virtualized code view is what's on screen (the only surface
+  // the find bar can search and mark)
+  const codeView = !err && content !== null && !editing && !rendered
+    && kind !== 'image' && kind !== 'pdf'
+    && !(kind === 'office' && office) && !(kind === 'html' && htmlView === 'rendered')
+
+  const findMatches = useMemo(() => {
+    if (!findOpen || !findQ) return { lines: [] as number[], total: 0 }
+    const q = findQ.toLowerCase()
+    const arr = (content ?? '').split('\n')
+    const ls: number[] = []
+    let total = 0
+    for (let i = 0; i < Math.min(arr.length, MAX_LINES); i++) {
+      let ix = arr[i].toLowerCase().indexOf(q)
+      if (ix < 0) continue
+      ls.push(i)
+      while (ix >= 0) { total++; ix = arr[i].toLowerCase().indexOf(q, ix + q.length) }
+    }
+    return { lines: ls, total }
+  }, [content, findQ, findOpen])
+  const curFindLine = findMatches.lines.length
+    ? findMatches.lines[Math.min(findIx, findMatches.lines.length - 1)]
+    : -1
+
+  const stepFind = (dir: 1 | -1) => {
+    const n = findMatches.lines.length
+    if (n) setFindIx(ix => (Math.min(ix, n - 1) + dir + n) % n)
+  }
+
+  // center the current match in the viewport
+  useEffect(() => {
+    if (!findOpen || curFindLine < 0) return
+    const el = scrollRef.current
+    if (el) el.scrollTop = Math.max(0, curFindLine * ROW_H - el.clientHeight / 2)
+  }, [findIx, curFindLine, findOpen])
+
+  useEffect(() => {
+    if (findOpen) { findInputRef.current?.focus(); findInputRef.current?.select() }
+  }, [findOpen])
+
   // Track the viewport height (for the window size) and reset scroll to the top
   // when a different file is opened — but not on same-file reloads, so watching
   // an edited file doesn't yank the reader back to line 1.
@@ -960,15 +1033,29 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   }, [path])
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg3)' }}>
+    <div
+      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg3)' }}
+      onKeyDown={e => {
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f' && codeView) {
+          e.preventDefault()
+          setFindOpen(true)
+          findInputRef.current?.focus()
+          findInputRef.current?.select()
+        }
+      }}
+    >
       <div style={{
         height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px',
         background: 'var(--panel)', borderBottom: '1px solid var(--line)',
       }}>
-        <FileIcon name={name} path={path} isDir={false} size={14} />
-        <span className="mono" style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={path}>
-          {rel ?? name}
-        </span>
+        {!bare && (
+          <>
+            <FileIcon name={name} path={path} isDir={false} size={14} />
+            <span className="mono" style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={path}>
+              {rel ?? name}
+            </span>
+          </>
+        )}
         {status && (
           <span className="mono" style={{
             fontSize: 9.5, fontWeight: 700, padding: '1px 6px', borderRadius: 4, flexShrink: 0,
@@ -1043,6 +1130,16 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
             <Icon paths={['M12 20h9', 'M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z']} size={13} stroke={1.7} />
           </button>
         )}
+        {codeView && (
+          <button
+            className="icon-btn"
+            title="Find in file (⌘F)"
+            onClick={() => setFindOpen(v => !v)}
+            style={{ width: 26, height: 26, borderRadius: 6, color: findOpen ? 'var(--accent)' : undefined }}
+          >
+            <Icon paths={['M11 4a7 7 0 100 14 7 7 0 000-14z', 'M21 21l-4.8-4.8']} size={13} stroke={1.8} />
+          </button>
+        )}
         <button
           className="icon-btn"
           title={gutter === 'numbers' ? 'Gutter: line numbers — click for git change markers' : 'Gutter: git change markers — click for line numbers'}
@@ -1053,10 +1150,51 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
             ? <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M6 21v0']} size={14} stroke={1.7} />
             : <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>#</span>}
         </button>
-        <button className="icon-btn" title="Close file" onClick={onClose} style={{ width: 26, height: 26, borderRadius: 6 }}>
-          <Icon paths={IC.close} size={13} stroke={1.8} />
-        </button>
+        {!bare && (
+          <button className="icon-btn" title="Close file" onClick={onClose} style={{ width: 26, height: 26, borderRadius: 6 }}>
+            <Icon paths={IC.close} size={13} stroke={1.8} />
+          </button>
+        )}
       </div>
+
+      {findOpen && codeView && (
+        <div style={{
+          height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 7, padding: '0 10px',
+          background: 'var(--panel2)', borderBottom: '1px solid var(--line)',
+        }}>
+          <Icon paths={['M11 4a7 7 0 100 14 7 7 0 000-14z', 'M21 21l-4.8-4.8']} size={11} stroke={1.8} />
+          <input
+            ref={findInputRef}
+            className="mono"
+            value={findQ}
+            placeholder="Find in file…"
+            spellCheck={false}
+            onChange={e => { setFindQ(e.target.value); setFindIx(0) }}
+            onKeyDown={e => {
+              e.stopPropagation()
+              if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1) }
+              else if (e.key === 'Escape') { e.preventDefault(); setFindOpen(false) }
+            }}
+            style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 12 }}
+          />
+          <span className="mono" style={{ flexShrink: 0, fontSize: 10.5, color: findQ && !findMatches.total ? 'var(--red-soft)' : 'var(--dim)' }}>
+            {findQ
+              ? findMatches.total
+                ? `${findMatches.total} match${findMatches.total === 1 ? '' : 'es'} · line ${Math.min(findIx, findMatches.lines.length - 1) + 1}/${findMatches.lines.length}`
+                : 'no matches'
+              : ''}
+          </span>
+          <button className="icon-btn" title="Previous match (Shift+Enter)" onClick={() => stepFind(-1)} style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }}>
+            <Icon paths={['M6 14l6-6 6 6']} size={11} stroke={1.8} />
+          </button>
+          <button className="icon-btn" title="Next match (Enter)" onClick={() => stepFind(1)} style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }}>
+            <Icon paths={['M6 10l6 6 6-6']} size={11} stroke={1.8} />
+          </button>
+          <button className="icon-btn" title="Close find (Esc)" onClick={() => setFindOpen(false)} style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }}>
+            <Icon paths={IC.close} size={10} stroke={2} />
+          </button>
+        </div>
+      )}
 
       {err ? (
         <div style={{ padding: 18, fontSize: 12, color: 'var(--red-soft)' }}>
@@ -1186,8 +1324,9 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
       ) : (
         <div
           ref={scrollRef}
+          tabIndex={0}
           onScroll={e => setView({ top: e.currentTarget.scrollTop, h: e.currentTarget.clientHeight })}
-          style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
+          style={{ flex: 1, minHeight: 0, overflow: 'auto', outline: 'none' }}
         >
           <div style={{ display: 'inline-block', minWidth: '100%' }}>
             {/* spacer reserving the height of the rows scrolled off the top */}
@@ -1195,8 +1334,12 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
             {lines.slice(first, last).map((line, i) => {
               const n = first + i + 1
               const g = gutterFor(n)
+              const matched = findOpen && !!findQ && line.toLowerCase().includes(findQ.toLowerCase())
+              const isCur = matched && curFindLine === n - 1
+              const html = highlight(line, lang) || '&nbsp;'
+              const gitBg = gutter === 'git' && g.color ? `${g.color === 'var(--green)' ? 'rgba(96,211,148,.05)' : g.color === 'var(--amber)' ? 'rgba(255,176,32,.05)' : 'transparent'}` : 'transparent'
               return (
-                <div key={n} style={{ display: 'flex', height: ROW_H, background: gutter === 'git' && g.color ? `${g.color === 'var(--green)' ? 'rgba(96,211,148,.05)' : g.color === 'var(--amber)' ? 'rgba(255,176,32,.05)' : 'transparent'}` : 'transparent' }}>
+                <div key={n} style={{ display: 'flex', height: ROW_H, background: isCur ? 'rgba(245,196,81,.08)' : gitBg }}>
                   <span
                     className="mono"
                     title={gutter === 'git' ? g.label : undefined}
@@ -1212,8 +1355,8 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
                   </span>
                   <span
                     className="mono"
-                    style={{ padding: '0 14px', fontSize: 11.5, lineHeight: `${ROW_H}px`, whiteSpace: 'pre', color: 'var(--text2)', userSelect: 'text' }}
-                    dangerouslySetInnerHTML={{ __html: highlight(line, lang) || '&nbsp;' }}
+                    style={{ padding: '0 14px', fontSize: 12, lineHeight: `${ROW_H}px`, whiteSpace: 'pre', color: 'var(--text2)', userSelect: 'text' }}
+                    dangerouslySetInnerHTML={{ __html: matched ? markMatches(html, findQ, isCur) : html }}
                   />
                 </div>
               )
@@ -1499,6 +1642,7 @@ export function FilesPane({ agent }: { agent: Agent }) {
             <Breadcrumbs path={file} root={root} />
             <FileViewer
               key={file}
+              bare
               path={file}
               gutter={gutter}
               onToggleGutter={() => setGutter(g => (g === 'numbers' ? 'git' : 'numbers'))}
