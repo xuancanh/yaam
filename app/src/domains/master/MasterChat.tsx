@@ -44,8 +44,10 @@ function RouteCard({ msg }: { msg: Message }) {
   )
 }
 
-/** Render an actionable session escalation and its response controls. */
-function EscalateCard({ msg }: { msg: Message }) {
+/** Render an actionable session escalation and its response controls. When the
+ *  host wires `onFocusSession`, the card offers a jump to the session itself
+ *  (Mission Control: put it on stage; sidebar: open it in the Work view). */
+function EscalateCard({ msg, onFocusSession, focusLabel }: { msg: Message; onFocusSession?: (id: string) => void; focusLabel?: string }) {
   const { approve, deny, answerPrompt } = useActions()
   const esc = msg.esc!
   const decisionColor = esc.decision === 'denied' ? 'var(--red-soft)' : 'var(--green)'
@@ -58,7 +60,21 @@ function EscalateCard({ msg }: { msg: Message }) {
     }}>
       <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, fontWeight: 600, letterSpacing: 0.4, color: 'var(--amber)', marginBottom: 8 }}>
         <Icon paths={IC.warn} size={14} stroke={1.8} />
-        NEEDS YOUR DECISION
+        <span style={{ flex: 1 }}>NEEDS YOUR DECISION</span>
+        {onFocusSession && msg.escFor && !esc.resolved && (
+          <button
+            className="mono"
+            title={focusLabel ?? 'Show this session'}
+            onClick={() => onFocusSession(msg.escFor!)}
+            style={{
+              fontSize: 8.5, fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer', flexShrink: 0,
+              background: 'transparent', border: '1px solid rgba(255,176,32,.5)', borderRadius: 5,
+              color: 'var(--amber)', padding: '2px 7px',
+            }}
+          >
+            {focusLabel ?? 'VIEW'}
+          </button>
+        )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: esc.color }} />
@@ -200,7 +216,7 @@ function ThinkingBlock({ content }: { content: string }) {
 }
 
 /** Dispatch a chat message to its specialized row renderer. */
-function MessageRow({ msg }: { msg: Message }) {
+function MessageRow({ msg, onFocusSession, focusLabel }: { msg: Message; onFocusSession?: (id: string) => void; focusLabel?: string }) {
   if (msg.role === 'you') {
     return (
       <div style={{
@@ -224,7 +240,7 @@ function MessageRow({ msg }: { msg: Message }) {
           </div>
         )}
         {msg.kind === 'route' && <RouteCard msg={msg} />}
-        {msg.kind === 'escalate' && <EscalateCard msg={msg} />}
+        {msg.kind === 'escalate' && <EscalateCard msg={msg} onFocusSession={onFocusSession} focusLabel={focusLabel} />}
         {msg.kind === 'build' && <BuildCard msg={msg} />}
         {msg.kind === 'buildui' && <BuildUICard msg={msg} />}
       </div>
@@ -240,7 +256,13 @@ function MessageRow({ msg }: { msg: Message }) {
  *  Brain is off and a session is on stage, the composer becomes a direct line
  *  to that session's terminal instead of a dead end. Escalation cards in the
  *  stream stay fully answerable either way (they never needed the brain). */
-export function MasterChat({ directTarget }: { directTarget?: { id: string; name: string } | null }) {
+export function MasterChat({ directTarget, onFocusSession, focusLabel }: {
+  directTarget?: { id: string; name: string } | null
+  /** host-provided jump from an escalation card to its session */
+  onFocusSession?: (id: string) => void
+  /** label for that jump ('STAGE' in Mission Control, 'OPEN' in the sidebar) */
+  focusLabel?: string
+}) {
   const s = useConductorSelector(x => ({
     composer: x.composer, masterBusy: x.masterBusy, messages: x.messages,
     pendingToolApprovals: x.pendingToolApprovals, settings: x.settings,
@@ -249,6 +271,12 @@ export function MasterChat({ directTarget }: { directTarget?: { id: string; name
   const on = s.settings.masterEnabled && hasCreds(s.settings)
   const direct = !on && directTarget ? directTarget : null
   const [sentNote, setSentNote] = useState('')
+  // decisions lens: collapse the stream to just the escalation cards — the
+  // things that actually need a human — one click, one click back
+  const [lens, setLens] = useState<'all' | 'decisions'>('all')
+  const decisions = s.messages.filter(m => m.kind === 'escalate')
+  const openDecisions = decisions.filter(m => !m.esc?.resolved).length
+  const shown = lens === 'decisions' ? decisions : s.messages
   const scrollRef = useRef<HTMLDivElement>(null)
   // stick-to-bottom scrolling: follow new messages only while the user is near
   // the bottom; when they scroll up to read, stop following and offer a jump
@@ -302,9 +330,31 @@ export function MasterChat({ directTarget }: { directTarget?: { id: string; name
 
   return (
     <>
+      {decisions.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px 0' }}>
+          {(['all', 'decisions'] as const).map(l => (
+            <button
+              key={l}
+              className="mono"
+              onClick={() => setLens(l)}
+              style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer', borderRadius: 999, padding: '3px 10px',
+                background: lens === l ? 'rgba(245,196,81,.12)' : 'transparent',
+                border: `1px solid ${lens === l ? 'var(--accent)' : 'var(--line2)'}`,
+                color: lens === l ? 'var(--accent)' : l === 'decisions' && openDecisions > 0 ? 'var(--amber)' : 'var(--mut)',
+              }}
+            >
+              {l === 'all' ? 'ALL' : `DECISIONS${openDecisions > 0 ? ` · ${openDecisions} open` : ''}`}
+            </button>
+          ))}
+        </div>
+      )}
       <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
         <div ref={scrollRef} onScroll={onScroll} style={{ flex: 1, overflowY: 'auto', padding: '16px 15px', display: 'flex', flexDirection: 'column', gap: 15 }}>
-          {s.messages.map(m => <MessageRow key={m.id} msg={m} />)}
+          {shown.map(m => <MessageRow key={m.id} msg={m} onFocusSession={onFocusSession} focusLabel={focusLabel} />)}
+          {lens === 'decisions' && shown.length === 0 && (
+            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 12, color: 'var(--dim)' }}>No decisions yet — escalations land here.</div>
+          )}
         </div>
         {farFromBottom && (
           <button
@@ -339,6 +389,11 @@ export function MasterChat({ directTarget }: { directTarget?: { id: string; name
 
       <div style={{ borderTop: '1px solid var(--line)', padding: '12px 14px' }}>
         <div style={{ background: 'var(--panel2)', border: '1px solid var(--line2)', borderRadius: 12, padding: '10px 12px' }}>
+          {/* routing indicator: WHO receives what you type — never a mystery */}
+          <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9, fontWeight: 700, letterSpacing: 0.5, marginBottom: 5, color: on ? 'var(--accent)' : direct ? 'var(--green)' : 'var(--dim)' }}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor' }} />
+            {on ? 'TO MASTER — routes, answers, builds' : direct ? `DIRECT LINE → ${direct.name.toUpperCase()}` : 'OFFLINE — no brain configured'}
+          </div>
           <textarea
             data-composer="1"
             value={s.composer}

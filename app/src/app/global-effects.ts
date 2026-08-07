@@ -139,11 +139,11 @@ export function useGlobalEffects(): void {
       } else if (mod && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key) && useAppStore.getState().view === 'workspace') {
         // ⌘1–9 — jump to the nth session tab (Mission Control owns these on the board)
         jumpTab(Number(e.key) - 1)
-      } else if (mod && e.shiftKey && (e.key === ']' || e.key === '}')) {
-        jumpTab(undefined, 1) // ⌘⇧] — next session tab
-      } else if (mod && e.shiftKey && (e.key === '[' || e.key === '{')) {
+      } else if (mod && e.shiftKey && (e.key === ']' || e.key === '}') && useAppStore.getState().view === 'workspace') {
+        jumpTab(undefined, 1) // ⌘⇧] — next session tab (Mission Control owns these on its deck)
+      } else if (mod && e.shiftKey && (e.key === '[' || e.key === '{') && useAppStore.getState().view === 'workspace') {
         jumpTab(undefined, -1) // ⌘⇧[ — previous session tab
-      } else if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Tab') {
+      } else if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Tab' && useAppStore.getState().view === 'workspace') {
         jumpTab(undefined, e.shiftKey ? -1 : 1) // Ctrl(+Shift)+Tab — cycle tabs
       } else if (e.key === 'Escape') {
         dispatch(s => ({ ...s, paletteOpen: false, notifOpen: false, drawer: null, newSessionOpen: false, newTaskOpen: false }))

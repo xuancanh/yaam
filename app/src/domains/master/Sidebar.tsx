@@ -10,7 +10,7 @@ export function Sidebar() {
   const s = useConductorSelector(x => ({
     agents: x.agents, masterBusy: x.masterBusy, settings: x.settings,
   }), shallowEqual)
-  const { updateSettings, setView } = useActions()
+  const { updateSettings, setView, focusTab } = useActions()
   const on = s.settings.masterEnabled && hasCreds(s.settings)
   const width = Math.max(280, Math.min(640, s.settings.sidebarWidth ?? 392))
 
@@ -116,7 +116,10 @@ export function Sidebar() {
         </button>
       </div>
 
-      <MasterChat />
+      <MasterChat
+        onFocusSession={id => { focusTab(id); setView('workspace') }}
+        focusLabel="OPEN ↗"
+      />
     </div>
   )
 }

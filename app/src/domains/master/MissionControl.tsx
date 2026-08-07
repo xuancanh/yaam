@@ -7,7 +7,7 @@
 // Panes (safe — the Work grid is unmounted while this view shows, and each
 // session's xterm is a singleton attached in exactly one place). Clicking a
 // tile pins it solo; AUTO resumes priority-following.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { brainOn } from '../../llm/client'
 import { readScreen } from '../../core/terminals'
@@ -15,6 +15,7 @@ import { EVENT_COLORS } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { Icon, MasterMark } from '../../components/ui'
 import { Pane } from '../session/Pane'
+import { requestQuickShellToggle } from '../session/QuickShell'
 import { MasterChat } from './MasterChat'
 
 // faint blueprint grid painted under the stage and rail — reads as a deck,
@@ -42,10 +43,11 @@ const STATUS_META: Record<Agent['status'], { color: string; label: string }> = {
 
 /** One session tile in the rail: status ring, live terminal snapshot, and the
  *  needs-reason when the session is waiting on a decision. */
-function SessionTile({ agent, staged, wsName, onStage }: {
+function SessionTile({ agent, staged, ix, onStage }: {
   agent: Agent
   staged: boolean
-  wsName?: string
+  /** rail position — first nine tiles stage with ⌘1–9 */
+  ix: number
   onStage: () => void
 }) {
   const meta = STATUS_META[agent.status] ?? STATUS_META.idle
@@ -92,7 +94,7 @@ function SessionTile({ agent, staged, wsName, onStage }: {
       </div>
       <div className="mono" style={{ display: 'flex', gap: 6, padding: '5px 10px', fontSize: 9, color: 'var(--faint)', borderTop: '1px solid var(--line-soft)' }}>
         <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{agent.repo}</span>
-        {wsName && <span style={{ flexShrink: 0, color: 'var(--dim)' }}>{wsName}</span>}
+        {ix < 9 && <span style={{ flexShrink: 0, color: staged ? 'var(--accent)' : 'var(--faint)' }}>⌘{ix + 1}</span>}
       </div>
     </button>
   )
@@ -121,8 +123,12 @@ export function MissionControl() {
     events: x.events,
   }), shallowEqual)
   const on = useConductorSelector(x => brainOn(x.settings))
-  const { setView, focusTab } = useActions()
+  const chatWidth = useConductorSelector(x => Math.max(320, Math.min(640, x.settings.missionChatWidth ?? 400)))
+  const { setView, focusTab, switchWorkspace, updateSettings } = useActions()
   const [pinned, setPinned] = useState<string | null>(null)
+  // the deck follows the workspace model: switching workspaces re-scopes the
+  // whole view, and a pin never carries across
+  useEffect(() => setPinned(null), [s.activeWorkspace])
   // snapshot refresh: tiles re-read their terminal buffers on a slow heartbeat
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -134,16 +140,53 @@ export function MissionControl() {
     document.querySelector<HTMLTextAreaElement>('textarea[data-composer]')?.focus()
   }, [])
 
+  // Deck keyboard: ⌘1–9 stage the nth tile, ⌘⇧]/⌘⇧[ cycle the stage through
+  // the rail, ⌘⇧A resumes auto-follow, ⌘J toggles the staged session's quick
+  // shell. ⌘ variants only — inside a staged terminal, plain keys and Ctrl
+  // belong to the CLI. Refs keep the single listener stable across renders.
+  const keysRef = useRef<{ order: string[]; stagedId: string | null }>({ order: [], stagedId: null })
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.altKey) return
+      const { order, stagedId } = keysRef.current
+      if (!e.shiftKey && /^[1-9]$/.test(e.key)) {
+        const id = order[Number(e.key) - 1]
+        if (id) { e.preventDefault(); setPinned(id) }
+      } else if (e.shiftKey && (e.key === ']' || e.key === '}' || e.key === '[' || e.key === '{')) {
+        e.preventDefault()
+        const dir = e.key === ']' || e.key === '}' ? 1 : -1
+        const at = Math.max(0, order.indexOf(stagedId ?? ''))
+        const next = order[(at + dir + order.length) % order.length]
+        if (next) setPinned(next)
+      } else if (e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        setPinned(null)
+      } else if (!e.shiftKey && e.key.toLowerCase() === 'j' && stagedId) {
+        e.preventDefault()
+        requestQuickShellToggle(stagedId)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const sessions = useMemo(() => {
-    const live = s.agents.filter(a => !a.archived)
+    // this workspace's sessions only — the deck is a lens on the active
+    // workspace, exactly like the Work view
+    const live = s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
     // stable sort: priority desc, ties keep store order (creation order)
     return [...live].sort((a, b) => priority(b) - priority(a))
-  }, [s.agents])
+  }, [s.agents, s.activeWorkspace])
 
-  const wsName = (a: Agent) => {
-    const id = a.workspaceId ?? s.activeWorkspace
-    return id === s.activeWorkspace ? undefined : s.workspaces.find(w => w.id === id)?.name
-  }
+  // decisions waiting in OTHER workspaces — one glanceable chip, one click away
+  const elsewhere = useMemo(() => {
+    const others = s.agents.filter(a => !a.archived && a.status === 'needs'
+      && (a.workspaceId ?? s.activeWorkspace) !== s.activeWorkspace)
+    return { count: others.length, firstWs: others[0]?.workspaceId }
+  }, [s.agents, s.activeWorkspace])
+
+  const wsLabel = s.workspaces.find(w => w.id === s.activeWorkspace)?.name ?? 'workspace'
 
   // The stage follows priority unless the user pinned a tile (a pin on a
   // session that got archived silently falls back to auto). In auto, EVERY
@@ -162,6 +205,10 @@ export function MissionControl() {
   const running = sessions.filter(a => a.status === 'running').length
   const idle = sessions.length - needs - running
   const latestEvent = s.events[0]
+  // feed the stable keyboard listener the current rail order + stage
+  keysRef.current = { order: sessions.map(a => a.id), stagedId: staged?.id ?? null }
+  // while pinned, decisions may be piling up behind the pin — make AUTO call out
+  const autoHasNews = !auto && needs > 0
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -175,6 +222,9 @@ export function MissionControl() {
           <Icon paths={['M12 3a9 9 0 100 18 9 9 0 000-18z', 'M12 8a4 4 0 100 8 4 4 0 000-8z', 'M12 12h6.5']} size={17} stroke={1.6} />
         </span>
         <span className="grotesk" style={{ fontSize: 14, fontWeight: 700, letterSpacing: 1.2 }}>MISSION CONTROL</span>
+        <span className="mono" style={{ fontSize: 9.5, color: 'var(--mut)', letterSpacing: 0.6, border: '1px solid var(--line2)', borderRadius: 5, padding: '2px 8px', whiteSpace: 'nowrap', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {wsLabel.toUpperCase()}
+        </span>
         {latestEvent ? (
           <span className="mono" style={{ flex: 1, minWidth: 0, display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 9.5, color: 'var(--dim)', letterSpacing: 0.3, overflow: 'hidden' }}>
             <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: EVENT_COLORS[latestEvent.type] || 'var(--mut)' }} />
@@ -183,7 +233,23 @@ export function MissionControl() {
             </span>
           </span>
         ) : (
-          <span className="mono" style={{ flex: 1, fontSize: 9.5, color: 'var(--faint)', letterSpacing: 0.6 }}>ALL WORKSPACES · ONE CHANNEL</span>
+          <span className="mono" style={{ flex: 1, fontSize: 9.5, color: 'var(--faint)', letterSpacing: 0.6 }}>ONE CHANNEL · THE DECK FOLLOWS THE ACTION</span>
+        )}
+        {elsewhere.count > 0 && (
+          <button
+            className="mono"
+            title="Sessions in other workspaces are waiting on you — click to switch to the first one"
+            onClick={() => { if (elsewhere.firstWs) switchWorkspace(elsewhere.firstWs) }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+              fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: 'var(--amber)',
+              background: 'rgba(255,176,32,.08)', border: '1px solid var(--amber)', borderRadius: 6, padding: '3px 9px',
+              animation: 'cattn 2.6s ease-in-out infinite',
+            }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--amber)', animation: 'cpulse 1.4s ease-in-out infinite' }} />
+            {elsewhere.count} ELSEWHERE →
+          </button>
         )}
         <Stat n={needs} label="NEED YOU" color="var(--amber)" pulse />
         <Stat n={running} label="RUNNING" color="var(--green)" />
@@ -214,18 +280,24 @@ export function MissionControl() {
                 )}
                 <button
                   className="mono"
-                  title={auto ? 'Auto-following priority: decisions first, then running work. Click a tile to pin one.' : 'Pinned by you — click to resume auto-following'}
+                  title={auto
+                    ? 'Auto-following priority: decisions first, then running work. Click a tile (or ⌘1–9) to pin one; ⌘⇧A returns here.'
+                    : autoHasNews ? 'Decisions are waiting behind your pin — ⌘⇧A resumes auto-following' : 'Pinned by you — click (or ⌘⇧A) to resume auto-following'}
                   onClick={() => setPinned(null)}
                   style={{
                     fontSize: 9, fontWeight: 700, letterSpacing: 0.6, cursor: 'pointer', borderRadius: 5, padding: '2px 8px',
-                    background: auto ? 'rgba(61,220,151,.12)' : 'transparent',
-                    border: `1px solid ${auto ? 'var(--green)' : 'var(--line2)'}`,
-                    color: auto ? 'var(--green)' : 'var(--mut)',
+                    background: auto ? 'rgba(61,220,151,.12)' : autoHasNews ? 'rgba(255,176,32,.1)' : 'transparent',
+                    border: `1px solid ${auto ? 'var(--green)' : autoHasNews ? 'var(--amber)' : 'var(--line2)'}`,
+                    color: auto ? 'var(--green)' : autoHasNews ? 'var(--amber)' : 'var(--mut)',
+                    animation: autoHasNews ? 'cattn 2.6s ease-in-out infinite' : 'none',
                   }}
                 >
-                  {auto ? '◉ AUTO' : '⊙ PINNED — resume auto'}
+                  {auto ? '◉ AUTO' : autoHasNews ? `⊙ PINNED · ${needs} waiting` : '⊙ PINNED — resume auto'}
                 </button>
                 <div style={{ flex: 1 }} />
+                <span className="mono" style={{ fontSize: 8.5, color: 'var(--faint)', letterSpacing: 0.4, whiteSpace: 'nowrap' }}>
+                  ⌘1–9 stage · ⌘⇧] next · ⌘⇧A auto · ⌘J shell
+                </span>
                 {stagedList.length === 1 && (
                   <button
                     className="mono"
@@ -265,12 +337,12 @@ export function MissionControl() {
           {sessions.length > 1 && (
             <div style={{ flexShrink: 0, borderTop: '1px solid var(--line)', background: 'var(--bg2)', ...DECK_GRID }}>
               <div style={{ display: 'flex', gap: 10, padding: 10, overflowX: 'auto' }}>
-                {sessions.map(a => (
+                {sessions.map((a, i) => (
                   <SessionTile
                     key={a.id}
                     agent={a}
-                    staged={staged?.id === a.id}
-                    wsName={wsName(a)}
+                    ix={i}
+                    staged={stagedList.some(x => x.id === a.id)}
                     onStage={() => setPinned(a.id)}
                   />
                 ))}
@@ -281,9 +353,28 @@ export function MissionControl() {
 
         {/* ── the one chat ── */}
         <div style={{
-          width: 400, flexShrink: 0, borderLeft: '1px solid var(--line)', background: 'var(--panel)',
+          width: chatWidth, flexShrink: 0, borderLeft: '1px solid var(--line)', background: 'var(--panel)',
           display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative',
         }}>
+          <div
+            title="Drag to resize"
+            onPointerDown={e => {
+              e.preventDefault()
+              const startX = e.clientX
+              const startW = chatWidth
+              const move = (ev: PointerEvent) =>
+                updateSettings({ missionChatWidth: Math.max(320, Math.min(640, startW - (ev.clientX - startX))) })
+              const up = () => {
+                window.removeEventListener('pointermove', move)
+                window.removeEventListener('pointerup', up)
+                document.body.style.cursor = ''
+              }
+              document.body.style.cursor = 'col-resize'
+              window.addEventListener('pointermove', move)
+              window.addEventListener('pointerup', up)
+            }}
+            style={{ position: 'absolute', top: 0, left: -3, bottom: 0, width: 7, cursor: 'col-resize', zIndex: 5 }}
+          />
           <div style={{
             position: 'absolute', top: 0, left: 0, bottom: 0, width: 2,
             background: 'linear-gradient(180deg, rgba(245,196,81,.5), transparent 60%)',
@@ -307,7 +398,11 @@ export function MissionControl() {
               </button>
             )}
           </div>
-          <MasterChat directTarget={staged && staged.kind !== 'chat' ? { id: staged.id, name: staged.name } : null} />
+          <MasterChat
+            directTarget={staged && staged.kind !== 'chat' ? { id: staged.id, name: staged.name } : null}
+            onFocusSession={id => setPinned(id)}
+            focusLabel="STAGE"
+          />
         </div>
       </div>
     </div>
