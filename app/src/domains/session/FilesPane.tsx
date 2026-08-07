@@ -13,7 +13,7 @@ import type { SessionFs } from './remote-native'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import { renderDocx, renderOdp, renderOdt, renderPptx, renderWorkbook } from '../../shared/office-render'
 import type { OfficeRender } from '../../shared/office-render'
-import { IMG_MIME, viewKind } from '../../shared/file-preview'
+import { IMG_MIME, MEDIA_MIME, isCsv, parseCsv, viewKind } from '../../shared/file-preview'
 import { CodeEditor } from './lazy-editor'
 import { parseDiffLines } from './diff-marks'
 import { filterPaths } from './quick-open'
@@ -40,6 +40,8 @@ interface FilesState {
   drafts: Record<string, string>
   /** path → explicit view/edit choice (absent = kind default: text opens in edit) */
   modes: Record<string, 'edit' | 'view'>
+  /** explorer shows dotfiles (default true; the header eye toggles) */
+  showHidden?: boolean
 }
 const stateCache = new Map<string, FilesState>()
 // drag-adjusted explorer-column share (per session / folder); absent = the
@@ -50,13 +52,14 @@ const explorerSplitCache = new Map<string, number>()
 function cached(id: string): FilesState {
   let st = stateCache.get(id)
   if (!st) {
-    st = { file: null, gutter: 'git', expanded: [], tabs: [], drafts: {}, modes: {} }
+    st = { file: null, gutter: 'git', expanded: [], tabs: [], drafts: {}, modes: {}, showHidden: true }
     stateCache.set(id, st)
   } else {
     // entries created by an older bundle (HMR) predate the tab fields
     st.tabs ??= []
     st.drafts ??= {}
     st.modes ??= {}
+    st.showHidden ??= true
   }
   return st
 }
@@ -205,7 +208,7 @@ function TreeInputRow({ depth, isDir, name, initial, selectStem, onCommit, onCan
 }
 
 /** Recursively render one directory level and lazily loaded descendants. */
-function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, refresh, onAttachFile, onMenu, fs, crud }: {
+function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, refresh, onAttachFile, onMenu, fs, crud, showHidden = true }: {
   dir: string
   depth: number
   expanded: Set<string>
@@ -223,6 +226,8 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
   fs: SessionFs
   /** explorer CRUD state — inline create/rename inputs driven by the host */
   crud?: TreeCrud
+  /** include dotfiles (default true) — filtered at render, not at fetch */
+  showHidden?: boolean
 }) {
   const [entries, setEntries] = useState<DirEntryInfo[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -252,6 +257,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
   if (!entries) return <div style={{ padding: `3px 8px 3px ${14 + depth * 13}px`, fontSize: 11, color: 'var(--faint)' }}>…</div>
 
   const creating = crud?.editing && crud.editing.kind !== 'rename' && crud.editing.dir === dir ? crud.editing : null
+  const visible = showHidden ? entries : entries.filter(e => !e.name.startsWith('.'))
 
   return (
     <>
@@ -265,7 +271,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
           onCancel={crud!.cancel}
         />
       )}
-      {entries.map(e => {
+      {visible.map(e => {
         const color = e.isDir
           ? (git?.dirs.has(e.path) ? 'var(--amber)' : null)
           : gitColor(git?.byPath.get(e.path))
@@ -321,12 +327,12 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
             </button>
             )}
             {e.isDir && isOpen && (
-              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} refresh={refresh} onAttachFile={onAttachFile} onMenu={onMenu} fs={fs} crud={crud} />
+              <TreeLevel dir={e.path} depth={depth + 1} expanded={expanded} toggleDir={toggleDir} openFile={openFile} selected={selected} git={git} refresh={refresh} onAttachFile={onAttachFile} onMenu={onMenu} fs={fs} crud={crud} showHidden={showHidden} />
             )}
           </div>
         )
       })}
-      {entries.length === 0 && (
+      {visible.length === 0 && (
         <div style={{ padding: `3px 8px 3px ${20 + depth * 13}px`, fontSize: 11, color: 'var(--faint)' }}>empty</div>
       )}
     </>
@@ -495,14 +501,19 @@ const IC_NEW_FOLDER = ['M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 
 const IC_COLLAPSE = ['M7 11l5-5 5 5', 'M7 18l5-5 5 5']
 const IC_REFRESH = ['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']
 
+const IC_EYE = ['M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z', 'M12 9.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5z']
+const IC_EYE_OFF = ['M4 4l16 16', 'M9.9 5.2A10.6 10.6 0 0112 5c6.5 0 10 7 10 7a17 17 0 01-3.2 3.9M6.1 6.9A16.7 16.7 0 002 12s3.5 7 10 7c1.2 0 2.3-.2 3.3-.6']
+
 /** The EXPLORER header row with the VSCode-style action cluster. */
-function ExplorerHeader({ root, refreshTitle, onNewFile, onNewFolder, onRefresh, onCollapseAll }: {
+function ExplorerHeader({ root, refreshTitle, onNewFile, onNewFolder, onRefresh, onCollapseAll, showHidden, onToggleHidden }: {
   root: string
   refreshTitle: string
   onNewFile: () => void
   onNewFolder: () => void
   onRefresh: () => void
   onCollapseAll: () => void
+  showHidden: boolean
+  onToggleHidden: () => void
 }) {
   const btn = { width: 22, height: 22, borderRadius: 5 } as const
   return (
@@ -520,6 +531,9 @@ function ExplorerHeader({ root, refreshTitle, onNewFile, onNewFolder, onRefresh,
         </button>
         <button className="icon-btn" title="New Folder" onClick={onNewFolder} style={btn}>
           <Icon paths={IC_NEW_FOLDER} size={12} stroke={1.7} />
+        </button>
+        <button className="icon-btn" title={showHidden ? 'Showing dotfiles — click to hide' : 'Dotfiles hidden — click to show'} onClick={onToggleHidden} style={{ ...btn, color: showHidden ? undefined : 'var(--accent)' }}>
+          <Icon paths={showHidden ? IC_EYE : IC_EYE_OFF} size={12} stroke={1.6} />
         </button>
         <button className="icon-btn" title={refreshTitle} onClick={onRefresh} style={btn}>
           <Icon paths={IC_REFRESH} size={12} stroke={1.8} />
@@ -786,10 +800,13 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   const name = path.slice(path.lastIndexOf('/') + 1)
   const kind = viewKind(name)
   const isMdFile = /\.(md|markdown|mdx)$/i.test(name)
+  const isCsvFile = isCsv(name)
   const [content, setContent] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [marks, setMarks] = useState<{ added: Set<number>; modified: Set<number>; deletedAfter: Set<number> } | null>(null)
   const [mdView, setMdView] = useState<'rendered' | 'raw'>('rendered')
+  // csv/tsv render as a table by default; 'raw' shows the plain source rows
+  const [csvView, setCsvView] = useState<'table' | 'raw'>('table')
   const [dataUrl, setDataUrl] = useState<string | null>(null)
   // rich office render (docx html / workbook tables); null = extracted-text fallback
   const [office, setOffice] = useState<OfficeRender | null>(null)
@@ -809,9 +826,9 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   // text files open straight in the editor (VSCode-style); the toggle in the
   // header switches back to the read-only viewer. Mode is per-tab: the host
   // remembers the choice per path and hands it back via `initialMode`.
-  // markdown defaults to the rendered preview (view mode) — the pencil opens
-  // the editor; every other text file still opens straight into the editor
-  const [editing, setEditingState] = useState(() => (initialMode ? initialMode === 'edit' : kind === 'text' && !isMdFile))
+  // markdown and csv default to their rendered previews (view mode) — the
+  // pencil opens the editor; every other text file opens straight into it
+  const [editing, setEditingState] = useState(() => (initialMode ? initialMode === 'edit' : kind === 'text' && !isMdFile && !isCsvFile))
   const setEditing = (v: boolean) => { setEditingState(v); onModeChange?.(v ? 'edit' : 'view') }
   const editingRef = useRef(false)
   editingRef.current = editing
@@ -842,10 +859,10 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
     // through, since the editor needs the disk snapshot as its baseline
     if (editingRef.current && contentRef.current !== null) return
     try {
-      if (kind === 'image' || kind === 'pdf') {
+      if (kind === 'image' || kind === 'pdf' || kind === 'video' || kind === 'audio') {
         // rendered natively from a data URL; no diff/polling semantics
         const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
-        const mime = kind === 'pdf' ? 'application/pdf' : IMG_MIME[ext]
+        const mime = kind === 'pdf' ? 'application/pdf' : IMG_MIME[ext] ?? MEDIA_MIME[ext]
         setDataUrl(`data:${mime};base64,${await fs.readFileB64(path)}`)
         setErr(null)
         return
@@ -921,17 +938,18 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
     // reset the mode only when a different file is opened in this same viewer
     // (no remount) — a same-file reload must never kick the user out of editing
     if (pathChanged) {
-      setEditingState(kind === 'text' && !isMdFile)
+      setEditingState(kind === 'text' && !isMdFile && !isCsvFile)
+      setCsvView('table')
       setFindOpen(false)
       setFindQ('')
       setFindIx(0)
     }
     void load()
-    if (kind === 'image' || kind === 'pdf') return
+    if (kind === 'image' || kind === 'pdf' || kind === 'video' || kind === 'audio') return
     if (isTauri) return onFsChange(() => void load())
     const iv = window.setInterval(() => void load(), 4000)
     return () => window.clearInterval(iv)
-  }, [load, kind, path, isMdFile])
+  }, [load, kind, path, isMdFile, isCsvFile])
 
   // Stash the rendered HTML on the backend and load it through the custom
   // scheme so it escapes the app's inherited CSP (Tauri only). Re-stashes when
@@ -975,11 +993,19 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   const first = Math.max(0, Math.floor(view.top / ROW_H) - OVERSCAN)
   const last = Math.min(lines.length, Math.ceil((view.top + (view.h || 600)) / ROW_H) + OVERSCAN)
 
+  // csv table preview: parsed rows, capped so a huge export can't flood the DOM
+  const csvTable = useMemo(() => {
+    if (!isCsvFile || csvView !== 'table' || editing || content === null) return null
+    const rows = parseCsv(content, /\.tsv$/i.test(name) ? '\t' : ',')
+    return { rows: rows.slice(0, 2001), truncated: rows.length > 2001, total: rows.length }
+  }, [isCsvFile, csvView, editing, content, name])
+
   // true when the virtualized code view is what's on screen (the only surface
   // the find bar can search and mark)
   const codeView = !err && content !== null && !editing && !rendered
-    && kind !== 'image' && kind !== 'pdf'
+    && kind !== 'image' && kind !== 'pdf' && kind !== 'video' && kind !== 'audio'
     && !(kind === 'office' && office) && !(kind === 'html' && htmlView === 'rendered')
+    && !csvTable
 
   const findMatches = useMemo(() => {
     if (!findOpen || !findQ) return { lines: [] as number[], total: 0 }
@@ -1074,6 +1100,16 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
             style={{ padding: '4px 10px', fontSize: 11, flexShrink: 0 }}
           >
             ＋ Add to chat
+          </button>
+        )}
+        {isCsvFile && !editing && (
+          <button
+            className="icon-btn"
+            title={csvView === 'table' ? 'Table preview — click for the raw source' : 'Raw source — click for the table preview'}
+            onClick={() => setCsvView(v => (v === 'table' ? 'raw' : 'table'))}
+            style={{ width: 26, height: 26, borderRadius: 6, color: csvView === 'table' ? 'var(--accent)' : undefined }}
+          >
+            <Icon paths={['M4 5h16v14H4z', 'M4 10h16', 'M10 5v14', 'M16 5v14']} size={14} stroke={1.6} />
           </button>
         )}
         {isMd && (
@@ -1310,6 +1346,48 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
         dataUrl ? (
           <embed src={dataUrl} type="application/pdf" style={{ flex: 1, width: '100%', minHeight: 0 }} />
         ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
+      ) : kind === 'video' ? (
+        dataUrl ? (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: '#000' }}>
+            <video src={dataUrl} controls style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 6 }} />
+          </div>
+        ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
+      ) : kind === 'audio' ? (
+        dataUrl ? (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <audio src={dataUrl} controls style={{ width: '100%', maxWidth: 480 }} />
+          </div>
+        ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
+      ) : csvTable ? (
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <table className="mono" style={{ borderCollapse: 'collapse', fontSize: 11.5, margin: 10 }}>
+            <thead>
+              <tr>
+                {(csvTable.rows[0] ?? []).map((h, i) => (
+                  <th key={i} style={{
+                    position: 'sticky', top: 0, zIndex: 1, textAlign: 'left', padding: '5px 10px',
+                    background: 'var(--panel2)', color: 'var(--text)', fontWeight: 700,
+                    borderBottom: '2px solid var(--line2)', whiteSpace: 'nowrap',
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {csvTable.rows.slice(1).map((r, i) => (
+                <tr key={i} style={{ background: i % 2 ? 'var(--bg2)' : 'transparent' }}>
+                  {r.map((c, j) => (
+                    <td key={j} style={{ padding: '3px 10px', color: 'var(--text2)', borderBottom: '1px solid var(--line-soft)', whiteSpace: 'nowrap', maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis' }} title={c}>{c}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {csvTable.truncated && (
+            <div style={{ padding: '4px 12px 12px', fontSize: 11.5, color: 'var(--amber)' }}>
+              Showing the first 2,000 of {csvTable.total.toLocaleString()} rows — switch to raw for the rest.
+            </div>
+          )}
+        </div>
       ) : content === null ? (
         <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
       ) : rendered ? (
@@ -1399,6 +1477,7 @@ export function FilesPane({ agent }: { agent: Agent }) {
   const [tabs, setTabs] = useState<string[]>(init.tabs)
   const [drafts, setDrafts] = useState<Record<string, string>>(init.drafts)
   const [modes, setModes] = useState<Record<string, 'edit' | 'view'>>(init.modes)
+  const [showHidden, setShowHidden] = useState(init.showHidden ?? true)
   const [git, setGit] = useState<GitInfo | null>(null)
   const [refresh, setRefresh] = useState<TreeRefresh>({ tick: 0, dirs: null })
   // explorer/viewer split — fixed default width until first dragged
@@ -1423,8 +1502,8 @@ export function FilesPane({ agent }: { agent: Agent }) {
 
   // persist UI state across remounts
   useEffect(() => {
-    stateCache.set(agent.id, { file, gutter, expanded: [...expanded], tabs, drafts, modes })
-  }, [agent.id, file, gutter, expanded, tabs, drafts, modes])
+    stateCache.set(agent.id, { file, gutter, expanded: [...expanded], tabs, drafts, modes, showHidden })
+  }, [agent.id, file, gutter, expanded, tabs, drafts, modes, showHidden])
 
   // open a file in a tab (append once, then activate)
   const openFile = useCallback((path: string) => {
@@ -1605,6 +1684,8 @@ export function FilesPane({ agent }: { agent: Agent }) {
           onNewFile={() => crud.beginCreate(root, 'file')}
           onNewFolder={() => crud.beginCreate(root, 'folder')}
           onCollapseAll={() => setExpanded(new Set())}
+          showHidden={showHidden}
+          onToggleHidden={() => setShowHidden(v => !v)}
         />
         {opErr && <TreeOpError message={opErr} onDismiss={clearOpErr} />}
         <div
@@ -1624,6 +1705,7 @@ export function FilesPane({ agent }: { agent: Agent }) {
             onMenu={onTreeMenu}
             fs={fs}
             crud={crud}
+            showHidden={showHidden}
           />
         </div>
         {quickOpen && (
@@ -1680,6 +1762,7 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '', root) }: { 
   const [expanded, setExpanded] = useState<Set<string>>(new Set(init.expanded))
   const [refresh, setRefresh] = useState<TreeRefresh>({ tick: 0, dirs: null })
   const [treeShare, setTreeShare] = useState<number | null>(explorerSplitCache.get(`folder:${root}`) ?? null)
+  const [showHidden, setShowHidden] = useState(init.showHidden ?? true)
   const [quickOpen, setQuickOpen] = useState(false)
   const [menu, setMenu] = useState<TreeMenuState | null>(null)
   const onTreeMenu = isTauri
@@ -1692,8 +1775,8 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '', root) }: { 
   useEffect(() => {
     // single-file browser: keep whatever tab state the cache entry holds
     const st = cached(`folder:${root}`)
-    stateCache.set(`folder:${root}`, { file, gutter, expanded: [...expanded], tabs: st.tabs, drafts: st.drafts, modes: st.modes })
-  }, [root, file, gutter, expanded])
+    stateCache.set(`folder:${root}`, { file, gutter, expanded: [...expanded], tabs: st.tabs, drafts: st.drafts, modes: st.modes, showHidden })
+  }, [root, file, gutter, expanded, showHidden])
 
   const toggleDir = (path: string) => {
     setExpanded(prev => {
@@ -1749,6 +1832,8 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '', root) }: { 
           onNewFile={() => crud.beginCreate(root, 'file')}
           onNewFolder={() => crud.beginCreate(root, 'folder')}
           onCollapseAll={() => setExpanded(new Set())}
+          showHidden={showHidden}
+          onToggleHidden={() => setShowHidden(v => !v)}
         />
         {opErr && <TreeOpError message={opErr} onDismiss={clearOpErr} />}
         <div
@@ -1767,6 +1852,7 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '', root) }: { 
             onMenu={onTreeMenu}
             fs={fs}
             crud={crud}
+            showHidden={showHidden}
           />
         </div>
         {quickOpen && (

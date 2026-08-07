@@ -4,7 +4,7 @@
 // renders here. Markdown files render rich; diffs get the usual +/- coloring.
 import { useCallback, useEffect, useState } from 'react'
 import { Markdown } from '../components/Markdown'
-import { CodeLines, DiffLines, IMG_MIME, isMarkdown, isWorkbook, viewKind } from '../shared/file-preview'
+import { CodeLines, DiffLines, IMG_MIME, MEDIA_MIME, isMarkdown, isWorkbook, viewKind } from '../shared/file-preview'
 import { renderWorkbook } from '../shared/office-render'
 import type { OfficeRender } from '../shared/office-render'
 import { rpc } from './api'
@@ -95,7 +95,7 @@ export function FilesBrowser({ root, onAttach }: {
     const kind = viewKind(p)
     const name = p.slice(p.lastIndexOf('/') + 1)
     let req: Promise<void>
-    if (kind === 'image' || kind === 'pdf') {
+    if (kind === 'image' || kind === 'pdf' || kind === 'video' || kind === 'audio') {
       req = rpc<{ b64: string }>('rpc_fs_b64', p).then(r => setFile({ path: p, b64: r.b64, kind }))
     } else if (kind === 'office' && isWorkbook(name)) {
       // rich workbook: fetch raw bytes and render sheet tables (dependency-free
@@ -140,6 +140,17 @@ export function FilesBrowser({ root, onAttach }: {
               📄 Open PDF
             </button>
           </div>
+        )}
+        {file.kind === 'video' && file.b64 && (
+          <video
+            src={`data:${MEDIA_MIME[ext] ?? 'video/mp4'};base64,${file.b64}`}
+            controls
+            playsInline
+            style={{ maxWidth: '100%', borderRadius: 12, display: 'block', margin: '0 auto' }}
+          />
+        )}
+        {file.kind === 'audio' && file.b64 && (
+          <audio src={`data:${MEDIA_MIME[ext] ?? 'audio/mpeg'};base64,${file.b64}`} controls style={{ width: '100%' }} />
         )}
         {file.office
           ? <WorkbookView office={file.office} />

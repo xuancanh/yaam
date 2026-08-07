@@ -10,14 +10,55 @@ export const IMG_MIME: Record<string, string> = {
   webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
 }
 
+/** audio/video formats WKWebView plays natively from a data URL */
+export const MEDIA_MIME: Record<string, string> = {
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
+  mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', aac: 'audio/aac',
+  ogg: 'audio/ogg', flac: 'audio/flac',
+}
+
 /** How a viewer should treat one file, by extension. */
-export function viewKind(name: string): 'image' | 'pdf' | 'office' | 'html' | 'text' {
+export function viewKind(name: string): 'image' | 'pdf' | 'office' | 'html' | 'video' | 'audio' | 'text' {
   const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
   if (IMG_MIME[ext]) return 'image'
   if (ext === 'pdf') return 'pdf'
   if (['docx', 'odt', 'xlsx', 'xls', 'ods', 'pptx', 'odp'].includes(ext)) return 'office'
   if (ext === 'html' || ext === 'htm') return 'html'
+  if (MEDIA_MIME[ext]) return MEDIA_MIME[ext].startsWith('video') ? 'video' : 'audio'
   return 'text'
+}
+
+/** True for delimiter-separated files the table preview can render. */
+export function isCsv(name: string): boolean {
+  return /\.(csv|tsv)$/i.test(name)
+}
+
+/** Minimal RFC-4180-ish parser: quoted fields, embedded delimiters/newlines,
+ *  doubled-quote escapes. Row-capped by the caller's slice of the result. */
+export function parseCsv(text: string, delim: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++ }
+        else inQuotes = false
+      } else field += c
+    } else if (c === '"' && field === '') {
+      inQuotes = true
+    } else if (c === delim) {
+      row.push(field); field = ''
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++
+      row.push(field); field = ''
+      rows.push(row); row = []
+    } else field += c
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row) }
+  return rows
 }
 
 export function isMarkdown(name: string): boolean {
