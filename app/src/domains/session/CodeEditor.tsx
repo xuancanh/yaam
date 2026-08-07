@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { EditorView, basicSetup } from 'codemirror'
 import { keymap } from '@codemirror/view'
-import { Compartment, EditorState } from '@codemirror/state'
+import { Compartment, EditorState, Prec } from '@codemirror/state'
 import { indentWithTab } from '@codemirror/commands'
 import { languages } from '@codemirror/language-data'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -18,11 +18,20 @@ async function languageFor(name: string) {
   return desc ? await desc.load() : null
 }
 
-const baseTheme = EditorView.theme({
-  '&': { height: '100%', fontSize: '12px', backgroundColor: 'var(--bg3)' },
-  '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.55' },
+// Wrapped in Prec.high so these rules beat oneDark's own colors (earlier /
+// higher-precedence extensions win in CodeMirror) — otherwise the editor sits
+// on oneDark's blue-gray #282c34, a hazy mismatched slab inside the app's
+// near-black chrome.
+const baseTheme = Prec.high(EditorView.theme({
+  '&': { height: '100%', fontSize: '12.5px', backgroundColor: 'var(--bg3)' },
+  '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.6' },
+  '.cm-gutters': { backgroundColor: 'var(--bg2)', color: 'var(--faint)', border: 'none', borderRight: '1px solid var(--line-soft)' },
+  '.cm-activeLine': { backgroundColor: 'rgba(245,196,81,.04)' },
+  '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--mut)' },
+  '.cm-panels': { backgroundColor: 'var(--panel)', color: 'var(--text)', borderTop: '1px solid var(--line)' },
+  '.cm-panels input, .cm-panels button': { fontFamily: 'inherit' },
   '&.cm-focused': { outline: 'none' },
-})
+}))
 
 export function CodeEditor({ path, initial, baseline, onSave, onClose, onDocChange }: {
   path: string
