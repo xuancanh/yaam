@@ -4,11 +4,12 @@ import { hasCreds } from '../../master'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { Icon, MasterMark } from '../../components/ui'
 import { MasterChat } from './MasterChat'
+import { requestMissionStage } from './mission-bus'
 
 /** Render the resizable Master conversation, composer, and collapsed rail. */
 export function Sidebar() {
   const s = useConductorSelector(x => ({
-    agents: x.agents, masterBusy: x.masterBusy, settings: x.settings,
+    agents: x.agents, masterBusy: x.masterBusy, settings: x.settings, view: x.view,
   }), shallowEqual)
   const { updateSettings, setView, focusTab } = useActions()
   const on = s.settings.masterEnabled && hasCreds(s.settings)
@@ -117,8 +118,13 @@ export function Sidebar() {
       </div>
 
       <MasterChat
-        onFocusSession={id => { focusTab(id); setView('workspace') }}
-        focusLabel="OPEN ↗"
+        onFocusSession={id => {
+          // beside the deck, a card jump stages the session there; elsewhere
+          // it opens the session's tab in the Work view
+          if (s.view === 'mission') requestMissionStage(id)
+          else { focusTab(id); setView('workspace') }
+        }}
+        focusLabel={s.view === 'mission' ? 'STAGE' : 'OPEN ↗'}
       />
     </div>
   )

@@ -15,6 +15,7 @@ import type { Agent } from '../../core/types'
 import { Icon, MasterMark } from '../../components/ui'
 import { Pane } from '../session/Pane'
 import { requestQuickShellToggle } from '../session/QuickShell'
+import { onMissionStage } from './mission-bus'
 
 // faint blueprint grid painted under the stage and rail — reads as a deck,
 // costs nothing (two repeating gradients, no elements)
@@ -39,33 +40,65 @@ const STATUS_META: Record<Agent['status'], { color: string; label: string }> = {
   idle: { color: 'var(--dim)', label: 'IDLE' },
 }
 
-/** One session tile in the rail: status ring, live terminal snapshot, and the
- *  needs-reason when the session is waiting on a decision. */
-function SessionTile({ agent, staged, ix, onStage }: {
+/** An unresolved escalation's answerable surface, mined from the chat stream. */
+interface TileEsc {
+  options?: { num: number; label: string }[]
+}
+
+/** One session tile in the rail: status ring, live terminal snapshot with an
+ *  activity glow when output just moved, the needs-reason when waiting — and
+ *  the decision's OWN controls (approve/deny or the numbered options), so
+ *  routine calls are answered from the rail without staging anything. */
+function SessionTile({ agent, staged, ix, esc, onStage }: {
   agent: Agent
   staged: boolean
-  /** rail position — first nine tiles stage with ⌘1–9 */
+  /** rail position — first nine entries stage with ⌘1–9 */
   ix: number
+  /** the session's unresolved escalation (options included), if any */
+  esc?: TileEsc | null
   onStage: () => void
 }) {
+  const { approve, deny, answerPrompt } = useActions()
   const meta = STATUS_META[agent.status] ?? STATUS_META.idle
   const snapshot = agent.kind === 'chat' ? [] : readScreen(agent.id, 7)
-  const ring = staged ? 'var(--accent)' : agent.status === 'needs' ? 'var(--amber)' : 'var(--line2)'
+
+  // activity glow: when the snapshot text changes between heartbeats, the
+  // tile's LED brightens briefly — a wall of monitors you can read at a glance
+  const snapText = snapshot.join('\n')
+  const prevSnap = useRef(snapText)
+  const [glow, setGlow] = useState(false)
+  useEffect(() => {
+    if (prevSnap.current === snapText) return
+    prevSnap.current = snapText
+    setGlow(true)
+    const t = window.setTimeout(() => setGlow(false), 1300)
+    return () => window.clearTimeout(t)
+  }, [snapText])
+
+  const ring = staged ? 'var(--accent)' : agent.status === 'needs' ? 'var(--amber)' : glow ? 'var(--green)' : 'var(--line2)'
+  const needsHere = agent.status === 'needs'
+  const opts = esc?.options?.slice(0, 4)
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       className="mc-tile"
       onClick={onStage}
+      onKeyDown={e => { if (e.key === 'Enter') onStage() }}
       title={staged ? `${agent.name} — on stage` : `Put ${agent.name} on stage`}
       style={{
         width: 232, flexShrink: 0, textAlign: 'left', cursor: 'pointer',
         background: staged ? 'rgba(245,196,81,.05)' : 'var(--panel)',
         border: `1px solid ${ring}`, borderRadius: 11, padding: 0, overflow: 'hidden',
         display: 'flex', flexDirection: 'column', color: 'var(--text)',
-        animation: agent.status === 'needs' && !staged ? 'cattn 2.6s ease-in-out infinite' : 'none',
+        animation: needsHere && !staged ? 'cattn 2.6s ease-in-out infinite' : 'none',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 10px', borderBottom: '1px solid var(--line-soft)' }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: agent.color, flexShrink: 0 }} />
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%', background: agent.color, flexShrink: 0,
+          boxShadow: glow ? `0 0 6px 1px ${agent.color}` : 'none', transition: 'box-shadow .3s',
+        }} />
         <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {agent.name}
         </span>
@@ -77,10 +110,10 @@ function SessionTile({ agent, staged, ix, onStage }: {
         </span>
       </div>
       <div className="mono" style={{
-        height: 88, padding: '6px 10px', fontSize: 8.5, lineHeight: 1.45, color: 'var(--mut)',
+        height: needsHere ? 62 : 88, padding: '6px 10px', fontSize: 8.5, lineHeight: 1.45, color: 'var(--mut)',
         background: 'var(--bg3)', overflow: 'hidden', whiteSpace: 'pre', position: 'relative',
       }}>
-        {agent.status === 'needs' && agent.escReason ? (
+        {needsHere && agent.escReason ? (
           <span style={{ color: 'var(--amber)', whiteSpace: 'pre-wrap', fontSize: 10, lineHeight: 1.5 }}>⚠ {agent.escReason}</span>
         ) : agent.kind === 'chat' ? (
           <span style={{ color: 'var(--dim)' }}>chat agent</span>
@@ -90,10 +123,73 @@ function SessionTile({ agent, staged, ix, onStage }: {
         {/* soft fade so clipped snapshots read as a viewport, not a bug */}
         <span style={{ position: 'absolute', inset: 'auto 0 0 0', height: 22, background: 'linear-gradient(transparent, var(--bg3))' }} />
       </div>
+      {/* answer the decision right here — no staging required for routine calls */}
+      {needsHere && (
+        opts?.length ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '6px 8px', borderTop: '1px solid var(--line-soft)' }}>
+            {opts.map(o => (
+              <button
+                key={o.num}
+                className="mono"
+                title={o.label}
+                onClick={e => { e.stopPropagation(); answerPrompt(agent.id, o.num) }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', maxWidth: '100%',
+                  fontSize: 9.5, borderRadius: 6, padding: '3px 8px', background: 'var(--bg2)',
+                  border: '1px solid var(--line2)', color: 'var(--text2)',
+                }}
+              >
+                <span style={{ color: 'var(--accent)', fontWeight: 700, flexShrink: 0 }}>{o.num}</span>
+                <span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 6, padding: '6px 8px', borderTop: '1px solid var(--line-soft)' }}>
+            <button
+              className="approve-btn"
+              onClick={e => { e.stopPropagation(); approve(agent.id) }}
+              style={{ flex: 1, padding: '4px 0', fontSize: 10.5 }}
+            >
+              ✓ Approve
+            </button>
+            <button
+              className="deny-btn"
+              onClick={e => { e.stopPropagation(); deny(agent.id) }}
+              style={{ flex: 1, padding: '4px 0', fontSize: 10.5 }}
+            >
+              ✕ Deny
+            </button>
+          </div>
+        )
+      )}
       <div className="mono" style={{ display: 'flex', gap: 6, padding: '5px 10px', fontSize: 9, color: 'var(--faint)', borderTop: '1px solid var(--line-soft)' }}>
         <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{agent.repo}</span>
         {ix < 9 && <span style={{ flexShrink: 0, color: staged ? 'var(--accent)' : 'var(--faint)' }}>⌘{ix + 1}</span>}
       </div>
+    </div>
+  )
+}
+
+/** Idle sessions collapse to compact pills — present, stageable, but quiet, so
+ *  the rail's real estate belongs to sessions that are doing something. */
+function QuietChip({ agent, ix, staged, onStage }: { agent: Agent; ix: number; staged: boolean; onStage: () => void }) {
+  return (
+    <button
+      className="mono"
+      onClick={onStage}
+      title={`${agent.name} — idle · click to stage`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', maxWidth: 190,
+        fontSize: 10, borderRadius: 999, padding: '4px 11px',
+        background: staged ? 'rgba(245,196,81,.08)' : 'var(--panel)',
+        border: `1px solid ${staged ? 'var(--accent)' : 'var(--line2)'}`,
+        color: staged ? 'var(--text)' : 'var(--mut)',
+      }}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: agent.color, opacity: 0.6, flexShrink: 0 }} />
+      <span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{agent.name}</span>
+      {ix < 9 && <span style={{ flexShrink: 0, fontSize: 8.5, color: 'var(--faint)' }}>⌘{ix + 1}</span>}
     </button>
   )
 }
@@ -118,7 +214,7 @@ function Stat({ n, label, color, pulse }: { n: number; label: string; color: str
 export function MissionControl() {
   const s = useConductorSelector(x => ({
     agents: x.agents, workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, masterBusy: x.masterBusy,
-    events: x.events,
+    events: x.events, messages: x.messages,
   }), shallowEqual)
   const on = useConductorSelector(x => brainOn(x.settings))
   const { setView, focusTab, switchWorkspace } = useActions()
@@ -126,6 +222,20 @@ export function MissionControl() {
   // the deck follows the workspace model: switching workspaces re-scopes the
   // whole view, and a pin never carries across
   useEffect(() => setPinned(null), [s.activeWorkspace])
+  // sidebar escalation cards stage their session here while the deck is up
+  useEffect(() => onMissionStage(id => setPinned(id)), [])
+
+  // each session's newest unresolved escalation (for the tiles' inline
+  // answers) — messages are already scoped to the active workspace
+  const escByAgent = useMemo(() => {
+    const m = new Map<string, TileEsc>()
+    for (const msg of s.messages) {
+      if (msg.kind === 'escalate' && msg.escFor && msg.esc && !msg.esc.resolved) {
+        m.set(msg.escFor, { options: msg.esc.options })
+      }
+    }
+    return m
+  }, [s.messages])
   // snapshot refresh: tiles re-read their terminal buffers on a slow heartbeat
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -326,19 +436,37 @@ export function MissionControl() {
             </div>
           )}
 
-          {/* ── the rail: every session, priority first ── */}
+          {/* ── the rail: live tiles first, idle sessions as quiet chips ── */}
           {sessions.length > 1 && (
             <div style={{ flexShrink: 0, borderTop: '1px solid var(--line)', background: 'var(--bg2)', ...DECK_GRID }}>
-              <div style={{ display: 'flex', gap: 10, padding: 10, overflowX: 'auto' }}>
-                {sessions.map((a, i) => (
+              <div style={{ display: 'flex', alignItems: 'stretch', gap: 10, padding: 10, overflowX: 'auto' }}>
+                {sessions.filter(a => a.status !== 'idle').map(a => (
                   <SessionTile
                     key={a.id}
                     agent={a}
-                    ix={i}
+                    ix={sessions.indexOf(a)}
+                    esc={escByAgent.get(a.id)}
                     staged={stagedList.some(x => x.id === a.id)}
                     onStage={() => setPinned(a.id)}
                   />
                 ))}
+                {sessions.some(a => a.status === 'idle') && (
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', flexWrap: 'wrap', alignContent: 'flex-start',
+                    gap: 6, maxHeight: 150, padding: '2px 0', flexShrink: 0,
+                  }}>
+                    <span className="mono" style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: 0.6, color: 'var(--faint)', padding: '2px 2px 0' }}>QUIET</span>
+                    {sessions.filter(a => a.status === 'idle').map(a => (
+                      <QuietChip
+                        key={a.id}
+                        agent={a}
+                        ix={sessions.indexOf(a)}
+                        staged={stagedList.some(x => x.id === a.id)}
+                        onStage={() => setPinned(a.id)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
