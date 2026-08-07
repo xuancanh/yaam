@@ -9,6 +9,7 @@
 // tile pins it solo; AUTO resumes priority-following.
 import { useEffect, useMemo, useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { brainOn } from '../../llm/client'
 import { readScreen } from '../../core/terminals'
 import { EVENT_COLORS } from '../../core/data'
 import type { Agent } from '../../core/types'
@@ -119,6 +120,7 @@ export function MissionControl() {
     agents: x.agents, workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, masterBusy: x.masterBusy,
     events: x.events,
   }), shallowEqual)
+  const on = useConductorSelector(x => brainOn(x.settings))
   const { setView, focusTab } = useActions()
   const [pinned, setPinned] = useState<string | null>(null)
   // snapshot refresh: tiles re-read their terminal buffers on a slow heartbeat
@@ -251,7 +253,11 @@ export function MissionControl() {
           ) : (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--dim)', ...DECK_GRID }}>
               <MasterMark size={40} glow={false} />
-              <div style={{ fontSize: 13 }}>No live sessions. Ask Master for something below, or launch one from the Work view.</div>
+              <div style={{ fontSize: 13 }}>
+                {on
+                  ? 'No live sessions. Ask Master for something below, or launch one from the Work view.'
+                  : 'No live sessions. Launch one from the Work view — the deck lights up as sessions run.'}
+              </div>
             </div>
           )}
 
@@ -286,12 +292,22 @@ export function MissionControl() {
             <MasterMark size={26} />
             <div style={{ flex: 1 }}>
               <div className="grotesk" style={{ fontSize: 13.5, fontWeight: 600 }}>Master</div>
-              <div className="mono" style={{ fontSize: 9, letterSpacing: 0.6, color: s.masterBusy ? 'var(--accent)' : 'var(--dim)' }}>
-                {s.masterBusy ? 'THINKING…' : 'COMMAND CHANNEL'}
+              <div className="mono" style={{ fontSize: 9, letterSpacing: 0.6, color: s.masterBusy ? 'var(--accent)' : on ? 'var(--dim)' : 'var(--amber)' }}>
+                {s.masterBusy ? 'THINKING…' : on ? 'COMMAND CHANNEL' : 'DIRECT CHANNEL · BRAIN OFF'}
               </div>
             </div>
+            {!on && (
+              <button
+                className="mono"
+                title="Escalations and direct input work without it — add a brain to route free-form orders"
+                onClick={() => setView('settings')}
+                style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.4, cursor: 'pointer', background: 'none', border: '1px solid var(--line2)', borderRadius: 5, color: 'var(--mut)', padding: '2px 7px' }}
+              >
+                ADD BRAIN
+              </button>
+            )}
           </div>
-          <MasterChat />
+          <MasterChat directTarget={staged && staged.kind !== 'chat' ? { id: staged.id, name: staged.name } : null} />
         </div>
       </div>
     </div>

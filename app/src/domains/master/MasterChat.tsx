@@ -234,14 +234,21 @@ function MessageRow({ msg }: { msg: Message }) {
 
 /** The shared conversation surface: scrollable messages with stick-to-bottom
  *  behavior, pending tool approvals, and the composer. Hosts provide their own
- *  chrome (header, width, resize). */
-export function MasterChat() {
+ *  chrome (header, width, resize).
+ *
+ *  `directTarget`: brainless fallback for Mission Control — when the Master
+ *  Brain is off and a session is on stage, the composer becomes a direct line
+ *  to that session's terminal instead of a dead end. Escalation cards in the
+ *  stream stay fully answerable either way (they never needed the brain). */
+export function MasterChat({ directTarget }: { directTarget?: { id: string; name: string } | null }) {
   const s = useConductorSelector(x => ({
     composer: x.composer, masterBusy: x.masterBusy, messages: x.messages,
     pendingToolApprovals: x.pendingToolApprovals, settings: x.settings,
   }), shallowEqual)
-  const { setComposer, send, resolveToolApproval } = useActions()
+  const { setComposer, send, resolveToolApproval, sendInput } = useActions()
   const on = s.settings.masterEnabled && hasCreds(s.settings)
+  const direct = !on && directTarget ? directTarget : null
+  const [sentNote, setSentNote] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   // stick-to-bottom scrolling: follow new messages only while the user is near
   // the bottom; when they scroll up to read, stop following and offer a jump
@@ -273,11 +280,23 @@ export function MasterChat() {
     scrollToBottom()
   }, [])
 
+  // Brain on: a Master turn. Brain off with a staged session: the line goes
+  // straight to that session's terminal (and the composer clears).
+  const submit = () => {
+    if (!direct) { send(); return }
+    const text = s.composer.trim()
+    if (!text) return
+    sendInput(direct.id, text)
+    setComposer('')
+    setSentNote(`↳ sent to ${direct.name}`)
+    window.setTimeout(() => setSentNote(''), 1800)
+  }
+
   // Send on Enter while preserving Shift+Enter for multiline input.
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      send()
+      submit()
     }
   }
 
@@ -325,7 +344,11 @@ export function MasterChat() {
             value={s.composer}
             onChange={e => setComposer(e.target.value)}
             onKeyDown={onKey}
-            placeholder={on ? 'Tell Master what you need — it routes tasks, answers questions, and builds tools automatically…' : 'Master is offline — add a brain in Settings → Master Brain to route tasks from here'}
+            placeholder={on
+              ? 'Tell Master what you need — it routes tasks, answers questions, and builds tools automatically…'
+              : direct
+                ? `Brain off — this line goes straight to ${direct.name}'s terminal…`
+                : 'Master is offline — add a brain in Settings → Master Brain to route tasks from here'}
             rows={2}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none',
@@ -333,10 +356,14 @@ export function MasterChat() {
             }}
           />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
-            <span className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>
-              {on ? <>↩ send · Master picks the right action{isMac ? '' : ' · Ctrl+K to focus'}</> : 'terminal sessions work without it — this chat needs credentials'}
+            <span className="mono" style={{ fontSize: 10.5, color: sentNote ? 'var(--green)' : 'var(--dim)' }}>
+              {sentNote
+                ? sentNote
+                : on ? <>↩ send · Master picks the right action{isMac ? '' : ' · Ctrl+K to focus'}</>
+                : direct ? '↩ sends to the staged session · decision cards above still work'
+                : 'terminal sessions work without it — this chat needs credentials'}
             </span>
-            <button className="send-btn" onClick={send}>
+            <button className="send-btn" onClick={submit}>
               <Icon paths={IC.send} size={17} stroke={2.2} />
             </button>
           </div>
