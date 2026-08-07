@@ -45,6 +45,18 @@ interface TileEsc {
   options?: { num: number; label: string }[]
 }
 
+/** The last few lines a human would care about: drop rows that are pure TUI
+ *  chrome (box borders, spinners, separators), strip edge decoration, and keep
+ *  the tail. A raw screen dump at tile size was unreadable noise; three real
+ *  lines of output actually say what the agent is doing. */
+function meaningfulTail(id: string, n = 3): string[] {
+  return readScreen(id, 40)
+    .map(l => l.replace(/^[\s│┃┆┊>*·∙‣›❯▏▕]+|[\s│┃┆┊▏▕]+$/g, ''))
+    .filter(l => /[A-Za-z0-9]/.test(l))
+    .slice(-n)
+    .map(l => l.slice(0, 220))
+}
+
 /** One session tile in the rail: status ring, live terminal snapshot with an
  *  activity glow when output just moved, the needs-reason when waiting — and
  *  the decision's OWN controls (approve/deny or the numbered options), so
@@ -60,11 +72,11 @@ function SessionTile({ agent, staged, ix, esc, onStage }: {
 }) {
   const { approve, deny, answerPrompt } = useActions()
   const meta = STATUS_META[agent.status] ?? STATUS_META.idle
-  const snapshot = agent.kind === 'chat' ? [] : readScreen(agent.id, 7)
+  const tail = agent.kind === 'chat' ? [] : meaningfulTail(agent.id)
 
-  // activity glow: when the snapshot text changes between heartbeats, the
+  // activity glow: when the tail text changes between heartbeats, the
   // tile's LED brightens briefly — a wall of monitors you can read at a glance
-  const snapText = snapshot.join('\n')
+  const snapText = tail.join('\n')
   const prevSnap = useRef(snapText)
   const [glow, setGlow] = useState(false)
   useEffect(() => {
@@ -87,7 +99,7 @@ function SessionTile({ agent, staged, ix, esc, onStage }: {
       onKeyDown={e => { if (e.key === 'Enter') onStage() }}
       title={staged ? `${agent.name} — on stage` : `Put ${agent.name} on stage`}
       style={{
-        width: 232, flexShrink: 0, textAlign: 'left', cursor: 'pointer',
+        width: 268, flexShrink: 0, textAlign: 'left', cursor: 'pointer',
         background: staged ? 'rgba(245,196,81,.05)' : 'var(--panel)',
         border: `1px solid ${ring}`, borderRadius: 11, padding: 0, overflow: 'hidden',
         display: 'flex', flexDirection: 'column', color: 'var(--text)',
@@ -110,18 +122,23 @@ function SessionTile({ agent, staged, ix, esc, onStage }: {
         </span>
       </div>
       <div className="mono" style={{
-        height: needsHere ? 62 : 88, padding: '6px 10px', fontSize: 8.5, lineHeight: 1.45, color: 'var(--mut)',
-        background: 'var(--bg3)', overflow: 'hidden', whiteSpace: 'pre', position: 'relative',
+        height: needsHere ? 56 : 68, padding: '6px 10px', fontSize: 10.5, lineHeight: 1.55, color: 'var(--text2)',
+        background: 'var(--bg3)', overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
       }}>
         {needsHere && agent.escReason ? (
-          <span style={{ color: 'var(--amber)', whiteSpace: 'pre-wrap', fontSize: 10, lineHeight: 1.5 }}>⚠ {agent.escReason}</span>
+          <span style={{ color: 'var(--amber)', whiteSpace: 'pre-wrap', fontSize: 10.5, lineHeight: 1.5, overflow: 'hidden' }}>⚠ {agent.escReason}</span>
         ) : agent.kind === 'chat' ? (
           <span style={{ color: 'var(--dim)' }}>chat agent</span>
-        ) : snapshot.length ? snapshot.join('\n') : (
-          <span style={{ color: 'var(--faint)' }}>no live output</span>
+        ) : tail.length ? tail.map((l, i) => (
+          <span key={i} style={{
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            color: i === tail.length - 1 ? 'var(--text2)' : 'var(--dim)',
+          }}>
+            {l}
+          </span>
+        )) : (
+          <span style={{ color: 'var(--faint)' }}>no output yet</span>
         )}
-        {/* soft fade so clipped snapshots read as a viewport, not a bug */}
-        <span style={{ position: 'absolute', inset: 'auto 0 0 0', height: 22, background: 'linear-gradient(transparent, var(--bg3))' }} />
       </div>
       {/* answer the decision right here — no staging required for routine calls */}
       {needsHere && (
