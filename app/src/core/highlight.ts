@@ -8,13 +8,16 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+// CSS variables so the app theme and the Settings → Appearance viewer palette
+// both restyle existing highlighted output without re-rendering it. The
+// literal fallbacks keep detached contexts (tests, plain srcdoc) legible.
 export const HL_COLORS = {
-  comment: '#5B6472',
-  string: '#7FE3B0',
-  keyword: '#C77DFF',
-  number: '#F5C451',
-  tag: '#7FD1FF',
-  attr: '#E8A87C',
+  comment: 'var(--hl-comment, #5B6472)',
+  string: 'var(--hl-string, #7FE3B0)',
+  keyword: 'var(--hl-keyword, #C77DFF)',
+  number: 'var(--hl-number, #F5C451)',
+  tag: 'var(--hl-tag, #7FD1FF)',
+  attr: 'var(--hl-attr, #E8A87C)',
 }
 
 const C = HL_COLORS

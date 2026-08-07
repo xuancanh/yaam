@@ -57,8 +57,19 @@ export function AppearanceSection() {
           <select value={a.theme} onChange={e => patch({ theme: e.target.value as AppearanceSettings['theme'] })} style={{ ...FIELD_STYLE, width: 160 }}>
             <option value="dark">Dark</option>
             <option value="midnight">Midnight</option>
+            <option value="forest">Forest</option>
             <option value="light">Light</option>
+            <option value="paper">Paper</option>
+            <option value="sakura">Sakura</option>
             <option value="system">System</option>
+          </select>
+        </AppearanceRow>
+        <AppearanceRow label="File viewer syntax" detail="Syntax-highlight palette for code in the file viewer and editor. Auto follows the theme; the named palettes look best on dark themes.">
+          <select value={a.viewerTheme} onChange={e => patch({ viewerTheme: e.target.value as AppearanceSettings['viewerTheme'] })} style={{ ...FIELD_STYLE, width: 160 }}>
+            <option value="auto">Match theme</option>
+            <option value="ocean">Ocean</option>
+            <option value="violet">Violet</option>
+            <option value="ember">Ember</option>
           </select>
         </AppearanceRow>
         <AppearanceRow label="Interface scale" detail="Scales all text and spacing together.">

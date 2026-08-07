@@ -8,7 +8,8 @@ import { keymap } from '@codemirror/view'
 import { Compartment, EditorState, Prec } from '@codemirror/state'
 import { indentWithTab } from '@codemirror/commands'
 import { languages } from '@codemirror/language-data'
-import { oneDark } from '@codemirror/theme-one-dark'
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { tags as t } from '@lezer/highlight'
 
 /** CodeMirror language extension for a filename, resolved lazily. */
 async function languageFor(name: string) {
@@ -18,20 +19,40 @@ async function languageFor(name: string) {
   return desc ? await desc.load() : null
 }
 
-// Wrapped in Prec.high so these rules beat oneDark's own colors (earlier /
-// higher-precedence extensions win in CodeMirror) — otherwise the editor sits
-// on oneDark's blue-gray #282c34, a hazy mismatched slab inside the app's
-// near-black chrome.
+// Everything reads app CSS variables, so the editor restyles live with the
+// theme and the Settings → Appearance viewer palette — no oneDark, whose fixed
+// blue-gray background used to sit as a hazy mismatched slab in the chrome.
+// Prec.high keeps these rules above any language/extension defaults.
 const baseTheme = Prec.high(EditorView.theme({
-  '&': { height: '100%', fontSize: '12.5px', backgroundColor: 'var(--bg3)' },
+  '&': { height: '100%', fontSize: '12.5px', backgroundColor: 'var(--bg3)', color: 'var(--text2)' },
   '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.6' },
   '.cm-gutters': { backgroundColor: 'var(--bg2)', color: 'var(--faint)', border: 'none', borderRight: '1px solid var(--line-soft)' },
-  '.cm-activeLine': { backgroundColor: 'rgba(245,196,81,.04)' },
+  '.cm-activeLine': { backgroundColor: 'rgba(128,128,128,.07)' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--mut)' },
+  '.cm-content': { caretColor: 'var(--accent)' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)' },
+  '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection':
+    { backgroundColor: 'var(--selection) !important' },
+  '.cm-selectionMatch': { backgroundColor: 'rgba(128,128,128,.18)' },
   '.cm-panels': { backgroundColor: 'var(--panel)', color: 'var(--text)', borderTop: '1px solid var(--line)' },
   '.cm-panels input, .cm-panels button': { fontFamily: 'inherit' },
   '&.cm-focused': { outline: 'none' },
 }))
+
+// Token colors from the shared --hl-* variables (same source as the read-only
+// viewer's regex highlighter), so both surfaces always agree.
+const varHighlight = syntaxHighlighting(HighlightStyle.define([
+  { tag: [t.comment, t.blockComment, t.lineComment], color: 'var(--hl-comment)', fontStyle: 'italic' },
+  { tag: [t.string, t.special(t.string), t.regexp, t.docString], color: 'var(--hl-string)' },
+  { tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword, t.definitionKeyword, t.bool, t.null, t.self], color: 'var(--hl-keyword)' },
+  { tag: [t.number, t.integer, t.float, t.atom], color: 'var(--hl-number)' },
+  { tag: [t.typeName, t.tagName, t.className, t.namespace], color: 'var(--hl-tag)' },
+  { tag: [t.attributeName, t.propertyName, t.labelName], color: 'var(--hl-attr)' },
+  { tag: [t.heading], color: 'var(--text)', fontWeight: '700' },
+  { tag: [t.link, t.url], color: 'var(--hl-tag)', textDecoration: 'underline' },
+  { tag: [t.emphasis], fontStyle: 'italic' },
+  { tag: [t.strong], fontWeight: '700' },
+]))
 
 export function CodeEditor({ path, initial, baseline, onSave, onClose, onDocChange }: {
   path: string
@@ -92,7 +113,6 @@ export function CodeEditor({ path, initial, baseline, onSave, onClose, onDocChan
     const host = hostRef.current
     if (!host) return
     const langCompartment = new Compartment()
-    const theme = document.documentElement.getAttribute('data-theme')
     const view = new EditorView({
       parent: host,
       state: EditorState.create({
@@ -104,7 +124,7 @@ export function CodeEditor({ path, initial, baseline, onSave, onClose, onDocChan
             indentWithTab,
           ]),
           langCompartment.of([]),
-          ...(theme === 'light' || theme === 'paper' ? [] : [oneDark]),
+          varHighlight,
           baseTheme,
           EditorView.updateListener.of(u => {
             if (u.docChanged) {

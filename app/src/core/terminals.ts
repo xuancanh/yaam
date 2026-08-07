@@ -74,10 +74,25 @@ const PAPER_TERM = {
   black: '#3A342A', white: '#8A8069', brightWhite: '#6E6553',
 }
 
+const FOREST_TERM = {
+  ...DARK_TERM,
+  background: '#09110C', cursor: '#5FD68B',
+  selectionBackground: 'rgba(95,214,139,.28)',
+}
+
+const SAKURA_TERM = {
+  ...LIGHT_TERM,
+  background: '#FBF5F6', foreground: '#2B2126', cursor: '#C14E6E',
+  selectionBackground: 'rgba(193,78,110,.22)',
+  black: '#2B2126',
+}
+
 /** Literal xterm palette for one app theme (pure — unit-testable). */
 export function termThemeFor(theme: string): typeof DARK_TERM {
   if (theme === 'light') return LIGHT_TERM
   if (theme === 'paper') return PAPER_TERM
+  if (theme === 'forest') return FOREST_TERM
+  if (theme === 'sakura') return SAKURA_TERM
   return DARK_TERM // dark + midnight
 }
 

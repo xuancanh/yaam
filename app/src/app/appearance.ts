@@ -32,6 +32,7 @@ export function steppedUiScale(current: number | undefined, dir: -1 | 0 | 1): nu
 
 export const APPEARANCE_DEFAULTS: Required<AppearanceSettings> = {
   theme: 'dark',
+  viewerTheme: 'auto',
   uiScale: 100,
   density: 'normal',
   uiFont: 'plex',
@@ -55,6 +56,10 @@ export function applyAppearance(a?: AppearanceSettings): void {
   root.setAttribute('data-theme', theme)
   applyTerminalTheme(theme) // xterm canvases can't read CSS variables
   root.setAttribute('data-density', cfg.density)
+  // viewer syntax palette: 'auto' clears the attribute so the theme's own
+  // token colors apply; anything else overrides just the --hl-* variables
+  if (cfg.viewerTheme === 'auto') root.removeAttribute('data-viewer-theme')
+  else root.setAttribute('data-viewer-theme', cfg.viewerTheme)
   const style = root.style as CSSStyleDeclaration & { zoom?: string }
   // Scale the whole UI (fonts + spacing) — the pragmatic knob for an app styled
   // in absolute px. Prefer the WebView's native zoom: CSS `zoom` on the root

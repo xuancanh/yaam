@@ -28,6 +28,13 @@
   --red: #FF5C5C;
   --red-soft: #FF7A7A;
   --code-green: #9DE3C0;
+  /* syntax tokens — the shared highlighter emits var(--hl-*) colors */
+  --hl-comment: #5B6472;
+  --hl-string: #7FE3B0;
+  --hl-keyword: #C77DFF;
+  --hl-number: #F5C451;
+  --hl-tag: #7FD1FF;
+  --hl-attr: #E8A87C;
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-title: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;

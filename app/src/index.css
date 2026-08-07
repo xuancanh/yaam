@@ -27,6 +27,16 @@
   --red-soft: #ff7a7a;
   --code-bg: rgba(255, 255, 255, 0.07);
   --selection: rgba(245, 196, 81, 0.28);
+
+  /* syntax tokens (file viewer, code editor, addon source) — themes and the
+     Settings → Appearance viewer palette override these */
+  --hl-comment: #5b6472;
+  --hl-string: #7fe3b0;
+  --hl-keyword: #c77dff;
+  --hl-number: #f5c451;
+  --hl-tag: #7fd1ff;
+  --hl-attr: #e8a87c;
+
   /* elevation — dark surfaces need shadow depth to read as layered */
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.32), 0 4px 14px rgba(0, 0, 0, 0.18);
   --shadow-float: 0 2px 6px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.24);
@@ -71,6 +81,12 @@
   --red-soft: #c25555;
   --code-bg: rgba(0, 0, 0, 0.055);
   --selection: rgba(176, 125, 16, 0.25);
+  --hl-comment: #8a92a3;
+  --hl-string: #157a4f;
+  --hl-keyword: #8250df;
+  --hl-number: #a86a00;
+  --hl-tag: #0550ae;
+  --hl-attr: #b35a00;
   --shadow-card: 0 1px 2px rgba(25, 30, 50, 0.08), 0 3px 10px rgba(25, 30, 50, 0.06);
   --shadow-float: 0 1px 3px rgba(25, 30, 50, 0.08), 0 8px 24px rgba(25, 30, 50, 0.1);
 }
@@ -101,6 +117,12 @@
   --red-soft: #b85c4a;
   --code-bg: rgba(60, 45, 10, 0.06);
   --selection: rgba(138, 109, 31, 0.22);
+  --hl-comment: #8d8470;
+  --hl-string: #2e7d4f;
+  --hl-keyword: #7548c2;
+  --hl-number: #9c6b00;
+  --hl-tag: #205e9e;
+  --hl-attr: #a05a1e;
   --shadow-card: 0 1px 2px rgba(70, 55, 20, 0.1), 0 3px 10px rgba(70, 55, 20, 0.07);
   --shadow-float: 0 1px 3px rgba(70, 55, 20, 0.1), 0 8px 24px rgba(70, 55, 20, 0.12);
 }
@@ -130,6 +152,99 @@
   --red-soft: #ff7a7a;
   --code-bg: rgba(255, 255, 255, 0.07);
   --selection: rgba(111, 168, 255, 0.3);
+}
+
+:root[data-theme='forest'] {
+  /* deep evergreen: dark with mossy surfaces and a leaf-green accent */
+  --bg: #070d09;
+  --bg2: #09110c;
+  --bg3: #060b08;
+  --panel: #0b120d;
+  --panel2: #101812;
+  --panel3: #152017;
+  --line: #1e2b21;
+  --line2: #27362a;
+  --line3: #344739;
+  --line-soft: #17211a;
+  --hover: #17231a;
+  --text: #e5efe7;
+  --text2: #c4d3c8;
+  --mut: #89998d;
+  --mut2: #98a89c;
+  --dim: #5f6f63;
+  --faint: #47554b;
+  --accent: #5fd68b;
+  --green: #3ddc97;
+  --amber: #ffb020;
+  --red: #ff5c5c;
+  --red-soft: #ff7a7a;
+  --code-bg: rgba(255, 255, 255, 0.07);
+  --selection: rgba(95, 214, 139, 0.28);
+  --hl-string: #8fe3ae;
+  --hl-keyword: #7fd1ff;
+  --hl-number: #ffd479;
+  --hl-tag: #5fd68b;
+  --hl-attr: #d9c78a;
+}
+
+:root[data-theme='sakura'] {
+  /* light with warm blossom-pink accents */
+  --bg: #f6eef0;
+  --bg2: #fbf5f6;
+  --bg3: #fdf9fa;
+  --panel: #fffbfc;
+  --panel2: #f6edef;
+  --panel3: #eee2e5;
+  --line: #e3d3d8;
+  --line2: #d5c1c8;
+  --line3: #bda6ae;
+  --line-soft: #ecdfe3;
+  --hover: #f1e5e8;
+  --text: #2b2126;
+  --text2: #40333a;
+  --mut: #6e5c64;
+  --mut2: #5f4e56;
+  --dim: #8a767f;
+  --faint: #a8949d;
+  --accent: #c14e6e;
+  --green: #178f5c;
+  --amber: #a86a00;
+  --red: #d43f3f;
+  --red-soft: #c25555;
+  --code-bg: rgba(80, 20, 40, 0.05);
+  --selection: rgba(193, 78, 110, 0.22);
+  --shadow-card: 0 1px 2px rgba(60, 25, 40, 0.08), 0 3px 10px rgba(60, 25, 40, 0.06);
+  --shadow-float: 0 1px 3px rgba(60, 25, 40, 0.09), 0 8px 24px rgba(60, 25, 40, 0.11);
+  --hl-comment: #9d8a92;
+  --hl-string: #157a4f;
+  --hl-keyword: #b03a7c;
+  --hl-number: #a86a00;
+  --hl-tag: #7548c2;
+  --hl-attr: #b35a00;
+}
+
+/* viewer syntax palettes (Settings → Appearance → File viewer syntax);
+   token colors only — surfaces stay with the app theme */
+:root[data-viewer-theme='ocean'] {
+  --hl-string: #6fd3e0;
+  --hl-keyword: #6fa8ff;
+  --hl-number: #ffd479;
+  --hl-tag: #57b3ff;
+  --hl-attr: #9adcf0;
+}
+:root[data-viewer-theme='violet'] {
+  --hl-string: #d0a9ff;
+  --hl-keyword: #ff8fd0;
+  --hl-number: #ffd479;
+  --hl-tag: #b28aff;
+  --hl-attr: #e0b8ff;
+}
+:root[data-viewer-theme='ember'] {
+  --hl-string: #ffb27f;
+  --hl-keyword: #ff8f6b;
+  --hl-number: #ffd479;
+  --hl-tag: #ffaa5e;
+  --hl-attr: #ffc9a3;
 }
 
 /* density presets */
