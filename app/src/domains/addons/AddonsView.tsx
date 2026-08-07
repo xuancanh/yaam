@@ -288,7 +288,7 @@ export function AddonsView() {
                 onClick={() => setSelected({ kind: 'installed', key: a.id })}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 9,
-                  background: selected?.kind === 'installed' && selected.key === a.id ? 'rgba(245,196,81,.08)' : 'transparent',
+                  background: selected?.kind === 'installed' && selected.key === a.id ? 'var(--accent-faint)' : 'transparent',
                   border: 'none', textAlign: 'left',
                 }}
               >
@@ -316,7 +316,7 @@ export function AddonsView() {
                   onClick={() => setSelected({ kind: 'market', key: e.url })}
                   style={{
                     width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 9,
-                    background: selected?.kind === 'market' && selected.key === e.url ? 'rgba(245,196,81,.08)' : 'transparent',
+                    background: selected?.kind === 'market' && selected.key === e.url ? 'var(--accent-faint)' : 'transparent',
                     border: 'none', textAlign: 'left',
                   }}
                 >

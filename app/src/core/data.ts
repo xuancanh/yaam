@@ -86,7 +86,7 @@ export const DIFF_BG: Record<string, string> = {
   add: 'rgba(61,220,151,.09)',
   del: 'rgba(255,92,92,.09)',
   ctx: 'transparent',
-  meta: 'rgba(245,196,81,.08)',
+  meta: 'var(--accent-faint)',
 }
 
 // dot color for a session's tab/card indicator: attention overrides toward
@@ -106,6 +106,27 @@ export function hexToRgba(hex: string | undefined, a: number): string {
   if (!hex) return 'transparent'
   const n = parseInt(hex.slice(1), 16)
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
+}
+
+/** Adapt a fixed accent hex (tab/workspace/status colors — all tuned for dark
+ *  surfaces) to the CURRENT theme: on light themes the pastel is saturated
+ *  around its mean and darkened so borders, dots, and colored text keep
+ *  contrast on pale panels; dark themes get it back unchanged. Reads the live
+ *  data-theme attribute — callers re-render far more often than themes change. */
+export function uiTint(hex: string): string {
+  if (typeof document === 'undefined') return hex
+  const theme = document.documentElement.getAttribute('data-theme')
+  if (theme !== 'light' && theme !== 'paper' && theme !== 'sakura') return hex
+  const m = /^#([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return hex
+  const n = parseInt(m[1], 16)
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+  const mean = (ch[0] + ch[1] + ch[2]) / 3
+  const adj = ch.map(v => {
+    const saturated = Math.max(0, Math.min(255, mean + (v - mean) * 1.3))
+    return Math.round(saturated * 0.58)
+  })
+  return `#${adj.map(v => v.toString(16).padStart(2, '0')).join('')}`
 }
 
 // What of this session feeds Master's context — toggles are enforced when

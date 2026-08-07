@@ -478,7 +478,7 @@ function TimeGrid({ days, crons }: { days: Date[]; crons: Cron[] }) {
             const byMinute = new Map<number, DayFire[]>()
             for (const f of timed) byMinute.set(f.minute, [...(byMinute.get(f.minute) ?? []), f])
             return (
-              <div key={day.toISOString()} style={{ flex: 1, minWidth: 0, position: 'relative', borderLeft: '1px solid var(--line-soft)', background: today ? 'rgba(245,196,81,.025)' : 'transparent' }}>
+              <div key={day.toISOString()} style={{ flex: 1, minWidth: 0, position: 'relative', borderLeft: '1px solid var(--line-soft)', background: today ? 'var(--accent-faint)' : 'transparent' }}>
                 {Array.from({ length: 23 }, (_, i) => (
                   <div key={i} style={{ position: 'absolute', top: (i + 1) * HOUR_H, left: 0, right: 0, borderTop: '1px solid var(--line-soft)' }} />
                 ))}

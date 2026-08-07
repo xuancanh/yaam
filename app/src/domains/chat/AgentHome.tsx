@@ -178,7 +178,7 @@ export function AgentHome({ agent, onEditProfile, onNewConversation, onOpenChat 
           {requests.length > 0 && (
             <div>
               <SectionHead label={`WAITING ON YOU · ${requests.length}`} hint="capabilities this agent asked for (request_capability)" />
-              <div style={{ ...CARD, border: '1px solid rgba(245,196,81,.35)', padding: '4px 8px' }}>
+              <div style={{ ...CARD, border: '1px solid var(--accent-border)', padding: '4px 8px' }}>
                 {requests.map((t, i) => (
                   <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 8px', borderBottom: i < requests.length - 1 ? '1px solid var(--line)' : 'none' }}>
                     <span style={{ fontSize: 13, flexShrink: 0 }}>⚠</span>

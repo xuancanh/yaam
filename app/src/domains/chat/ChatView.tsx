@@ -247,7 +247,7 @@ export function ChatView() {
                 onClick={() => openChat(g.agent.id)}
                 style={{
                   width: '100%', display: 'flex', flexDirection: 'column', gap: 3, padding: 'var(--row-pad)', borderRadius: 9,
-                  background: s.activeChatId === g.agent.id ? 'rgba(245,196,81,.08)' : 'transparent',
+                  background: s.activeChatId === g.agent.id ? 'var(--accent-faint)' : 'transparent',
                   border: 'none', textAlign: 'left',
                 }}
               >
@@ -267,7 +267,7 @@ export function ChatView() {
                 onClick={() => openChat(a.id)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 9, padding: 'var(--row-pad)', borderRadius: 9, cursor: 'pointer',
-                  background: s.activeChatId === a.id ? 'rgba(245,196,81,.08)' : 'transparent',
+                  background: s.activeChatId === a.id ? 'var(--accent-faint)' : 'transparent',
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -401,7 +401,7 @@ export function ChatView() {
                 onClick={() => setChatPermMode(selected.id, (selected.permMode ?? 'ask') === 'ask' ? 'auto' : 'ask')}
                 style={{
                   fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 6, cursor: 'pointer', letterSpacing: 0.4,
-                  border: `1px solid ${(selected.permMode ?? 'ask') === 'ask' ? 'rgba(61,220,151,.35)' : 'rgba(245,196,81,.4)'}`,
+                  border: `1px solid ${(selected.permMode ?? 'ask') === 'ask' ? 'rgba(61,220,151,.35)' : 'var(--accent-border)'}`,
                   background: 'transparent',
                   color: (selected.permMode ?? 'ask') === 'ask' ? 'var(--green)' : 'var(--accent)',
                 }}

@@ -39,7 +39,7 @@ function TemplateEditor({ tpl, onClose }: { tpl: AgentTemplate; onClose: () => v
           <span className="mono" style={{
             fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, padding: '2px 8px', borderRadius: 5, marginTop: 4,
             color: tpl.mode === 'ephemeral' ? 'var(--accent)' : 'var(--green)',
-            border: `1px solid ${tpl.mode === 'ephemeral' ? 'rgba(245,196,81,.4)' : 'rgba(61,220,151,.4)'}`,
+            border: `1px solid ${tpl.mode === 'ephemeral' ? 'var(--accent-border)' : 'rgba(61,220,151,.4)'}`,
           }}>
             {tpl.mode === 'ephemeral' ? 'ONE-SHOT' : 'INTERACTIVE'}
           </span>
@@ -197,7 +197,7 @@ function TemplateCard({ tpl, onEdit }: { tpl: AgentTemplate; onEdit: () => void 
         <span className="mono" style={{
           fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, padding: '2px 8px', borderRadius: 5, flexShrink: 0,
           color: tpl.mode === 'ephemeral' ? 'var(--accent)' : 'var(--green)',
-          border: `1px solid ${tpl.mode === 'ephemeral' ? 'rgba(245,196,81,.4)' : 'rgba(61,220,151,.4)'}`,
+          border: `1px solid ${tpl.mode === 'ephemeral' ? 'var(--accent-border)' : 'rgba(61,220,151,.4)'}`,
         }}>
           {tpl.mode === 'ephemeral' ? 'ONE-SHOT' : 'INTERACTIVE'}
         </span>

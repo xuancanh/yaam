@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { APP_VERSION } from '../../core/addons'
 import { isSatelliteWindow } from '../../core/window-role'
-import { NOTIF_COLORS, WORKSPACE_COLORS, DEFAULT_WORKSPACE_COLOR, hexToRgba } from '../../core/data'
+import { NOTIF_COLORS, WORKSPACE_COLORS, DEFAULT_WORKSPACE_COLOR, hexToRgba, uiTint } from '../../core/data'
 import { ColorSwatches } from '../../components/ColorSwatches'
 import { EditableName, IC, Icon, MasterMark } from '../../components/ui'
 import { keepAwakeDesired } from '../../app/keep-awake'
@@ -62,12 +62,12 @@ function WorkspaceSwitcher() {
                 onClick={() => { if (w.id !== s.activeWorkspace) { switchWorkspace(w.id); setOpen(false) } }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', borderRadius: 8,
-                  background: w.id === s.activeWorkspace ? 'rgba(245,196,81,.08)' : 'transparent',
+                  background: w.id === s.activeWorkspace ? 'var(--accent-faint)' : 'transparent',
                   cursor: w.id === s.activeWorkspace ? 'default' : 'pointer',
                 }}
                 className={w.id === s.activeWorkspace ? '' : 'palette-item'}
               >
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: w.color ?? (w.id === s.activeWorkspace ? 'var(--accent)' : 'var(--line2)'), flexShrink: 0 }} />
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: w.color ? uiTint(w.color) : (w.id === s.activeWorkspace ? 'var(--accent)' : 'var(--line2)'), flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0, fontSize: 13 }}>
                   {w.id === s.activeWorkspace
                     ? <EditableName name={w.name} onRename={name => renameWorkspace(w.id, name)} fontSize={13} />

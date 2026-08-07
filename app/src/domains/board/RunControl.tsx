@@ -63,7 +63,7 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, brief
       style={{
         width: '100%', display: 'flex', flexDirection: 'column', gap: expanded ? 3 : 2,
         padding: expanded ? '8px 10px 9px' : '6px 10px', textAlign: 'left',
-        background: selected ? 'rgba(245,196,81,.09)' : 'transparent', border: 'none',
+        background: selected ? 'var(--accent-soft)' : 'transparent', border: 'none',
         borderLeft: `2px solid ${selected ? 'var(--accent)' : 'transparent'}`, borderRadius: 8, cursor: 'pointer',
       }}
     >

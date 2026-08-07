@@ -27,6 +27,11 @@
   --red-soft: #ff7a7a;
   --code-bg: rgba(255, 255, 255, 0.07);
   --selection: rgba(245, 196, 81, 0.28);
+  /* translucent accent tiers — replace hardcoded gold rgba() so light themes
+     and custom accents restyle every soft background/border together */
+  --accent-faint: rgba(245, 196, 81, 0.07);
+  --accent-soft: rgba(245, 196, 81, 0.13);
+  --accent-border: rgba(245, 196, 81, 0.42);
 
   /* syntax tokens (file viewer, code editor, addon source) — themes and the
      Settings → Appearance viewer palette override these */
@@ -81,6 +86,9 @@
   --red-soft: #c25555;
   --code-bg: rgba(0, 0, 0, 0.055);
   --selection: rgba(176, 125, 16, 0.25);
+  --accent-faint: rgba(176, 125, 16, 0.09);
+  --accent-soft: rgba(176, 125, 16, 0.16);
+  --accent-border: rgba(176, 125, 16, 0.5);
   --hl-comment: #8a92a3;
   --hl-string: #157a4f;
   --hl-keyword: #8250df;
@@ -117,6 +125,9 @@
   --red-soft: #b85c4a;
   --code-bg: rgba(60, 45, 10, 0.06);
   --selection: rgba(138, 109, 31, 0.22);
+  --accent-faint: rgba(138, 109, 31, 0.1);
+  --accent-soft: rgba(138, 109, 31, 0.17);
+  --accent-border: rgba(138, 109, 31, 0.5);
   --hl-comment: #8d8470;
   --hl-string: #2e7d4f;
   --hl-keyword: #7548c2;
@@ -152,6 +163,9 @@
   --red-soft: #ff7a7a;
   --code-bg: rgba(255, 255, 255, 0.07);
   --selection: rgba(111, 168, 255, 0.3);
+  --accent-faint: rgba(111, 168, 255, 0.07);
+  --accent-soft: rgba(111, 168, 255, 0.13);
+  --accent-border: rgba(111, 168, 255, 0.42);
 }
 
 :root[data-theme='forest'] {
@@ -180,6 +194,9 @@
   --red-soft: #ff7a7a;
   --code-bg: rgba(255, 255, 255, 0.07);
   --selection: rgba(95, 214, 139, 0.28);
+  --accent-faint: rgba(95, 214, 139, 0.07);
+  --accent-soft: rgba(95, 214, 139, 0.13);
+  --accent-border: rgba(95, 214, 139, 0.42);
   --hl-string: #8fe3ae;
   --hl-keyword: #7fd1ff;
   --hl-number: #ffd479;
@@ -213,6 +230,9 @@
   --red-soft: #c25555;
   --code-bg: rgba(80, 20, 40, 0.05);
   --selection: rgba(193, 78, 110, 0.22);
+  --accent-faint: rgba(193, 78, 110, 0.08);
+  --accent-soft: rgba(193, 78, 110, 0.15);
+  --accent-border: rgba(193, 78, 110, 0.48);
   --shadow-card: 0 1px 2px rgba(60, 25, 40, 0.08), 0 3px 10px rgba(60, 25, 40, 0.06);
   --shadow-float: 0 1px 3px rgba(60, 25, 40, 0.09), 0 8px 24px rgba(60, 25, 40, 0.11);
   --hl-comment: #9d8a92;
@@ -757,7 +777,7 @@ button {
 
 /* in-file search highlights (file viewer find bar) */
 .find-mark {
-  background: rgba(245, 196, 81, 0.3);
+  background: var(--selection);
   color: inherit;
   border-radius: 2px;
 }
@@ -889,7 +909,7 @@ button {
   flex-shrink: 0;
 }
 .dock-chip:hover {
-  border-color: rgba(245, 196, 81, 0.5);
+  border-color: var(--accent-border);
   background: var(--panel3);
 }
 
@@ -906,7 +926,7 @@ button {
   color: var(--text);
 }
 .option-btn:hover {
-  border-color: rgba(245, 196, 81, 0.5);
+  border-color: var(--accent-border);
   background: var(--panel3);
 }
 

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR, TAB_COLORS } from '../../core/data'
+import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR, TAB_COLORS, uiTint } from '../../core/data'
 import type { Agent, BoardTask, TabGroup } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { ContextMenu } from '../../components/ContextMenu'
@@ -177,7 +177,7 @@ function LayoutMenu({ group }: { group: TabGroup | undefined }) {
                     }}
                     style={{
                       flex: 1, height: 26, border: '1px solid ' + (isSel ? 'var(--accent)' : 'var(--line2)'),
-                      borderRadius: 7, background: isSel ? 'rgba(245,196,81,.10)' : 'transparent',
+                      borderRadius: 7, background: isSel ? 'var(--accent-soft)' : 'transparent',
                       color: isCur ? 'var(--accent)' : isSel ? 'var(--text)' : 'var(--mut2)',
                       fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
                     }}
@@ -202,7 +202,7 @@ function LayoutMenu({ group }: { group: TabGroup | undefined }) {
                     onClick={() => { setPaneLayout(v.rows); setOpen(false) }}
                     style={{
                       height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-                      background: active ? 'rgba(245,196,81,.08)' : 'transparent', border: 'none', borderRadius: 8,
+                      background: active ? 'var(--accent-faint)' : 'transparent', border: 'none', borderRadius: 8,
                       color: active ? 'var(--accent)' : 'var(--text)',
                     }}
                   >
@@ -375,7 +375,7 @@ export function Workspace() {
     const flash = a.status === 'needs' || a.attention
     const responding = !flash && a.status === 'running' && !!a.responding
     const active = flash || responding
-    const color = responding ? RESPONDING_COLOR : indicatorColor(a)
+    const color = uiTint(responding ? RESPONDING_COLOR : indicatorColor(a))
     return (
       <span style={{
         width: active ? 9 : 8, height: active ? 9 : 8, borderRadius: '50%',
@@ -420,7 +420,8 @@ export function Workspace() {
               const a = members[0]?.agent
               if (!a && !activeG) return null
               // the accent stays visible on inactive tabs, just dimmed
-              const accent = g.color ?? a?.color
+              const rawAccent = g.color ?? a?.color
+              const accent = rawAccent ? uiTint(rawAccent) : undefined
               const button = (
                 <button
                   className="tab-btn"
@@ -454,12 +455,12 @@ export function Workspace() {
                   display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, padding: '0 4px 0 8px',
                   height: 34, background: activeG ? 'var(--panel2)' : 'transparent', borderRadius: 9,
                   border: `1px solid ${g.color
-                    ? hexToRgba(g.color, activeG ? 0.75 : 0.4)
+                    ? hexToRgba(uiTint(g.color), activeG ? 0.75 : 0.4)
                     : activeG ? hexToRgba(ACCENT, 0.35) : 'var(--line2)'}`,
                   cursor: activeG ? 'default' : 'pointer',
                 }}
               >
-                <span title={`Split view · ${members.length} sessions`} style={{ color: g.color ?? (activeG ? 'var(--accent)' : 'var(--dim)'), display: 'flex', marginRight: 4 }}>
+                <span title={`Split view · ${members.length} sessions`} style={{ color: g.color ? uiTint(g.color) : (activeG ? 'var(--accent)' : 'var(--dim)'), display: 'flex', marginRight: 4 }}>
                   <LayoutGlyph rows={groupRows(g)} color="currentColor" />
                 </span>
                 {members.map(({ agent: a, slot }) => {
@@ -473,7 +474,7 @@ export function Workspace() {
                       aria-label={`${a.name} · ${a.repo}`}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 7,
-                        background: active ? hexToRgba(a.color, 0.16) : 'transparent', border: 'none',
+                        background: active ? hexToRgba(uiTint(a.color), 0.16) : 'transparent', border: 'none',
                       }}
                     >
                       {tabDot(a)}
@@ -500,7 +501,7 @@ export function Workspace() {
               aria-label={`${a.name} · ${a.repo}`}
               onClick={() => focusTab(a.id)}
               onContextMenu={e => openTabMenu(e, a)}
-              style={{ background: 'transparent', borderTop: `2px solid ${hexToRgba(a.color, 0.45)}` }}
+              style={{ background: 'transparent', borderTop: `2px solid ${hexToRgba(uiTint(a.color), 0.45)}` }}
             >
               {tabDot(a)}
               <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--mut2)', whiteSpace: 'nowrap' }}>{a.name}</span>

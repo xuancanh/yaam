@@ -69,7 +69,7 @@ export function Sidebar() {
     }}>
       <div style={{
         position: 'absolute', top: 0, left: 0, bottom: 0, width: 2,
-        background: 'linear-gradient(180deg, rgba(245,196,81,.5), transparent 60%)',
+        background: 'linear-gradient(180deg, var(--accent-border), transparent 60%)',
       }} />
       <div
         onPointerDown={startResize}

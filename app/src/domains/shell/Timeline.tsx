@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useConductorSelector, shallowEqual } from '../../store'
-import { EVENT_COLORS, hexToRgba } from '../../core/data'
+import { EVENT_COLORS, hexToRgba, uiTint } from '../../core/data'
 import { ViewHeader } from '../../components/ui'
 
 /** Text above this length is clamped to two lines until clicked open. */
@@ -47,8 +47,8 @@ export function Timeline() {
             </div>
           )}
           {s.events.map(e => {
-            const color = EVENT_COLORS[e.type] || 'var(--mut)'
-            const soft = hexToRgba(EVENT_COLORS[e.type] || '#8B93A1', 0.16)
+            const color = EVENT_COLORS[e.type] ? uiTint(EVENT_COLORS[e.type]) : 'var(--mut)'
+            const soft = hexToRgba(uiTint(EVENT_COLORS[e.type] || '#8B93A1'), 0.16)
             const agent = e.agentId ? byId.get(e.agentId) : null
             return (
               <div key={e.id} style={{ display: 'flex', gap: 12 }}>

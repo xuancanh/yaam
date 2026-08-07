@@ -319,7 +319,7 @@ export function MasterChat({ onFocusSession, focusLabel }: {
               onClick={() => setLens(l)}
               style={{
                 fontSize: 9, fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer', borderRadius: 999, padding: '3px 10px',
-                background: lens === l ? 'rgba(245,196,81,.12)' : 'transparent',
+                background: lens === l ? 'var(--accent-soft)' : 'transparent',
                 border: `1px solid ${lens === l ? 'var(--accent)' : 'var(--line2)'}`,
                 color: lens === l ? 'var(--accent)' : l === 'decisions' && openDecisions > 0 ? 'var(--amber)' : 'var(--mut)',
               }}
@@ -356,7 +356,7 @@ export function MasterChat({ onFocusSession, focusLabel }: {
       {s.pendingToolApprovals.length > 0 && (
         <div style={{ borderTop: '1px solid var(--line)', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {s.pendingToolApprovals.map(pa => (
-            <div key={pa.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(245,196,81,.07)', border: '1px solid rgba(245,196,81,.3)', borderRadius: 10, padding: '8px 10px' }}>
+            <div key={pa.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--accent-faint)', border: '1px solid var(--accent-border)', borderRadius: 10, padding: '8px 10px' }}>
               <span style={{ flex: 1, fontSize: 12, lineHeight: 1.4 }}>
                 Master wants to use <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{pa.toolId}</span> <span style={{ color: 'var(--dim)' }}>(Ask first)</span>
               </span>

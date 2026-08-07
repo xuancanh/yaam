@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { brainOn } from '../../llm/client'
 import { readScreen } from '../../core/terminals'
-import { EVENT_COLORS } from '../../core/data'
+import { EVENT_COLORS, uiTint } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { Icon, MasterMark } from '../../components/ui'
 import { Pane } from '../session/Pane'
@@ -100,7 +100,7 @@ function SessionTile({ agent, staged, ix, esc, onStage }: {
       title={staged ? `${agent.name} — on stage` : `Put ${agent.name} on stage`}
       style={{
         width: 268, flexShrink: 0, textAlign: 'left', cursor: 'pointer',
-        background: staged ? 'rgba(245,196,81,.05)' : 'var(--panel)',
+        background: staged ? 'var(--accent-faint)' : 'var(--panel)',
         border: `1px solid ${ring}`, borderRadius: 11, padding: 0, overflow: 'hidden',
         display: 'flex', flexDirection: 'column', color: 'var(--text)',
         animation: needsHere && !staged ? 'cattn 2.6s ease-in-out infinite' : 'none',
@@ -108,8 +108,8 @@ function SessionTile({ agent, staged, ix, esc, onStage }: {
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 10px', borderBottom: '1px solid var(--line-soft)' }}>
         <span style={{
-          width: 8, height: 8, borderRadius: '50%', background: agent.color, flexShrink: 0,
-          boxShadow: glow ? `0 0 6px 1px ${agent.color}` : 'none', transition: 'box-shadow .3s',
+          width: 8, height: 8, borderRadius: '50%', background: uiTint(agent.color), flexShrink: 0,
+          boxShadow: glow ? `0 0 6px 1px ${uiTint(agent.color)}` : 'none', transition: 'box-shadow .3s',
         }} />
         <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {agent.name}
@@ -199,12 +199,12 @@ function QuietChip({ agent, ix, staged, onStage }: { agent: Agent; ix: number; s
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', maxWidth: 190,
         fontSize: 10, borderRadius: 999, padding: '4px 11px',
-        background: staged ? 'rgba(245,196,81,.08)' : 'var(--panel)',
+        background: staged ? 'var(--accent-faint)' : 'var(--panel)',
         border: `1px solid ${staged ? 'var(--accent)' : 'var(--line2)'}`,
         color: staged ? 'var(--text)' : 'var(--mut)',
       }}
     >
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: agent.color, opacity: 0.6, flexShrink: 0 }} />
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: uiTint(agent.color), opacity: 0.6, flexShrink: 0 }} />
       <span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{agent.name}</span>
       {ix < 9 && <span style={{ flexShrink: 0, fontSize: 8.5, color: 'var(--faint)' }}>⌘{ix + 1}</span>}
     </button>
@@ -347,7 +347,7 @@ export function MissionControl() {
         </span>
         {latestEvent ? (
           <span className="mono" style={{ flex: 1, minWidth: 0, display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 9.5, color: 'var(--dim)', letterSpacing: 0.3, overflow: 'hidden' }}>
-            <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: EVENT_COLORS[latestEvent.type] || 'var(--mut)' }} />
+            <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: EVENT_COLORS[latestEvent.type] ? uiTint(EVENT_COLORS[latestEvent.type]) : 'var(--mut)' }} />
             <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {latestEvent.time} · {latestEvent.text}
             </span>

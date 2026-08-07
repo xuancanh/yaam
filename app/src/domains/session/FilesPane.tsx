@@ -298,7 +298,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 6, border: 'none',
                 textAlign: 'left', padding: `3px 8px 3px ${8 + depth * 13}px`, borderRadius: 6,
-                background: isSel ? 'rgba(245,196,81,.14)' : 'transparent',
+                background: isSel ? 'var(--accent-soft)' : 'transparent',
                 color: color ?? (isSel ? 'var(--text)' : 'var(--mut2)'),
                 fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}
@@ -318,7 +318,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
                   style={{
                     marginLeft: color ? 4 : 'auto', flexShrink: 0, width: 18, height: 18, borderRadius: 5,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    background: 'rgba(245,196,81,.14)', color: 'var(--accent)', fontSize: 12, fontWeight: 700,
+                    background: 'var(--accent-soft)', color: 'var(--accent)', fontSize: 12, fontWeight: 700,
                   }}
                 >
                   +
@@ -670,7 +670,7 @@ function QuickOpen({ root, fs, cacheKey, onPick, onClose }: {
               style={{
                 width: '100%', display: 'flex', alignItems: 'baseline', gap: 6, border: 'none',
                 textAlign: 'left', padding: '4px 8px', borderRadius: 6, whiteSpace: 'nowrap', overflow: 'hidden',
-                background: i === sel ? 'rgba(245,196,81,.09)' : 'transparent',
+                background: i === sel ? 'var(--accent-soft)' : 'transparent',
                 color: i === sel ? 'var(--text)' : 'var(--mut)', fontSize: 12,
               }}
             >
@@ -1417,7 +1417,7 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
               const html = highlight(line, lang) || '&nbsp;'
               const gitBg = gutter === 'git' && g.color ? `${g.color === 'var(--green)' ? 'rgba(96,211,148,.05)' : g.color === 'var(--amber)' ? 'rgba(255,176,32,.05)' : 'transparent'}` : 'transparent'
               return (
-                <div key={n} style={{ display: 'flex', height: ROW_H, background: isCur ? 'rgba(245,196,81,.08)' : gitBg }}>
+                <div key={n} style={{ display: 'flex', height: ROW_H, background: isCur ? 'var(--accent-faint)' : gitBg }}>
                   <span
                     className="mono"
                     title={gutter === 'git' ? g.label : undefined}

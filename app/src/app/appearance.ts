@@ -77,14 +77,19 @@ function mixHex(base: string, tint: string, amount: number): string {
  *  over every surface variable, derived from the active theme's own values. */
 function applyAccent(root: HTMLElement, accent: string, tint: boolean): void {
   // always start from the theme's baseline so switching/clearing never stacks
-  root.style.removeProperty('--accent')
-  root.style.removeProperty('--selection')
+  for (const name of ['--accent', '--selection', '--accent-faint', '--accent-soft', '--accent-border']) {
+    root.style.removeProperty(name)
+  }
   for (const [name] of TINT_VARS) root.style.removeProperty(name)
   const rgb = parseHex(accent)
   setTerminalAccent(rgb ? accent : null)
   if (!rgb) return
+  const rgba = (a: number) => `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${a})`
   root.style.setProperty('--accent', accent)
-  root.style.setProperty('--selection', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.28)`)
+  root.style.setProperty('--selection', rgba(0.28))
+  root.style.setProperty('--accent-faint', rgba(0.08))
+  root.style.setProperty('--accent-soft', rgba(0.14))
+  root.style.setProperty('--accent-border', rgba(0.45))
   if (!tint) return
   // read each surface's theme value (overrides were just cleared) and blend
   const computed = getComputedStyle(root)

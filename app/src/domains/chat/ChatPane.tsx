@@ -156,7 +156,7 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
   return (
     <div style={{
       alignSelf: 'stretch', flexShrink: 0, margin: '0 4px', padding: '8px 12px', borderRadius: 10,
-      background: 'rgba(245,196,81,.06)', border: '1px solid rgba(245,196,81,.3)',
+      background: 'var(--accent-faint)', border: '1px solid var(--accent-border)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', flexShrink: 0 }}>agent wants to run</span>
@@ -388,7 +388,7 @@ function FileMenu({ items, sel, onPick }: { items: string[]; sel: number; onPick
             onMouseDown={e => { e.preventDefault(); onPick(path) }}
             style={{
               width: '100%', display: 'flex', alignItems: 'baseline', gap: 8, border: 'none', textAlign: 'left',
-              padding: '7px 12px', background: i === sel ? 'rgba(245,196,81,.1)' : 'transparent', cursor: 'pointer',
+              padding: '7px 12px', background: i === sel ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer',
             }}
           >
             <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', flexShrink: 0 }}>{path.slice(cut + 1)}</span>
@@ -423,7 +423,7 @@ function SlashMenu({ items, sel, onPick }: {
           onMouseDown={e => { e.preventDefault(); onPick(it.name) }}
           style={{
             width: '100%', display: 'flex', alignItems: 'baseline', gap: 8, border: 'none', textAlign: 'left',
-            padding: '7px 12px', background: i === sel ? 'rgba(245,196,81,.1)' : 'transparent', cursor: 'pointer',
+            padding: '7px 12px', background: i === sel ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer',
           }}
         >
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', flexShrink: 0 }}>/{it.name}</span>
@@ -774,7 +774,7 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
           {dragOver && (
             <div style={{
               position: 'absolute', inset: 0, zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(245,196,81,.08)', border: '1px dashed var(--accent)', borderRadius: 16,
+              background: 'var(--accent-faint)', border: '1px dashed var(--accent)', borderRadius: 16,
               fontSize: 12, color: 'var(--accent)', pointerEvents: 'none',
             }}>
               drop files to attach

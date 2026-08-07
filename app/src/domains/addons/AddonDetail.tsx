@@ -69,7 +69,7 @@ export function AddonDetail({ a, inTab }: { a: Addon; inTab?: boolean }) {
         <Switch on={a.enabled} onToggle={() => toggleAddon(a.id)} />
       </div>
       {a.devPath && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(245,196,81,.35)', background: 'rgba(245,196,81,.07)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, padding: '7px 10px', borderRadius: 8, border: '1px solid var(--accent-border)', background: 'var(--accent-faint)' }}>
           <span className="mono" style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: 'var(--accent)' }}>DEV</span>
           <span className="mono" style={{ fontSize: 11, color: 'var(--mut)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.devPath}>
             watching {a.devPath} — edits hot-reload this addon

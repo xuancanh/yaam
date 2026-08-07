@@ -395,7 +395,7 @@ export function SettingsView() {
                   onClick={() => setChatTab(id)}
                   style={{
                     border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    background: chatTab === id ? 'rgba(245,196,81,.14)' : 'transparent',
+                    background: chatTab === id ? 'var(--accent-soft)' : 'transparent',
                     color: chatTab === id ? 'var(--accent)' : 'var(--mut)',
                   }}
                 >

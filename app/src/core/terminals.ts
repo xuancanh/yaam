@@ -49,7 +49,7 @@ const entries = new Map<string, Entry>()
 
 const DARK_TERM = {
   background: '#0A0B0F', foreground: '#C7CCD6', cursor: '#F5C451',
-  selectionBackground: 'rgba(245,196,81,.28)',
+  selectionBackground: 'var(--accent-border)',
   black: '#1a1e26', red: '#FF7A7A', green: '#3DDC97', yellow: '#F5C451',
   blue: '#7FD1FF', magenta: '#C77DFF', cyan: '#7FE3B0', white: '#E7E9F0',
   brightBlack: '#4a5262', brightRed: '#FF9B9B', brightGreen: '#7FE3B0',

@@ -107,7 +107,7 @@ function FileRowView({ row, selected, onSelect, onToggle }: {
       onClick={onSelect}
       style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: `2px 8px 2px ${10 + row.depth * 12}px`,
-        borderRadius: 6, cursor: 'pointer', background: selected ? 'rgba(245,196,81,.14)' : 'transparent',
+        borderRadius: 6, cursor: 'pointer', background: selected ? 'var(--accent-soft)' : 'transparent',
       }}
     >
       <button

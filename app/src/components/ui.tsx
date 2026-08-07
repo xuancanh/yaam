@@ -167,7 +167,7 @@ export function MasterMark({ size = 24, glow = true, color }: { size?: number; g
   // `color` (a workspace accent) tints the logo; default is the yellow accent.
   const accent = color ?? 'var(--accent)'
   const soft = color ? hexToRgba(color, 0.72) : 'rgba(245,196,81,.72)'
-  const glowColor = color ? hexToRgba(color, 0.5) : 'rgba(245,196,81,.5)'
+  const glowColor = color ? hexToRgba(color, 0.5) : 'var(--accent-border)'
   return (
     <div style={{
       width: size, height: size, borderRadius: Math.round(size * 0.29),
