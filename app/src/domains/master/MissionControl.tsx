@@ -1,17 +1,28 @@
 // Mission Control: the full-screen command deck. ONE Master chat on the right
 // (the same conversation as the sidebar — MasterChat is shared), and a dynamic
-// stage on the left that follows whichever session matters most right now:
-// sessions needing a decision outrank running ones, running outrank idle. The
-// staged session is a full interactive Pane (safe — the Work view's grid is
-// unmounted while this view shows, and a session's xterm is a singleton).
-// Clicking a tile pins it to the stage; AUTO resumes priority-following.
+// stage on the left that follows whatever matters most right now: sessions
+// needing a decision outrank running ones, running outrank idle — and when
+// SEVERAL need a decision at once, the stage splits into a grid (up to four
+// interactive panes, one per escalated session). Staged sessions are full
+// Panes (safe — the Work grid is unmounted while this view shows, and each
+// session's xterm is a singleton attached in exactly one place). Clicking a
+// tile pins it solo; AUTO resumes priority-following.
 import { useEffect, useMemo, useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { readScreen } from '../../core/terminals'
+import { EVENT_COLORS } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { Icon, MasterMark } from '../../components/ui'
 import { Pane } from '../session/Pane'
 import { MasterChat } from './MasterChat'
+
+// faint blueprint grid painted under the stage and rail — reads as a deck,
+// costs nothing (two repeating gradients, no elements)
+const DECK_GRID = {
+  backgroundImage:
+    'repeating-linear-gradient(0deg, transparent 0 23px, rgba(127,140,160,.05) 23px 24px),' +
+    'repeating-linear-gradient(90deg, transparent 0 23px, rgba(127,140,160,.05) 23px 24px)',
+} as const
 
 /** Priority for the auto-stage: decisions first, then live work, then errors. */
 function priority(a: Agent): number {
@@ -41,6 +52,7 @@ function SessionTile({ agent, staged, wsName, onStage }: {
   const ring = staged ? 'var(--accent)' : agent.status === 'needs' ? 'var(--amber)' : 'var(--line2)'
   return (
     <button
+      className="mc-tile"
       onClick={onStage}
       title={staged ? `${agent.name} — on stage` : `Put ${agent.name} on stage`}
       style={{
@@ -105,6 +117,7 @@ function Stat({ n, label, color, pulse }: { n: number; label: string; color: str
 export function MissionControl() {
   const s = useConductorSelector(x => ({
     agents: x.agents, workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, masterBusy: x.masterBusy,
+    events: x.events,
   }), shallowEqual)
   const { setView, focusTab } = useActions()
   const [pinned, setPinned] = useState<string | null>(null)
@@ -113,6 +126,10 @@ export function MissionControl() {
   useEffect(() => {
     const iv = window.setInterval(() => setTick(t => t + 1), 1500)
     return () => window.clearInterval(iv)
+  }, [])
+  // entering the deck lands you in the command channel, ready to type
+  useEffect(() => {
+    document.querySelector<HTMLTextAreaElement>('textarea[data-composer]')?.focus()
   }, [])
 
   const sessions = useMemo(() => {
@@ -126,14 +143,23 @@ export function MissionControl() {
     return id === s.activeWorkspace ? undefined : s.workspaces.find(w => w.id === id)?.name
   }
 
-  // the stage follows priority unless the user pinned a tile; a pin on a
-  // session that got archived silently falls back to auto
-  const staged = (pinned && sessions.find(a => a.id === pinned)) || sessions[0] || null
-  const auto = !pinned || staged?.id !== pinned
+  // The stage follows priority unless the user pinned a tile (a pin on a
+  // session that got archived silently falls back to auto). In auto, EVERY
+  // session needing a decision takes the stage together — up to four panes.
+  const needsSessions = sessions.filter(a => a.status === 'needs')
+  const pinnedAgent = pinned ? sessions.find(a => a.id === pinned) : undefined
+  const stagedList: Agent[] = pinnedAgent
+    ? [pinnedAgent]
+    : needsSessions.length > 1 ? needsSessions.slice(0, 4)
+    : sessions.slice(0, 1)
+  const staged = stagedList[0] ?? null
+  const auto = !pinnedAgent
+  const overflow = auto && needsSessions.length > 4 ? needsSessions.length - 4 : 0
 
-  const needs = sessions.filter(a => a.status === 'needs').length
+  const needs = needsSessions.length
   const running = sessions.filter(a => a.status === 'running').length
   const idle = sessions.length - needs - running
+  const latestEvent = s.events[0]
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -143,10 +169,20 @@ export function MissionControl() {
         borderBottom: '1px solid var(--line)',
         background: 'linear-gradient(180deg, var(--panel), var(--bg))',
       }}>
-        <Icon paths={['M12 3a9 9 0 100 18 9 9 0 000-18z', 'M12 8a4 4 0 100 8 4 4 0 000-8z', 'M12 12h6.5']} size={17} stroke={1.6} />
+        <span style={{ display: 'inline-flex', animation: s.masterBusy ? 'mcsweep 2.4s linear infinite' : 'none' }}>
+          <Icon paths={['M12 3a9 9 0 100 18 9 9 0 000-18z', 'M12 8a4 4 0 100 8 4 4 0 000-8z', 'M12 12h6.5']} size={17} stroke={1.6} />
+        </span>
         <span className="grotesk" style={{ fontSize: 14, fontWeight: 700, letterSpacing: 1.2 }}>MISSION CONTROL</span>
-        <span className="mono" style={{ fontSize: 9.5, color: 'var(--faint)', letterSpacing: 0.6 }}>ALL WORKSPACES · ONE CHANNEL</span>
-        <div style={{ flex: 1 }} />
+        {latestEvent ? (
+          <span className="mono" style={{ flex: 1, minWidth: 0, display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 9.5, color: 'var(--dim)', letterSpacing: 0.3, overflow: 'hidden' }}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: EVENT_COLORS[latestEvent.type] || 'var(--mut)' }} />
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {latestEvent.time} · {latestEvent.text}
+            </span>
+          </span>
+        ) : (
+          <span className="mono" style={{ flex: 1, fontSize: 9.5, color: 'var(--faint)', letterSpacing: 0.6 }}>ALL WORKSPACES · ONE CHANNEL</span>
+        )}
         <Stat n={needs} label="NEED YOU" color="var(--amber)" pulse />
         <Stat n={running} label="RUNNING" color="var(--green)" />
         <Stat n={idle} label="IDLE" color="var(--dim)" />
@@ -165,11 +201,18 @@ export function MissionControl() {
           {staged ? (
             <>
               <div style={{ height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 9, padding: '0 12px', borderBottom: '1px solid var(--line)' }}>
-                <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.7, color: 'var(--dim)' }}>ON STAGE</span>
-                <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text2)' }}>{staged.name}</span>
+                <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.7, color: stagedList.length > 1 ? 'var(--amber)' : 'var(--dim)' }}>
+                  {stagedList.length > 1 ? `⚠ ${stagedList.length} DECISIONS ON STAGE` : 'ON STAGE'}
+                </span>
+                {stagedList.length === 1 && (
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text2)' }}>{staged.name}</span>
+                )}
+                {overflow > 0 && (
+                  <span className="mono" style={{ fontSize: 9, color: 'var(--amber)' }}>+{overflow} more waiting in the rail</span>
+                )}
                 <button
                   className="mono"
-                  title={auto ? 'Auto-following priority: decisions first, then running work. Click a tile to pin.' : 'Pinned by you — click to resume auto-following'}
+                  title={auto ? 'Auto-following priority: decisions first, then running work. Click a tile to pin one.' : 'Pinned by you — click to resume auto-following'}
                   onClick={() => setPinned(null)}
                   style={{
                     fontSize: 9, fontWeight: 700, letterSpacing: 0.6, cursor: 'pointer', borderRadius: 5, padding: '2px 8px',
@@ -181,21 +224,32 @@ export function MissionControl() {
                   {auto ? '◉ AUTO' : '⊙ PINNED — resume auto'}
                 </button>
                 <div style={{ flex: 1 }} />
-                <button
-                  className="mono"
-                  title="Open this session in the Work view"
-                  onClick={() => { focusTab(staged.id); setView('workspace') }}
-                  style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, cursor: 'pointer', background: 'none', border: 'none', color: 'var(--dim)', padding: '2px 4px' }}
-                >
-                  OPEN IN WORK ↗
-                </button>
+                {stagedList.length === 1 && (
+                  <button
+                    className="mono"
+                    title="Open this session in the Work view"
+                    onClick={() => { focusTab(staged.id); setView('workspace') }}
+                    style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 0.4, cursor: 'pointer', background: 'none', border: 'none', color: 'var(--dim)', padding: '2px 4px' }}
+                  >
+                    OPEN IN WORK ↗
+                  </button>
+                )}
               </div>
-              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                <Pane key={staged.id} agent={staged} index={0} active showRing={false} maximized={false} standalone />
+              {/* 1 pane fills; 2 split side-by-side; 3–4 form a 2×2 grid */}
+              <div style={{
+                flex: 1, minHeight: 0, display: 'grid', gap: 1, background: 'var(--line)',
+                gridTemplateColumns: stagedList.length > 1 ? '1fr 1fr' : '1fr',
+                gridTemplateRows: stagedList.length > 2 ? '1fr 1fr' : '1fr',
+              }}>
+                {stagedList.map(a => (
+                  <div key={a.id} style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg2)' }}>
+                    <Pane agent={a} index={0} active={stagedList.length === 1} showRing={false} maximized={false} standalone />
+                  </div>
+                ))}
               </div>
             </>
           ) : (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--dim)' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--dim)', ...DECK_GRID }}>
               <MasterMark size={40} glow={false} />
               <div style={{ fontSize: 13 }}>No live sessions. Ask Master for something below, or launch one from the Work view.</div>
             </div>
@@ -203,7 +257,7 @@ export function MissionControl() {
 
           {/* ── the rail: every session, priority first ── */}
           {sessions.length > 1 && (
-            <div style={{ flexShrink: 0, borderTop: '1px solid var(--line)', background: 'var(--bg2)' }}>
+            <div style={{ flexShrink: 0, borderTop: '1px solid var(--line)', background: 'var(--bg2)', ...DECK_GRID }}>
               <div style={{ display: 'flex', gap: 10, padding: 10, overflowX: 'auto' }}>
                 {sessions.map(a => (
                   <SessionTile

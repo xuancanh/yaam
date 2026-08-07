@@ -743,6 +743,18 @@ button {
   background: var(--hover);
 }
 
+/* Mission Control deck */
+@keyframes mcsweep {
+  to { transform: rotate(360deg); }
+}
+.mc-tile {
+  transition: transform 0.13s ease, box-shadow 0.13s ease;
+}
+.mc-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+}
+
 /* in-file search highlights (file viewer find bar) */
 .find-mark {
   background: rgba(245, 196, 81, 0.3);
