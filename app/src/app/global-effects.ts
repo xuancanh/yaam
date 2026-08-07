@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 import { dispatch, useAppStore } from '../core/store'
 import { setGithubTokenSource } from '../infrastructure/native/http'
 import { focusSessionIn, workspaceTabOrder, activeSessionId } from '../domains/session/layout-state'
+import { requestQuickShellToggle } from '../domains/session/QuickShell'
 import { applyAppearance, steppedUiScale } from './appearance'
 import { checkAppUpdate } from '../infrastructure/native/app-update'
 import { hookConsole } from '../core/debug-log'
@@ -120,6 +121,13 @@ export function useGlobalEffects(): void {
       } else if (mod && !e.altKey && e.key === ',') {
         e.preventDefault() // ⌘, — settings (macOS convention)
         dispatch(s => ({ ...s, view: 'settings' }))
+      } else if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'j' && useAppStore.getState().view === 'workspace') {
+        // ⌘J — toggle the active session's quick shell panel (VS Code parity)
+        const sid = activeSessionId(useAppStore.getState())
+        if (sid) {
+          e.preventDefault()
+          requestQuickShellToggle(sid)
+        }
       } else if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'b') {
         e.preventDefault() // ⌘B — toggle the Master chat panel
         dispatch(s => ({ ...s, settings: { ...s.settings, sidebarHidden: !s.settings.sidebarHidden } }))

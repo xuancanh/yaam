@@ -18,6 +18,7 @@ import { onEnsureFilesPanel } from './open-file-bus'
 import { sessionFs } from './remote-native'
 import { SuggestionChips } from './SuggestionChips'
 import { TerminalPane } from './TerminalPane'
+import { QuickShell, disposeQuickShell, onQuickShellToggle } from './QuickShell'
 import { WorktreeMergeBar } from './WorktreeMergeBar'
 
 // explorer/changes visibility survives tab switches (panes remount freely)
@@ -34,6 +35,9 @@ const watcherDockCache = new Map<string, PanelDock>()
 // the session's durable activity (tasks, work evidence, and user actions)
 const historyOpenCache = new Map<string, boolean>()
 const historyDockCache = new Map<string, PanelDock>()
+// the quick shell — a scratch terminal in the session's folder (⌘J)
+const shellOpenCache = new Map<string, boolean>()
+const shellDockCache = new Map<string, PanelDock>()
 // drag-resizable split ratios: each dock area's share of the pane
 const splitCache = new Map<string, { left: number; right: number; bottom: number }>()
 // "full tab" mode: the docked panels take the whole pane, terminal hidden
@@ -41,7 +45,7 @@ const panelFullCache = new Map<string, boolean>()
 
 /** Slim docked-panel header: label + dock switches + host extras + close,
  *  shared by the Files and Changes panels so they behave identically. */
-function DockStrip({ label, dock, onDock, onPopup, onClose, full, onToggleFull }: {
+function DockStrip({ label, dock, onDock, onPopup, onClose, full, onToggleFull, extras }: {
   label: string
   dock: PanelDock
   onDock: (d: PanelDock) => void
@@ -49,11 +53,14 @@ function DockStrip({ label, dock, onDock, onPopup, onClose, full, onToggleFull }
   onClose: () => void
   full?: boolean
   onToggleFull?: () => void
+  /** host-specific buttons rendered before the dock cluster */
+  extras?: React.ReactNode
 }) {
   return (
     <div style={{ height: 28, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, padding: '0 8px', borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
       <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: 'var(--dim)' }}>{label}</span>
       <div style={{ flex: 1 }} />
+      {extras}
       <button
         className="icon-btn"
         title="Dock to the left of the session"
@@ -144,6 +151,16 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
   const [historyOpen, setHistoryOpen] = useState(historyOpenCache.get(agent.id) ?? false)
   const [historyDock, setHistoryDock] = useState<PanelDock>(historyDockCache.get(agent.id) ?? 'right')
   const setHDock = (d: PanelDock) => { historyDockCache.set(agent.id, d); setHistoryDock(d) }
+  // quick shell panel: docks bottom by default (a wide shell reads best);
+  // bumping shellGen remounts QuickShell after an explicit Restart
+  const [shellOpen, setShellOpen] = useState(shellOpenCache.get(agent.id) ?? false)
+  const [shellDock, setShellDock] = useState<PanelDock>(shellDockCache.get(agent.id) ?? 'bottom')
+  const [shellGen, setShellGen] = useState(0)
+  const setSDock = (d: PanelDock) => { shellDockCache.set(agent.id, d); setShellDock(d) }
+  const toggleShell = () => setShellOpen(v => { shellOpenCache.set(agent.id, !v); return !v })
+  const restartShell = () => { disposeQuickShell(agent.id); setShellGen(g => g + 1) }
+  // ⌘J / the palette toggle the panel for whichever pane hosts the session
+  useEffect(() => onQuickShellToggle(agent.id, toggleShell), [agent.id]) // eslint-disable-line react-hooks/exhaustive-deps
   // drag-resizable panel splits: each dock area's share of the pane
   const [split, setSplitState] = useState(() => splitCache.get(agent.id) ?? { left: 0.42, right: 0.45, bottom: 0.42 })
   const setSplit = (patch: Partial<{ left: number; right: number; bottom: number }>) =>
@@ -225,6 +242,14 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             <Icon paths={['M6 3v12', 'M6 15a3 3 0 103 3', 'M18 9a3 3 0 10-3-3', 'M18 9a9 9 0 01-9 9']} size={15} stroke={1.7} />
           </button>
         )}
+        <button
+          className="icon-btn"
+          title={shellOpen ? 'Hide the quick shell (⌘J)' : "Terminal — a quick shell in this session's folder (⌘J)"}
+          style={{ width: 27, height: 27, borderRadius: 7, color: shellOpen ? 'var(--accent)' : undefined }}
+          onClick={e => { e.stopPropagation(); toggleShell() }}
+        >
+          <Icon paths={['M4 5h16v14H4z', 'M7.5 9.5l3 2.5-3 2.5', 'M12.5 15h4']} size={15} stroke={1.6} />
+        </button>
         {task && (watcherAvailable || (task.chat ?? []).some(m => m.role !== 'system')) && (
           <button
             className="icon-btn"
@@ -348,6 +373,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         const closeGit = () => { gitOpenCache.set(agent.id, false); setGitOpen(false) }
         const closeWatcher = () => { watcherOpenCache.set(agent.id, false); setWatcherOpen(false) }
         const closeHistory = () => { historyOpenCache.set(agent.id, false); setHistoryOpen(false) }
+        const closeShell = () => { shellOpenCache.set(agent.id, false); setShellOpen(false) }
         const filesPanel = filesOpen && (
           <>
             <DockStrip label="FILES" dock={filesDock} onDock={setFDock} onClose={closeFiles} full={panelFull} onToggleFull={toggleFull} />
@@ -386,11 +412,35 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             </div>
           </>
         )
+        const shellPanel = shellOpen && (
+          <>
+            <DockStrip
+              label="TERMINAL"
+              dock={shellDock}
+              onDock={setSDock}
+              onClose={closeShell}
+              full={panelFull}
+              onToggleFull={toggleFull}
+              extras={
+                <button
+                  className="icon-btn"
+                  title="Restart the shell (kills the current one)"
+                  style={{ width: 22, height: 22, borderRadius: 6 }}
+                  onClick={e => { e.stopPropagation(); restartShell() }}
+                >
+                  <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={11} stroke={1.8} />
+                </button>
+              }
+            />
+            <QuickShell key={shellGen} agent={agent} />
+          </>
+        )
         const sidePanels = (side: PanelDock) => [
           ...(filesPanel && filesDock === side ? [filesPanel] : []),
           ...(gitPanel && gitDock === side ? [gitPanel] : []),
           ...(watcherPanel && watcherDock === side ? [watcherPanel] : []),
           ...(historyPanel && historyDock === side ? [historyPanel] : []),
+          ...(shellPanel && shellDock === side ? [shellPanel] : []),
         ]
         const leftPanels = sidePanels('left')
         const rightPanels = sidePanels('right')

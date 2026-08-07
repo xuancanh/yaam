@@ -5,6 +5,7 @@ import { steppedUiScale } from '../../app/appearance'
 import type { View } from '../../core/types'
 import { Icon } from '../../components/ui'
 import { activeSessionId, workspaceTabOrder } from '../session/layout-state'
+import { requestQuickShellToggle } from '../session/QuickShell'
 import { brainOn } from '../../llm/client'
 
 const ICONS: Record<string, string[]> = {
@@ -77,6 +78,13 @@ export function CommandPalette() {
       const step = (d: number) => a.focusTab(order[(at + d + order.length) % order.length])
       cmds.push({ id: 'term-next', label: 'Focus next terminal', hint: 'navigate', icon: 'term', run: () => step(1) })
       cmds.push({ id: 'term-prev', label: 'Focus previous terminal', hint: 'navigate', icon: 'term', run: () => step(-1) })
+    }
+    {
+      // quick shell: toggle the scratch terminal docked in the active session
+      const sid = activeSessionId({ groups: s.groups, activeGroup: s.activeGroup })
+      if (sid) {
+        cmds.push({ id: 'quick-shell', label: 'Toggle quick shell', hint: '⌘J · scratch terminal in this session', icon: 'term', run: () => requestQuickShellToggle(sid) })
+      }
     }
     order.forEach((id, i) => {
       const x = byId.get(id)

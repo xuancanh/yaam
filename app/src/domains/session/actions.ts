@@ -10,6 +10,7 @@ import { dispatch } from '../../core/store'
 import { focusSessionIn, removeFromGroups } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
 import { killRemote, tmuxName, wrapLaunch } from './remote-machine'
+import { disposeQuickShell } from './QuickShell'
 import { sandboxLocalWrap, sandboxRemoteWrap } from './sandbox'
 import { probeRemoteCliSession } from './remote-probe'
 import { execCommand, worktreeMerge, worktreeRemove } from '../../core/native'
@@ -142,6 +143,8 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       // free the xterm buffer + runtime registries; the agent (with its log
       // tail) stays persisted and the terminal is rebuilt on unarchive
       disposeSessionRuntime(id)
+      // the quick shell rides along with its session — no orphaned PTYs
+      disposeQuickShell(id)
       const event = createSessionActivity(stateRef.current, id, { category: 'action', actor: 'user', kind: 'archive', text: 'Archived session' })
       dispatch(s => withActivityTargets({
         ...s,
