@@ -171,6 +171,11 @@ export function getTerminal(
       cursorBlink: true,
       scrollback: 5000,
       theme: accentedTermTheme(currentAppTheme()),
+      // TUIs style themselves with the FIXED 256-color palette (dark-tuned
+      // grays), which only xterm can rescue on a light background: this makes
+      // it nudge any foreground below 4.5:1 contrast until it's readable
+      // (VS Code ships the same value).
+      minimumContrastRatio: 4.5,
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
