@@ -51,6 +51,11 @@ export interface MasterCtx {
   /** flag + kill a session (routes through the shared stop_session command);
    *  defaults to the direct stop-flag + kill when unwired */
   stopLine?: (sid: string) => void
+  /** answer a session's pending escalation (routes through
+   *  answer_permission_prompt as the master actor) */
+  answerLine?: (sid: string, choice: number | 'approve' | 'deny') => void
+  /** interrupt a session's current turn (routes through interrupt_turn) */
+  interruptLine?: (sid: string) => void
   /** current cancellation signal for the Master turn (aborted on workspace delete) */
   signal?: () => AbortSignal | undefined
 }
@@ -131,6 +136,33 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
       ctx.logEvent('route', sid, `Master → ${agent.name}: ${text.slice(0, 48)}`)
       await wait(1600)
       return `sent to ${agent.name}. screen now:\n${untrustedBlock(ctx.sessionScreenTail(sid), agent.name)}`
+    },
+    answerPrompt: (sid, choice) => {
+      const gated = catalogGate('answer_prompt') || sessionGate(sid, 'send')
+      if (gated) return gated
+      const agent = stateRef.current.agents.find(a => a.id === sid)
+      if (!agent) return `no session with id ${sid}`
+      if (agent.status !== 'needs') return `session ${agent.name} has no pending prompt (status=${agent.status})`
+      const parsed = choice === 'approve' || choice === 'deny' ? choice : Number.parseInt(choice, 10)
+      if (typeof parsed === 'number' && (!Number.isInteger(parsed) || parsed < 1)) {
+        return 'choice must be "approve", "deny", or an option number'
+      }
+      if (!ctx.answerLine) return 'answer_prompt is unavailable in this window'
+      ctx.answerLine(sid, parsed)
+      ctx.logEvent('route', sid, `Master answered prompt · ${choice}`)
+      ctx.armResponseWatch(sid)
+      return `answered "${choice}" on ${agent.name} — its next output will be relayed as an [event]`
+    },
+    interruptSession: sid => {
+      const gated = catalogGate('interrupt_session') || sessionGate(sid, 'send')
+      if (gated) return gated
+      const agent = stateRef.current.agents.find(a => a.id === sid)
+      if (!agent) return `no session with id ${sid}`
+      if (!ctx.interruptLine) return 'interrupt_session is unavailable in this window'
+      ctx.interruptLine(sid)
+      ctx.logEvent('route', sid, `Master interrupted ${agent.name}`)
+      ctx.armResponseWatch(sid)
+      return `interrupted ${agent.name}'s current turn (the session keeps running)`
     },
     pressKeys: async (sid, keys) => {
       const gated = catalogGate('send_to_session') || sessionGate(sid, 'send')

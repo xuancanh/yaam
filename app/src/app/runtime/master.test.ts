@@ -64,7 +64,7 @@ describe('createMasterSubsystem window-role gating', () => {
   it('satellite: runMaster is an explicit no-op regardless of credentials', () => {
     const refs = createRuntimeRefs()
     const role: WindowRole = { kind: 'workspace', workspaceId: 'ws-a' }
-    const sub = createMasterSubsystem(kernel(), refs, session, addon, undefined, undefined, undefined, role)
+    const sub = createMasterSubsystem(kernel(), refs, session, addon, undefined, undefined, undefined, undefined, undefined, role)
     sub.runMaster('manual run')
     expect(mocks.masterRun).not.toHaveBeenCalled()
   })
@@ -72,7 +72,7 @@ describe('createMasterSubsystem window-role gating', () => {
   it('satellite: masterEvent (monitor escalation) never reaches Master', () => {
     const refs = createRuntimeRefs()
     const role: WindowRole = { kind: 'workspace', workspaceId: 'ws-a' }
-    createMasterSubsystem(kernel(), refs, session, addon, undefined, undefined, undefined, role)
+    createMasterSubsystem(kernel(), refs, session, addon, undefined, undefined, undefined, undefined, undefined, role)
     refs.masterEventRef.current('session needs input', 'agent-1')
     expect(mocks.masterRun).not.toHaveBeenCalled()
   })

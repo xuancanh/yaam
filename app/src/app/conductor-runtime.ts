@@ -143,11 +143,15 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
     void registry.execute('send_to_session', { sessionId: sid, text }, { actor: { kind: 'master' } }).catch(() => {})
   const masterStopLine = (sid: string) =>
     void registry.execute('stop_session', { sessionId: sid }, { actor: { kind: 'master' } }).catch(() => {})
+  const masterAnswerLine = (sid: string, choice: number | 'approve' | 'deny') =>
+    void registry.execute('answer_permission_prompt', { sessionId: sid, choice }, { actor: { kind: 'master' } }).catch(() => {})
+  const masterInterruptLine = (sid: string) =>
+    void registry.execute('interrupt_turn', { sessionId: sid }, { actor: { kind: 'master' } }).catch(() => {})
 
   const session = createSessionRuntime(kernel, refs)
   const addon = createAddonSubsystem(kernel, refs, session, addonExec)
   const chat = createChatBoot(kernel, refs, session, role)
-  const master = createMasterSubsystem(kernel, refs, session, addon, chat.runChatMessage, masterSendLine, masterStopLine, role)
+  const master = createMasterSubsystem(kernel, refs, session, addon, chat.runChatMessage, masterSendLine, masterStopLine, masterAnswerLine, masterInterruptLine, role)
 
   const actions = createConductorActions({
     ...kernel,

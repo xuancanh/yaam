@@ -321,3 +321,67 @@ describe('Master event queue (REL-8)', () => {
     expect(drops).toHaveLength(4)
   })
 })
+
+describe('Master answer_prompt / interrupt_session (phase 2.4)', () => {
+  beforeEach(() => {
+    captured.exec = null
+    // earlier queue tests replace the mock implementation persistently —
+    // restore the exec-capturing one
+    vi.mocked(runMasterTurn).mockImplementation(async (_getState, exec) => {
+      captured.exec = exec
+      return { text: '', thinking: '' }
+    })
+  })
+
+  const withNeeds = (state: AppState): AppState => ({
+    ...state,
+    agents: [{ id: 'a1', name: 'W', kind: 'real', status: 'needs', escReason: 'Proceed?', log: [], memory: [], tools: [] } as unknown as AppState['agents'][number]],
+  })
+
+  it('answer_prompt is Ask-first by default and routes through answerLine once approved', async () => {
+    const ctx = makeCtx(withNeeds(seedState()))
+    const answerLine = vi.fn()
+    ctx.answerLine = answerLine
+    let exec = await execOf(ctx)
+    expect(exec.answerPrompt('a1', 'approve')).toContain('Ask first')
+    expect(answerLine).not.toHaveBeenCalled()
+
+    // one-shot approval consumed
+    captured.exec = null
+    ctx.toolApprovalsRef.current.add('answer_prompt')
+    exec = await execOf(ctx)
+    expect(exec.answerPrompt('a1', '2')).toContain('answered "2" on W')
+    expect(answerLine).toHaveBeenCalledWith('a1', 2)
+  })
+
+  it('answer_prompt validates the choice and requires a pending prompt', async () => {
+    const ctx = makeCtx(withNeeds(seedState()))
+    ctx.stateRef.current = {
+      ...ctx.stateRef.current,
+      toolsCatalog: ctx.stateRef.current.toolsCatalog.map(t => t.id === 'answer_prompt' ? { ...t, perm: 'Auto' } : t),
+    }
+    const answerLine = vi.fn()
+    ctx.answerLine = answerLine
+    const exec = await execOf(ctx)
+    expect(exec.answerPrompt('a1', 'zero')).toContain('choice must be')
+    ctx.stateRef.current = {
+      ...ctx.stateRef.current,
+      agents: ctx.stateRef.current.agents.map(a => ({ ...a, status: 'running' as const })),
+    }
+    expect(exec.answerPrompt('a1', 'approve')).toContain('no pending prompt')
+    expect(answerLine).not.toHaveBeenCalled()
+  })
+
+  it('interrupt_session routes through interruptLine under its own gate', async () => {
+    const ctx = makeCtx(withNeeds(seedState()))
+    ctx.stateRef.current = {
+      ...ctx.stateRef.current,
+      toolsCatalog: ctx.stateRef.current.toolsCatalog.map(t => t.id === 'interrupt_session' ? { ...t, perm: 'Auto' } : t),
+    }
+    const interruptLine = vi.fn()
+    ctx.interruptLine = interruptLine
+    const exec = await execOf(ctx)
+    expect(exec.interruptSession('a1')).toContain('interrupted W')
+    expect(interruptLine).toHaveBeenCalledWith('a1')
+  })
+})

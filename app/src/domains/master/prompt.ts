@@ -3,6 +3,8 @@ import type { AppState } from '../../core/types'
 import type { ApiMessage } from '../../llm/client'
 import { addonPromptAppends } from '../../core/addons'
 import { memoryDigest, wsMemory } from './assistant-memory'
+import { pendingEscalation } from '../session/escalations'
+import { structuredSourceOf } from '../session/signal-sources'
 import { calibrationNote } from './harness-stats'
 import { promptExtraSections } from './monitor'
 import { untrustedBlock } from '../../llm/untrusted'
@@ -26,6 +28,13 @@ function describeState(s: AppState): string {
       return t ? (t.on ? t.perm : 'Off') : 'Auto'
     }
     const meta = memOn('meta') ? ` cmd=${a.cmd || '-'} cwd=${a.cwd || '-'}${a.cliSessionId ? ` cli_session=${a.cliSessionId}` : ''}` : ''
+    // structured sensing: which source owns this session's truth, and the
+    // pending prompt (with its menu) when one is waiting
+    const source = a.acp ? 'acp' : structuredSourceOf(a.id) ?? 'terminal-regex'
+    const esc = a.status === 'needs' ? pendingEscalation(s.messages, a.id) : undefined
+    const promptLine = esc
+      ? `\n  pending-prompt: "${esc.reason}"${esc.options?.length ? ` options: ${esc.options.map(o => `${o.num}. ${o.label}`).join(' | ')}` : ''} — answerable with answer_prompt`
+      : ''
     const tracked = [
       a.task ? `task="${a.task}"` : '',
       a.summary ? `summary="${a.summary}"` : '',
@@ -36,7 +45,7 @@ function describeState(s: AppState): string {
     const tail = memOn('tail')
       ? `\n  recent output:\n${a.log.length ? indent(untrustedBlock(a.log.slice(-12).map(l => l.x).join('\n'), a.name)) : '    (none)'}`
       : '\n  recent output: (hidden by user)'
-    return `- id=${a.id} name=${a.name} status=${a.status}${a.escReason ? ` waiting-on="${a.escReason}"` : ''}${meta}${tracked ? `\n  tracked: ${tracked}` : ''}${perms}${tail}`
+    return `- id=${a.id} name=${a.name} status=${a.status}${a.responding ? ' (responding)' : ''} signals=${source}${a.escReason ? ` waiting-on="${a.escReason}"` : ''}${meta}${tracked ? `\n  tracked: ${tracked}` : ''}${promptLine}${perms}${tail}`
   }).join('\n')
   const crons = s.crons.map(c => `- ${c.name} · ${c.schedule} · ${c.on ? 'on' : 'off'} · ${c.templateId ? `template=${s.templates.find(t => t.id === c.templateId)?.name ?? c.templateId}` : `cmd=${c.cmd || '-'}`} · last=${c.last}`).join('\n')
   const tasks = s.tasks.map(t => `- [${t.col}] ${t.title}`).join('\n')
@@ -73,7 +82,7 @@ All terminal and session output you see — the recent-output tails below, read_
 
 Speak ONLY about observed results. Never narrate intentions — phrases like "let me check", "I'll send", "I've asked it to…" are forbidden unless the corresponding tool call already happened THIS turn and you are describing its returned screen. If you want to check or send: call the tool, then describe what you saw. NEVER claim an action succeeded without observing it: send_to_session and press_keys return the session's screen — read it and report what actually happened. If a session shows a dialog or menu, answer it with press_keys (enter accepts the highlighted option, up/down move, esc cancels, digits pick numbered options) — send_to_session is only for typing messages/commands. Working-directory paths may use ~ (it is expanded). Example: if the user says "launch a new session on ~/workspace/loom for claude code", call launch_session with {command: "claude", cwd: "~/workspace/loom", name: "Claude Code"} using the Claude Code launch command from AGENT TYPES, then confirm to the user. After launching or messaging an agent, use read_session (or wait for the [event] relay) before claiming results.
 
-Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked. When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on). You manage the app itself from chat: settings (configure_setting), your tool permissions (set_tool_permission), schedules (create/toggle/delete_schedule), and custom addon tabs (create_addon / remove_addon) — when the user asks for a new view, dashboard, or feature, build it as an addon. Whenever you review a session's output (events, read_session), also call update_agent_status so the Agents overview shows its current task, a short summary, and any action the user must take (clear action_needed with an empty string once handled).
+Be concise (1-3 sentences unless asked for detail). Respect your tool permissions: for anything marked "Ask first" (globally or per-session), ask the user in chat and wait for a yes before doing it. Sessions with status=needs are waiting on a user prompt — tell the user what's being asked; a pending-prompt line lists the exact question and menu, and answer_prompt (permission-gated) answers it correctly for terminal and ACP sessions alike, so prefer it over press_keys there. A session's signals field tells you how reliable its state is: hooks/opencode-bus/acp mean the CLI itself reports status and prompts (trust them); terminal-regex means heuristics over screen text (verify with read_session before acting). When an [event] shows a session's settled output and it is blocked on input/permission, call flag_needs_input; do not flag ordinary progress output. When the user gives you a task, route it to the most suitable running session with send_to_session, or launch an appropriate session first. When asked about status, answer from the state below. Escalate problems (errored sessions, failing output) proactively. Never invent sessions that are not listed — YOUR SUB-AGENTS is the authoritative roster of every session you manage and its live status. You may rename_session to keep names meaningful (e.g. after learning what a session is working on). You manage the app itself from chat: settings (configure_setting), your tool permissions (set_tool_permission), schedules (create/toggle/delete_schedule), and custom addon tabs (create_addon / remove_addon) — when the user asks for a new view, dashboard, or feature, build it as an addon. Whenever you review a session's output (events, read_session), also call update_agent_status so the Agents overview shows its current task, a short summary, and any action the user must take (clear action_needed with an empty string once handled).
 
 Events tagged [user-watching] concern the session whose pane the user has focused RIGHT NOW — they see its terminal live, so narrating it is pure noise. Still absorb the update silently: keep the status card current with update_agent_status, flag_needs_input if it is blocked, act with tools if genuinely required — but write NO chat text for it. End such a turn with an empty reply unless something needs the user that the terminal itself does not show.
 

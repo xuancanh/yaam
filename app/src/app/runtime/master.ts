@@ -32,8 +32,13 @@ export interface MasterSubsystem {
 export type MasterSendLine = (sid: string, text: string) => void
 /** Flags + kills a session as the master actor (routes through stop_session). */
 export type MasterStopLine = (sid: string) => void
+/** Answers a pending escalation as the master actor (routes through
+ *  answer_permission_prompt). */
+export type MasterAnswerLine = (sid: string, choice: number | 'approve' | 'deny') => void
+/** Interrupts a session's turn as the master actor (routes through interrupt_turn). */
+export type MasterInterruptLine = (sid: string) => void
 
-export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem, runChatMessage?: (agentId: string, text: string) => void, sendLine?: MasterSendLine, stopLine?: MasterStopLine, role: WindowRole = { kind: 'main' }): MasterSubsystem {
+export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, session: SessionRuntime, addon: AddonSubsystem, runChatMessage?: (agentId: string, text: string) => void, sendLine?: MasterSendLine, stopLine?: MasterStopLine, answerLine?: MasterAnswerLine, interruptLine?: MasterInterruptLine, role: WindowRole = { kind: 'main' }): MasterSubsystem {
   const { stateRef, widOf, logEvent, notify, flash } = k
   const { masterEventRef, toolApprovalsRef, userStoppedRef, fireAddonHookRef } = refs
   const state: StatePort = { get: () => stateRef.current, update: dispatch, subscribe: () => () => {} }
@@ -74,7 +79,7 @@ export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, ses
     armResponseWatch: session.armResponseWatch,
     sessionScreenTail: session.sessionScreenTail, logEvent, flash,
     applyAgentStatus: session.applyAgentStatus, setNeedsInput: session.setNeedsInput, makeAddonApi: addon.makeAddonApi,
-    sendLine, stopLine,
+    sendLine, stopLine, answerLine, interruptLine,
   })
   const runMaster: MasterRuntime['run'] = isMain ? master.run : () => {}
   masterEventRef.current = isMain ? (note, agentId) => {

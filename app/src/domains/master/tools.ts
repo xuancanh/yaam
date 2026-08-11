@@ -7,6 +7,8 @@ export interface MasterExec {
   stopSession: (sessionId: string) => string
   readSession: (sessionId: string, lines?: number) => string
   flagNeedsInput: (sessionId: string, question: string) => string
+  answerPrompt: (sessionId: string, choice: string) => string
+  interruptSession: (sessionId: string) => string
   renameSession: (sessionId: string, name: string) => string
   updateAgentStatus: (sessionId: string, task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => string
   runAddonTool: (name: string, input: Record<string, unknown>) => Promise<string>
@@ -184,6 +186,27 @@ Style to match the app: dark background #0A0B0F, text #E7E9F0, muted #8B93A1, ac
     },
   },
   {
+    name: 'answer_prompt',
+    description: 'Answer a session\'s pending permission/menu prompt: choice is "approve", "deny", or an option number from the escalation card (e.g. "2"). Prefer this over press_keys for prompts — it steers terminal menus AND answers protocol (ACP) permission requests correctly. Only valid while the session status is needs.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string' },
+        choice: { type: 'string', description: '"approve", "deny", or an option number' },
+      },
+      required: ['session_id', 'choice'],
+    },
+  },
+  {
+    name: 'interrupt_session',
+    description: 'Interrupt a session\'s current turn without killing it (Escape for terminal TUIs, a protocol cancel for ACP sessions). Use when a session is running down the wrong path and needs redirecting.',
+    input_schema: {
+      type: 'object',
+      properties: { session_id: { type: 'string' } },
+      required: ['session_id'],
+    },
+  },
+  {
     name: 'stop_session',
     description: 'Stop (kill) a running session.',
     input_schema: {
@@ -263,6 +286,8 @@ export async function runTool(name: string, input: Record<string, unknown>, exec
     case 'stop_session': return exec.stopSession(str('session_id'))
     case 'read_session': return exec.readSession(str('session_id'), typeof input.lines === 'number' ? input.lines : undefined)
     case 'flag_needs_input': return exec.flagNeedsInput(str('session_id'), str('question'))
+    case 'answer_prompt': return exec.answerPrompt(str('session_id'), str('choice'))
+    case 'interrupt_session': return exec.interruptSession(str('session_id'))
     case 'rename_session': return exec.renameSession(str('session_id'), str('name'))
     case 'configure_setting': return exec.configureSetting(str('key'), str('value'))
     case 'set_tool_permission': return exec.setToolPermission(str('tool_id'), str('perm'))
