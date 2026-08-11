@@ -1,5 +1,6 @@
 //! Backend domains. Each module keeps its managed state, business logic,
 //! Tauri command boundary, and unit tests together.
+pub mod acp;
 pub mod bedrock;
 pub mod fs;
 pub mod git;

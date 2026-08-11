@@ -51,6 +51,7 @@ pub fn run() {
         .manage(domains::hooks::HookListener::default())
         .manage(domains::transcript::TranscriptManager::default())
         .manage(domains::opencode::OpencodeManager::default())
+        .manage(domains::acp::AcpManager::default())
         // serve rich HTML previews on their own origin so they escape the app's
         // inherited CSP without weakening the privileged WebView (see preview.rs)
         .register_uri_scheme_protocol(
@@ -138,6 +139,11 @@ pub fn run() {
             domains::opencode::free_port,
             domains::opencode::opencode_watch,
             domains::opencode::opencode_unwatch,
+            domains::acp::acp_start,
+            domains::acp::acp_prompt,
+            domains::acp::acp_cancel,
+            domains::acp::acp_respond_permission,
+            domains::acp::acp_stop,
         ])
         .setup(|app| setup::init(app))
         .run(tauri::generate_context!())
