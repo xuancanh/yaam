@@ -167,6 +167,8 @@ export interface SessionRecord {
   /** ACP session: the agent runs over stdio (no PTY); the terminal is a
    *  rendered feed and input flows through session/prompt */
   acp?: boolean
+  /** token usage extracted from the structured transcript at exit */
+  runUsage?: { inputTokens: number; outputTokens: number; assistantTurns?: number }
   launchedAt?: number
   /** archived sessions are hidden from tabs/overview but kept for history */
   archived?: boolean

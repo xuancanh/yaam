@@ -20,6 +20,8 @@ import type { LocatedTask } from '../board/task-state'
 import { hasCreds } from '../../llm/client'
 import { createSessionActivity, withActivityTargets } from '../activity/history'
 import { captureSessionChanges } from './change-history'
+import { transcriptEventsFor } from './transcript-events'
+import { formatUsage, usageFromTranscript } from './run-usage'
 import { untrustedBlock } from '../../llm/untrusted'
 
 /** The native process-exit event we react to. */
@@ -77,6 +79,9 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
     autoArchive: !!agent?.autoArchive, hasTask: !!taskFor,
   })
   const { failed } = cls
+  // typed ground truth from the structured transcript (claude/codex tails):
+  // recorded on the agent and given to the watcher as data, not prose
+  const usage = usageFromTranscript(transcriptEventsFor(e.id))
   // Without a monitor, retain only a lifecycle summary. Never promote a raw
   // terminal line into the synthesized Task / Now / Next status brief.
   const brainDigest = brainOff && !userStopped && !taskFor && agent
@@ -101,7 +106,11 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
           ...a,
           status: failed ? 'error' as const : 'idle' as const,
           attention: !userStopped,
-          log: a.log.concat([{ t: 'sys' as const, x: userStopped ? 'stopped by you' : `process exited${e.code !== null ? ` · code ${e.code}` : ''}` }]),
+          ...(usage ? { runUsage: usage } : {}),
+          log: a.log.concat([
+            { t: 'sys' as const, x: userStopped ? 'stopped by you' : `process exited${e.code !== null ? ` · code ${e.code}` : ''}` },
+            ...(usage ? [{ t: 'sys' as const, x: `tokens · ${formatUsage(usage)}` }] : []),
+          ]),
           ...(brainDigest
             ? {
                 summary: brainDigest.summary,
@@ -164,7 +173,7 @@ export function coordinateSessionExit(e: SessionExitEvent, p: SessionExitPorts):
       } else {
         runWatcher(taskFor.task.id, userStopped
           ? `The user manually STOPPED the task's session "${agent.name}". This is a pause, not a failure — do not move the task to failed or claim completion. Update your note and wait for instructions.`
-          : `The task's session "${agent.name}" exited ${failed ? `with code ${e.code} (failure)` : 'cleanly'}. Final output:\n${untrustedBlock(tail, agent.name)}\n\n` +
+          : `The task's session "${agent.name}" exited ${failed ? `with code ${e.code} (failure)` : 'cleanly'}.${usage ? ` Token usage (from the CLI's own transcript, trustworthy): ${formatUsage(usage)}.` : ''} Final output:\n${untrustedBlock(tail, agent.name)}\n\n` +
             'Assess the result against the acceptance criteria and move the task (review when it looks complete, failed if the attempt is dead), then update your note. ' +
             'Post ONE message to the user in the task chat that (1) summarizes concretely what was accomplished — files changed, checks run, criteria met or missed — and ' +
             '(2) when the task moved to review, explicitly asks them to review and approve the changes (the Review button on the card shows the diff). ' +

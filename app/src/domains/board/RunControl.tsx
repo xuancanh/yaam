@@ -126,6 +126,11 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, brief
         )}
         {agent?.machine && <span style={{ color: 'var(--accent)', flexShrink: 0 }}>⧉ {agent.machine.label || 'remote'}</span>}
         {agent?.worktree && <span style={{ color: 'var(--amber)', flexShrink: 0 }}>⑂</span>}
+        {agent?.runUsage && agent.status !== 'running' && (
+          <span title={`token usage · ${agent.runUsage.inputTokens} in / ${agent.runUsage.outputTokens} out`} style={{ color: 'var(--faint)', flexShrink: 0 }}>
+            {Math.round((agent.runUsage.inputTokens + agent.runUsage.outputTokens) / 1000)}k tok
+          </span>
+        )}
         {stats && stats.files > 0 && (
           <span style={{ marginLeft: 'auto', color: 'var(--dim)', flexShrink: 0 }}>
             <span style={{ color: 'var(--green)' }}>+{stats.add}</span> <span style={{ color: 'var(--red-soft)' }}>−{stats.del}</span> · {stats.files}
