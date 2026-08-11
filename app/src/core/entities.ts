@@ -686,6 +686,9 @@ export interface OrchestrationSettings {
   devMode?: boolean
   /** Runs rail density: compact rows auto-open only when user action is needed */
   runListMode?: 'compact' | 'full'
+  /** Runs rail grouping: triage status buckets, or by working folder (each
+   *  folder can expand its archived sessions for restore) */
+  runGroupMode?: 'status' | 'folder'
   /** auto-compact a chat once one turn's input reaches this many tokens:
    *  the API context is distilled into a summary (the visible transcript is
    *  untouched). undefined = default (80k) · 0 = off */

@@ -7,7 +7,7 @@ import { SessionHoverPreview } from '../session/SessionHoverPreview'
 import { sessionWorkStatus } from '../session/session-work-status'
 import { useDiffStats } from '../session/diff-stats'
 import { brainOn } from '../../llm/client'
-import { groupRuns, runNeedsUserAction, runStatusLabel } from './run-state'
+import { groupRuns, groupRunsByFolder, runCwdOf, runNeedsUserAction, runStatusLabel } from './run-state'
 import type { RunFilter, RunRef } from './run-state'
 import { WatcherChat } from './WatcherChat'
 
@@ -25,15 +25,9 @@ function runTitle(run: RunRef): string {
   return run.kind === 'task' ? run.task.title : run.agent.name
 }
 
-/** The folder a run works in (worktree beats session cwd beats task cwd). */
-function runCwd(run: RunRef): string | undefined {
-  const task = run.kind === 'task' ? run.task : undefined
-  return run.agent?.worktree?.workdir ?? run.agent?.cwd ?? task?.cwd
-}
-
 /** One selectable run row: status dot, title, working folder, live diff stats,
  *  and an inline start for unstarted tasks (backlog). */
-function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, briefsOn, onSelect }: {
+function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, briefsOn, showFolder = true, onSelect }: {
   run: RunRef
   linkedTask?: BoardTask
   stats?: { add: number; del: number; files: number }
@@ -42,6 +36,8 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, brief
   showDetails: boolean
   /** Master Brain on: TASK/NOW/NEXT briefs exist and are worth the rows */
   briefsOn: boolean
+  /** off when the rail already groups rows under a folder header */
+  showFolder?: boolean
   onSelect: () => void
 }) {
   const { startTask } = useActions()
@@ -53,8 +49,8 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, brief
   // without the brain the briefs are permanent placeholders — never expand
   const expanded = briefsOn && (showDetails || runNeedsUserAction(run))
   const startable = !!task && !agent && task.col !== 'done' && task.col !== 'failed'
-  const cwd = runCwd(run)
-  const folder = cwd?.replace(/\/+$/, '').split('/').pop()
+  const cwd = runCwdOf(run)
+  const folder = showFolder ? cwd?.replace(/\/+$/, '').split('/').pop() : undefined
   const row = (
     <button
       className="palette-item"
@@ -175,15 +171,23 @@ export function RunControl() {
   const s = useConductorSelector(x => ({
     tasks: x.tasks, agents: x.agents, activeWorkspace: x.activeWorkspace,
     runListMode: x.settings.runListMode ?? 'compact',
+    runGroupMode: x.settings.runGroupMode ?? 'status',
     briefsOn: brainOn(x.settings),
   }), shallowEqual)
-  const { updateSettings } = useActions()
+  const { updateSettings, unarchiveSession } = useActions()
   const [filter, setFilter] = useState<RunFilter>('all')
+  const byFolder = s.runGroupMode === 'folder'
   const groups = useMemo(
     () => groupRuns(s.tasks, s.agents, filter, s.activeWorkspace),
     [s.tasks, s.agents, filter, s.activeWorkspace],
   )
+  const folderGroups = useMemo(
+    () => groupRunsByFolder(s.tasks, s.agents, filter, s.activeWorkspace),
+    [s.tasks, s.agents, filter, s.activeWorkspace],
+  )
   const flat = useMemo(() => groups.flatMap(g => g.runs), [groups])
+  // folders whose archived-session list is open
+  const [openArchives, setOpenArchives] = useState<Set<string>>(new Set())
   const taskByAgent = useMemo(() => {
     const map = new Map<string, BoardTask>()
     for (const task of s.tasks) {
@@ -216,7 +220,9 @@ export function RunControl() {
     return () => window.removeEventListener('keydown', onKey)
   }, [flat])
 
-  if (!flat.length && filter === 'all') {
+  // in folder mode an all-archived workspace still has history worth showing
+  const hasArchived = folderGroups.some(g => g.archived.length > 0)
+  if (!flat.length && filter === 'all' && !(byFolder && hasArchived)) {
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10, background: 'var(--bg2)' }}>
         <div className="grotesk" style={{ fontSize: 15, fontWeight: 600, color: 'var(--mut)' }}>Nothing in flight</div>
@@ -225,7 +231,30 @@ export function RunControl() {
     )
   }
 
-  let shortcutIx = 0
+  // ⌘n follows triage order in both groupings, so the numbers never move
+  // when the user switches between Status and Folder
+  const shortcutByKey = new Map(flat.slice(0, 9).map((r, i) => [r.key, i + 1]))
+  // restoring puts the session back among live runs; select its new row
+  // (the task run when a live task owns this agent, else the loose session)
+  const restoreArchived = (a: Agent) => {
+    unarchiveSession(a.id)
+    const owner = s.tasks.find(t => !t.archived && t.agentId === a.id)
+    setSelKey(owner ? `task:${owner.id}` : `sess:${a.id}`)
+  }
+  const renderRun = (run: RunRef, showFolder: boolean) => (
+    <RunRow
+      key={run.key}
+      run={run}
+      linkedTask={run.agent ? taskByAgent.get(run.agent.id) : undefined}
+      stats={run.agent ? stats[run.agent.id] : undefined}
+      selected={selected?.key === run.key}
+      shortcut={shortcutByKey.get(run.key)}
+      showDetails={s.runListMode === 'full'}
+      briefsOn={s.briefsOn}
+      showFolder={showFolder}
+      onSelect={() => setSelKey(run.key)}
+    />
+  )
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{ width: 'clamp(238px, 26vw, 294px)', flexShrink: 0, borderRight: '1px solid var(--line)', overflowY: 'auto', background: 'var(--panel)', padding: '6px 6px 12px' }}>
@@ -243,6 +272,24 @@ export function RunControl() {
               }}
             >
               {f.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '0 7px 5px' }}>
+          <span className="mono" style={{ flex: 1, fontSize: 8.5, letterSpacing: .55, color: 'var(--faint)' }}>GROUP</span>
+          {(['status', 'folder'] as const).map(mode => (
+            <button
+              key={mode}
+              title={mode === 'status' ? 'Group by triage status — urgent first' : 'Group by working folder, with each folder’s archived sessions one click away'}
+              onClick={() => updateSettings({ runGroupMode: mode })}
+              style={{
+                border: 'none', borderRadius: 6, padding: '3px 7px', cursor: 'pointer',
+                background: s.runGroupMode === mode ? 'var(--panel2)' : 'transparent',
+                color: s.runGroupMode === mode ? 'var(--accent)' : 'var(--dim)',
+                fontSize: 9.5, fontWeight: 600, textTransform: 'capitalize',
+              }}
+            >
+              {mode}
             </button>
           ))}
         </div>
@@ -264,12 +311,12 @@ export function RunControl() {
             </button>
           ))}
         </div>}
-        {!flat.length && (
+        {!flat.length && !(byFolder && hasArchived) && (
           <div style={{ padding: '18px 10px', fontSize: 11.5, color: 'var(--dim)', textAlign: 'center' }}>
             No runs match this filter.
           </div>
         )}
-        {groups.map(g => (
+        {!byFolder && groups.map(g => (
           <div key={g.id}>
             <div className="mono" style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '10px 10px 4px',
@@ -278,24 +325,67 @@ export function RunControl() {
             }}>
               {g.label.toUpperCase()} <span style={{ color: 'var(--faint)' }}>{g.runs.length}</span>
             </div>
-            {g.runs.map(run => {
-              const ix = ++shortcutIx
-              return (
-                <RunRow
-                  key={run.key}
-                  run={run}
-                  linkedTask={run.agent ? taskByAgent.get(run.agent.id) : undefined}
-                  stats={run.agent ? stats[run.agent.id] : undefined}
-                  selected={selected?.key === run.key}
-                  shortcut={ix <= 9 ? ix : undefined}
-                  showDetails={s.runListMode === 'full'}
-                  briefsOn={s.briefsOn}
-                  onSelect={() => setSelKey(run.key)}
-                />
-              )
-            })}
+            {g.runs.map(run => renderRun(run, true))}
           </div>
         ))}
+        {byFolder && folderGroups.map(g => {
+          const open = openArchives.has(g.cwd)
+          return (
+            <div key={g.cwd || '(none)'}>
+              <div className="mono" title={g.cwd || undefined} style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '10px 10px 4px', minWidth: 0,
+                fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6,
+                color: g.runs.some(runNeedsUserAction) ? 'var(--amber)' : 'var(--dim)',
+              }}>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {g.label.toUpperCase()}
+                </span>
+                <span style={{ color: 'var(--faint)', flexShrink: 0 }}>{g.runs.length}</span>
+              </div>
+              {g.runs.map(run => renderRun(run, false))}
+              {g.archived.length > 0 && (
+                <>
+                  <button
+                    className="palette-item"
+                    aria-expanded={open}
+                    onClick={() => setOpenArchives(prev => {
+                      const next = new Set(prev)
+                      if (open) next.delete(g.cwd); else next.add(g.cwd)
+                      return next
+                    })}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px 4px 12px',
+                      background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ fontSize: 8, color: 'var(--faint)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▶</span>
+                    <span className="mono" style={{ fontSize: 8.5, letterSpacing: .55, color: 'var(--faint)' }}>
+                      ARCHIVED {g.archived.length}
+                    </span>
+                  </button>
+                  {open && g.archived.map(a => (
+                    <button
+                      key={a.id}
+                      className="palette-item"
+                      title={`Restore ${a.name} from the archive`}
+                      onClick={() => restoreArchived(a)}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px 5px 22px',
+                        background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+                      }}
+                    >
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', border: '1px solid var(--dim)', flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {a.name}
+                      </span>
+                      <span className="mono" style={{ fontSize: 8.5, color: 'var(--faint)', flexShrink: 0 }}>RESTORE</span>
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          )
+        })}
       </div>
       {selected && (
         selected.agent

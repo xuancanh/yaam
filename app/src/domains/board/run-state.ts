@@ -48,6 +48,12 @@ export function runGroupOf(run: RunRef): RunGroupId {
   return 'idle'
 }
 
+/** The folder a run works in (worktree beats session cwd beats task cwd). */
+export function runCwdOf(run: RunRef): string | undefined {
+  const task = run.kind === 'task' ? run.task : undefined
+  return run.agent?.worktree?.workdir ?? run.agent?.cwd ?? task?.cwd
+}
+
 export type RunFilter = 'all' | 'task' | 'session' | 'scheduled'
 
 /** Filter predicate for the run list. 'scheduled' = tasks with a pending
@@ -110,4 +116,44 @@ export function groupRuns(tasks: BoardTask[], agents: Agent[], filter: RunFilter
     if (runMatchesFilter(run, filter)) byGroup.get(runGroupOf(run))!.runs.push(run)
   }
   return groups.filter(g => g.runs.length > 0)
+}
+
+export interface FolderRunGroup {
+  /** normalized folder path; '' for runs with no working folder */
+  cwd: string
+  /** folder basename (full path stays in the header tooltip) */
+  label: string
+  /** live runs in triage order (urgent first) */
+  runs: RunRef[]
+  /** archived sessions whose folder matches, restorable in place */
+  archived: Agent[]
+}
+
+const normFolder = (p?: string) => (p ?? '').replace(/\/+$/, '')
+
+/** Bucket the triage-ordered runs by working folder, and attach each folder's
+ *  archived sessions so history stays reachable next to the live work. Folder
+ *  order follows triage order (folders with urgent runs first); folders that
+ *  hold only archived sessions come after, and folderless runs sit last. */
+export function groupRunsByFolder(tasks: BoardTask[], agents: Agent[], filter: RunFilter = 'all', workspaceId?: string): FolderRunGroup[] {
+  const flat = groupRuns(tasks, agents, filter, workspaceId).flatMap(g => g.runs)
+  const byCwd = new Map<string, FolderRunGroup>()
+  const ensure = (cwd: string) => {
+    let g = byCwd.get(cwd)
+    if (!g) {
+      g = { cwd, label: cwd ? (cwd.split('/').pop() || cwd) : 'No folder', runs: [], archived: [] }
+      byCwd.set(cwd, g)
+    }
+    return g
+  }
+  for (const run of flat) ensure(normFolder(runCwdOf(run))).runs.push(run)
+  const scoped = workspaceId
+    ? agents.filter(a => (a.workspaceId ?? workspaceId) === workspaceId)
+    : agents
+  for (const a of scoped) {
+    if (!a.archived || a.kind === 'chat') continue
+    ensure(normFolder(a.worktree?.workdir ?? a.cwd)).archived.push(a)
+  }
+  const groups = [...byCwd.values()]
+  return [...groups.filter(g => g.cwd), ...groups.filter(g => !g.cwd)]
 }

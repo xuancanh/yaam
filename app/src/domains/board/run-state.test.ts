@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupRuns, runGroupOf, runMatchesFilter, runNeedsUserAction, runStatusLabel } from './run-state'
+import { groupRuns, groupRunsByFolder, runGroupOf, runMatchesFilter, runNeedsUserAction, runStatusLabel } from './run-state'
 import type { Agent, BoardTask } from '../../core/types'
 
 const task = (over: Partial<BoardTask>): BoardTask =>
@@ -100,5 +100,36 @@ describe('groupRuns', () => {
     const runs = groups.flatMap(g => g.runs)
     expect(runs.map(r => r.key)).toEqual(['task:t1', 'sess:local', 'sess:legacy'])
     expect(runs.find(r => r.key === 'task:t1')).toMatchObject({ agent: undefined })
+  })
+})
+
+describe('groupRunsByFolder', () => {
+  it('buckets runs by working folder in triage order, folderless last', () => {
+    const urgent = agent({ id: 'urgent', status: 'needs', cwd: '/repos/api/' })
+    const calm = agent({ id: 'calm', status: 'running', cwd: '/repos/web' })
+    const nowhere = agent({ id: 'nowhere', status: 'idle' })
+    const groups = groupRunsByFolder([], [calm, urgent, nowhere])
+    expect(groups.map(g => g.cwd)).toEqual(['/repos/api', '/repos/web', ''])
+    expect(groups.map(g => g.label)).toEqual(['api', 'web', 'No folder'])
+    expect(groups[0].runs.map(r => r.key)).toEqual(['sess:urgent'])
+  })
+  it('attaches archived sessions to their folder, including archive-only folders', () => {
+    const live = agent({ id: 'live', status: 'running', cwd: '/repos/api' })
+    const old1 = agent({ id: 'old1', archived: true, cwd: '/repos/api/' })
+    const old2 = agent({ id: 'old2', archived: true, cwd: '/repos/legacy' })
+    const chat = agent({ id: 'chat', kind: 'chat', archived: true, cwd: '/repos/api' })
+    const groups = groupRunsByFolder([], [live, old1, old2, chat])
+    expect(groups.map(g => g.cwd)).toEqual(['/repos/api', '/repos/legacy'])
+    expect(groups[0].archived.map(a => a.id)).toEqual(['old1'])
+    expect(groups[0].runs.map(r => r.key)).toEqual(['sess:live'])
+    expect(groups[1].runs).toEqual([])
+    expect(groups[1].archived.map(a => a.id)).toEqual(['old2'])
+  })
+  it('prefers the worktree folder and scopes archived sessions to the workspace', () => {
+    const wt = agent({ id: 'wt', status: 'running', cwd: '/repos/api', worktree: { workdir: '/wt/api-fix' } as never })
+    const foreign = agent({ id: 'foreign', archived: true, cwd: '/repos/api', workspaceId: 'ws-b' })
+    const groups = groupRunsByFolder([], [wt, foreign], 'all', 'ws-a')
+    expect(groups.map(g => g.cwd)).toEqual(['/wt/api-fix'])
+    expect(groups[0].archived).toEqual([])
   })
 })
