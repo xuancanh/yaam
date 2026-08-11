@@ -42,9 +42,42 @@ fn claude_transcript_path(home: &str, cwd: &str, session_id: &str) -> std::path:
         .join(format!("{session_id}.jsonl"))
 }
 
-fn tail_loop(app: AppHandle, agent: String, path: std::path::PathBuf, stop: Arc<AtomicBool>) {
+/// Locate a Codex rollout file by its session id. Rollouts live under
+/// `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl`; the id is the
+/// filename's trailing segment (matches detect_cli_session's derivation).
+fn find_codex_rollout(home: &str, session_id: &str) -> Option<std::path::PathBuf> {
+    let root = std::path::PathBuf::from(home).join(".codex/sessions");
+    let suffix = format!("-{session_id}.jsonl");
+    let mut stack = vec![(root, 0u8)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                // YYYY/MM/DD nesting — a bounded walk, not a filesystem crawl
+                if depth < 3 {
+                    stack.push((path, depth + 1));
+                }
+            } else if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(&suffix))
+            {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn tail_loop(app: AppHandle, agent: String, path: std::path::PathBuf, stop: Arc<AtomicBool>, from_start: bool) {
     // existing file = resume: only stream what the session writes from now on
-    let mut offset: u64 = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    // (unless the caller knows the whole file belongs to this fresh session)
+    let mut offset: u64 = if from_start {
+        0
+    } else {
+        std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+    };
     let mut carry: Vec<u8> = Vec::new();
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -93,7 +126,9 @@ fn tail_loop(app: AppHandle, agent: String, path: std::path::PathBuf, stop: Arc<
     }
 }
 
-/// Start (or replace) the transcript watcher for one YAAM session.
+/// Start (or replace) the transcript watcher for one YAAM session. Claude's
+/// path is derivable up front; Codex rollouts are discovered by session id,
+/// retrying briefly because the file appears shortly after process start.
 #[tauri::command]
 pub fn transcript_watch(
     app: AppHandle,
@@ -102,15 +137,12 @@ pub fn transcript_watch(
     kind: String,
     cwd: String,
     session_id: String,
+    from_start: bool,
 ) -> Result<(), String> {
-    if kind != "claude" {
-        return Err(format!("unsupported transcript kind: {kind}"));
-    }
     if session_id.is_empty() || session_id.contains(['/', '\\']) || session_id.contains("..") {
         return Err("invalid session id".to_string());
     }
     let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
-    let path = claude_transcript_path(&home, &cwd, &session_id);
     let stop = Arc::new(AtomicBool::new(false));
     {
         let mut watchers = state
@@ -121,8 +153,30 @@ pub fn transcript_watch(
             old.store(true, Ordering::Relaxed);
         }
     }
-    std::thread::spawn(move || tail_loop(app, agent, path, stop));
-    Ok(())
+    match kind.as_str() {
+        "claude" => {
+            let path = claude_transcript_path(&home, &cwd, &session_id);
+            std::thread::spawn(move || tail_loop(app, agent, path, stop, from_start));
+            Ok(())
+        }
+        "codex" => {
+            std::thread::spawn(move || {
+                // the rollout may not exist yet; look for it for up to a minute
+                for _ in 0..60 {
+                    if stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    if let Some(path) = find_codex_rollout(&home, &session_id) {
+                        tail_loop(app, agent, path, stop, from_start);
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                }
+            });
+            Ok(())
+        }
+        other => Err(format!("unsupported transcript kind: {other}")),
+    }
 }
 
 /// Stop a session's transcript watcher (archive/delete).
@@ -146,6 +200,19 @@ mod tests {
             p,
             std::path::PathBuf::from("/Users/u/.claude/projects/-Users-u-my-app/abc-123.jsonl")
         );
+    }
+
+    #[test]
+    fn finds_codex_rollout_by_session_id() {
+        let home = std::env::temp_dir().join(format!("yaam-rollout-test-{}", std::process::id()));
+        let day = home.join(".codex/sessions/2026/08/11");
+        std::fs::create_dir_all(&day).unwrap();
+        let rollout = day.join("rollout-2026-08-11T10-00-00-abc-123-def.jsonl");
+        std::fs::write(&rollout, "{}\n").unwrap();
+        let home_s = home.to_str().unwrap();
+        assert_eq!(find_codex_rollout(home_s, "abc-123-def"), Some(rollout));
+        assert_eq!(find_codex_rollout(home_s, "missing"), None);
+        std::fs::remove_dir_all(&home).ok();
     }
 
     #[test]

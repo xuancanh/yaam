@@ -98,6 +98,9 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
               ? { ...a, cliSessionId: sid, log: a.log.concat([{ t: 'sys', x: `${isResume ? 'session id changed on resume' : `captured ${probeType.name} session`} · ${sid}` }]) }
               : a),
           }))
+          // codex: the captured id names its rollout file — start the
+          // structured tail (whole file on a fresh launch, new lines on resume)
+          if (probeType.probe === 'codex') void port.watchTranscript(id, 'codex', '', sid, !isResume)
         }).catch(() => {})
       }
       later(7000, tryDetect)
@@ -182,7 +185,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         // minted id → the transcript path is known before the file exists;
         // start the structured tail now (best-effort, supplementary signal)
         if (knownSessionId && adapter?.store.kind === 'claude-projects') {
-          void port.watchTranscript(id, 'claude', spawnCwd || agent.cwd || '', knownSessionId)
+          void port.watchTranscript(id, 'claude', spawnCwd || agent.cwd || '', knownSessionId, false)
         }
         if (opts?.detached) {
           // the PTY moves into a detached host process; the app runs a small

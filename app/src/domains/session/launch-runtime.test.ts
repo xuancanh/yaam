@@ -93,7 +93,7 @@ describe('createLaunchRuntime.launchSession', () => {
     const agent = useAppStore.getState().agents.find(a => a.id === id)
     expect(agent?.cmd).toBe('claude')
     // minted id → the transcript tail starts immediately at the known path
-    expect(port.watchTranscript).toHaveBeenCalledWith(id, 'claude', '/repo', agent?.cliSessionId)
+    expect(port.watchTranscript).toHaveBeenCalledWith(id, 'claude', '/repo', agent?.cliSessionId, false)
   })
 
   it('skips hook injection when the listener is unavailable or the user passed --settings', async () => {
@@ -112,6 +112,19 @@ describe('createLaunchRuntime.launchSession', () => {
     await Promise.resolve()
     const spawned2 = (port2.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
     expect(spawned2.match(/--settings/g)).toHaveLength(1)
+  })
+
+  it('starts the codex rollout tail once the probe captures the session id', async () => {
+    const timers: Array<() => void> = []
+    const port = fakePort({ isTauri: true, detectCliSession: vi.fn(async () => 'cx-id-1') })
+    useAppStore.setState({ agentTypes: [agentType({ id: 'codex', model: 'codex', probe: 'codex' })] } as Partial<AppState> as AppState)
+    const rt = createLaunchRuntime(ctx(port, { later: vi.fn((_ms: number, fn: () => void) => { timers.push(fn) }) }))
+    const id = rt.launchSession('codex', '/repo', 'CX', 'codex')!
+    await Promise.resolve()
+    timers[0]()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(port.watchTranscript).toHaveBeenCalledWith(id, 'codex', '', 'cx-id-1', true)
   })
 
   it('launches a plain terminal directly without a command-shell wrapper', () => {

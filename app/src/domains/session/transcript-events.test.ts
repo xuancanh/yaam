@@ -26,6 +26,11 @@ describe('applyTranscriptLines', () => {
     expect(useAppStore.getState().agents[0].responding).toBe(true)
   })
 
+  it('treats codex rollout items as activity too', () => {
+    applyTranscriptLines({ stateRef }, { agent: 'a1', lines: ['{"type":"response_item","payload":{}}'] })
+    expect(useAppStore.getState().agents[0].responding).toBe(true)
+  })
+
   it('caps the ring and ignores unknown or archived sessions', () => {
     const lines = Array.from({ length: 120 }, (_, i) => `{"type":"user","i":${i}}`)
     applyTranscriptLines({ stateRef }, { agent: 'a1', lines })

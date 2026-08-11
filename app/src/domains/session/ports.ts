@@ -30,7 +30,7 @@ export interface SessionProcessPort {
   /** local agent-hook listener address, started on first use (null = unavailable) */
   hooksInfo: () => Promise<native.HookListenerInfo | null>
   /** start (or replace) a session's CLI transcript watcher (best-effort) */
-  watchTranscript: (agentId: string, kind: string, cwd: string, sessionId: string) => Promise<void>
+  watchTranscript: (agentId: string, kind: string, cwd: string, sessionId: string, fromStart: boolean) => Promise<void>
   /** stop a session's transcript watcher */
   unwatchTranscript: (agentId: string) => Promise<void>
   /** isolate a working folder in git worktree(s); returns where to run */
@@ -74,7 +74,7 @@ export const realSessionProcessPort: SessionProcessPort = {
   sendLine: (id, text) => sendLineToSession(id, text),
   detectCliSession: (kind, cwd, sinceMs, exclude) => native.detectCliSession(kind, cwd, sinceMs, exclude),
   hooksInfo: () => native.hooksInfo(),
-  watchTranscript: (agentId, kind, cwd, sessionId) => native.transcriptWatch(agentId, kind, cwd, sessionId),
+  watchTranscript: (agentId, kind, cwd, sessionId, fromStart) => native.transcriptWatch(agentId, kind, cwd, sessionId, fromStart),
   unwatchTranscript: agentId => native.transcriptUnwatch(agentId),
   createWorktree: (baseCwd, slug) => native.worktreeCreate(baseCwd, slug),
   sandboxWrapper: (id, cwd, extraPaths, denyNetwork) => native.sandboxWrapper(id, cwd, extraPaths, denyNetwork),

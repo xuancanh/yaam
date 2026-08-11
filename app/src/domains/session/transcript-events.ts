@@ -37,19 +37,21 @@ export interface TranscriptEventsDeps {
 export function applyTranscriptLines(deps: TranscriptEventsDeps, e: TranscriptLinesEvent): void {
   const agent = deps.stateRef.current.agents.find(a => a.id === e.agent)
   if (!agent || agent.archived) return
-  let sawAssistant = false
+  let sawActivity = false
   const ring = rings.get(e.agent) ?? []
   for (const line of e.lines) {
     let ev: unknown
     try { ev = JSON.parse(line) } catch { continue }
     if (!ev || typeof ev !== 'object') continue
     const rec = ev as Record<string, unknown>
-    if (rec.type === 'assistant') sawAssistant = true
+    // claude transcripts stream `assistant` entries; codex rollouts stream
+    // `response_item`/`event_msg` — all mean the agent is actively working
+    if (rec.type === 'assistant' || rec.type === 'response_item' || rec.type === 'event_msg') sawActivity = true
     ring.push(rec)
   }
   if (ring.length > RING_CAP) ring.splice(0, ring.length - RING_CAP)
   rings.set(e.agent, ring)
-  if (sawAssistant && agent.status === 'running' && !agent.responding) {
+  if (sawActivity && agent.status === 'running' && !agent.responding) {
     dispatch(s => ({
       ...s,
       agents: s.agents.map(a => (a.id === e.agent && !a.responding ? { ...a, responding: true } : a)),

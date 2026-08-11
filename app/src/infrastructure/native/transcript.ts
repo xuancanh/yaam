@@ -12,11 +12,13 @@ export interface TranscriptLinesEvent {
   lines: string[]
 }
 
-/** Start (or replace) the transcript watcher for a session. Best-effort:
- *  failures are swallowed — transcripts are a supplementary signal. */
-export async function transcriptWatch(agent: string, kind: string, cwd: string, sessionId: string): Promise<void> {
+/** Start (or replace) the transcript watcher for a session. `fromStart` streams
+ *  the whole file (fresh session); otherwise an existing file is tailed from
+ *  its end (resume). Best-effort: failures are swallowed — transcripts are a
+ *  supplementary signal. */
+export async function transcriptWatch(agent: string, kind: string, cwd: string, sessionId: string, fromStart: boolean): Promise<void> {
   if (!isTauri) return
-  await invoke('transcript_watch', { agent, kind, cwd, sessionId }).catch(() => {})
+  await invoke('transcript_watch', { agent, kind, cwd, sessionId, fromStart }).catch(() => {})
 }
 
 /** Stop a session's transcript watcher. */
