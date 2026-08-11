@@ -21,7 +21,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     removeSession: vi.fn(async () => {}),
     writeSession: vi.fn(async () => {}),
     sendLine: vi.fn(),
-    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), watchTranscript: vi.fn(async () => {}), unwatchTranscript: vi.fn(async () => {}),
+    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), watchTranscript: vi.fn(async () => {}), unwatchTranscript: vi.fn(async () => {}), freePort: vi.fn(async () => null), watchOpencode: vi.fn(async () => {}), unwatchOpencode: vi.fn(async () => {}),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     sandboxWrapper: vi.fn(async () => "sandbox-exec -f '/fake.sb'"),
     detachedSpawn: vi.fn(async () => 'attach-cmd'),
@@ -125,6 +125,25 @@ describe('createLaunchRuntime.launchSession', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(port.watchTranscript).toHaveBeenCalledWith(id, 'codex', '', 'cx-id-1', true)
+  })
+
+  it('pins the OpenCode server to an allocated port and watches its event bus', async () => {
+    const port = fakePort({ freePort: vi.fn(async () => 45678) })
+    useAppStore.setState({ agentTypes: [agentType({ id: 'opencode', model: 'opencode', probe: 'opencode' })] } as Partial<AppState> as AppState)
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('opencode', '/repo', 'OC', 'opencode')!
+    await Promise.resolve()
+    await Promise.resolve()
+    const spawned = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    expect(spawned).toContain('--port 45678 --hostname 127.0.0.1')
+    expect(port.watchOpencode).toHaveBeenCalledWith(id, 45678)
+    // user-pinned ports are respected
+    const port2 = fakePort({ freePort: vi.fn(async () => 45678) })
+    createLaunchRuntime(ctx(port2)).launchSession('opencode --port 5000', '/repo', 'OC', 'opencode')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(port2.freePort).not.toHaveBeenCalled()
+    expect(port2.watchOpencode).not.toHaveBeenCalled()
   })
 
   it('launches a plain terminal directly without a command-shell wrapper', () => {

@@ -6,6 +6,7 @@ pub mod git;
 pub mod hooks;
 pub mod mcp;
 pub mod open;
+pub mod opencode;
 pub mod power;
 pub mod detach;
 pub mod icons;

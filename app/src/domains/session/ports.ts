@@ -33,6 +33,12 @@ export interface SessionProcessPort {
   watchTranscript: (agentId: string, kind: string, cwd: string, sessionId: string, fromStart: boolean) => Promise<void>
   /** stop a session's transcript watcher */
   unwatchTranscript: (agentId: string) => Promise<void>
+  /** an OS-assigned loopback port for a CLI's event server (null = unavailable) */
+  freePort: () => Promise<number | null>
+  /** start (or replace) a session's OpenCode server-bus watcher */
+  watchOpencode: (agentId: string, port: number) => Promise<void>
+  /** stop a session's OpenCode server-bus watcher */
+  unwatchOpencode: (agentId: string) => Promise<void>
   /** isolate a working folder in git worktree(s); returns where to run */
   createWorktree: (baseCwd: string, slug: string) => Promise<native.WorktreeInfo>
   /** OS write-sandbox wrapper prefix for a local session (rejects = fail closed) */
@@ -76,6 +82,9 @@ export const realSessionProcessPort: SessionProcessPort = {
   hooksInfo: () => native.hooksInfo(),
   watchTranscript: (agentId, kind, cwd, sessionId, fromStart) => native.transcriptWatch(agentId, kind, cwd, sessionId, fromStart),
   unwatchTranscript: agentId => native.transcriptUnwatch(agentId),
+  freePort: () => native.freePort(),
+  watchOpencode: (agentId, port) => native.opencodeWatch(agentId, port),
+  unwatchOpencode: agentId => native.opencodeUnwatch(agentId),
   createWorktree: (baseCwd, slug) => native.worktreeCreate(baseCwd, slug),
   sandboxWrapper: (id, cwd, extraPaths, denyNetwork) => native.sandboxWrapper(id, cwd, extraPaths, denyNetwork),
   detachedSpawn: (id, command, cwd, commandShell, rows, cols) => native.detachedSpawn(id, command, cwd, commandShell, rows, cols),

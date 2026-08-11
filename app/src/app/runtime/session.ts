@@ -15,6 +15,7 @@ import { createSessionAttention } from '../../domains/session/attention'
 import { createSessionSettle } from '../../domains/session/use-settle'
 import { attachHookEvents } from '../../domains/session/hook-events'
 import { attachTranscriptEvents } from '../../domains/session/transcript-events'
+import { attachOpencodeEvents } from '../../domains/session/opencode-events'
 import { subscribeSessionExits } from '../../domains/session/exit-handler'
 import { createLaunchRuntime } from '../../domains/session/launch-runtime'
 import { createMonitorRuntime } from '../../domains/master/monitor-runtime'
@@ -172,6 +173,7 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
   let offExit: (() => void) | undefined
   let offHooks: (() => void) | undefined
   let offTranscript: (() => void) | undefined
+  let offOpencode: (() => void) | undefined
   return {
     sessionScreenTail, setNeedsInput, applyAgentStatus, appendTail,
     runMonitor, disposeMonitor: (id: string) => monitor.dispose(id),
@@ -184,12 +186,14 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
       offExit ??= subscribeSessionExits(exitCtx)
       offHooks ??= attachHookEvents({ stateRef, setNeedsInput, clearNeeds })
       offTranscript ??= attachTranscriptEvents({ stateRef })
+      offOpencode ??= attachOpencodeEvents({ stateRef, setNeedsInput, clearNeeds })
     },
     dispose() {
       settle.dispose()
       offExit?.(); offExit = undefined
       offHooks?.(); offHooks = undefined
       offTranscript?.(); offTranscript = undefined
+      offOpencode?.(); offOpencode = undefined
     },
   }
 }

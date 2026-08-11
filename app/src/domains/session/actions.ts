@@ -145,6 +145,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       // tail) stays persisted and the terminal is rebuilt on unarchive
       disposeSessionRuntime(id)
       void port.unwatchTranscript(id)
+      void port.unwatchOpencode(id)
       dropTranscriptEvents(id)
       // the quick shell rides along with its session — no orphaned PTYs
       disposeQuickShell(id)
@@ -180,6 +181,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       port.killSession(id).catch(() => {})
       disposeSessionRuntime(id)
       void port.unwatchTranscript(id)
+      void port.unwatchOpencode(id)
       dropTranscriptEvents(id)
       port.removeSession(id).catch(() => {}) // drop its persisted file too
       const task = findTaskForAgentInState(stateRef.current, id)

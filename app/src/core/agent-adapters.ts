@@ -44,6 +44,9 @@ export interface AgentAdapter {
   /** settings JSON wiring the CLI's lifecycle hooks to YAAM's local listener
    *  (passed via the CLI's per-session settings flag; local sessions only) */
   hookSettings?: (url: string) => string
+  /** flag pinning the CLI's local event server to a port YAAM allocated, so
+   *  the manager can subscribe to its bus (local sessions only) */
+  serverPortFlag?: (port: number) => string
   /** where the CLI persists session state, for structured readers (Phase 1.2+).
    *  Descriptive today; not yet consumed at runtime. */
   store: { kind: 'claude-projects' | 'codex-rollouts' | 'opencode-server'; note: string }
@@ -115,11 +118,11 @@ export const ADAPTERS: Record<AdapterId, AgentAdapter> = {
       if (full) parts.push(shQuote(full))
       return parts
     },
-    // NOTE: opencode moved session storage to SQLite; the legacy ses_*.json
-    // detection in detect_cli_session finds nothing on current installs. The
-    // real integration is its HTTP server (Phase 1.4); until then a failed
-    // probe is benign and resume falls back to `--continue`.
-    store: { kind: 'opencode-server', note: 'SQLite at ~/.local/share/opencode/opencode.db; use the local HTTP server, not files' },
+    // opencode moved session storage to SQLite, so file detection is blind;
+    // the server bus (pinned below) is the real integration — it streams
+    // status/permissions and names the session id for resume.
+    store: { kind: 'opencode-server', note: 'SQLite at ~/.local/share/opencode/opencode.db; the local HTTP server is the integration surface' },
+    serverPortFlag: port => `--port ${port} --hostname 127.0.0.1`,
   },
 }
 

@@ -159,6 +159,16 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
             launchCommand = `${spawnCommand} --settings ${shQuote(adapter.hookSettings(url))}`
           }
         }
+        // event-server CLIs (opencode): pin the server to a port we allocated
+        // and stream its SSE bus — authoritative status, permissions, and the
+        // session id its SQLite store hides from file detection
+        if (!machine && !opts?.terminalShell && adapter?.serverPortFlag && !/(^|\s)--port(\s|=)/.test(spawnCommand)) {
+          const serverPort = await port.freePort().catch(() => null)
+          if (serverPort) {
+            launchCommand = `${launchCommand} ${adapter.serverPortFlag(serverPort)}`
+            void port.watchOpencode(id, serverPort)
+          }
+        }
         const base = `${envPrefix(launchType?.env)}${launchCommand}`
         // Machine session: the local PTY runs an ssh client into a remote tmux
         // session (the durability layer). The remote cwd is handled inside the

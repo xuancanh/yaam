@@ -11,10 +11,13 @@ import type { AgentHookEvent } from '../../core/native'
 import { hookSignal } from './hook-signals'
 import { isHookNeedsFlag, markHookNeedsFlag } from './needs-provenance'
 
-export interface HookEventsDeps {
-  stateRef: { current: AppState }
+export interface SignalDeps {
   setNeedsInput: (id: string, question: string) => void
   clearNeeds: (id: string) => void
+}
+
+export interface HookEventsDeps extends SignalDeps {
+  stateRef: { current: AppState }
   /** event subscription; defaults to the native bridge (injectable for tests) */
   subscribe?: (cb: (e: AgentHookEvent) => void) => () => void
 }
@@ -25,16 +28,13 @@ const setResponding = (id: string, on: boolean) =>
     agents: s.agents.map(a => (a.id === id && !!a.responding !== on ? { ...a, responding: on } : a)),
   }))
 
-/** Apply one forwarded hook event to session state (exported for tests). */
-export function applyHookEvent(deps: HookEventsDeps, e: AgentHookEvent): void {
-  const s = deps.stateRef.current
-  const sid = typeof e.payload.session_id === 'string' ? e.payload.session_id : undefined
-  // the hook URL carries our own session id; the CLI session id is the fallback
-  const agent = (e.agent ? s.agents.find(a => a.id === e.agent) : undefined)
-    ?? (sid ? s.agents.find(a => a.cliSessionId === sid && !a.archived) : undefined)
-  if (!agent || agent.archived) return
-  const sig = hookSignal(e.payload)
-  if (!sig) return
+/** Apply one structured signal to a session — shared by every structured
+ *  source (Claude hooks, the OpenCode event bus). */
+export function applySessionSignal(
+  deps: SignalDeps,
+  agent: { id: string; status: string },
+  sig: NonNullable<ReturnType<typeof hookSignal>>,
+): void {
   switch (sig.kind) {
     case 'turn-start':
       setResponding(agent.id, true)
@@ -58,6 +58,19 @@ export function applyHookEvent(deps: HookEventsDeps, e: AgentHookEvent): void {
       // the process reaper owns exits; nothing to do here
       break
   }
+}
+
+/** Apply one forwarded hook event to session state (exported for tests). */
+export function applyHookEvent(deps: HookEventsDeps, e: AgentHookEvent): void {
+  const s = deps.stateRef.current
+  const sid = typeof e.payload.session_id === 'string' ? e.payload.session_id : undefined
+  // the hook URL carries our own session id; the CLI session id is the fallback
+  const agent = (e.agent ? s.agents.find(a => a.id === e.agent) : undefined)
+    ?? (sid ? s.agents.find(a => a.cliSessionId === sid && !a.archived) : undefined)
+  if (!agent || agent.archived) return
+  const sig = hookSignal(e.payload)
+  if (!sig) return
+  applySessionSignal(deps, agent, sig)
 }
 
 /** Subscribe to hook events; returns an unsubscribe function. */
