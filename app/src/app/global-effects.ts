@@ -119,7 +119,7 @@ export function useGlobalEffects(): void {
         zoom(0) // ⌘/Ctrl 0 — reset zoom
       } else if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 't') {
         e.preventDefault() // ⌘T — new agent session (in the Work view)
-        dispatch(s => ({ ...s, view: 'workspace', newSessionOpen: true }))
+        dispatch(s => ({ ...s, view: 'workspace', newSessionOpen: true, newSessionCwd: undefined }))
       } else if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault() // ⌘N — new board task
         dispatch(s => ({ ...s, view: 'board', newTaskOpen: true }))

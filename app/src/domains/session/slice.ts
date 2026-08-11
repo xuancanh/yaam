@@ -8,6 +8,9 @@ export interface SessionSlice {
   /** chat session selected in the Chat view */
   activeChatId: string | null
   newSessionOpen: boolean
+  /** working folder the new-session dialog opens prefilled with (e.g. launched
+   *  from a folder group in the Runs rail); unset falls back to defaultCwd */
+  newSessionCwd?: string
 }
 
 /** Initial session slice for a fresh app state. */

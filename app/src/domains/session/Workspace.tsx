@@ -305,7 +305,7 @@ function EmptySlot({ index }: { index: number }) {
 /** Compose the mode toggle, group/loose tabs, the active group's split grid,
  *  and the dock — or, in Runs mode, the triage rail + session pane. */
 export function Workspace() {
-  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen, workMode: x.settings.workMode ?? 'tabs', brainConfigured: brainOn(x.settings) }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen, newSessionCwd: x.newSessionCwd, workMode: x.settings.workMode ?? 'tabs', brainConfigured: brainOn(x.settings) }), shallowEqual)
   const { focusTab, activateGroup, closeGroup, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit, updateSettings } = useActions()
   const runsMode = s.workMode === 'runs'
   const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null)
@@ -512,7 +512,7 @@ export function Workspace() {
           </>}
         </div>
         {!runsMode && <LayoutMenu group={ag} />}
-        <button className="icon-btn" title="New agent session" onClick={openNewSession} style={{ width: 30, height: 30, flexShrink: 0, color: 'var(--mut2)' }}>
+        <button className="icon-btn" title="New agent session" onClick={() => openNewSession()} style={{ width: 30, height: 30, flexShrink: 0, color: 'var(--mut2)' }}>
           <Icon paths={IC.plus} size={17} stroke={1.8} />
         </button>
       </div>
@@ -525,7 +525,7 @@ export function Workspace() {
             <div style={{ fontSize: 12.5, color: 'var(--dim)', maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
               Launch any CLI as a live session — Claude Code, Codex, Aider, a REPL, or a plain shell.
             </div>
-            <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={openNewSession}>
+            <button className="approve-btn" style={{ padding: '9px 22px', fontSize: 13 }} onClick={() => openNewSession()}>
               New agent session
             </button>
             {!s.brainConfigured && (
@@ -609,7 +609,7 @@ export function Workspace() {
       )}
       {tabMenu && <TabContextMenu menu={tabMenu} onClose={closeTabMenu} />}
       {groupMenu && <GroupContextMenu menu={groupMenu} onClose={closeGroupMenu} />}
-      {s.newSessionOpen && <NewSessionDialog onClose={closeNewSession} />}
+      {s.newSessionOpen && <NewSessionDialog onClose={closeNewSession} initialCwd={s.newSessionCwd} />}
     </div>
   )
 }

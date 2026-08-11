@@ -15,7 +15,7 @@ function FieldLabel({ children }: { children: string }) {
 }
 
 /** Launch a terminal session (CLI/template/shell) or a chat-mode agent. */
-export function NewSessionDialog({ onClose }: { onClose: () => void }) {
+export function NewSessionDialog({ onClose, initialCwd }: { onClose: () => void; initialCwd?: string }) {
   const s = useConductorSelector(x => ({ agentTypes: x.agentTypes, settings: x.settings, templates: x.templates }), shallowEqual)
   const { newRealSession, runTemplate } = useActions()
 
@@ -27,7 +27,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const [command, setCommand] = useState(enabledTypes[0]?.model ?? '')
   const [task, setTask] = useState('')
 
-  const [cwd, setCwd] = useState(s.settings.defaultCwd || '')
+  const [cwd, setCwd] = useState(initialCwd || s.settings.defaultCwd || '')
   const [isolate, setIsolate] = useState(false)
   const [sandbox, setSandbox] = useState(false)
   const [detached, setDetached] = useState(false)

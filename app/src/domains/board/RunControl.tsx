@@ -6,6 +6,7 @@ import { Pane } from '../session/Pane'
 import { SessionHoverPreview } from '../session/SessionHoverPreview'
 import { sessionWorkStatus } from '../session/session-work-status'
 import { useDiffStats } from '../session/diff-stats'
+import { IC, Icon } from '../../components/ui'
 import { brainOn } from '../../llm/client'
 import { groupRuns, groupRunsByFolder, runCwdOf, runNeedsUserAction, runStatusLabel } from './run-state'
 import type { RunFilter, RunRef } from './run-state'
@@ -19,6 +20,33 @@ import { WatcherChat } from './WatcherChat'
 
 const TONE: Record<string, string> = {
   amber: 'var(--amber)', green: 'var(--green)', red: 'var(--red-soft)', mut: 'var(--dim)',
+}
+
+const SEG_WRAP = {
+  display: 'flex', gap: 2, background: 'var(--bg2)', border: '1px solid var(--line)',
+  borderRadius: 9, padding: 2,
+} as const
+
+const segBtn = (active: boolean) => ({
+  flex: 1, minWidth: 0, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  gap: 5, border: 'none', borderRadius: 7, padding: '0 4px', fontSize: 11, fontWeight: 600,
+  cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden',
+  background: active ? 'var(--panel2)' : 'transparent',
+  color: active ? 'var(--accent)' : 'var(--dim)',
+} as const)
+
+/** Sticky group header shell: keeps its label readable while rows scroll under. */
+const HEADER_STYLE = {
+  position: 'sticky', top: 0, zIndex: 2, background: 'var(--panel)',
+  display: 'flex', alignItems: 'center', gap: 6, padding: '9px 6px 5px', minWidth: 0,
+} as const
+
+function FolderGlyph({ color, size = 12 }: { color: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+    </svg>
+  )
 }
 
 function runTitle(run: RunRef): string {
@@ -57,8 +85,8 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, brief
       onClick={onSelect}
       aria-expanded={expanded}
       style={{
-        width: '100%', display: 'flex', flexDirection: 'column', gap: expanded ? 3 : 2,
-        padding: expanded ? '8px 10px 9px' : '6px 10px', textAlign: 'left',
+        width: '100%', display: 'flex', flexDirection: 'column', gap: expanded ? 3 : 2.5,
+        padding: expanded ? '8px 10px 9px' : '7px 10px', textAlign: 'left',
         background: selected ? 'var(--accent-soft)' : 'transparent', border: 'none',
         borderLeft: `2px solid ${selected ? 'var(--accent)' : 'transparent'}`, borderRadius: 8, cursor: 'pointer',
       }}
@@ -87,8 +115,8 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, brief
       <div className="mono" style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', fontSize: 10, paddingLeft: 15, minWidth: 0 }}>
         <span style={{ color: TONE[st.tone], flexShrink: 0 }}>{st.label}</span>
         {folder && (
-          <span title={cwd} style={{ color: 'var(--mut)', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            ▸ {folder}
+          <span title={cwd} style={{ color: 'var(--dim)', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {folder}
           </span>
         )}
         {agent?.machine && <span style={{ color: 'var(--accent)', flexShrink: 0 }}>⧉ {agent.machine.label || 'remote'}</span>}
@@ -174,7 +202,7 @@ export function RunControl() {
     runGroupMode: x.settings.runGroupMode ?? 'status',
     briefsOn: brainOn(x.settings),
   }), shallowEqual)
-  const { updateSettings, unarchiveSession } = useActions()
+  const { updateSettings, unarchiveSession, openNewSession } = useActions()
   const [filter, setFilter] = useState<RunFilter>('all')
   const byFolder = s.runGroupMode === 'folder'
   const groups = useMemo(
@@ -257,135 +285,159 @@ export function RunControl() {
   )
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-      <div style={{ width: 'clamp(238px, 26vw, 294px)', flexShrink: 0, borderRight: '1px solid var(--line)', overflowY: 'auto', background: 'var(--panel)', padding: '6px 6px 12px' }}>
-        <div style={{ display: 'flex', gap: 2, margin: '4px 4px 8px', background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 9, padding: 2 }}>
-          {FILTERS.map(f => (
-            <button
-              key={f.id}
-              onClick={() => setFilter(f.id)}
-              style={{
-                flex: 1, minWidth: 0, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: 'none', borderRadius: 7, padding: 0, fontSize: 10.5, fontWeight: 600, cursor: 'pointer',
-                whiteSpace: 'nowrap', overflow: 'hidden',
-                background: filter === f.id ? 'var(--panel2)' : 'transparent',
-                color: filter === f.id ? 'var(--accent)' : 'var(--dim)',
-              }}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '0 7px 5px' }}>
-          <span className="mono" style={{ flex: 1, fontSize: 8.5, letterSpacing: .55, color: 'var(--faint)' }}>GROUP</span>
-          {(['status', 'folder'] as const).map(mode => (
-            <button
-              key={mode}
-              title={mode === 'status' ? 'Group by triage status — urgent first' : 'Group by working folder, with each folder’s archived sessions one click away'}
-              onClick={() => updateSettings({ runGroupMode: mode })}
-              style={{
-                border: 'none', borderRadius: 6, padding: '3px 7px', cursor: 'pointer',
-                background: s.runGroupMode === mode ? 'var(--panel2)' : 'transparent',
-                color: s.runGroupMode === mode ? 'var(--accent)' : 'var(--dim)',
-                fontSize: 9.5, fontWeight: 600, textTransform: 'capitalize',
-              }}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
-        {s.briefsOn && <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '0 7px 5px' }}>
-          <span className="mono" style={{ flex: 1, fontSize: 8.5, letterSpacing: .55, color: 'var(--faint)' }}>VIEW</span>
-          {(['compact', 'full'] as const).map(mode => (
-            <button
-              key={mode}
-              title={mode === 'compact' ? 'Compact rows; expand only when action is needed' : 'Show Task, Now, and Next for every row'}
-              onClick={() => updateSettings({ runListMode: mode })}
-              style={{
-                border: 'none', borderRadius: 6, padding: '3px 7px', cursor: 'pointer',
-                background: s.runListMode === mode ? 'var(--panel2)' : 'transparent',
-                color: s.runListMode === mode ? 'var(--accent)' : 'var(--dim)',
-                fontSize: 9.5, fontWeight: 600, textTransform: 'capitalize',
-              }}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>}
-        {!flat.length && !(byFolder && hasArchived) && (
-          <div style={{ padding: '18px 10px', fontSize: 11.5, color: 'var(--dim)', textAlign: 'center' }}>
-            No runs match this filter.
+      <div style={{
+        width: 'clamp(248px, 26vw, 312px)', flexShrink: 0, borderRight: '1px solid var(--line)',
+        background: 'var(--panel)', display: 'flex', flexDirection: 'column', minHeight: 0,
+      }}>
+        <div style={{ flexShrink: 0, padding: '8px 8px 7px', borderBottom: '1px solid var(--line-soft)', display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <div style={SEG_WRAP}>
+            {FILTERS.map(f => (
+              <button key={f.id} onClick={() => setFilter(f.id)} style={segBtn(filter === f.id)}>
+                {f.label}
+              </button>
+            ))}
           </div>
-        )}
-        {!byFolder && groups.map(g => (
-          <div key={g.id}>
-            <div className="mono" style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '10px 10px 4px',
-              fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6,
-              color: g.id === 'needs' ? 'var(--amber)' : 'var(--dim)',
-            }}>
-              {g.label.toUpperCase()} <span style={{ color: 'var(--faint)' }}>{g.runs.length}</span>
+          <div style={{ display: 'flex', gap: 5 }}>
+            <div style={{ ...SEG_WRAP, flex: 1 }}>
+              <button
+                title="Group by what each run needs from you — urgent first"
+                onClick={() => updateSettings({ runGroupMode: 'status' })}
+                style={segBtn(!byFolder)}
+              >
+                <Icon paths={['M4 6h16', 'M4 12h11', 'M4 18h7']} size={11} stroke={1.8} />
+                Status
+              </button>
+              <button
+                title="Group by working folder — archived sessions stay one click away"
+                onClick={() => updateSettings({ runGroupMode: 'folder' })}
+                style={segBtn(byFolder)}
+              >
+                <FolderGlyph color="currentColor" size={11} />
+                Folder
+              </button>
             </div>
-            {g.runs.map(run => renderRun(run, true))}
+            {s.briefsOn && (
+              <button
+                className="icon-btn"
+                title={s.runListMode === 'full'
+                  ? 'Hide the Task / Now / Next briefs (rows expand only when action is needed)'
+                  : 'Show Task / Now / Next briefs on every row'}
+                aria-pressed={s.runListMode === 'full'}
+                onClick={() => updateSettings({ runListMode: s.runListMode === 'full' ? 'compact' : 'full' })}
+                style={{
+                  width: 30, flexShrink: 0, borderRadius: 8,
+                  background: s.runListMode === 'full' ? 'var(--accent-soft)' : 'transparent',
+                  color: s.runListMode === 'full' ? 'var(--accent)' : 'var(--dim)',
+                }}
+              >
+                <Icon paths={['M5 7h14', 'M5 12h14', 'M5 17h8']} size={13} stroke={1.8} />
+              </button>
+            )}
           </div>
-        ))}
-        {byFolder && folderGroups.map(g => {
-          const open = openArchives.has(g.cwd)
-          return (
-            <div key={g.cwd || '(none)'}>
-              <div className="mono" title={g.cwd || undefined} style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '10px 10px 4px', minWidth: 0,
-                fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6,
-                color: g.runs.some(runNeedsUserAction) ? 'var(--amber)' : 'var(--dim)',
-              }}>
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {g.label.toUpperCase()}
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 6px 12px' }}>
+          {!flat.length && !(byFolder && hasArchived) && (
+            <div style={{ padding: '18px 10px', fontSize: 11.5, color: 'var(--dim)', textAlign: 'center' }}>
+              No runs match this filter.
+            </div>
+          )}
+          {!byFolder && groups.map(g => (
+            <div key={g.id}>
+              <div style={HEADER_STYLE}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                  background: g.id === 'needs' ? 'var(--amber)' : g.id === 'running' ? 'var(--green)' : 'var(--faint)',
+                }} />
+                <span style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase',
+                  color: g.id === 'needs' ? 'var(--amber)' : 'var(--mut)', flexShrink: 0,
+                }}>
+                  {g.label}
                 </span>
-                <span style={{ color: 'var(--faint)', flexShrink: 0 }}>{g.runs.length}</span>
+                <span style={{ flex: 1, height: 1, background: 'var(--line-soft)' }} />
+                <span className="mono" style={{ fontSize: 9.5, color: 'var(--faint)', flexShrink: 0 }}>{g.runs.length}</span>
               </div>
-              {g.runs.map(run => renderRun(run, false))}
-              {g.archived.length > 0 && (
-                <>
+              {g.runs.map(run => renderRun(run, true))}
+            </div>
+          ))}
+          {byFolder && folderGroups.map(g => {
+            const open = openArchives.has(g.cwd)
+            const needs = g.runs.some(runNeedsUserAction)
+            return (
+              <div key={g.cwd || '(none)'}>
+                <div title={g.cwd || undefined} style={HEADER_STYLE}>
+                  <FolderGlyph color={needs ? 'var(--amber)' : 'var(--dim)'} />
+                  <span style={{
+                    fontSize: 11.5, fontWeight: 650, minWidth: 0,
+                    color: needs ? 'var(--text)' : 'var(--mut2)',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {g.label}
+                  </span>
+                  {g.runs.length > 0 && (
+                    <span className="mono" style={{ fontSize: 9.5, color: 'var(--faint)', flexShrink: 0 }}>{g.runs.length}</span>
+                  )}
+                  <span style={{ flex: 1, height: 1, background: 'var(--line-soft)' }} />
                   <button
-                    className="palette-item"
-                    aria-expanded={open}
-                    onClick={() => setOpenArchives(prev => {
-                      const next = new Set(prev)
-                      if (open) next.delete(g.cwd); else next.add(g.cwd)
-                      return next
-                    })}
-                    style={{
-                      width: '100%', display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px 4px 12px',
-                      background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer',
-                    }}
+                    className="icon-btn"
+                    title={g.cwd ? `New session in ${g.cwd}` : 'New session'}
+                    onClick={() => openNewSession(g.cwd || undefined)}
+                    style={{ width: 20, height: 20, borderRadius: 6, border: 'none', flexShrink: 0 }}
                   >
-                    <span style={{ fontSize: 8, color: 'var(--faint)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▶</span>
-                    <span className="mono" style={{ fontSize: 8.5, letterSpacing: .55, color: 'var(--faint)' }}>
-                      ARCHIVED {g.archived.length}
-                    </span>
+                    <Icon paths={IC.plus} size={11} stroke={2} />
                   </button>
-                  {open && g.archived.map(a => (
+                </div>
+                {g.runs.map(run => renderRun(run, false))}
+                {g.runs.length === 0 && g.archived.length > 0 && !open && (
+                  <div style={{ padding: '2px 10px 4px', fontSize: 11, color: 'var(--faint)' }}>
+                    Nothing running here.
+                  </div>
+                )}
+                {g.archived.length > 0 && (
+                  <>
                     <button
-                      key={a.id}
                       className="palette-item"
-                      title={`Restore ${a.name} from the archive`}
-                      onClick={() => restoreArchived(a)}
+                      aria-expanded={open}
+                      onClick={() => setOpenArchives(prev => {
+                        const next = new Set(prev)
+                        if (open) next.delete(g.cwd); else next.add(g.cwd)
+                        return next
+                      })}
                       style={{
-                        width: '100%', display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px 5px 22px',
-                        background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+                        width: '100%', display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
+                        background: 'transparent', border: 'none', borderRadius: 7, cursor: 'pointer', color: 'var(--dim)',
                       }}
                     >
-                      <span style={{ width: 7, height: 7, borderRadius: '50%', border: '1px solid var(--dim)', flexShrink: 0 }} />
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {a.name}
-                      </span>
-                      <span className="mono" style={{ fontSize: 8.5, color: 'var(--faint)', flexShrink: 0 }}>RESTORE</span>
+                      <span aria-hidden style={{
+                        display: 'flex', fontSize: 7, color: 'var(--faint)', width: 8, justifyContent: 'center',
+                        transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s',
+                      }}>▶</span>
+                      <span style={{ fontSize: 11, fontWeight: 600 }}>Archived · {g.archived.length}</span>
                     </button>
-                  ))}
-                </>
-              )}
-            </div>
-          )
-        })}
+                    {open && g.archived.map(a => (
+                      <button
+                        key={a.id}
+                        className="palette-item"
+                        title={`Restore ${a.name} from the archive`}
+                        onClick={() => restoreArchived(a)}
+                        style={{
+                          width: '100%', display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px 5px 24px',
+                          background: 'transparent', border: 'none', borderRadius: 7, cursor: 'pointer', textAlign: 'left',
+                        }}
+                      >
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', border: '1px solid var(--dim)', flexShrink: 0 }} />
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {a.name}
+                        </span>
+                        <span className="mono reveal-on-hover" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }}>RESTORE</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
       {selected && (
         selected.agent

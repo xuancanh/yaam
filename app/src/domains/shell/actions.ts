@@ -21,7 +21,8 @@ export interface ShellActions {
   openAgent: (id: string) => void
   openDiff: (id: string) => void
   closeDrawer: () => void
-  openNewSession: () => void
+  /** open the new-session dialog, optionally prefilled with a working folder */
+  openNewSession: (cwd?: string) => void
   closeNewSession: () => void
   gotoNeeds: () => void
 }
@@ -62,8 +63,8 @@ export function createShellActions(): ShellActions {
     openDiff: id => dispatch(s => ({ ...s, drawer: { kind: 'diff', agentId: id } })),
     closeDrawer: () => dispatch(s => ({ ...s, drawer: null })),
 
-    openNewSession: () => dispatch(s => ({ ...s, newSessionOpen: true })),
-    closeNewSession: () => dispatch(s => ({ ...s, newSessionOpen: false })),
+    openNewSession: cwd => dispatch(s => ({ ...s, newSessionOpen: true, newSessionCwd: cwd })),
+    closeNewSession: () => dispatch(s => ({ ...s, newSessionOpen: false, newSessionCwd: undefined })),
 
     gotoNeeds: () => dispatch(s => {
       const needsAgent = s.agents.find(a => ((a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace) && (a.status === 'needs' || a.status === 'error'))

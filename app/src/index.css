@@ -792,6 +792,15 @@ button {
 .palette-item:hover {
   background: var(--hover);
 }
+/* quiet affordances (e.g. the archived row's RESTORE) surface on row hover */
+.reveal-on-hover {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.palette-item:hover .reveal-on-hover,
+.palette-item:focus-visible .reveal-on-hover {
+  opacity: 1;
+}
 
 .context-menu-backdrop {
   position: fixed;
