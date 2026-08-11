@@ -134,6 +134,35 @@ false "finished" signals), and every later phase builds on real events.
    still gated or experimental), Codex cloud handoff (`codex cloud apply` into the diff
    viewer once the lifecycle API stabilizes).
 
+## 5b. Kiro and ACP (added after Kiro research, Aug 11)
+
+Kiro's CLI is proprietary and credit-metered, its headless mode prints plain text
+(no JSON output or session-id echo yet; upstream issues #5423/#9066 are open), and
+Kiro Crew exposes no connector API for external managers. The real surfaces:
+
+1. **ACP client (the strategic one).** `kiro-cli acp` speaks the Agent Client
+   Protocol (JSON-RPC over stdio, published by Zed, v1): session lifecycle,
+   streaming chunks, ToolCall/ToolCallUpdate/TurnEnd, and a client-implemented
+   `session/request_permission` that plugs straight into the Phase 2 approvals
+   inbox. One ACP client gives YAAM three agents at once: Kiro, Gemini CLI
+   (native), and Claude Code via the official `@agentclientprotocol/claude-agent-acp`
+   adapter. This becomes a fourth adapter kind: `statusSource: 'acp'` sessions run
+   over stdio instead of a bare PTY. Verify empirically whether Kiro emits
+   permission requests over ACP or auto-resolves from agent config.
+2. **Kiro hooks tap for PTY sessions.** `.kiro/hooks/*.json` (project) and
+   `~/.kiro/hooks/` (global) fire PreToolUse / PostToolUse / UserPromptSubmit /
+   SessionStart / Stop with session context as JSON on stdin — the same shape as
+   YAAM's Claude hook listener, so a small command action forwarding stdin to the
+   loopback listener reuses the whole 1.2 pipeline.
+3. **Steering as the memory channel.** `.kiro/steering/*.md` loads
+   unconditionally in the CLI; the folder-scoped memory design (`memory-design.md`)
+   delivers to Kiro by writing a managed steering file, alongside AGENTS.md and
+   CLAUDE.md.
+
+Sequencing: the hooks tap is a small follow-up to Phase 1; the ACP client is a
+Phase 2-sized item that lands best together with the approvals inbox since the
+protocol hands the permission flow to the client by design.
+
 ## 6. Product track (interleaves with the phases)
 
 Session control is the plumbing; these are the product bets that ride on it. Rough
