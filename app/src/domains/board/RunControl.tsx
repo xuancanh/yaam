@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { MouseEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { indicatorColor } from '../../core/data'
 import type { Agent, BoardTask } from '../../core/types'
@@ -6,6 +7,8 @@ import { Pane } from '../session/Pane'
 import { SessionHoverPreview } from '../session/SessionHoverPreview'
 import { sessionWorkStatus } from '../session/session-work-status'
 import { useDiffStats } from '../session/diff-stats'
+import { pendingEscalation } from '../session/escalations'
+import type { Escalation } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { brainOn } from '../../llm/client'
 import { groupRuns, groupRunsByFolder, runCwdOf, runNeedsUserAction, runStatusLabel } from './run-state'
@@ -55,7 +58,7 @@ function runTitle(run: RunRef): string {
 
 /** One selectable run row: status dot, title, working folder, live diff stats,
  *  and an inline start for unstarted tasks (backlog). */
-function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, briefsOn, showFolder = true, onSelect }: {
+function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, briefsOn, showFolder = true, approval, onSelect }: {
   run: RunRef
   linkedTask?: BoardTask
   stats?: { add: number; del: number; files: number }
@@ -66,9 +69,11 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, brief
   briefsOn: boolean
   /** off when the rail already groups rows under a folder header */
   showFolder?: boolean
+  /** the session's pending escalation, answerable inline */
+  approval?: Escalation
   onSelect: () => void
 }) {
-  const { startTask } = useActions()
+  const { startTask, answerPrompt, approve, deny } = useActions()
   const agent = run.agent
   const task = run.kind === 'task' ? run.task : linkedTask
   const st = runStatusLabel(run)
@@ -127,6 +132,44 @@ function RunRow({ run, linkedTask, stats, selected, shortcut, showDetails, brief
           </span>
         )}
       </div>
+      {agent?.status === 'needs' && (() => {
+        const reason = approval?.reason || agent.escReason || agent.actionNeeded
+        const options = approval?.options ?? []
+        const chip = {
+          display: 'inline-flex', alignItems: 'center', padding: '2px 9px', borderRadius: 6,
+          border: '1px solid var(--line2)', fontSize: 10.5, fontWeight: 600, cursor: 'pointer',
+          color: 'var(--text2)', whiteSpace: 'nowrap' as const, maxWidth: 150,
+          overflow: 'hidden' as const, textOverflow: 'ellipsis' as const,
+        }
+        const act = (e: MouseEvent, fn: () => void) => { e.stopPropagation(); fn() }
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%', paddingLeft: 15, paddingTop: 2 }}>
+            {reason && (
+              <span style={{ fontSize: 10.5, color: 'var(--amber)', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                {reason}
+              </span>
+            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {options.length > 0
+                ? options.slice(0, 4).map(o => (
+                    <span key={o.num} role="button" title={o.label} style={chip} onClick={e => act(e, () => answerPrompt(agent.id, o.num))}>
+                      {o.num} · {o.label}
+                    </span>
+                  ))
+                : (
+                  <>
+                    <span role="button" style={{ ...chip, color: 'var(--green)', borderColor: 'var(--green)' }} onClick={e => act(e, () => approve(agent.id))}>
+                      Approve
+                    </span>
+                    <span role="button" style={{ ...chip, color: 'var(--red-soft)', borderColor: 'var(--red-soft)' }} onClick={e => act(e, () => deny(agent.id))}>
+                      Deny
+                    </span>
+                  </>
+                )}
+            </div>
+          </div>
+        )
+      })()}
       {expanded && ([
         ['TASK', work.task, 'var(--accent)'],
         ['NOW', work.current, 'var(--mut2)'],
@@ -197,7 +240,7 @@ const FILTERS: Array<{ id: RunFilter; label: string }> = [
 /** The Work view's Runs mode: triage rail + the standard session pane. */
 export function RunControl() {
   const s = useConductorSelector(x => ({
-    tasks: x.tasks, agents: x.agents, activeWorkspace: x.activeWorkspace,
+    tasks: x.tasks, agents: x.agents, activeWorkspace: x.activeWorkspace, messages: x.messages,
     runListMode: x.settings.runListMode ?? 'compact',
     runGroupMode: x.settings.runGroupMode ?? 'status',
     briefsOn: brainOn(x.settings),
@@ -280,6 +323,7 @@ export function RunControl() {
       showDetails={s.runListMode === 'full'}
       briefsOn={s.briefsOn}
       showFolder={showFolder}
+      approval={run.agent?.status === 'needs' ? pendingEscalation(s.messages, run.agent.id) : undefined}
       onSelect={() => setSelKey(run.key)}
     />
   )
