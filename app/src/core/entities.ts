@@ -443,8 +443,9 @@ export interface AgentType {
   resumeCmd?: string
   /** resume command when no session id was captured (e.g. claude --continue) */
   resumeFallbackCmd?: string
-  /** how to detect the CLI's session id after launch */
-  probe?: 'claude' | 'codex'
+  /** which capability adapter (core/agent-adapters) drives this CLI: session-id
+   *  capture, headless flags, and structured-state integration */
+  probe?: 'claude' | 'codex' | 'opencode'
 }
 
 /** an MCP server chat agents can call tools on — streamable HTTP or a local

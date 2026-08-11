@@ -1,12 +1,14 @@
 // Session command helpers: agent-type resolution, env prefixing, native process
 // spawn, key map, and TUI-safe line sending.
 import * as native from '../../core/native'
+import { binOf } from '../../core/agent-adapters'
 import type { AppState } from '../../core/types'
 
 /** Resolve a configured agent type from the executable at the start of a command. */
 export function typeForCommand(command: string, types: AppState['agentTypes']) {
-  const bin = command.trim().split(/\s+/)[0]
-  return types.find(t => t.model.trim().split(/\s+/)[0] === bin)
+  // basename match, so `/usr/local/bin/claude` still resolves the claude type
+  const bin = binOf(command)
+  return bin ? types.find(t => binOf(t.model) === bin) : undefined
 }
 
 // KEY=value lines → shell assignment prefix (we spawn via sh -lc)

@@ -4,6 +4,7 @@
 import type { Agent, AgentType, Machine, SandboxConfig } from '../../core/types'
 import { defaultDetail, mkMemory, mkTools, TAB_COLORS } from '../../core/data'
 import { mkId } from '../../shared/id'
+import { adapterFor } from '../../core/agent-adapters'
 import { typeForCommand } from './command'
 
 export interface LaunchInput {
@@ -35,22 +36,22 @@ export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeW
   const color = TAB_COLORS[Math.floor(Math.random() * TAB_COLORS.length)]
   const dir = cwd.trim()
   const launchType = agentTypes.find(t => t.id === (typeId ?? '')) ?? typeForCommand(trimmed, agentTypes)
-  // Deterministic Claude sessions: Claude Code honors `--session-id <uuid>`, so
-  // we mint the id ourselves and know it immediately — no fragile file
-  // detection. The flag goes only into the SPAWNED command (reusing an id
-  // errors "already in use"), while cmd stays clean for relaunch/resume.
-  // codex/opencode have no launch-time id flag, so they keep file DETECTION,
-  // which reads LOCAL stores — so remote (machine) sessions can't resume those by
-  // id and restart fresh. Claude honors `--session-id <uuid>` wherever it runs, so
-  // we mint the id up front even for machine sessions and resume by it on the host
-  // (see actions.resume) — injection works remotely, only detection doesn't. The
-  // ssh wrap is applied later (launch-runtime), after the env prefix, so
-  // `spawnCommand` stays the clean agent command here.
+  // Deterministic session ids where the CLI allows it: mint-strategy adapters
+  // (Claude's `--session-id <uuid>`) get the id injected at launch, so we know
+  // it immediately — no fragile file detection. The flag goes only into the
+  // SPAWNED command (reusing an id errors "already in use"), while cmd stays
+  // clean for relaunch/resume. Detect-strategy adapters (codex/opencode) keep
+  // file detection, which reads LOCAL stores — remote (machine) sessions can't
+  // resume those by id and restart fresh. Minting works wherever the CLI runs,
+  // so it applies to machine sessions too (see actions.resume). The ssh wrap is
+  // applied later (launch-runtime), after the env prefix, so `spawnCommand`
+  // stays the clean agent command here.
   let knownSessionId: string | undefined
   let spawnCommand = trimmed
-  if (launchType?.probe === 'claude' && !/(^|\s)(--session-id|--resume|-r|--continue|-c)(\s|=|$)/.test(trimmed)) {
+  const adapter = adapterFor(launchType, trimmed)
+  if (adapter?.sessionId === 'mint' && adapter.mintFlag && !adapter.sessionFlagRe?.test(trimmed)) {
     knownSessionId = crypto.randomUUID()
-    spawnCommand = trimmed.replace(/^(\s*\S+)/, `$1 --session-id ${knownSessionId}`)
+    spawnCommand = trimmed.replace(/^(\s*\S+)/, `$1 ${adapter.mintFlag(knownSessionId)}`)
   }
   const agent: Agent = {
     id, name: nameHint || bin, short: (nameHint || bin).slice(0, 2).toUpperCase(), color,

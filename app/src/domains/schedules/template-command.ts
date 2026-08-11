@@ -1,9 +1,19 @@
 // Translate an agent template into the real CLI invocation for its agent type.
+// Per-CLI flag knowledge lives in core/agent-adapters; this module only
+// composes the prompt and dispatches.
+import { adapterFor, shQuote } from '../../core/agent-adapters'
+import type { HeadlessSpec } from '../../core/agent-adapters'
 import type { AgentTemplate, AgentType } from '../../core/types'
 
-/** Quote an arbitrary string for safe use as one POSIX shell argument. */
-export function shQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`
+export { shQuote }
+
+/** Arguments for a CLI with no adapter: extras, then one prompt argument. */
+function genericArgs(spec: HeadlessSpec): string[] {
+  const parts: string[] = []
+  if (spec.extraArgs.trim()) parts.push(spec.extraArgs.trim())
+  const full = [spec.systemPrompt.trim(), spec.prompt].filter(Boolean).join('\n\n')
+  if (full) parts.push(shQuote(full))
+  return parts
 }
 
 /**
@@ -19,36 +29,10 @@ export function buildTemplateCommand(tpl: AgentTemplate, type: AgentType | undef
     : [tpl.prompt, task ?? ''].filter(Boolean).join('\n\n')
   // the verification contract (criteria + goal) rides AFTER the composed prompt
   const prompt = [base.trim(), (contract ?? '').trim()].filter(Boolean).join('\n\n')
-  const kind = type?.probe
-    ?? (/(^|\/)claude$/.test(bin) ? 'claude' : /(^|\/)codex$/.test(bin) ? 'codex' : undefined)
-  const extra = tpl.extraArgs.trim()
-  const parts: string[] = [bin]
-
-  if (kind === 'claude') {
-    if (tpl.mode === 'ephemeral') parts.push('-p')
-    if (tpl.model.trim()) parts.push('--model', shQuote(tpl.model.trim()))
-    if (tpl.systemPrompt.trim()) parts.push('--append-system-prompt', shQuote(tpl.systemPrompt.trim()))
-    if (tpl.approval === 'edits') parts.push('--permission-mode', 'acceptEdits')
-    if (tpl.approval === 'full') parts.push('--dangerously-skip-permissions')
-    if (extra) parts.push(extra)
-    if (prompt) parts.push(shQuote(prompt))
-    return parts.join(' ')
+  const spec: HeadlessSpec = {
+    mode: tpl.mode, model: tpl.model, systemPrompt: tpl.systemPrompt,
+    approval: tpl.approval, extraArgs: tpl.extraArgs, prompt,
   }
-
-  if (kind === 'codex') {
-    if (tpl.mode === 'ephemeral') parts.push('exec', '--skip-git-repo-check')
-    if (tpl.model.trim()) parts.push('-m', shQuote(tpl.model.trim()))
-    if (tpl.approval === 'safe') parts.push('--sandbox', 'read-only')
-    if (tpl.approval === 'edits') parts.push('--sandbox', 'workspace-write')
-    if (tpl.approval === 'full') parts.push('--dangerously-bypass-approvals-and-sandbox')
-    if (extra) parts.push(extra)
-    const full = [tpl.systemPrompt.trim(), prompt].filter(Boolean).join('\n\n')
-    if (full) parts.push(shQuote(full))
-    return parts.join(' ')
-  }
-
-  if (extra) parts.push(extra)
-  const full = [tpl.systemPrompt.trim(), prompt].filter(Boolean).join('\n\n')
-  if (full) parts.push(shQuote(full))
-  return parts.join(' ')
+  const adapter = adapterFor(type, bin)
+  return [bin, ...(adapter ? adapter.buildArgs(spec) : genericArgs(spec))].join(' ')
 }
