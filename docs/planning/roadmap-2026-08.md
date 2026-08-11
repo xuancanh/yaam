@@ -152,11 +152,12 @@ items 3 and 4 alongside Phase 3.
    "this task cost $4.20 across 3 sessions". agent-deck ships cost tracking as a
    headline feature and Omnigent's spend caps validated demand; the dashboard is cheap
    once Phase 1 exists, and it feeds the Phase 4 policy work.
-3. **Project memory as a feature, not internals.** Kiro Crew's pitch is persistent
-   memory across sessions; YAAM already has assistant-memory files internally. Promote
-   them: a visible, editable per-project knowledge base injected into every session
-   launched in that folder, learned from corrections and merged sessions. Local-first
-   memory is a real differentiator against cloud orchestrators.
+3. **Project memory as a feature, not internals.** Memory keyed by working folder,
+   not session or harness: project facts, episode summaries, harvested corrections,
+   and preferences, injected via each adapter's native mechanism (AGENTS.md /
+   CLAUDE.md managed blocks, system-prompt flags, later MCP pull). Local-first and
+   cross-harness is the differentiator against Kiro Crew's cloud-locked memory.
+   Full design: `memory-design.md`.
 4. **Notifications and attention routing.** The approvals inbox needs delivery: push
    to the mobile companion, optional Telegram/Discord bridges (Claude Code channels
    and herdr-remote both point here), and a daily digest of what fleet sessions did.
