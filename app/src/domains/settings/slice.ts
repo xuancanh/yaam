@@ -22,6 +22,7 @@ export function freshSettingsSlice(): SettingsSlice {
       { id: 'claude', name: 'Claude Code', color: '#E8A87C', model: 'claude', tools: 6, desc: 'Anthropic CLI — deep multi-file edits, tests, and refactors.', enabled: true, resumeCmd: 'claude --resume {id}', resumeFallbackCmd: 'claude --continue', probe: 'claude' },
       { id: 'codex', name: 'Codex', color: '#34D399', model: 'codex', tools: 6, desc: 'OpenAI CLI — fast fixes, typechecking, and e2e.', enabled: true, resumeCmd: 'codex resume {id}', resumeFallbackCmd: 'codex resume --last', probe: 'codex' },
       { id: 'opencode', name: 'OpenCode', color: '#7FD1FF', model: 'opencode', tools: 6, desc: 'Open-source terminal agent — bring your own models.', enabled: true, resumeCmd: 'opencode --session {id}', resumeFallbackCmd: 'opencode --continue', probe: 'opencode' },
+      { id: 'kiro', name: 'Kiro', color: '#A78BFA', model: 'kiro-cli chat', tools: 6, desc: 'AWS Kiro CLI — spec-driven agent (subscription).', enabled: false, resumeFallbackCmd: 'kiro-cli chat --resume' },
       { id: 'gemini', name: 'Gemini CLI', color: '#6C8EF5', model: 'gemini', tools: 5, desc: 'Google CLI — very large-context refactors.', enabled: true },
       { id: 'aider', name: 'Aider', color: '#C77DFF', model: 'aider', tools: 6, desc: 'Pair-programming CLI — git-native diffs.', enabled: true, resumeCmd: 'aider --restore-chat-history' },
       { id: 'cursor', name: 'Cursor Agent', color: 'var(--mut2)', model: 'cursor-agent', tools: 4, desc: 'Background agent — repo-wide autonomous tasks.', enabled: false },

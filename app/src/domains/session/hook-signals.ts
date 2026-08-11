@@ -13,23 +13,27 @@ export type HookSignal =
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
 
+const toolNameOf = (payload: Record<string, unknown>): string | undefined =>
+  str(payload.tool_name) ?? str(payload.toolName)
+
 /** One-line human description of a permission request. */
 function permissionQuestion(payload: Record<string, unknown>): string {
-  const tool = str(payload.tool_name) ?? 'a tool'
+  const tool = toolNameOf(payload) ?? 'a tool'
   const input = payload.tool_input as Record<string, unknown> | undefined
   const detail = str(input?.command) ?? str(input?.file_path) ?? str(input?.url)
   return `Permission needed · ${tool}${detail ? ` — ${detail.slice(0, 100)}` : ''}`
 }
 
 /** Map one hook payload to a session signal; null = event carries no signal
- *  we act on (unknown events, informational notifications). */
+ *  we act on (unknown events, informational notifications). Field spellings
+ *  cover both dialects: Claude Code (`hook_event_name`) and Kiro (`trigger`). */
 export function hookSignal(payload: Record<string, unknown>): HookSignal | null {
-  switch (payload.hook_event_name) {
+  switch (str(payload.hook_event_name) ?? str(payload.trigger)) {
     case 'UserPromptSubmit':
       return { kind: 'turn-start' }
     case 'PreToolUse':
     case 'PostToolUse':
-      return { kind: 'activity', tool: str(payload.tool_name) }
+      return { kind: 'activity', tool: toolNameOf(payload) }
     case 'PermissionRequest':
       return { kind: 'needs', question: permissionQuestion(payload) }
     case 'Notification': {

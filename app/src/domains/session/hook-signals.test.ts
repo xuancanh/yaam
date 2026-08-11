@@ -14,6 +14,13 @@ describe('hookSignal', () => {
     expect(hookSignal({ hook_event_name: 'SessionEnd' })).toEqual({ kind: 'session-end' })
     expect(hookSignal({ hook_event_name: 'ConfigChange' })).toBeNull()
   })
+  it('understands the Kiro hook dialect (trigger / toolName)', () => {
+    expect(hookSignal({ trigger: 'PreToolUse', toolName: 'fs_write' })).toEqual({ kind: 'activity', tool: 'fs_write' })
+    expect(hookSignal({ trigger: 'Stop' })).toEqual({ kind: 'turn-end' })
+    expect(hookSignal({ trigger: 'UserPromptSubmit' })).toEqual({ kind: 'turn-start' })
+    expect(hookSignal({ trigger: 'SessionStart' })).toBeNull()
+  })
+
   it('describes permission requests with the tool and its target', () => {
     expect(hookSignal({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp/x' } }))
       .toEqual({ kind: 'needs', question: 'Permission needed · Bash — rm -rf /tmp/x' })
@@ -75,6 +82,17 @@ describe('applyHookEvent', () => {
     expect(useAppStore.getState().agents[0].responding).toBe(true)
     applyHookEvent(deps, { agent: 'a1', payload: { hook_event_name: 'Stop' } })
     expect(useAppStore.getState().agents[0].responding).toBe(false)
+  })
+
+  it('falls back to a unique live session in the event cwd (kiro without ids)', () => {
+    useAppStore.setState({ agents: [agent({ cliSessionId: undefined, cwd: '/repo' })] } as Partial<AppState> as AppState)
+    const deps = { stateRef, setNeedsInput: vi.fn(), clearNeeds: vi.fn() }
+    applyHookEvent(deps, { agent: null, payload: { trigger: 'UserPromptSubmit', cwd: '/repo' } })
+    expect(useAppStore.getState().agents[0].responding).toBe(true)
+    // ambiguous cwd (two live sessions) resolves to nobody
+    useAppStore.setState({ agents: [agent({ id: 'a1', cwd: '/repo' }), agent({ id: 'a2', cwd: '/repo' })] } as Partial<AppState> as AppState)
+    applyHookEvent(deps, { agent: null, payload: { trigger: 'Stop', cwd: '/repo' } })
+    expect(useAppStore.getState().agents.some(a => a.responding === false)).toBe(false)
   })
 
   it('ignores unknown agents and archived sessions', () => {

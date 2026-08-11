@@ -132,6 +132,7 @@ pub fn run() {
             domains::watch::watch_dir,
             domains::watch::unwatch_dir,
             domains::hooks::hooks_info,
+            domains::hooks::kiro_hooks_install,
             domains::transcript::transcript_watch,
             domains::transcript::transcript_unwatch,
             domains::opencode::free_port,

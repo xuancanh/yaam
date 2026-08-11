@@ -29,6 +29,13 @@ export async function hooksInfo(): Promise<HookListenerInfo | null> {
   }
 }
 
+/** Write (or refresh) the global Kiro hook bridge so kiro-cli sessions forward
+ *  their lifecycle events to the listener. Best-effort. */
+export async function kiroHooksInstall(url: string): Promise<void> {
+  if (!isTauri) return
+  await invoke('kiro_hooks_install', { url }).catch(() => {})
+}
+
 /** Subscribe to forwarded hook events; returns an unsubscribe function. */
 export function onAgentHook(cb: (e: AgentHookEvent) => void): () => void {
   if (!isTauri) return () => {}

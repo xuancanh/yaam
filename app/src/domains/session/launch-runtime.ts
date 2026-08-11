@@ -159,6 +159,15 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
             launchCommand = `${spawnCommand} --settings ${shQuote(adapter.hookSettings(url))}`
           }
         }
+        // file-hook CLIs (kiro): refresh the global hook bridge with this run's
+        // listener address and export the session id so events map exactly
+        if (!machine && !opts?.terminalShell && adapter?.fileHooks === 'kiro') {
+          const info = await port.hooksInfo().catch(() => null)
+          if (info) {
+            void port.installKiroHooks(`http://127.0.0.1:${info.port}/hook?token=${encodeURIComponent(info.token)}`)
+            if (adapter.sessionEnv) launchCommand = `${adapter.sessionEnv(id)} ${launchCommand}`
+          }
+        }
         // event-server CLIs (opencode): pin the server to a port we allocated
         // and stream its SSE bus — authoritative status, permissions, and the
         // session id its SQLite store hides from file detection

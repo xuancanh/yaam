@@ -29,6 +29,8 @@ export interface SessionProcessPort {
   detectCliSession: (kind: string, cwd: string | undefined, sinceMs: number, exclude?: string[]) => Promise<string | null>
   /** local agent-hook listener address, started on first use (null = unavailable) */
   hooksInfo: () => Promise<native.HookListenerInfo | null>
+  /** write/refresh the global Kiro hook bridge pointing at the listener */
+  installKiroHooks: (url: string) => Promise<void>
   /** start (or replace) a session's CLI transcript watcher (best-effort) */
   watchTranscript: (agentId: string, kind: string, cwd: string, sessionId: string, fromStart: boolean) => Promise<void>
   /** stop a session's transcript watcher */
@@ -80,6 +82,7 @@ export const realSessionProcessPort: SessionProcessPort = {
   sendLine: (id, text) => sendLineToSession(id, text),
   detectCliSession: (kind, cwd, sinceMs, exclude) => native.detectCliSession(kind, cwd, sinceMs, exclude),
   hooksInfo: () => native.hooksInfo(),
+  installKiroHooks: url => native.kiroHooksInstall(url),
   watchTranscript: (agentId, kind, cwd, sessionId, fromStart) => native.transcriptWatch(agentId, kind, cwd, sessionId, fromStart),
   unwatchTranscript: agentId => native.transcriptUnwatch(agentId),
   freePort: () => native.freePort(),

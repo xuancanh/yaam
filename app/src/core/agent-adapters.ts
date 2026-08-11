@@ -4,7 +4,7 @@
 // adapterFor() instead of sniffing binary names or switching on probe ids.
 import type { AgentType } from './entities'
 
-export type AdapterId = 'claude' | 'codex' | 'opencode'
+export type AdapterId = 'claude' | 'codex' | 'opencode' | 'kiro'
 
 /** Quote an arbitrary string for safe use as one POSIX shell argument. */
 export function shQuote(s: string): string {
@@ -49,7 +49,12 @@ export interface AgentAdapter {
   serverPortFlag?: (port: number) => string
   /** where the CLI persists session state, for structured readers (Phase 1.2+).
    *  Descriptive today; not yet consumed at runtime. */
-  store: { kind: 'claude-projects' | 'codex-rollouts' | 'opencode-server'; note: string }
+  store: { kind: 'claude-projects' | 'codex-rollouts' | 'opencode-server' | 'kiro-cli'; note: string }
+  /** env assignment identifying the session to file-installed hooks (the hook
+   *  command forwards it back, so events map to the exact session) */
+  sessionEnv?: (id: string) => string
+  /** CLI whose hooks are installed as global files rather than launch flags */
+  fileHooks?: 'kiro'
 }
 
 export const ADAPTERS: Record<AdapterId, AgentAdapter> = {
@@ -123,6 +128,27 @@ export const ADAPTERS: Record<AdapterId, AgentAdapter> = {
     // status/permissions and names the session id for resume.
     store: { kind: 'opencode-server', note: 'SQLite at ~/.local/share/opencode/opencode.db; the local HTTP server is the integration surface' },
     serverPortFlag: port => `--port ${port} --hostname 127.0.0.1`,
+  },
+  kiro: {
+    id: 'kiro',
+    bins: ['kiro-cli'],
+    // sessions live in kiro's SQLite (plus ~/.kiro/sessions for ACP mode);
+    // no detection implemented, so resume uses the fallback (--resume)
+    sessionId: 'detect',
+    // the seed launch command is `kiro-cli chat`; args ride after the subcommand
+    buildArgs: spec => {
+      const parts: string[] = []
+      if (spec.mode === 'ephemeral') parts.push('--no-interactive')
+      if (spec.approval === 'full') parts.push('--trust-all-tools')
+      if (spec.extraArgs.trim()) parts.push(spec.extraArgs.trim())
+      // no model or system-prompt flags; fold the system prompt into the prompt
+      const full = [spec.systemPrompt.trim(), spec.prompt].filter(Boolean).join('\n\n')
+      if (full) parts.push(shQuote(full))
+      return parts
+    },
+    store: { kind: 'kiro-cli', note: 'SQLite (kiro-cli data.sqlite3) + ~/.kiro/sessions for ACP mode; hooks in .kiro/hooks are the event tap' },
+    sessionEnv: id => `YAAM_SESSION=${id}`,
+    fileHooks: 'kiro',
   },
 }
 

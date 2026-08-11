@@ -64,9 +64,19 @@ export function applySessionSignal(
 export function applyHookEvent(deps: HookEventsDeps, e: AgentHookEvent): void {
   const s = deps.stateRef.current
   const sid = typeof e.payload.session_id === 'string' ? e.payload.session_id : undefined
-  // the hook URL carries our own session id; the CLI session id is the fallback
+  const cwd = typeof e.payload.cwd === 'string' ? e.payload.cwd : undefined
+  // resolution order: our own session id from the hook URL, then the CLI's
+  // session id, then — for file-hook CLIs whose events have neither (a kiro
+  // session the user launched outside YAAM) — a unique live session in the
+  // event's working folder
+  const byCwd = () => {
+    if (!cwd) return undefined
+    const live = s.agents.filter(a => !a.archived && (a.status === 'running' || a.status === 'needs') && a.cwd === cwd)
+    return live.length === 1 ? live[0] : undefined
+  }
   const agent = (e.agent ? s.agents.find(a => a.id === e.agent) : undefined)
     ?? (sid ? s.agents.find(a => a.cliSessionId === sid && !a.archived) : undefined)
+    ?? byCwd()
   if (!agent || agent.archived) return
   const sig = hookSignal(e.payload)
   if (!sig) return

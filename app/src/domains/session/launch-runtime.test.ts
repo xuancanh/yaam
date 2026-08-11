@@ -21,7 +21,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     removeSession: vi.fn(async () => {}),
     writeSession: vi.fn(async () => {}),
     sendLine: vi.fn(),
-    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), watchTranscript: vi.fn(async () => {}), unwatchTranscript: vi.fn(async () => {}), freePort: vi.fn(async () => null), watchOpencode: vi.fn(async () => {}), unwatchOpencode: vi.fn(async () => {}),
+    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), installKiroHooks: vi.fn(async () => {}), watchTranscript: vi.fn(async () => {}), unwatchTranscript: vi.fn(async () => {}), freePort: vi.fn(async () => null), watchOpencode: vi.fn(async () => {}), unwatchOpencode: vi.fn(async () => {}),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     sandboxWrapper: vi.fn(async () => "sandbox-exec -f '/fake.sb'"),
     detachedSpawn: vi.fn(async () => 'attach-cmd'),
@@ -144,6 +144,19 @@ describe('createLaunchRuntime.launchSession', () => {
     await Promise.resolve()
     expect(port2.freePort).not.toHaveBeenCalled()
     expect(port2.watchOpencode).not.toHaveBeenCalled()
+  })
+
+  it('kiro: refreshes the global hook bridge and exports the session id', async () => {
+    const port = fakePort({ hooksInfo: vi.fn(async () => ({ port: 4242, token: 'tok' })) })
+    useAppStore.setState({ agentTypes: [agentType({ id: 'kiro', model: 'kiro-cli chat' })] } as Partial<AppState> as AppState)
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('kiro-cli chat', '/repo', 'K', 'kiro')!
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(port.installKiroHooks).toHaveBeenCalledWith('http://127.0.0.1:4242/hook?token=tok')
+    const spawned = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    expect(spawned).toContain(`YAAM_SESSION=${id} `)
+    expect(spawned).toContain('kiro-cli chat')
   })
 
   it('launches a plain terminal directly without a command-shell wrapper', () => {

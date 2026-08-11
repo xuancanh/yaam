@@ -61,6 +61,47 @@ fn router(shared: Arc<Shared>) -> Router {
         .with_state(shared)
 }
 
+/// Kiro's hooks are configured as JSON files, not launch flags: this builds
+/// the bridge file that forwards every lifecycle event's stdin JSON to the
+/// loopback listener. `$YAAM_SESSION` (exported into YAAM-launched sessions)
+/// identifies the exact session; curl failures are swallowed (`|| true`) so a
+/// closed YAAM never blocks the CLI, and blocking triggers stay unaffected.
+pub fn kiro_hooks_json(url: &str) -> String {
+    let triggers = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"];
+    let hooks: Vec<serde_json::Value> = triggers
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "name": format!("yaam-{}", t.to_lowercase()),
+                "trigger": t,
+                "action": {
+                    "type": "command",
+                    "command": format!(
+                        "curl -fsS -m 3 -X POST \"{url}&agent=$YAAM_SESSION\" -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 || true"
+                    )
+                }
+            })
+        })
+        .collect();
+    serde_json::json!({ "version": "v1", "hooks": hooks }).to_string()
+}
+
+/// Write (or refresh) the global Kiro hook bridge at ~/.kiro/hooks/. Called on
+/// each Kiro launch so the file always carries the current run's port+token;
+/// a stale file from a previous run fails fast and silently.
+#[tauri::command]
+pub fn kiro_hooks_install(url: String) -> Result<(), String> {
+    // the URL lands inside a shell command in a config file — accept only our
+    // own loopback listener so this can never be pointed elsewhere
+    if !url.starts_with("http://127.0.0.1:") || url.contains(['"', '\\', '$', '`']) {
+        return Err("refusing to install hooks for a non-local url".to_string());
+    }
+    let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
+    let dir = std::path::PathBuf::from(&home).join(".kiro/hooks");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("yaam-bridge.json"), kiro_hooks_json(&url)).map_err(|e| e.to_string())
+}
+
 /// Return the listener's address, starting it on first use. The server lives
 /// for the app's lifetime; a fresh token is minted per app run, so hook URLs
 /// from a previous run stop working (their POSTs fail fast and the CLI moves on).
@@ -100,4 +141,23 @@ pub fn hooks_info(app: AppHandle, state: TauriState<HookListener>) -> Result<Hoo
     let info = HookInfo { port, token };
     *slot = Some(info.clone());
     Ok(info)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kiro_bridge_covers_lifecycle_triggers_and_forwards_stdin() {
+        let json = kiro_hooks_json("http://127.0.0.1:4242/hook?token=t0k");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["version"], "v1");
+        let hooks = v["hooks"].as_array().unwrap();
+        let triggers: Vec<&str> = hooks.iter().map(|h| h["trigger"].as_str().unwrap()).collect();
+        assert_eq!(triggers, ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"]);
+        let cmd = hooks[0]["action"]["command"].as_str().unwrap();
+        assert!(cmd.contains("http://127.0.0.1:4242/hook?token=t0k&agent=$YAAM_SESSION"));
+        assert!(cmd.contains("--data-binary @-"));
+        assert!(cmd.ends_with("|| true"));
+    }
 }
