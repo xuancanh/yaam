@@ -11,7 +11,7 @@ import { hasCreds } from '../../master'
 import { buildLaunch } from './launch'
 import { focusSessionIn } from './layout-state'
 import { adapterFor, shQuote } from '../../core/agent-adapters'
-import { envPrefix, typeForCommand } from './command'
+import { envPrefix, sendLineToSession, typeForCommand } from './command'
 import { findMachine, wrapLaunch } from './remote-machine'
 import { sandboxLocalWrap, sandboxRemoteWrap } from './sandbox'
 import { probeRemoteCliSession } from './remote-probe'
@@ -129,7 +129,15 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         if (agent.workspaceId !== s.activeWorkspace) return withAgent
         return { ...focusSessionIn(withAgent, id), newSessionOpen: false }
       })
-      port.attachTerminal(id, line => { appendTail(id, line); ctx.bufferOutput?.(id, line) }, () => clearNeeds(id), () => bumpSettle(id), text => recordSubmit(id, text))
+      const termHandle = port.attachTerminal(id, line => { appendTail(id, line); ctx.bufferOutput?.(id, line) }, () => clearNeeds(id), () => bumpSettle(id), text => {
+        recordSubmit(id, text)
+        // ACP sessions have no PTY echo: show the typed line, then send it as
+        // the next prompt turn (sendLineToSession routes ACP to acp_prompt)
+        if (stateRef.current.agents.find(a => a.id === id)?.acp && text.trim()) {
+          termHandle.writeln(`\x1b[36m› ${text}\x1b[0m`)
+          sendLineToSession(id, text)
+        }
+      })
       const fail = (err: unknown) => {
         dispatch(s => ({
           ...s,
@@ -144,6 +152,18 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         // terminal. Plain terminal sessions already carry terminalShell and
         // launch that shell directly instead.
         const commandShell = opts?.terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
+        // ACP sessions: the agent speaks the protocol over stdio, no PTY. The
+        // terminal becomes a rendered feed (acp-events); prompts and answers
+        // flow through the Rust peer. Local only — the child runs beside us.
+        if (launchType?.acp) {
+          if (machine) {
+            fail('ACP sessions run locally — launch without a machine')
+            return
+          }
+          termHandle.writeln('\x1b[90mACP session — a live feed of the agent protocol; typed lines go to session/prompt.\x1b[0m')
+          await port.acpStart(id, spawnCommand, spawnCwd || agent.cwd || '', commandShell)
+          return
+        }
         const sandbox = plan.agent.sandbox
         // Structured sensing: local sessions of hook-capable CLIs get per-session
         // settings pointing their lifecycle hooks at YAAM's loopback listener.

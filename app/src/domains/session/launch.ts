@@ -58,6 +58,7 @@ export function buildLaunch(input: LaunchInput, agentTypes: AgentType[], activeW
     repo: dir ? dir.split('/').pop() || dir : '~', branch: 'live',
     status: 'running', model: trimmed, kind: 'real', cmd: trimmed, cwd: dir, launchedAt: Date.now(),
     cliSessionId: knownSessionId,
+    acp: launchType?.acp || undefined,
     typeId: typeId ?? typeForCommand(trimmed, agentTypes)?.id,
     workspaceId: workspaceId ?? activeWorkspace,
     machineId: machine?.id,

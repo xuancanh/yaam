@@ -2,6 +2,7 @@
 // spawn, key map, and TUI-safe line sending.
 import * as native from '../../core/native'
 import { binOf } from '../../core/agent-adapters'
+import { useAppStore } from '../../core/store'
 import type { AppState } from '../../core/types'
 
 /** Resolve a configured agent type from the executable at the start of a command. */
@@ -37,6 +38,12 @@ export const KEYMAP: Record<string, string> = {
 /** Send text and Enter as separate writes; TUIs otherwise treat the combined
  *  chunk as pasted text and may insert a newline instead of submitting. */
 export function sendLineToSession(id: string, text: string) {
+  // ACP sessions have no PTY — a sent line IS the next prompt turn
+  const agent = useAppStore.getState().agents.find(a => a.id === id)
+  if (agent?.acp) {
+    void native.acpPrompt(id, text)
+    return
+  }
   native.writeSession(id, text).catch(() => {})
   window.setTimeout(() => { native.writeSession(id, '\r').catch(() => {}) }, 250)
 }

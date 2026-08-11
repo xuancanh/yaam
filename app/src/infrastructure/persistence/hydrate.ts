@@ -141,7 +141,7 @@ export function buildHydration(p: Partial<PersistedState>, seed: AppState): Hydr
       : seed.toolsCatalog,
     agentTypes: p.agentTypes
       ? seed.agentTypes
-          .map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, resumeFallbackCmd: t.resumeFallbackCmd, probe: t.probe } as typeof t))
+          .map(t => ({ ...t, ...(p.agentTypes!.find(x => x.id === t.id) ?? {}), resumeCmd: t.resumeCmd, resumeFallbackCmd: t.resumeFallbackCmd, probe: t.probe, acp: t.acp } as typeof t))
           .concat(p.agentTypes.filter(x => x.custom && !seed.agentTypes.some(t => t.id === x.id)))
       : seed.agentTypes,
     templates: p.templates ?? seed.templates ?? [],

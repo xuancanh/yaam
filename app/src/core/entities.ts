@@ -164,6 +164,9 @@ export interface SessionRecord {
   history?: HistoryEntry[]
   /** the CLI's own session/conversation id, captured after launch for resume */
   cliSessionId?: string
+  /** ACP session: the agent runs over stdio (no PTY); the terminal is a
+   *  rendered feed and input flows through session/prompt */
+  acp?: boolean
   launchedAt?: number
   /** archived sessions are hidden from tabs/overview but kept for history */
   archived?: boolean
@@ -446,6 +449,9 @@ export interface AgentType {
   /** which capability adapter (core/agent-adapters) drives this CLI: session-id
    *  capture, headless flags, and structured-state integration */
   probe?: 'claude' | 'codex' | 'opencode'
+  /** the command speaks the Agent Client Protocol over stdio (no PTY): YAAM
+   *  drives it via session/prompt and answers its permission requests */
+  acp?: boolean
 }
 
 /** an MCP server chat agents can call tools on — streamable HTTP or a local

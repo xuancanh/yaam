@@ -21,7 +21,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     removeSession: vi.fn(async () => {}),
     writeSession: vi.fn(async () => {}),
     sendLine: vi.fn(),
-    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), installKiroHooks: vi.fn(async () => {}), watchTranscript: vi.fn(async () => {}), unwatchTranscript: vi.fn(async () => {}), freePort: vi.fn(async () => null), watchOpencode: vi.fn(async () => {}), unwatchOpencode: vi.fn(async () => {}),
+    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), installKiroHooks: vi.fn(async () => {}), watchTranscript: vi.fn(async () => {}), unwatchTranscript: vi.fn(async () => {}), freePort: vi.fn(async () => null), watchOpencode: vi.fn(async () => {}), unwatchOpencode: vi.fn(async () => {}), acpStart: vi.fn(async () => {}), acpStop: vi.fn(async () => {}),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     sandboxWrapper: vi.fn(async () => "sandbox-exec -f '/fake.sb'"),
     detachedSpawn: vi.fn(async () => 'attach-cmd'),
@@ -157,6 +157,18 @@ describe('createLaunchRuntime.launchSession', () => {
     const spawned = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
     expect(spawned).toContain(`YAAM_SESSION=${id} `)
     expect(spawned).toContain('kiro-cli chat')
+  })
+
+  it('acp: starts the stdio peer instead of a PTY and marks the agent', async () => {
+    const port = fakePort()
+    useAppStore.setState({ agentTypes: [agentType({ id: 'kiro-acp', model: 'kiro-cli acp', acp: true })] } as Partial<AppState> as AppState)
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('kiro-cli acp', '/repo', 'K', 'kiro-acp')!
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(port.acpStart).toHaveBeenCalledWith(id, 'kiro-cli acp', '/repo', 'zsh')
+    expect(port.spawnSession).not.toHaveBeenCalled()
+    expect(useAppStore.getState().agents.find(a => a.id === id)?.acp).toBe(true)
   })
 
   it('launches a plain terminal directly without a command-shell wrapper', () => {

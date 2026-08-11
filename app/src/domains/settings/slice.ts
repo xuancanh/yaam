@@ -23,6 +23,11 @@ export function freshSettingsSlice(): SettingsSlice {
       { id: 'codex', name: 'Codex', color: '#34D399', model: 'codex', tools: 6, desc: 'OpenAI CLI — fast fixes, typechecking, and e2e.', enabled: true, resumeCmd: 'codex resume {id}', resumeFallbackCmd: 'codex resume --last', probe: 'codex' },
       { id: 'opencode', name: 'OpenCode', color: '#7FD1FF', model: 'opencode', tools: 6, desc: 'Open-source terminal agent — bring your own models.', enabled: true, resumeCmd: 'opencode --session {id}', resumeFallbackCmd: 'opencode --continue', probe: 'opencode' },
       { id: 'kiro', name: 'Kiro', color: '#A78BFA', model: 'kiro-cli chat', tools: 6, desc: 'AWS Kiro CLI — spec-driven agent (subscription).', enabled: false, resumeFallbackCmd: 'kiro-cli chat --resume' },
+      // ACP sessions run the agent over stdio (no TUI): structured events,
+      // permission cards, live feed in the terminal pane
+      { id: 'kiro-acp', name: 'Kiro (ACP)', color: '#A78BFA', model: 'kiro-cli acp', tools: 6, desc: 'Kiro over the Agent Client Protocol — structured events and approvals.', enabled: false, acp: true },
+      { id: 'gemini-acp', name: 'Gemini (ACP)', color: '#7FD1FF', model: 'gemini --acp', tools: 6, desc: 'Gemini CLI over the Agent Client Protocol.', enabled: false, acp: true },
+      { id: 'claude-acp', name: 'Claude (ACP)', color: '#E8A87C', model: 'npx @agentclientprotocol/claude-agent-acp', tools: 6, desc: 'Claude Code over the Agent Client Protocol.', enabled: false, acp: true },
       { id: 'gemini', name: 'Gemini CLI', color: '#6C8EF5', model: 'gemini', tools: 5, desc: 'Google CLI — very large-context refactors.', enabled: true },
       { id: 'aider', name: 'Aider', color: '#C77DFF', model: 'aider', tools: 6, desc: 'Pair-programming CLI — git-native diffs.', enabled: true, resumeCmd: 'aider --restore-chat-history' },
       { id: 'cursor', name: 'Cursor Agent', color: 'var(--mut2)', model: 'cursor-agent', tools: 4, desc: 'Background agent — repo-wide autonomous tasks.', enabled: false },

@@ -146,6 +146,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       disposeSessionRuntime(id)
       void port.unwatchTranscript(id)
       void port.unwatchOpencode(id)
+      if (agent?.acp) void port.acpStop(id)
       dropTranscriptEvents(id)
       // the quick shell rides along with its session — no orphaned PTYs
       disposeQuickShell(id)
@@ -182,6 +183,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       disposeSessionRuntime(id)
       void port.unwatchTranscript(id)
       void port.unwatchOpencode(id)
+      if (agent?.acp) void port.acpStop(id)
       dropTranscriptEvents(id)
       port.removeSession(id).catch(() => {}) // drop its persisted file too
       const task = findTaskForAgentInState(stateRef.current, id)
@@ -209,6 +211,26 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
     resume: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
       if (agent?.kind === 'chat') return // chat agents have no process; just send a message
+      // ACP resume: respawn the stdio agent (a fresh protocol session for now;
+      // session/load comes with the approvals-inbox work)
+      if (agent?.acp && agent.cmd && agent.status !== 'running') {
+        dispatch(s => ({
+          ...s,
+          agents: s.agents.map(a => a.id === id
+            ? { ...a, status: 'running' as const, escReason: undefined, cliSessionId: undefined, log: a.log.concat([{ t: 'sys' as const, x: 'acp session restarted' }]) }
+            : a),
+        }))
+        void port.acpStart(id, agent.cmd, agent.cwd ?? '', stateRef.current.settings?.shell || 'zsh').catch(err => {
+          dispatch(s => ({
+            ...s,
+            agents: s.agents.map(a => a.id === id
+              ? { ...a, status: 'error' as const, log: a.log.concat([{ t: 'err' as const, x: String(err) }]) }
+              : a),
+          }))
+        })
+        armResponseWatch(id)
+        return
+      }
       const terminalShell = agent?.terminalShell ?? inferLegacyTerminalShell(agent?.cmd)
       let resumeNote = 'session resumed'
       if (agent?.kind === 'real' && agent.cmd && agent.status !== 'running') {
@@ -388,6 +410,8 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
 
     stopSession: id => {
       const agent = stateRef.current.agents.find(a => a.id === id)
+      // an ACP session's agent is a stdio child, not a PTY
+      if (agent?.acp) void port.acpStop(id)
       // a LOCAL detached session's PTY lives in a host process — end it for real,
       // not just drop the attach client
       if (agent?.detached && !agent.machine) void port.detachedKill(id)

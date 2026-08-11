@@ -9,6 +9,7 @@ import { withMemoryAppend } from '../master/assistant-memory'
 import { resolveDecision } from '../master/harness-stats'
 import { createSessionActivity, withActivityTargets } from '../activity/history'
 import { sendLineToSession } from './command'
+import { deliverAcpAnswer } from './acp-events'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
 
@@ -51,10 +52,14 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
       if (!agent || !esc?.options?.length) return
       const target = esc.options.find(o => o.num === num)
       if (!target) return
-      const delta = num - (esc.cursorNum ?? 1)
-      const moves = delta > 0 ? '\x1b[B'.repeat(delta) : '\x1b[A'.repeat(-delta)
-      if (moves) port.writeSession(aid, moves).catch(() => {})
-      window.setTimeout(() => { port.writeSession(aid, '\r').catch(() => {}) }, 200)
+      // ACP sessions answer the protocol's permission request; PTY sessions
+      // steer the TUI cursor with arrow keys + Enter
+      if (!deliverAcpAnswer(aid, num)) {
+        const delta = num - (esc.cursorNum ?? 1)
+        const moves = delta > 0 ? '\x1b[B'.repeat(delta) : '\x1b[A'.repeat(-delta)
+        if (moves) port.writeSession(aid, moves).catch(() => {})
+        window.setTimeout(() => { port.writeSession(aid, '\r').catch(() => {}) }, 200)
+      }
       clearFlagged(aid)
       const event = createSessionActivity(st, aid, {
         category: 'decision', actor: 'user', kind: 'choose', text: `Chose “${target.label}”`, detail: esc.reason || undefined,
@@ -77,7 +82,7 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
     approve: aid => {
       const agent = stateRef.current.agents.find(a => a.id === aid)
       // answer the prompt: Enter accepts the default / highlighted option
-      if (agent?.kind === 'real') port.writeSession(aid, '\r').catch(() => {})
+      if (agent?.kind === 'real' && !deliverAcpAnswer(aid, 'approve')) port.writeSession(aid, '\r').catch(() => {})
       const reason = (agent?.escReason ?? '').slice(0, 90)
       const event = createSessionActivity(stateRef.current, aid, {
         category: 'decision', actor: 'user', kind: 'approve', text: 'Approved prompt', detail: reason || undefined,
@@ -97,7 +102,7 @@ export function createSessionPromptActions(ctx: PromptActionsCtx): SessionPrompt
     deny: aid => {
       const agent = stateRef.current.agents.find(a => a.id === aid)
       // Escape cancels the prompt
-      if (agent?.kind === 'real') port.writeSession(aid, '\x1b').catch(() => {})
+      if (agent?.kind === 'real' && !deliverAcpAnswer(aid, 'deny')) port.writeSession(aid, '\x1b').catch(() => {})
       const reason = (agent?.escReason ?? '').slice(0, 90)
       const event = createSessionActivity(stateRef.current, aid, {
         category: 'decision', actor: 'user', kind: 'deny', text: 'Denied prompt', detail: reason || undefined,
