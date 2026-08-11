@@ -10,6 +10,7 @@ import { onAgentHook } from '../../core/native'
 import type { AgentHookEvent } from '../../core/native'
 import { hookSignal } from './hook-signals'
 import { isHookNeedsFlag, markHookNeedsFlag } from './needs-provenance'
+import { markStructuredSignal } from './signal-sources'
 
 export interface SignalDeps {
   setNeedsInput: (id: string, question: string) => void
@@ -78,6 +79,9 @@ export function applyHookEvent(deps: HookEventsDeps, e: AgentHookEvent): void {
     ?? (sid ? s.agents.find(a => a.cliSessionId === sid && !a.archived) : undefined)
     ?? byCwd()
   if (!agent || agent.archived) return
+  // any hook event is proof the CLI feeds us structured signals — the regex
+  // scanner stands down for this session while events stay fresh
+  markStructuredSignal(agent.id, 'hooks')
   const sig = hookSignal(e.payload)
   if (!sig) return
   applySessionSignal(deps, agent, sig)

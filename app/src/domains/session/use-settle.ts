@@ -18,6 +18,7 @@ import {
   detectPrompt, extractOptions, stableScreenKey, QUESTION_LINE_RE, QUESTION_MARK_LINE_RE, TUI_PROMPT_RE,
 } from './prompt-detection'
 import { clearNeedsFlagSource, isScannerNeedsFlag, markScannerNeedsFlag, resetNeedsFlagSources } from './needs-provenance'
+import { hasAuthoritativeSignals, resetStructuredSignals, dropStructuredSignals } from './signal-sources'
 import { NOTE_PROGRESS } from '../board/watcher-notes'
 import { untrustedBlock } from '../../llm/untrusted'
 
@@ -181,9 +182,16 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     outputTimers.delete(id)
     // output went quiet — the checkpoint backoff starts over on the next burst
     checkpointDelay.delete(id)
-    // output went quiet — the session is no longer actively responding
-    setResponding(id, false)
     const agent = state.get().agents.find(a => a.id === id)
+    // Sessions with live structured coverage (hooks, server bus, ACP) get
+    // turn boundaries and needs-input from the CLI itself: quiet output must
+    // not clear their responding flag, and the regex heuristics stand down.
+    // Coverage decays, so a session whose events stop flowing falls back to
+    // the full scanner path automatically.
+    const authoritative = !!agent && hasAuthoritativeSignals(agent)
+    // output went quiet — the session is no longer actively responding
+    if (!authoritative) setResponding(id, false)
+    else streaming.delete(id) // keep the local edge-tracker honest either way
     // a detached (spun-out) workspace is owned by its satellite window — this
     // window must not flag/notify/monitor its sessions
     if (!agent || isDetachedAgent(state.get(), agent) || (agent.status !== 'running' && agent.status !== 'needs')) return
@@ -199,7 +207,11 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     if (!content.length) { flushOutput(id, true); return }
     // Never flag input, and never relay half-answers, while the TUI busy marker
     // is visible — any question-looking text on screen is transient then.
-    const { busy, promptDetected, question } = detectPrompt(content, alt)
+    // Authoritative sessions skip the regexes: their busy state is the
+    // hook/bus-maintained responding flag, and prompts arrive as events.
+    const { busy, promptDetected, question } = authoritative
+      ? { busy: !!agent.responding, promptDetected: false, question: '' }
+      : detectPrompt(content, alt)
 
     if (promptDetected) {
       const already = agent.status === 'needs' && lastFlagged.get(id) === question
@@ -311,6 +323,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
 
   const clearFlagged = (id: string) => { lastFlagged.delete(id); clearNeedsFlagSource(id) }
   const disposeSettle = (id: string) => {
+    dropStructuredSignals(id)
     settle.get(id)?.timer.dispose()
     settle.delete(id)
     armed.delete(id)
@@ -335,6 +348,8 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       if (a.kind !== 'real') continue
       if (isDetachedAgent(s, a)) continue
       if (a.status !== 'running' && a.status !== 'needs') continue
+      // structured coverage owns this session's prompts — nothing to scan for
+      if (hasAuthoritativeSignals(a)) continue
       if (!isAltScreen(a.id)) continue
       const screen = readScreen(a.id)
       if (!screen.length) continue
@@ -379,6 +394,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       for (const timer of outputTimers.values()) timer.dispose()
       settle.clear(); armed.clear(); lastFlagged.clear(); outputBuffers.clear(); outputTimers.clear(); lastOutputKey.clear(); lastFinalKey.clear(); checkpointDelay.clear(); lastCheckpointKey.clear(); streaming.clear()
       resetNeedsFlagSources()
+      resetStructuredSignals()
     },
   }
 }

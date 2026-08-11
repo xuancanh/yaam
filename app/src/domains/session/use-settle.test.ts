@@ -13,6 +13,7 @@ vi.mock('../../master', () => ({ hasCreds: () => false }))
 import { createSessionSettle } from './use-settle'
 import type { SettleDeps } from './use-settle'
 import { markScannerNeedsFlag } from './needs-provenance'
+import { STRUCTURED_FRESH_MS, markStructuredSignal, resetStructuredSignals } from './signal-sources'
 import { createFakeStatePort, FakeClock } from '../../core/ports.fakes'
 import type { AppState, Agent } from '../../core/types'
 
@@ -371,5 +372,36 @@ describe('createSessionSettle detached workspaces', () => {
     expect(h.deps.notify).not.toHaveBeenCalled()
     expect(h.state.get().agents[0].status).toBe('running') // no status writes
     expect(h.state.get().agents[0].responding).toBeUndefined()
+  })
+
+  it('structured coverage suppresses the regex prompt scanner', () => {
+    // the screen shows a classic approval dialog, but hooks own this session
+    tui.alt.add('a1')
+    tui.screens.set('a1', ['│ Do you want to proceed?', '│ ❯ 1. Yes', '│   2. No'])
+    const h = harness([agent()])
+    markStructuredSignal('a1', 'hooks')
+    h.rt.bumpSettle('a1')
+    h.clock.advance(3000)
+    expect(h.deps.setNeedsInput).not.toHaveBeenCalled()
+    expect(h.state.get().agents[0].status).toBe('running')
+
+    // stale coverage: the scanner resumes as the safety net
+    markStructuredSignal('a1', 'hooks', Date.now() - STRUCTURED_FRESH_MS - 1)
+    h.rt.bumpSettle('a1')
+    h.clock.advance(3000)
+    expect(h.deps.setNeedsInput).toHaveBeenCalled()
+    tui.alt.delete('a1')
+    tui.screens.delete('a1')
+    resetStructuredSignals()
+  })
+
+  it('quiet output does not clear an authoritative session\'s responding flag', () => {
+    const h = harness([agent({ responding: true, log: [{ t: 'out', x: 'tooling' }] as Agent['log'] })])
+    markStructuredSignal('a1', 'hooks')
+    h.rt.bumpSettle('a1')
+    h.clock.advance(3000)
+    // the hooks own turn boundaries: settle leaves responding alone
+    expect(h.state.get().agents[0].responding).toBe(true)
+    resetStructuredSignals()
   })
 })

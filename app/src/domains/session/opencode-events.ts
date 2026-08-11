@@ -12,6 +12,7 @@ import type { OpencodeEvent } from '../../core/native'
 import type { HookSignal } from './hook-signals'
 import { applySessionSignal } from './hook-events'
 import type { SignalDeps } from './hook-events'
+import { markStructuredSignal } from './signal-sources'
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
 
@@ -63,6 +64,8 @@ export interface OpencodeEventsDeps extends SignalDeps {
 export function applyOpencodeEvent(deps: OpencodeEventsDeps, e: OpencodeEvent): void {
   const agent = deps.stateRef.current.agents.find(a => a.id === e.agent)
   if (!agent || agent.archived) return
+  // a connected server bus is authoritative — the regex scanner stands down
+  markStructuredSignal(agent.id, 'opencode-bus')
   const sid = opencodeSessionId(e.payload)
   if (sid && !agent.cliSessionId) {
     // first session-scoped event names the TUI's conversation — capture it
