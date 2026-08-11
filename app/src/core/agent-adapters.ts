@@ -41,6 +41,9 @@ export interface AgentAdapter {
   sessionFlagRe?: RegExp
   /** translate template fields into CLI arguments after the binary */
   buildArgs: (spec: HeadlessSpec) => string[]
+  /** settings JSON wiring the CLI's lifecycle hooks to YAAM's local listener
+   *  (passed via the CLI's per-session settings flag; local sessions only) */
+  hookSettings?: (url: string) => string
   /** where the CLI persists session state, for structured readers (Phase 1.2+).
    *  Descriptive today; not yet consumed at runtime. */
   store: { kind: 'claude-projects' | 'codex-rollouts' | 'opencode-server'; note: string }
@@ -65,6 +68,17 @@ export const ADAPTERS: Record<AdapterId, AgentAdapter> = {
       return parts
     },
     store: { kind: 'claude-projects', note: '~/.claude/projects/<encoded-cwd>/<session-id>.jsonl; path known at launch because we mint the id' },
+    // http hooks merge with the user's own settings-file hooks; an unreachable
+    // listener fails fast and Claude proceeds, so this is strictly additive
+    hookSettings: url => {
+      const http = [{ hooks: [{ type: 'http', url }] }]
+      return JSON.stringify({
+        hooks: {
+          UserPromptSubmit: http, PreToolUse: http, PostToolUse: http,
+          Notification: http, PermissionRequest: http, Stop: http, SessionEnd: http,
+        },
+      })
+    },
   },
   codex: {
     id: 'codex',

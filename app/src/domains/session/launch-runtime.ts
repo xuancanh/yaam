@@ -10,6 +10,7 @@ import { dispatch } from '../../core/store'
 import { hasCreds } from '../../master'
 import { buildLaunch } from './launch'
 import { focusSessionIn } from './layout-state'
+import { adapterFor, shQuote } from '../../core/agent-adapters'
 import { envPrefix, typeForCommand } from './command'
 import { findMachine, wrapLaunch } from './remote-machine'
 import { sandboxLocalWrap, sandboxRemoteWrap } from './sandbox'
@@ -141,7 +142,21 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
         // launch that shell directly instead.
         const commandShell = opts?.terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
         const sandbox = plan.agent.sandbox
-        const base = `${envPrefix(launchType?.env)}${spawnCommand}`
+        // Structured sensing: local sessions of hook-capable CLIs get per-session
+        // settings pointing their lifecycle hooks at YAAM's loopback listener.
+        // Machine sessions can't reach localhost, plain terminals have no agent,
+        // and a user-supplied --settings wins over ours. Purely additive: an
+        // unreachable listener makes the hook fail fast and the CLI proceeds.
+        let launchCommand = spawnCommand
+        const adapter = adapterFor(launchType, spawnCommand)
+        if (!machine && !opts?.terminalShell && adapter?.hookSettings && !/(^|\s)--settings(\s|=)/.test(spawnCommand)) {
+          const info = await port.hooksInfo().catch(() => null)
+          if (info) {
+            const url = `http://127.0.0.1:${info.port}/hook?token=${encodeURIComponent(info.token)}&agent=${encodeURIComponent(id)}`
+            launchCommand = `${spawnCommand} --settings ${shQuote(adapter.hookSettings(url))}`
+          }
+        }
+        const base = `${envPrefix(launchType?.env)}${launchCommand}`
         // Machine session: the local PTY runs an ssh client into a remote tmux
         // session (the durability layer). The remote cwd is handled inside the
         // wrap, so the local spawn cwd is irrelevant; CLI id probing/detach are
@@ -164,6 +179,11 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
           : base
         // Claude's id is known up front; only codex/opencode need file detection.
         if (!knownSessionId) probeCliSession(id, agent.cmd ?? '', spawnCwd ?? '', false)
+        // minted id → the transcript path is known before the file exists;
+        // start the structured tail now (best-effort, supplementary signal)
+        if (knownSessionId && adapter?.store.kind === 'claude-projects') {
+          void port.watchTranscript(id, 'claude', spawnCwd || agent.cwd || '', knownSessionId)
+        }
         if (opts?.detached) {
           // the PTY moves into a detached host process; the app runs a small
           // attach client instead. agent.cmd keeps the ORIGINAL command —

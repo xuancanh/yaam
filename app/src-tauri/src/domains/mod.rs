@@ -3,6 +3,7 @@
 pub mod bedrock;
 pub mod fs;
 pub mod git;
+pub mod hooks;
 pub mod mcp;
 pub mod open;
 pub mod power;
@@ -15,5 +16,6 @@ pub mod search;
 pub mod secrets;
 pub mod session;
 pub mod state;
+pub mod transcript;
 pub mod watch;
 pub mod worktree;

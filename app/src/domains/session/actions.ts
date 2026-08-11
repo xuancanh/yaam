@@ -16,6 +16,7 @@ import { probeRemoteCliSession } from './remote-probe'
 import { execCommand, worktreeMerge, worktreeRemove } from '../../core/native'
 import { realSessionProcessPort } from './ports'
 import type { SessionProcessPort } from './ports'
+import { dropTranscriptEvents } from './transcript-events'
 import { inferLegacyTerminalShell } from '../../store/state-helpers'
 import { createSessionActivity, withActivityTargets } from '../activity/history'
 import { findTaskForAgentInState } from '../board/task-state'
@@ -143,6 +144,8 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       // free the xterm buffer + runtime registries; the agent (with its log
       // tail) stays persisted and the terminal is rebuilt on unarchive
       disposeSessionRuntime(id)
+      void port.unwatchTranscript(id)
+      dropTranscriptEvents(id)
       // the quick shell rides along with its session — no orphaned PTYs
       disposeQuickShell(id)
       const event = createSessionActivity(stateRef.current, id, { category: 'action', actor: 'user', kind: 'archive', text: 'Archived session' })
@@ -176,6 +179,8 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       markUserStopped(id)
       port.killSession(id).catch(() => {})
       disposeSessionRuntime(id)
+      void port.unwatchTranscript(id)
+      dropTranscriptEvents(id)
       port.removeSession(id).catch(() => {}) // drop its persisted file too
       const task = findTaskForAgentInState(stateRef.current, id)
       const event = createSessionActivity(stateRef.current, id, {

@@ -21,7 +21,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     removeSession: vi.fn(async () => {}),
     writeSession: vi.fn(async () => {}),
     sendLine: vi.fn(),
-    detectCliSession: vi.fn(async () => null),
+    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), watchTranscript: vi.fn(async () => {}), unwatchTranscript: vi.fn(async () => {}),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     sandboxWrapper: vi.fn(async () => "sandbox-exec -f '/fake.sb'"),
     detachedSpawn: vi.fn(async () => 'attach-cmd'),
@@ -76,6 +76,42 @@ describe('createLaunchRuntime.launchSession', () => {
     expect(port.spawnSession).toHaveBeenCalledWith(id, expect.stringContaining('mycli run'), '/repo', undefined, undefined, undefined, 'zsh')
     await Promise.resolve()
     expect(useAppStore.getState().agents.find(a => a.id === id)?.status).toBe('running')
+  })
+
+  it('wires Claude lifecycle hooks to the local listener via --settings', async () => {
+    const port = fakePort({ hooksInfo: vi.fn(async () => ({ port: 43210, token: 'tok' })) })
+    useAppStore.setState({ agentTypes: [agentType({ id: 'claude', model: 'claude', probe: 'claude' })] } as Partial<AppState> as AppState)
+    const rt = createLaunchRuntime(ctx(port))
+    const id = rt.launchSession('claude', '/repo', 'C', 'claude')!
+    await Promise.resolve()
+    await Promise.resolve()
+    const spawned = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    expect(spawned).toContain('--settings')
+    expect(spawned).toContain(`http://127.0.0.1:43210/hook?token=tok&agent=${id}`)
+    expect(spawned).toContain('"PreToolUse"')
+    // the durable record keeps the CLEAN command for relaunch/resume
+    const agent = useAppStore.getState().agents.find(a => a.id === id)
+    expect(agent?.cmd).toBe('claude')
+    // minted id → the transcript tail starts immediately at the known path
+    expect(port.watchTranscript).toHaveBeenCalledWith(id, 'claude', '/repo', agent?.cliSessionId)
+  })
+
+  it('skips hook injection when the listener is unavailable or the user passed --settings', async () => {
+    const port = fakePort({ hooksInfo: vi.fn(async () => null) })
+    useAppStore.setState({ agentTypes: [agentType({ id: 'claude', model: 'claude', probe: 'claude' })] } as Partial<AppState> as AppState)
+    const rt = createLaunchRuntime(ctx(port))
+    rt.launchSession('claude', '/repo', 'C', 'claude')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect((port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1]).not.toContain('--settings')
+
+    const port2 = fakePort({ hooksInfo: vi.fn(async () => ({ port: 1, token: 't' })) })
+    const rt2 = createLaunchRuntime(ctx(port2))
+    rt2.launchSession('claude --settings /my.json', '/repo', 'C', 'claude')
+    await Promise.resolve()
+    await Promise.resolve()
+    const spawned2 = (port2.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    expect(spawned2.match(/--settings/g)).toHaveLength(1)
   })
 
   it('launches a plain terminal directly without a command-shell wrapper', () => {

@@ -13,6 +13,8 @@ import { findTaskInState, findTaskForAgentInState, updateLocatedTask } from '../
 import type { LocatedTask } from '../../domains/board/task-state'
 import { createSessionAttention } from '../../domains/session/attention'
 import { createSessionSettle } from '../../domains/session/use-settle'
+import { attachHookEvents } from '../../domains/session/hook-events'
+import { attachTranscriptEvents } from '../../domains/session/transcript-events'
 import { subscribeSessionExits } from '../../domains/session/exit-handler'
 import { createLaunchRuntime } from '../../domains/session/launch-runtime'
 import { createMonitorRuntime } from '../../domains/master/monitor-runtime'
@@ -168,6 +170,8 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
   spawnTaskSessionRef.current = (taskId, extraInstructions) => spawnTaskSession(taskId, { extraInstructions })
 
   let offExit: (() => void) | undefined
+  let offHooks: (() => void) | undefined
+  let offTranscript: (() => void) | undefined
   return {
     sessionScreenTail, setNeedsInput, applyAgentStatus, appendTail,
     runMonitor, disposeMonitor: (id: string) => monitor.dispose(id),
@@ -175,7 +179,17 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
     runWatcher, disposeWatcher: (tid: string) => watcher.dispose(tid),
     armResponseWatch, bumpSettle, bufferOutput, recordTerminalSubmit, clearFlagged, disposeSettle, clearNeeds,
     launchSession, launchFromTemplate, spawnTaskSession, spawnSessionForTask, startTaskViaWatcher, probeCliSession,
-    start() { settle.start(); offExit ??= subscribeSessionExits(exitCtx) },
-    dispose() { settle.dispose(); offExit?.(); offExit = undefined },
+    start() {
+      settle.start()
+      offExit ??= subscribeSessionExits(exitCtx)
+      offHooks ??= attachHookEvents({ stateRef, setNeedsInput, clearNeeds })
+      offTranscript ??= attachTranscriptEvents({ stateRef })
+    },
+    dispose() {
+      settle.dispose()
+      offExit?.(); offExit = undefined
+      offHooks?.(); offHooks = undefined
+      offTranscript?.(); offTranscript = undefined
+    },
   }
 }

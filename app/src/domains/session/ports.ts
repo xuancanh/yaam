@@ -27,6 +27,12 @@ export interface SessionProcessPort {
   sendLine: (id: string, text: string) => void
   /** discover a CLI's resume id from its session files (best-effort) */
   detectCliSession: (kind: string, cwd: string | undefined, sinceMs: number, exclude?: string[]) => Promise<string | null>
+  /** local agent-hook listener address, started on first use (null = unavailable) */
+  hooksInfo: () => Promise<native.HookListenerInfo | null>
+  /** start (or replace) a session's CLI transcript watcher (best-effort) */
+  watchTranscript: (agentId: string, kind: string, cwd: string, sessionId: string) => Promise<void>
+  /** stop a session's transcript watcher */
+  unwatchTranscript: (agentId: string) => Promise<void>
   /** isolate a working folder in git worktree(s); returns where to run */
   createWorktree: (baseCwd: string, slug: string) => Promise<native.WorktreeInfo>
   /** OS write-sandbox wrapper prefix for a local session (rejects = fail closed) */
@@ -67,6 +73,9 @@ export const realSessionProcessPort: SessionProcessPort = {
   writeSession: (id, data) => native.writeSession(id, data),
   sendLine: (id, text) => sendLineToSession(id, text),
   detectCliSession: (kind, cwd, sinceMs, exclude) => native.detectCliSession(kind, cwd, sinceMs, exclude),
+  hooksInfo: () => native.hooksInfo(),
+  watchTranscript: (agentId, kind, cwd, sessionId) => native.transcriptWatch(agentId, kind, cwd, sessionId),
+  unwatchTranscript: agentId => native.transcriptUnwatch(agentId),
   createWorktree: (baseCwd, slug) => native.worktreeCreate(baseCwd, slug),
   sandboxWrapper: (id, cwd, extraPaths, denyNetwork) => native.sandboxWrapper(id, cwd, extraPaths, denyNetwork),
   detachedSpawn: (id, command, cwd, commandShell, rows, cols) => native.detachedSpawn(id, command, cwd, commandShell, rows, cols),

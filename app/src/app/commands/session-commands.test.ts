@@ -9,7 +9,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
   return {
     isTauri: false,
     spawnSession: vi.fn(async () => {}), killSession: vi.fn(async () => {}), removeSession: vi.fn(async () => {}),
-    writeSession: vi.fn(async () => {}), sendLine: vi.fn(), detectCliSession: vi.fn(async () => null),
+    writeSession: vi.fn(async () => {}), sendLine: vi.fn(), detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), watchTranscript: vi.fn(async () => {}), unwatchTranscript: vi.fn(async () => {}),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     sandboxWrapper: vi.fn(async () => "sandbox-exec -f '/fake.sb'"),
     detachedSpawn: vi.fn(async () => 'attach-cmd'),
