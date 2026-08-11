@@ -134,7 +134,7 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
       detail: e.error ? { error: e.error } : undefined,
     }),
   })
-  registerSessionCommands(registry, { stateRef, markUserStopped: id => refs.userStoppedRef.current.add(id) })
+  registerSessionCommands(registry, { stateRef, markUserStopped: id => refs.userStoppedRef.current.add(id), promptAnswer: refs.promptAnswerRef })
   registerBoardCommands(registry, statePort, (hook, event) => refs.fireAddonHookRef.current(hook, event))
   registerScheduleCommands(registry, statePort)
   const addonExec = (name: string, input: unknown, addonId: string) =>
@@ -156,6 +156,8 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
   })
   // close the cycle: addons (built earlier) reach the board review verbs here
   refs.taskReviewRef.current = { approve: actions.approveTaskReview, reject: actions.rejectTaskReview }
+  // and registry commands reach the prompt-answer verbs
+  refs.promptAnswerRef.current = { answerPrompt: actions.answerPrompt, approve: actions.approve, deny: actions.deny }
 
   // teardown for the multi-window wiring (satellite sync / main listeners)
   const windowDisposers: Array<() => void> = []

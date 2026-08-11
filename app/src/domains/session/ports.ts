@@ -43,6 +43,8 @@ export interface SessionProcessPort {
   unwatchOpencode: (agentId: string) => Promise<void>
   /** spawn an ACP agent over stdio and run the handshake */
   acpStart: (agentId: string, command: string, cwd: string, shell?: string) => Promise<void>
+  /** cancel an ACP session's in-flight turn */
+  acpCancel: (agentId: string) => Promise<void>
   /** kill an ACP agent process */
   acpStop: (agentId: string) => Promise<void>
   /** isolate a working folder in git worktree(s); returns where to run */
@@ -93,6 +95,7 @@ export const realSessionProcessPort: SessionProcessPort = {
   watchOpencode: (agentId, port) => native.opencodeWatch(agentId, port),
   unwatchOpencode: agentId => native.opencodeUnwatch(agentId),
   acpStart: (agentId, command, cwd, shell) => native.acpStart(agentId, command, cwd, shell),
+  acpCancel: agentId => native.acpCancel(agentId),
   acpStop: agentId => native.acpStop(agentId),
   createWorktree: (baseCwd, slug) => native.worktreeCreate(baseCwd, slug),
   sandboxWrapper: (id, cwd, extraPaths, denyNetwork) => native.sandboxWrapper(id, cwd, extraPaths, denyNetwork),

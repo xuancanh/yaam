@@ -13,6 +13,9 @@ export interface RuntimeRefs {
   /** board review verbs (approve merges worktrees) — set once the board
    *  actions exist; addons and addon agents call through this ref */
   taskReviewRef: MutableRefObject<{ approve: (taskId: string) => Promise<string>; reject: (taskId: string, comment: string) => void }>
+  /** prompt-answer verbs (escalation cards) — set once the session controller
+   *  exists; registry commands call through this ref */
+  promptAnswerRef: MutableRefObject<{ answerPrompt: (aid: string, num: number) => void; approve: (aid: string) => void; deny: (aid: string) => void }>
   spawnTaskSessionRef: MutableRefObject<(taskId: string, extraInstructions?: string) => string | null>
   startIntegrationsRef: MutableRefObject<() => void>
   /** sessions the user stopped via ■ — their exit is a STOP, not a completion */
@@ -33,6 +36,7 @@ export function createRuntimeRefs(): RuntimeRefs {
     runAddonAgentRef: { current: async () => 'agent not ready' },
     runWatcherRef: { current: () => {} },
     taskReviewRef: { current: { approve: async () => 'board actions not ready', reject: () => {} } },
+    promptAnswerRef: { current: { answerPrompt: () => {}, approve: () => {}, deny: () => {} } },
     spawnTaskSessionRef: { current: () => null },
     startIntegrationsRef: { current: () => {} },
     userStoppedRef: { current: new Set() },
