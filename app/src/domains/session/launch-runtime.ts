@@ -179,6 +179,15 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
             launchCommand = `${spawnCommand} --settings ${shQuote(adapter.hookSettings(url))}`
           }
         }
+        // manager MCP server: the session gets report_status/get_task tools
+        // pointed at the same loopback listener (its /mcp route)
+        if (!machine && !opts?.terminalShell && adapter?.mcpConfigFlag && !/--strict-mcp-config/.test(spawnCommand)) {
+          const info = await port.hooksInfo().catch(() => null)
+          if (info) {
+            const url = `http://127.0.0.1:${info.port}/mcp?token=${encodeURIComponent(info.token)}&agent=${encodeURIComponent(id)}`
+            launchCommand = `${launchCommand} ${adapter.mcpConfigFlag(url)}`
+          }
+        }
         // file-hook CLIs (kiro): refresh the global hook bridge with this run's
         // listener address and export the session id so events map exactly
         if (!machine && !opts?.terminalShell && adapter?.fileHooks === 'kiro') {

@@ -17,6 +17,7 @@ import { attachHookEvents } from '../../domains/session/hook-events'
 import { attachTranscriptEvents } from '../../domains/session/transcript-events'
 import { attachOpencodeEvents } from '../../domains/session/opencode-events'
 import { attachAcpEvents } from '../../domains/session/acp-events'
+import { attachMcpServe } from '../../domains/session/mcp-serve'
 import { subscribeSessionExits } from '../../domains/session/exit-handler'
 import { createLaunchRuntime } from '../../domains/session/launch-runtime'
 import { createMonitorRuntime } from '../../domains/master/monitor-runtime'
@@ -176,6 +177,7 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
   let offTranscript: (() => void) | undefined
   let offOpencode: (() => void) | undefined
   let offAcp: (() => void) | undefined
+  let offMcpServe: (() => void) | undefined
   return {
     sessionScreenTail, setNeedsInput, applyAgentStatus, appendTail,
     runMonitor, disposeMonitor: (id: string) => monitor.dispose(id),
@@ -190,6 +192,7 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
       offTranscript ??= attachTranscriptEvents({ stateRef })
       offOpencode ??= attachOpencodeEvents({ stateRef, setNeedsInput, clearNeeds })
       offAcp ??= attachAcpEvents({ stateRef, setNeedsInput, clearNeeds })
+      offMcpServe ??= attachMcpServe({ stateRef, applyAgentStatus, taskForSession })
     },
     dispose() {
       settle.dispose()
@@ -198,6 +201,7 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
       offTranscript?.(); offTranscript = undefined
       offOpencode?.(); offOpencode = undefined
       offAcp?.(); offAcp = undefined
+      offMcpServe?.(); offMcpServe = undefined
     },
   }
 }

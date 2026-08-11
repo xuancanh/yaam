@@ -47,6 +47,9 @@ export interface AgentAdapter {
   /** flag pinning the CLI's local event server to a port YAAM allocated, so
    *  the manager can subscribe to its bus (local sessions only) */
   serverPortFlag?: (port: number) => string
+  /** flag injecting YAAM's manager MCP server (report_status/get_task) into
+   *  the session (local sessions only) */
+  mcpConfigFlag?: (url: string) => string
   /** where the CLI persists session state, for structured readers (Phase 1.2+).
    *  Descriptive today; not yet consumed at runtime. */
   store: { kind: 'claude-projects' | 'codex-rollouts' | 'opencode-server' | 'kiro-cli'; note: string }
@@ -76,6 +79,9 @@ export const ADAPTERS: Record<AdapterId, AgentAdapter> = {
       return parts
     },
     store: { kind: 'claude-projects', note: '~/.claude/projects/<encoded-cwd>/<session-id>.jsonl; path known at launch because we mint the id' },
+    // an extra --mcp-config merges with the user's own servers (the flag is
+    // repeatable); skipped when the user passed --strict-mcp-config
+    mcpConfigFlag: url => `--mcp-config ${shQuote(JSON.stringify({ mcpServers: { yaam: { type: 'http', url } } }))}`,
     // http hooks merge with the user's own settings-file hooks; an unreachable
     // listener fails fast and Claude proceeds, so this is strictly additive
     hookSettings: url => {

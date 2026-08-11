@@ -83,12 +83,14 @@ describe('createLaunchRuntime.launchSession', () => {
     useAppStore.setState({ agentTypes: [agentType({ id: 'claude', model: 'claude', probe: 'claude' })] } as Partial<AppState> as AppState)
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('claude', '/repo', 'C', 'claude')!
-    await Promise.resolve()
-    await Promise.resolve()
+    await vi.waitFor(() => expect(port.spawnSession).toHaveBeenCalled())
     const spawned = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
     expect(spawned).toContain('--settings')
     expect(spawned).toContain(`http://127.0.0.1:43210/hook?token=tok&agent=${id}`)
     expect(spawned).toContain('"PreToolUse"')
+    // the manager MCP server rides along on the same listener
+    expect(spawned).toContain('--mcp-config')
+    expect(spawned).toContain(`http://127.0.0.1:43210/mcp?token=tok&agent=${id}`)
     // the durable record keeps the CLEAN command for relaunch/resume
     const agent = useAppStore.getState().agents.find(a => a.id === id)
     expect(agent?.cmd).toBe('claude')
@@ -101,15 +103,13 @@ describe('createLaunchRuntime.launchSession', () => {
     useAppStore.setState({ agentTypes: [agentType({ id: 'claude', model: 'claude', probe: 'claude' })] } as Partial<AppState> as AppState)
     const rt = createLaunchRuntime(ctx(port))
     rt.launchSession('claude', '/repo', 'C', 'claude')
-    await Promise.resolve()
-    await Promise.resolve()
+    await vi.waitFor(() => expect(port.spawnSession).toHaveBeenCalled())
     expect((port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1]).not.toContain('--settings')
 
     const port2 = fakePort({ hooksInfo: vi.fn(async () => ({ port: 1, token: 't' })) })
     const rt2 = createLaunchRuntime(ctx(port2))
     rt2.launchSession('claude --settings /my.json', '/repo', 'C', 'claude')
-    await Promise.resolve()
-    await Promise.resolve()
+    await vi.waitFor(() => expect(port2.spawnSession).toHaveBeenCalled())
     const spawned2 = (port2.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
     expect(spawned2.match(/--settings/g)).toHaveLength(1)
   })

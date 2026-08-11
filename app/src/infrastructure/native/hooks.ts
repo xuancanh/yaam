@@ -36,6 +36,33 @@ export async function kiroHooksInstall(url: string): Promise<void> {
   await invoke('kiro_hooks_install', { url }).catch(() => {})
 }
 
+/** One MCP tools/call from a spawned session, awaiting an answer. */
+export interface McpServeCall {
+  callId: number
+  /** YAAM session id from the per-session server URL */
+  agent: string | null
+  name: string | null
+  arguments: Record<string, unknown>
+}
+
+/** Complete one pending tools/call with an MCP tool result. */
+export async function mcpServeRespond(callId: number, result: Record<string, unknown>): Promise<void> {
+  if (!isTauri) return
+  await invoke('mcp_serve_respond', { callId, result }).catch(() => {})
+}
+
+/** Subscribe to manager-tool calls from sessions; returns an unsubscribe fn. */
+export function onMcpServeCall(cb: (e: McpServeCall) => void): () => void {
+  if (!isTauri) return () => {}
+  let alive = true
+  let unlisten = () => {}
+  listen<McpServeCall>('mcp-serve-call', e => cb(e.payload)).then(fn => {
+    if (alive) unlisten = fn
+    else fn()
+  })
+  return () => { alive = false; unlisten() }
+}
+
 /** Subscribe to forwarded hook events; returns an unsubscribe function. */
 export function onAgentHook(cb: (e: AgentHookEvent) => void): () => void {
   if (!isTauri) return () => {}
