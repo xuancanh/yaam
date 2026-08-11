@@ -193,7 +193,7 @@ fn stream_events(app: &AppHandle, agent: &str, port: u16, stop: &AtomicBool) -> 
     let mut chunks = ChunkDecoder::new();
     let mut sse = SseParser::new();
     let mut decoded = Vec::new();
-    let mut handle = |raw: &[u8],
+    let handle = |raw: &[u8],
                       chunks: &mut ChunkDecoder,
                       sse: &mut SseParser,
                       decoded: &mut Vec<u8>| {
