@@ -30,7 +30,8 @@ export function NewSessionDialog({ onClose, initialCwd }: { onClose: () => void;
   const [cwd, setCwd] = useState(initialCwd || s.settings.defaultCwd || '')
   const [isolate, setIsolate] = useState(false)
   const [sandbox, setSandbox] = useState(false)
-  const [detached, setDetached] = useState(false)
+  // detached by default: sessions survive quitting YAAM unless opted out
+  const [detached, setDetached] = useState(isTauri)
 
   // remote machine (ssh + tmux); '' = run locally
   const machines = s.settings.machines ?? []
