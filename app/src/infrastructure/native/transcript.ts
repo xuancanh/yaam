@@ -27,6 +27,24 @@ export async function transcriptUnwatch(agent: string): Promise<void> {
   await invoke('transcript_unwatch', { agent }).catch(() => {})
 }
 
+/** A CLI session found in an on-disk store, adoptable into YAAM. */
+export interface DiscoveredSession {
+  kind: string
+  sessionId: string
+  cwd: string | null
+  mtimeMs: number
+}
+
+/** List recent CLI sessions from the claude/codex stores, newest first. */
+export async function discoverSessions(sinceMs: number): Promise<DiscoveredSession[]> {
+  if (!isTauri) return []
+  try {
+    return await invoke<DiscoveredSession[]>('discover_sessions', { sinceMs })
+  } catch {
+    return []
+  }
+}
+
 /** Subscribe to forwarded transcript lines; returns an unsubscribe function. */
 export function onTranscriptLines(cb: (e: TranscriptLinesEvent) => void): () => void {
   if (!isTauri) return () => {}

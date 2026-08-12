@@ -5,7 +5,9 @@
 // Composed into the provider's action surface.
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
-import type { AppState, EventType, SandboxConfig } from '../../core/types'
+import type { Agent, AppState, EventType, SandboxConfig } from '../../core/types'
+import { defaultDetail, mkMemory, mkTools, TAB_COLORS } from '../../core/data'
+import { mkId } from '../../shared/id'
 import { dispatch } from '../../core/store'
 import { focusSessionIn, removeFromGroups } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
@@ -59,6 +61,10 @@ export interface SessionActions {
   newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean, detached?: boolean, machineId?: string, sandbox?: SandboxConfig) => void
   sendInput: (id: string, text: string) => void
   stopSession: (id: string) => void
+  /** track a CLI session discovered in an on-disk store (started outside
+   *  YAAM): creates an idle session carrying the CLI id so ▶ resumes the
+   *  conversation here, and tails its transcript for live status meanwhile */
+  adoptExternalSession: (kind: string, sessionId: string, cwd?: string) => void
 }
 
 export function useSessionActions(ctx: SessionActionsCtx): SessionActions {
@@ -406,6 +412,38 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       // when no registry is wired (unit tests, standalone use)
       if (ctx.execCommand) void ctx.execCommand('send_to_session', { sessionId: id, text }, { actor: { kind: 'user' } })
       else port.sendLine(id, text)
+    },
+
+    adoptExternalSession: (kind, sessionId, cwd) => {
+      const st = stateRef.current
+      if (st.agents.some(a => a.cliSessionId === sessionId)) {
+        flash('That session is already tracked')
+        return
+      }
+      const type = st.agentTypes.find(t => t.probe === kind) ?? st.agentTypes.find(t => t.id === kind)
+      const id = mkId('a')
+      const dir = (cwd ?? '').trim()
+      const folder = dir ? dir.split('/').pop() || dir : undefined
+      const name = `${folder ?? kind} · adopted`
+      const agent: Agent = {
+        id, name, short: name.slice(0, 2).toUpperCase(),
+        color: TAB_COLORS[Math.floor(Math.random() * TAB_COLORS.length)],
+        repo: folder ?? '~', branch: 'live',
+        // idle, honestly: the CLI runs in someone else's terminal right now
+        status: 'idle', model: type?.model ?? kind, kind: 'real',
+        cmd: type?.model ?? kind, cwd: dir, cliSessionId: sessionId,
+        typeId: type?.id, workspaceId: st.activeWorkspace,
+        memory: mkMemory(), tools: mkTools(),
+        log: [{ t: 'sys', x: `adopted external ${kind} session · ${sessionId}` }],
+        ...defaultDetail(), usageVersion: 1,
+      }
+      const term = port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), text => recordTerminalSubmit(id, text))
+      term.writeln(`\x1b[90madopted external ${kind} session ${sessionId}${dir ? ` @ ${dir}` : ''} — ▶ resumes the conversation here\x1b[0m`)
+      dispatch(s => ({ ...s, agents: s.agents.concat([agent]) }))
+      // live sensing while it runs elsewhere: tail only what it writes from now on
+      if (kind === 'claude' || kind === 'codex') void port.watchTranscript(id, kind, dir, sessionId, false)
+      logEvent('route', id, `Adopted external ${kind} session${folder ? ` in ${folder}` : ''}`)
+      flash(`Adopted ${kind} session${folder ? ` · ${folder}` : ''}`)
     },
 
     stopSession: id => {

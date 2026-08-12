@@ -8,6 +8,8 @@ import { SessionHoverPreview } from '../session/SessionHoverPreview'
 import { sessionWorkStatus } from '../session/session-work-status'
 import { useDiffStats } from '../session/diff-stats'
 import { pendingEscalation } from '../session/escalations'
+import { discoverSessions } from '../../core/native'
+import type { DiscoveredSession } from '../../core/native'
 import type { Escalation } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { brainOn } from '../../llm/client'
@@ -250,7 +252,7 @@ export function RunControl() {
     runGroupMode: x.settings.runGroupMode ?? 'status',
     briefsOn: brainOn(x.settings),
   }), shallowEqual)
-  const { updateSettings, unarchiveSession, openNewSession } = useActions()
+  const { updateSettings, unarchiveSession, openNewSession, adoptExternalSession } = useActions()
   const [filter, setFilter] = useState<RunFilter>('all')
   const byFolder = s.runGroupMode === 'folder'
   const groups = useMemo(
@@ -264,6 +266,21 @@ export function RunControl() {
   const flat = useMemo(() => groups.flatMap(g => g.runs), [groups])
   // folders whose archived-session list is open
   const [openArchives, setOpenArchives] = useState<Set<string>>(new Set())
+  // CLI sessions found in the on-disk stores (started outside YAAM)
+  const [discovered, setDiscovered] = useState<DiscoveredSession[]>([])
+  useEffect(() => {
+    let alive = true
+    const refresh = () => {
+      void discoverSessions(Date.now() - 6 * 3600_000).then(d => { if (alive) setDiscovered(d) })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 45_000)
+    return () => { alive = false; window.clearInterval(timer) }
+  }, [])
+  const adoptable = useMemo(() => {
+    const claimed = new Set(s.agents.map(a => a.cliSessionId).filter(Boolean))
+    return discovered.filter(d => !claimed.has(d.sessionId))
+  }, [discovered, s.agents])
   const taskByAgent = useMemo(() => {
     const map = new Map<string, BoardTask>()
     for (const task of s.tasks) {
@@ -486,6 +503,43 @@ export function RunControl() {
               </div>
             )
           })}
+          {adoptable.length > 0 && (
+            <div>
+              <div style={HEADER_STYLE}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', border: '1px solid var(--dim)', flexShrink: 0 }} />
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', color: 'var(--mut)', flexShrink: 0 }}>
+                  Detected outside YAAM
+                </span>
+                <span style={{ flex: 1, height: 1, background: 'var(--line-soft)' }} />
+                <span className="mono" style={{ fontSize: 9.5, color: 'var(--faint)', flexShrink: 0 }}>{adoptable.length}</span>
+              </div>
+              {adoptable.map(d => {
+                const folder = d.cwd ? d.cwd.replace(/\/+$/, '').split('/').pop() : undefined
+                const mins = Math.max(0, Math.round((Date.now() - d.mtimeMs) / 60_000))
+                const age = mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`
+                return (
+                  <div key={`${d.kind}:${d.sessionId}`} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', minWidth: 0 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', border: '1px solid var(--dim)', flexShrink: 0 }} />
+                    <span title={d.cwd ?? d.sessionId} style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--mut)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {d.kind}{folder ? ` · ${folder}` : ''}
+                    </span>
+                    <span className="mono" style={{ fontSize: 9, color: 'var(--faint)', flexShrink: 0 }}>{age}</span>
+                    <span
+                      role="button"
+                      title="Track this session in YAAM — ▶ resumes the conversation here"
+                      onClick={() => adoptExternalSession(d.kind, d.sessionId, d.cwd ?? undefined)}
+                      style={{
+                        flexShrink: 0, padding: '2px 9px', borderRadius: 6, border: '1px solid var(--accent-border)',
+                        color: 'var(--accent)', fontSize: 10.5, fontWeight: 600, cursor: 'pointer',
+                      }}
+                    >
+                      Adopt
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
       {selected && (

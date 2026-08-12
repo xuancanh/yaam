@@ -290,4 +290,17 @@ describe('createSessionActions', () => {
     expect(get('a1')?.history?.[0]).toMatchObject({ actor: 'user', text: 'Submitted terminal input' })
     expect(get('a1')?.history?.[0]?.detail).toBe('typed directly')
   })
+
+  it('adoptExternalSession creates an idle tracked session and tails its transcript', () => {
+    seed([], { agentTypes: [{ id: 'claude', name: 'Claude Code', model: 'claude', enabled: true, probe: 'claude' } as unknown as AppState['agentTypes'][number]] })
+    const port = fakePort()
+    const actions = createSessionActions(ctx(port))
+    actions.adoptExternalSession('claude', 'ext-uuid-1', '/repo/x')
+    const adopted = useAppStore.getState().agents.find(a => a.cliSessionId === 'ext-uuid-1')
+    expect(adopted).toMatchObject({ status: 'idle', cmd: 'claude', typeId: 'claude', cwd: '/repo/x', name: 'x · adopted' })
+    expect(port.watchTranscript).toHaveBeenCalledWith(adopted!.id, 'claude', '/repo/x', 'ext-uuid-1', false)
+    // adopting the same id twice is a no-op
+    actions.adoptExternalSession('claude', 'ext-uuid-1', '/repo/x')
+    expect(useAppStore.getState().agents.filter(a => a.cliSessionId === 'ext-uuid-1')).toHaveLength(1)
+  })
 })

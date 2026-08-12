@@ -126,6 +126,125 @@ fn tail_loop(app: AppHandle, agent: String, path: std::path::PathBuf, stop: Arc<
     }
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredSession {
+    pub kind: String,
+    pub session_id: String,
+    pub cwd: Option<String>,
+    pub mtime_ms: f64,
+}
+
+/// Pull a working directory out of a transcript's first line: claude entries
+/// carry a top-level `cwd`, codex session_meta nests it under `payload`.
+fn first_line_cwd(path: &std::path::Path) -> Option<String> {
+    let mut buf = vec![0u8; 32 * 1024];
+    let mut f = std::fs::File::open(path).ok()?;
+    let n = f.read(&mut buf).ok()?;
+    let head = &buf[..n];
+    let line = head.split(|&b| b == b'\n').next()?;
+    let v: serde_json::Value = serde_json::from_slice(line).ok()?;
+    v.get("cwd")
+        .and_then(|c| c.as_str())
+        .or_else(|| v.pointer("/payload/cwd").and_then(|c| c.as_str()))
+        .map(|s| s.to_string())
+}
+
+fn mtime_ms(path: &std::path::Path) -> Option<f64> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let ms = modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis();
+    Some(ms as f64)
+}
+
+fn discover_impl(home: &str, since_ms: f64) -> Vec<DiscoveredSession> {
+    const SCAN_CAP: usize = 400;
+    const RESULT_CAP: usize = 20;
+    let mut out: Vec<DiscoveredSession> = Vec::new();
+    let mut scanned = 0usize;
+
+    // claude: ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
+    let projects = std::path::PathBuf::from(home).join(".claude/projects");
+    if let Ok(dirs) = std::fs::read_dir(&projects) {
+        'outer: for dir in dirs.flatten() {
+            let Ok(files) = std::fs::read_dir(dir.path()) else { continue };
+            for file in files.flatten() {
+                scanned += 1;
+                if scanned > SCAN_CAP {
+                    break 'outer;
+                }
+                let path = file.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                let Some(mtime) = mtime_ms(&path) else { continue };
+                if mtime < since_ms {
+                    continue;
+                }
+                let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+                out.push(DiscoveredSession {
+                    kind: "claude".to_string(),
+                    session_id: stem.to_string(),
+                    cwd: first_line_cwd(&path),
+                    mtime_ms: mtime,
+                });
+            }
+        }
+    }
+
+    // codex: ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl
+    let mut stack = vec![(std::path::PathBuf::from(home).join(".codex/sessions"), 0u8)];
+    while let Some((dir, depth)) = stack.pop() {
+        if scanned > SCAN_CAP {
+            break;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            scanned += 1;
+            if scanned > SCAN_CAP {
+                break;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                if depth < 3 {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            if !name.starts_with("rollout-") || !name.ends_with(".jsonl") {
+                continue;
+            }
+            let Some(mtime) = mtime_ms(&path) else { continue };
+            if mtime < since_ms {
+                continue;
+            }
+            let stem = &name[..name.len() - ".jsonl".len()];
+            if stem.len() < 36 {
+                continue;
+            }
+            out.push(DiscoveredSession {
+                kind: "codex".to_string(),
+                session_id: stem[stem.len() - 36..].to_string(),
+                cwd: first_line_cwd(&path),
+                mtime_ms: mtime,
+            });
+        }
+    }
+
+    out.sort_by(|a, b| b.mtime_ms.total_cmp(&a.mtime_ms));
+    out.truncate(RESULT_CAP);
+    out
+}
+
+/// List recent CLI sessions found in the on-disk stores (claude + codex),
+/// newest first — the frontend filters out ids YAAM already owns and offers
+/// the rest for adoption.
+#[tauri::command]
+pub fn discover_sessions(since_ms: f64) -> Result<Vec<DiscoveredSession>, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
+    Ok(discover_impl(&home, since_ms))
+}
+
 /// Start (or replace) the transcript watcher for one YAAM session. Claude's
 /// path is derivable up front; Codex rollouts are discovered by session id,
 /// retrying briefly because the file appears shortly after process start.
@@ -200,6 +319,32 @@ mod tests {
             p,
             std::path::PathBuf::from("/Users/u/.claude/projects/-Users-u-my-app/abc-123.jsonl")
         );
+    }
+
+    #[test]
+    fn discovers_recent_sessions_with_cwds_from_first_lines() {
+        let home = std::env::temp_dir().join(format!("yaam-discover-test-{}", std::process::id()));
+        let proj = home.join(".claude/projects/-repo-x");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(proj.join("11111111-2222-3333-4444-555555555555.jsonl"), "{\"cwd\":\"/repo/x\",\"type\":\"user\"}\n").unwrap();
+        let day = home.join(".codex/sessions/2026/08/11");
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(
+            day.join("rollout-2026-08-11T10-00-00-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl"),
+            "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/repo/y\"}}\n",
+        )
+        .unwrap();
+        let found = discover_impl(home.to_str().unwrap(), 0.0);
+        assert_eq!(found.len(), 2);
+        let claude = found.iter().find(|d| d.kind == "claude").unwrap();
+        assert_eq!(claude.session_id, "11111111-2222-3333-4444-555555555555");
+        assert_eq!(claude.cwd.as_deref(), Some("/repo/x"));
+        let codex = found.iter().find(|d| d.kind == "codex").unwrap();
+        assert_eq!(codex.session_id, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        assert_eq!(codex.cwd.as_deref(), Some("/repo/y"));
+        // a future since window filters everything out
+        assert!(discover_impl(home.to_str().unwrap(), f64::MAX).is_empty());
+        std::fs::remove_dir_all(&home).ok();
     }
 
     #[test]

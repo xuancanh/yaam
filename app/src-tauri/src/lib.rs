@@ -137,6 +137,7 @@ pub fn run() {
             domains::hooks::mcp_serve_respond,
             domains::transcript::transcript_watch,
             domains::transcript::transcript_unwatch,
+            domains::transcript::discover_sessions,
             domains::opencode::free_port,
             domains::opencode::opencode_watch,
             domains::opencode::opencode_unwatch,
