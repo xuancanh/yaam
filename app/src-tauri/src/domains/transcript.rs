@@ -12,7 +12,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::util::expand_tilde;
 
 const POLL_MS: u64 = 700;
 /// max bytes consumed per tick — the rest waits for the next poll
@@ -31,15 +30,18 @@ struct TranscriptLines {
     lines: Vec<String>,
 }
 
-/// Claude Code transcript file for a session: the project dir encodes the cwd
-/// with `/` and `.` replaced by `-` (matches detect_cli_session).
+/// Claude Code transcript file for a session (see util::claude_project_dir).
+/// When the derived project dir doesn't exist (very long cwd, which Claude
+/// truncates + hashes), fall back to finding the id in any project dir.
 fn claude_transcript_path(home: &str, cwd: &str, session_id: &str) -> std::path::PathBuf {
-    let base = expand_tilde(if cwd.is_empty() { home } else { cwd });
-    let encoded = base.replace(['/', '.'], "-");
-    std::path::PathBuf::from(home)
-        .join(".claude/projects")
-        .join(encoded)
-        .join(format!("{session_id}.jsonl"))
+    let dir = crate::util::claude_project_dir(home, cwd);
+    let path = dir.join(format!("{session_id}.jsonl"));
+    if !dir.is_dir() {
+        if let Some(found) = crate::util::find_claude_transcript(home, session_id) {
+            return found;
+        }
+    }
+    path
 }
 
 /// Locate a Codex rollout file by its session id. Rollouts live under

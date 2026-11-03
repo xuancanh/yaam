@@ -13,6 +13,65 @@ pub fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
+/// Claude Code's per-project directory for a working folder:
+/// `~/.claude/projects/<cwd with every non-alphanumeric char as '-'>`.
+/// (Not just `/` and `.`: `my_app` is stored as `my-app`.) Claude truncates
+/// very long encodings and appends a hash; callers that need an exact file
+/// should fall back to `find_claude_transcript` when this directory is absent.
+pub fn claude_project_dir(home: &str, cwd: &str) -> std::path::PathBuf {
+    let base = expand_tilde(if cwd.is_empty() { home } else { cwd });
+    let encoded: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    std::path::PathBuf::from(home).join(".claude/projects").join(encoded)
+}
+
+/// Locate `<session_id>.jsonl` in any Claude project directory (one level).
+pub fn find_claude_transcript(home: &str, session_id: &str) -> Option<std::path::PathBuf> {
+    let name = format!("{session_id}.jsonl");
+    std::fs::read_dir(std::path::PathBuf::from(home).join(".claude/projects"))
+        .ok()?
+        .flatten()
+        .map(|d| d.path().join(&name))
+        .find(|p| p.is_file())
+}
+
+/// Environment a parent Claude Code session exports to its children. YAAM is
+/// often started from inside one (`npm run tauri dev` in a Claude terminal);
+/// leaking these into spawned PTYs makes a nested `claude` treat itself as a
+/// child of that session (shared session id / transcript on some versions).
+pub const PARENT_AGENT_ENV: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+    "AI_AGENT",
+];
+
+#[cfg(test)]
+mod claude_dir_tests {
+    use super::claude_project_dir;
+
+    #[test]
+    fn encodes_every_non_alphanumeric_char() {
+        assert_eq!(
+            claude_project_dir("/Users/u", "/Users/u/workspace/interview_prep.react"),
+            std::path::PathBuf::from("/Users/u/.claude/projects/-Users-u-workspace-interview-prep-react")
+        );
+        assert_eq!(
+            claude_project_dir("/Users/u", ""),
+            std::path::PathBuf::from("/Users/u/.claude/projects/-Users-u")
+        );
+    }
+}
+
 // ── bounded subprocess execution ────────────────────────────────────────────
 
 /// Generous wall-clock limit for git-family subprocesses (git.rs, worktree.rs):

@@ -185,7 +185,14 @@ group, ending the session for real.
 Templates build CLI-specific shell-safe commands. Task runs are forced to
 one-shot mode and use the same path for active and background workspaces.
 Resume prefers a captured CLI id and falls back to each agent type's configured
-resume command.
+resume command. Local resume (detached included: a dead host relaunches the
+resume command, a live one just reattaches) re-applies the structured-sensing
+flags from `sensing-flags.ts` (Claude hooks + manager MCP, Kiro hook bridge,
+OpenCode port), restarts the Claude transcript tail, and skips file probing
+for minted ids. Claude's `/clear` and in-app `/resume` switch conversations
+under a new id; a `SessionStart` command hook (curl-forwarded, since Claude
+skips http hooks for that event) lets `hook-events.ts` update `cliSessionId`
+so the next resume reopens the conversation the user was actually in.
 
 ### Output and attention
 

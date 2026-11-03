@@ -4,7 +4,7 @@
 // adapterFor() instead of sniffing binary names or switching on probe ids.
 import type { AgentType } from './entities'
 
-export type AdapterId = 'claude' | 'codex' | 'opencode' | 'kiro'
+export type AdapterId = 'claude' | 'codex' | 'opencode' | 'kiro' | 'gemini' | 'omp'
 
 /** Quote an arbitrary string for safe use as one POSIX shell argument. */
 export function shQuote(s: string): string {
@@ -52,7 +52,7 @@ export interface AgentAdapter {
   mcpConfigFlag?: (url: string) => string
   /** where the CLI persists session state, for structured readers (Phase 1.2+).
    *  Descriptive today; not yet consumed at runtime. */
-  store: { kind: 'claude-projects' | 'codex-rollouts' | 'opencode-server' | 'kiro-cli'; note: string }
+  store: { kind: 'claude-projects' | 'codex-rollouts' | 'opencode-server' | 'kiro-cli' | 'gemini-chats' | 'omp-sessions'; note: string }
   /** env assignment identifying the session to file-installed hooks (the hook
    *  command forwards it back, so events map to the exact session) */
   sessionEnv?: (id: string) => string
@@ -86,8 +86,16 @@ export const ADAPTERS: Record<AdapterId, AgentAdapter> = {
     // listener fails fast and Claude proceeds, so this is strictly additive
     hookSettings: url => {
       const http = [{ hooks: [{ type: 'http', url }] }]
+      // SessionStart fires on startup, resume, /clear and compaction with the
+      // CLI's CURRENT session id. /clear (which Claude Code now nudges with
+      // "new task? /clear to save tokens") and the in-app /resume picker swap
+      // conversations mid-process; this keeps YAAM's resume id in step. Claude
+      // only runs COMMAND hooks for SessionStart (http ones are skipped), so it
+      // forwards its stdin payload with curl; failure is silent and harmless.
+      const forward = [{ hooks: [{ type: 'command', command: `curl -s -m 3 -X POST -H 'content-type: application/json' --data-binary @- ${shQuote(url)} >/dev/null 2>&1 || true` }] }]
       return JSON.stringify({
         hooks: {
+          SessionStart: forward,
           UserPromptSubmit: http, PreToolUse: http, PostToolUse: http,
           Notification: http, PermissionRequest: http, Stop: http, SessionEnd: http,
         },
@@ -155,6 +163,48 @@ export const ADAPTERS: Record<AdapterId, AgentAdapter> = {
     store: { kind: 'kiro-cli', note: 'SQLite (kiro-cli data.sqlite3) + ~/.kiro/sessions for ACP mode; hooks in .kiro/hooks are the event tap' },
     sessionEnv: id => `YAAM_SESSION=${id}`,
     fileHooks: 'kiro',
+  },
+  gemini: {
+    id: 'gemini',
+    bins: ['gemini'],
+    // Gemini CLI accepts a caller-chosen UUID (`--session-id`) and resumes by
+    // it (`--resume <uuid>`), so resume is deterministic like Claude's
+    sessionId: 'mint',
+    mintFlag: id => `--session-id ${id}`,
+    sessionFlagRe: /(^|\s)(--session-id|--resume|-r)(\s|=|$)/,
+    buildArgs: spec => {
+      const parts: string[] = []
+      if (spec.model.trim()) parts.push('-m', shQuote(spec.model.trim()))
+      if (spec.approval === 'safe') parts.push('--approval-mode', 'plan')
+      if (spec.approval === 'edits') parts.push('--approval-mode', 'auto_edit')
+      if (spec.approval === 'full') parts.push('--approval-mode', 'yolo')
+      if (spec.extraArgs.trim()) parts.push(spec.extraArgs.trim())
+      // no system-prompt flag; fold it into the prompt
+      const full = [spec.systemPrompt.trim(), spec.prompt].filter(Boolean).join('\n\n')
+      if (full) parts.push(spec.mode === 'ephemeral' ? '-p' : '-i', shQuote(full))
+      return parts
+    },
+    store: { kind: 'gemini-chats', note: '~/.gemini/tmp/<project-hash>/chats/session-*.json; id known at launch because we mint it' },
+  },
+  omp: {
+    id: 'omp',
+    bins: ['omp'],
+    // Oh My Pi names sessions itself (no id flag); the id is detected from
+    // ~/.omp/agent/sessions/<encoded-cwd>/<ts>_<id>.jsonl after launch
+    sessionId: 'detect',
+    buildArgs: spec => {
+      const parts: string[] = []
+      if (spec.mode === 'ephemeral') parts.push('-p')
+      if (spec.model.trim()) parts.push('--model', shQuote(spec.model.trim()))
+      if (spec.systemPrompt.trim()) parts.push('--append-system-prompt', shQuote(spec.systemPrompt.trim()))
+      if (spec.approval === 'safe') parts.push('--approval-mode', 'always-ask')
+      if (spec.approval === 'edits') parts.push('--approval-mode', 'write')
+      if (spec.approval === 'full') parts.push('--auto-approve')
+      if (spec.extraArgs.trim()) parts.push(spec.extraArgs.trim())
+      if (spec.prompt) parts.push(shQuote(spec.prompt))
+      return parts
+    },
+    store: { kind: 'omp-sessions', note: '~/.omp/agent/sessions/<encoded-cwd>/<ts>_<id>.jsonl (PI_CODING_AGENT_DIR overrides the root)' },
   },
 }
 

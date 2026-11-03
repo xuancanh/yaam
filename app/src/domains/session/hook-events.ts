@@ -21,6 +21,9 @@ export interface HookEventsDeps extends SignalDeps {
   stateRef: { current: AppState }
   /** event subscription; defaults to the native bridge (injectable for tests) */
   subscribe?: (cb: (e: AgentHookEvent) => void) => () => void
+  /** the CLI switched conversations in-process (/clear, /resume picker):
+   *  re-point anything keyed by the old id, e.g. the transcript tail */
+  onCliSessionChange?: (agentId: string, sessionId: string, cwd: string, fresh: boolean) => void
 }
 
 const setResponding = (id: string, on: boolean) =>
@@ -79,6 +82,27 @@ export function applyHookEvent(deps: HookEventsDeps, e: AgentHookEvent): void {
     ?? (sid ? s.agents.find(a => a.cliSessionId === sid && !a.archived) : undefined)
     ?? byCwd()
   if (!agent || agent.archived) return
+  // Keep the resume id in step with the CLI. Only trusted when the event names
+  // OUR session (agent param in the hook URL): Claude's /clear and in-app
+  // /resume swap the conversation under a new id while the process lives on,
+  // and resuming the stale id later would reopen the wrong conversation (or
+  // one the CLI's retention sweep has already deleted).
+  if (e.agent && agent.id === e.agent && sid && sid !== agent.cliSessionId) {
+    const prev = agent.cliSessionId
+    dispatch(st => ({
+      ...st,
+      agents: st.agents.map(a => a.id === agent.id && a.cliSessionId !== sid
+        ? {
+            ...a,
+            cliSessionId: sid,
+            log: a.log.concat([{ t: 'sys' as const, x: prev ? `CLI switched conversation · resume id now ${sid}` : `captured CLI session · ${sid}` }]),
+          }
+        : a),
+    }))
+    // /clear starts an empty transcript (stream it whole); a switch to an
+    // existing conversation only streams what is appended from now on
+    deps.onCliSessionChange?.(agent.id, sid, cwd ?? agent.cwd ?? '', e.payload.source === 'clear')
+  }
   // any hook event is proof the CLI feeds us structured signals — the regex
   // scanner stands down for this session while events stay fresh
   markStructuredSignal(agent.id, 'hooks')

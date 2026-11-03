@@ -52,6 +52,29 @@ describe('applyHookEvent', () => {
     expect(isHookNeedsFlag('a1')).toBe(true)
   })
 
+  it('follows a /clear to the new CLI session id when the event names our session', () => {
+    const onCliSessionChange = vi.fn()
+    const deps = { stateRef, setNeedsInput: vi.fn(), clearNeeds: vi.fn(), onCliSessionChange }
+    applyHookEvent(deps, { agent: 'a1', payload: { hook_event_name: 'SessionStart', source: 'clear', session_id: 'cli-2', cwd: '/w' } })
+    const a = useAppStore.getState().agents[0]
+    expect(a.cliSessionId).toBe('cli-2')
+    expect(a.log.at(-1)?.x).toContain('cli-2')
+    expect(onCliSessionChange).toHaveBeenCalledWith('a1', 'cli-2', '/w', true)
+    // same id again (startup/compact) is a no-op
+    onCliSessionChange.mockClear()
+    applyHookEvent(deps, { agent: 'a1', payload: { hook_event_name: 'SessionStart', source: 'compact', session_id: 'cli-2' } })
+    expect(onCliSessionChange).not.toHaveBeenCalled()
+  })
+
+  it('never re-keys a session from an event that does not name it', () => {
+    const onCliSessionChange = vi.fn()
+    useAppStore.setState({ agents: [agent({ cwd: '/w' })] } as Partial<AppState> as AppState)
+    applyHookEvent({ stateRef, setNeedsInput: vi.fn(), clearNeeds: vi.fn(), onCliSessionChange },
+      { agent: null, payload: { hook_event_name: 'SessionStart', session_id: 'someone-else', cwd: '/w' } })
+    expect(useAppStore.getState().agents[0].cliSessionId).toBe('cli-1')
+    expect(onCliSessionChange).not.toHaveBeenCalled()
+  })
+
   it('does not re-flag an already-flagged session', () => {
     useAppStore.setState({ agents: [agent({ status: 'needs' })] } as Partial<AppState> as AppState)
     const setNeedsInput = vi.fn()

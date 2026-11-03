@@ -1,6 +1,6 @@
 # YAAM — Yet Another Agent Manager
 
-A desktop app for running and orchestrating many live coding-agent sessions at once. YAAM puts a **Master** orchestrator between you and a fleet of real CLI agents (Claude Code, Codex, Gemini CLI, Aider, shells, REPLs) — you talk to Master, and it routes work to sessions, watches them, escalates when they need you, and builds schedules and tools on request.
+A desktop app for running and orchestrating many live coding-agent sessions at once. YAAM puts a **Master** orchestrator between you and a fleet of real CLI agents (Claude Code, Codex, Gemini CLI, OpenCode, Oh My Pi, DeepSeek via Claude Code, Aider, shells, REPLs) — you talk to Master, and it routes work to sessions, watches them, escalates when they need you, and builds schedules and tools on request.
 
 Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 

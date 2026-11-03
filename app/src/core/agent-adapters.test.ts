@@ -34,6 +34,22 @@ describe('session-id strategy', () => {
     expect(ADAPTERS.codex.sessionId).toBe('detect')
     expect(ADAPTERS.opencode.sessionId).toBe('detect')
   })
+  it('gemini mints and resumes by uuid; omp detects', () => {
+    expect(ADAPTERS.gemini.sessionId).toBe('mint')
+    expect(ADAPTERS.gemini.mintFlag!('u-1')).toBe('--session-id u-1')
+    expect(ADAPTERS.gemini.sessionFlagRe!.test('gemini --resume latest')).toBe(true)
+    expect(ADAPTERS.gemini.sessionFlagRe!.test('gemini')).toBe(false)
+    expect(ADAPTERS.omp.sessionId).toBe('detect')
+    expect(adapterFor(undefined, 'omp --model opus')?.id).toBe('omp')
+  })
+  it('claude forwards SessionStart through a command hook (http hooks are skipped for it)', () => {
+    const settings = JSON.parse(ADAPTERS.claude.hookSettings!('http://127.0.0.1:1/hook?token=t&agent=a'))
+    const start = settings.hooks.SessionStart[0].hooks[0]
+    expect(start.type).toBe('command')
+    expect(start.command).toContain(`curl`)
+    expect(start.command).toContain(`'http://127.0.0.1:1/hook?token=t&agent=a'`)
+    expect(settings.hooks.Stop[0].hooks[0].type).toBe('http')
+  })
   it('claude skips minting when the command already carries session identity', () => {
     for (const cmd of ['claude --resume abc', 'claude -c', 'claude --session-id x']) {
       expect(ADAPTERS.claude.sessionFlagRe!.test(cmd)).toBe(true)
@@ -59,6 +75,20 @@ describe('buildTemplateCommand via adapters', () => {
       .toBe(`opencode run --auto 'do fix it'`)
     expect(buildTemplateCommand(tpl({ typeId: 'opencode', mode: 'interactive' }), type({ model: 'opencode', probe: 'opencode' }), 'fix it'))
       .toBe(`opencode 'do fix it'`)
+  })
+  it('gemini: -p for one-shot, -i to seed interactive, approval-mode mapping', () => {
+    const g = type({ model: 'gemini', probe: 'gemini' })
+    expect(buildTemplateCommand(tpl({ typeId: 'gemini', approval: 'edits', model: 'gemini-3-pro' }), g, 'fix it'))
+      .toBe(`gemini -m 'gemini-3-pro' --approval-mode auto_edit -p 'do fix it'`)
+    expect(buildTemplateCommand(tpl({ typeId: 'gemini', mode: 'interactive', approval: 'full' }), g, 'fix it'))
+      .toBe(`gemini --approval-mode yolo -i 'do fix it'`)
+  })
+  it('omp: print mode, system prompt flag, approval mapping', () => {
+    const o = type({ model: 'omp', probe: 'omp' })
+    expect(buildTemplateCommand(tpl({ typeId: 'omp', systemPrompt: 'sp', approval: 'full' }), o, 'fix it'))
+      .toBe(`omp -p --append-system-prompt 'sp' --auto-approve 'do fix it'`)
+    expect(buildTemplateCommand(tpl({ typeId: 'omp', mode: 'interactive', approval: 'edits' }), o, 'fix it'))
+      .toBe(`omp --approval-mode write 'do fix it'`)
   })
   it('unknown CLIs get the generic shape and the contract rides after the prompt', () => {
     const t = tpl({ typeId: 'aider', systemPrompt: 'sp', extraArgs: '--yes' })

@@ -6,6 +6,9 @@ import { useAppStore } from '../../core/store'
 import type { MutableRefObject } from 'react'
 import type { AgentTemplate, AppState, AgentType, BoardTask, Machine } from '../../core/types'
 
+// drain chained microtasks (spawn paths await sensing flags + wrappers)
+const flush = async (n = 12) => { for (let i = 0; i < n; i++) await Promise.resolve() }
+
 const agentType = (over: Partial<AgentType> = {}): AgentType =>
   ({ id: 'cli', name: 'CLI', model: 'mycli', enabled: true, ...over } as unknown as AgentType)
 
@@ -74,7 +77,7 @@ describe('createLaunchRuntime.launchSession', () => {
     expect(agent).toMatchObject({ status: 'running', name: 'Worker', ephemeral: true })
     expect(port.attachTerminal).toHaveBeenCalledWith(id, expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function))
     expect(port.spawnSession).toHaveBeenCalledWith(id, expect.stringContaining('mycli run'), '/repo', undefined, undefined, undefined, 'zsh')
-    await Promise.resolve()
+    await flush()
     expect(useAppStore.getState().agents.find(a => a.id === id)?.status).toBe('running')
   })
 
@@ -120,10 +123,10 @@ describe('createLaunchRuntime.launchSession', () => {
     useAppStore.setState({ agentTypes: [agentType({ id: 'codex', model: 'codex', probe: 'codex' })] } as Partial<AppState> as AppState)
     const rt = createLaunchRuntime(ctx(port, { later: vi.fn((_ms: number, fn: () => void) => { timers.push(fn) }) }))
     const id = rt.launchSession('codex', '/repo', 'CX', 'codex')!
-    await Promise.resolve()
+    await flush()
     timers[0]()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
+    await flush()
     expect(port.watchTranscript).toHaveBeenCalledWith(id, 'codex', '', 'cx-id-1', true)
   })
 
@@ -132,16 +135,16 @@ describe('createLaunchRuntime.launchSession', () => {
     useAppStore.setState({ agentTypes: [agentType({ id: 'opencode', model: 'opencode', probe: 'opencode' })] } as Partial<AppState> as AppState)
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('opencode', '/repo', 'OC', 'opencode')!
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
+    await flush()
     const spawned = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
     expect(spawned).toContain('--port 45678 --hostname 127.0.0.1')
     expect(port.watchOpencode).toHaveBeenCalledWith(id, 45678)
     // user-pinned ports are respected
     const port2 = fakePort({ freePort: vi.fn(async () => 45678) })
     createLaunchRuntime(ctx(port2)).launchSession('opencode --port 5000', '/repo', 'OC', 'opencode')
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
+    await flush()
     expect(port2.freePort).not.toHaveBeenCalled()
     expect(port2.watchOpencode).not.toHaveBeenCalled()
   })
@@ -151,8 +154,8 @@ describe('createLaunchRuntime.launchSession', () => {
     useAppStore.setState({ agentTypes: [agentType({ id: 'kiro', model: 'kiro-cli chat' })] } as Partial<AppState> as AppState)
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('kiro-cli chat', '/repo', 'K', 'kiro')!
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
+    await flush()
     expect(port.installKiroHooks).toHaveBeenCalledWith('http://127.0.0.1:4242/hook?token=tok')
     const spawned = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
     expect(spawned).toContain(`YAAM_SESSION=${id} `)
@@ -164,8 +167,8 @@ describe('createLaunchRuntime.launchSession', () => {
     useAppStore.setState({ agentTypes: [agentType({ id: 'kiro-acp', model: 'kiro-cli acp', acp: true })] } as Partial<AppState> as AppState)
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('kiro-cli acp', '/repo', 'K', 'kiro-acp')!
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
+    await flush()
     expect(port.acpStart).toHaveBeenCalledWith(id, 'kiro-cli acp', '/repo', 'zsh')
     expect(port.spawnSession).not.toHaveBeenCalled()
     expect(useAppStore.getState().agents.find(a => a.id === id)?.acp).toBe(true)
@@ -185,8 +188,8 @@ describe('createLaunchRuntime.launchSession', () => {
     expect(id).not.toBeNull()
     // optimistic state is running until the rejection is observed
     expect(useAppStore.getState().agents.find(a => a.id === id)?.status).toBe('running')
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
+    await flush()
     const agent = useAppStore.getState().agents.find(a => a.id === id)
     expect(agent?.status).toBe('error')
     expect(agent?.log.some(l => l.t === 'err' && l.x.includes('spawn failed'))).toBe(true)
@@ -211,8 +214,8 @@ describe('createLaunchRuntime.launchSession', () => {
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('mycli run', '/repo', 'Iso', 'cli', undefined, { isolate: true })!
     expect(port.createWorktree).toHaveBeenCalledWith('/repo', id)
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
+    await flush()
     const agent = useAppStore.getState().agents.find(a => a.id === id)
     expect(agent?.cwd).toBe(`/home/.yaam/worktrees/${id}/repo`)
     expect(agent?.worktree?.root).toBe(`/home/.yaam/worktrees/${id}`)
@@ -223,8 +226,8 @@ describe('createLaunchRuntime.launchSession', () => {
     const port = fakePort({ createWorktree: vi.fn(async () => { throw new Error('no git repository found') }) })
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('mycli run', '/plain-folder', 'Iso', 'cli', undefined, { isolate: true })!
-    await Promise.resolve()
-    await Promise.resolve()
+    await flush()
+    await flush()
     const agent = useAppStore.getState().agents.find(a => a.id === id)
     expect(agent?.status).toBe('error')
     expect(port.spawnSession).not.toHaveBeenCalled()
@@ -276,7 +279,7 @@ describe('sandboxed launches', () => {
     const port = fakePort()
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('mycli run', '/repo', 'Sbx', 'cli', undefined, { sandbox: {} })!
-    await Promise.resolve(); await Promise.resolve()
+    await flush()
     expect(port.sandboxWrapper).toHaveBeenCalledWith(id, '/repo', [], false)
     expect(port.spawnSession).toHaveBeenCalledWith(
       id, expect.stringMatching(/^sandbox-exec -f '\/fake\.sb' \/bin\/sh -c 'mycli run/), '/repo', undefined, undefined, undefined, 'zsh')
@@ -287,7 +290,7 @@ describe('sandboxed launches', () => {
     const port = fakePort()
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('mycli run', '/repo', 'Sbx', 'cli', undefined, { sandbox: { denyNetwork: true, extraPaths: ['/data'] } })!
-    await Promise.resolve()
+    await flush()
     expect(port.sandboxWrapper).toHaveBeenCalledWith(id, '/repo', ['/data'], true)
   })
 
@@ -300,7 +303,7 @@ describe('sandboxed launches', () => {
     })
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('mycli run', '/repo', 'Sbx', 'cli', undefined, { isolate: true, sandbox: {} })!
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    await flush()
     expect(port.sandboxWrapper).toHaveBeenCalledWith(id, `/wt/${id}/repo`, [], false)
   })
 
@@ -308,7 +311,7 @@ describe('sandboxed launches', () => {
     const port = fakePort({ sandboxWrapper: vi.fn(async () => { throw new Error('sandbox: bwrap is not installed') }) })
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('mycli run', '/repo', 'Sbx', 'cli', undefined, { sandbox: {} })!
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    await flush()
     const agent = useAppStore.getState().agents.find(a => a.id === id)
     expect(agent?.status).toBe('error')
     expect(agent?.log.some(l => l.t === 'err' && l.x.includes('bwrap'))).toBe(true)
@@ -341,7 +344,7 @@ describe('detached launches', () => {
     const rt = createLaunchRuntime(ctx(port))
     const id = rt.launchSession('sleep 999', '/repo', undefined, undefined, undefined, { detached: true })
     expect(id).toBeTruthy()
-    await Promise.resolve(); await Promise.resolve()
+    await flush()
     expect(port.detachedSpawn).toHaveBeenCalledWith(id, expect.stringContaining('sleep 999'), '/repo', 'zsh')
     expect(port.spawnSession).toHaveBeenCalledWith(id, 'attach-cmd', '/repo', undefined, undefined, undefined, undefined)
     const a = useAppStore.getState().agents.find(x => x.id === id)

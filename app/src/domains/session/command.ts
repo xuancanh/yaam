@@ -21,7 +21,12 @@ export function envPrefix(env?: string): string {
     .filter(l => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
     .map(l => {
       const i = l.indexOf('=')
-      return `${l.slice(0, i)}='${l.slice(i + 1).replace(/'/g, `'\\''`)}'`
+      const value = l.slice(i + 1)
+      // a bare reference ($NAME / ${NAME}) expands in the login shell, so a
+      // secret can live in the user's profile instead of persisted app state
+      const ref = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(value)
+      if (ref) return `${l.slice(0, i)}="$${ref[1] ?? ref[2]}"`
+      return `${l.slice(0, i)}='${value.replace(/'/g, `'\\''`)}'`
     })
   return parts.length ? `${parts.join(' ')} ` : ''
 }

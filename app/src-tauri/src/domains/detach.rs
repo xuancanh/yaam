@@ -146,6 +146,7 @@ pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
     let mut cb = CommandBuilder::new(executable);
     cb.args(args);
     cb.env("TERM", "xterm-256color");
+    for key in crate::util::PARENT_AGENT_ENV { cb.env_remove(key); }
     if let Some(shell) = shell_env { cb.env("SHELL", shell); }
     if let Some(cwd) = spec.cwd.as_ref().filter(|c| !c.is_empty()) {
         cb.cwd(PathBuf::from(crate::util::expand_tilde(cwd)));

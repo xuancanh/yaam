@@ -450,7 +450,7 @@ export interface AgentType {
   resumeFallbackCmd?: string
   /** which capability adapter (core/agent-adapters) drives this CLI: session-id
    *  capture, headless flags, and structured-state integration */
-  probe?: 'claude' | 'codex' | 'opencode'
+  probe?: 'claude' | 'codex' | 'opencode' | 'gemini' | 'omp'
   /** the command speaks the Agent Client Protocol over stdio (no PTY): YAAM
    *  drives it via session/prompt and answers its permission requests */
   acp?: boolean

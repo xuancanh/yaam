@@ -118,12 +118,19 @@ terminal resize behavior), kill/remove a handle, and list live ids.
 The domain scans known CLI stores for files created within 180 seconds of the
 launch timestamp:
 
-- Claude: the encoded project directory under `~/.claude/projects`;
+- Claude: the encoded project directory under `~/.claude/projects` (every
+  non-alphanumeric cwd character becomes `-`, see `util::claude_project_dir`);
 - Codex: recursive `~/.codex/sessions` JSONL files;
-- OpenCode: recursive storage JSON files with `ses_` stems.
+- OpenCode: recursive storage JSON files with `ses_` stems;
+- Oh My Pi (`omp`): `~/.omp/agent/sessions/<dir>/<ts>_<id>.jsonl` (root
+  follows `PI_CODING_AGENT_DIR`), matched on the session header's `cwd`.
 
 Creation time is preferred over modification time. Already claimed ids are
 excluded so concurrent sessions do not resolve to the same conversation.
+Claude and Gemini don't need detection: YAAM mints their id at launch
+(`--session-id`). PTY spawns (direct and detached hosts) strip the
+`CLAUDECODE`/`CLAUDE_CODE_SESSION_ID`/... variables a parent Claude Code
+session exports, so a YAAM started from a Claude terminal can't leak them.
 
 ### Tests
 

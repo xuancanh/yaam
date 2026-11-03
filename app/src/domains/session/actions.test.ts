@@ -6,6 +6,9 @@ import { useAppStore } from '../../core/store'
 import type { MutableRefObject } from 'react'
 import type { AppState, Agent, AgentType } from '../../core/types'
 
+// drain chained microtasks (spawn paths await sensing flags + wrappers)
+const flush = async (n = 12) => { for (let i = 0; i < n; i++) await Promise.resolve() }
+
 const liveStateRef = { get current() { return useAppStore.getState() } } as MutableRefObject<AppState>
 
 const agent = (over: Partial<Agent> = {}): Agent => ({
@@ -125,16 +128,32 @@ describe('createSessionActions', () => {
     expect(get('a1')?.status).toBe('running')
   })
 
+  it('claude resume re-wires hooks, tails the transcript, and never re-probes a minted id', async () => {
+    const type = { id: 'claude', name: 'Claude Code', model: 'claude', probe: 'claude', resumeCmd: 'claude --resume {id}' } as unknown as AgentType
+    seed([agent({ status: 'idle', cmd: 'claude', cliSessionId: 'sid-1', typeId: 'claude' })], { agentTypes: [type] })
+    const port = fakePort({ hooksInfo: vi.fn(async () => ({ port: 4321, token: 'tok' })) })
+    const c = ctx(port)
+    createSessionActions(c).resume('a1')
+    await flush()
+    const spawned = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    expect(spawned).toMatch(/^claude --resume sid-1 --settings /)
+    expect(spawned).toContain('agent=a1')
+    expect(port.watchTranscript).toHaveBeenCalledWith('a1', 'claude', '/repo', 'sid-1', false)
+    // a file probe could grab a sibling session born in the same folder
+    expect(c.probeCliSession).not.toHaveBeenCalled()
+  })
+
   it('resume ensures the detached host and spawns the returned attach command', async () => {
     const type = { id: 'cli', name: 'CLI', model: 'mycli', env: 'TOKEN=secret', resumeCmd: 'mycli --resume {id}' } as unknown as AgentType
     seed([agent({ status: 'idle', detached: true, cmd: 'mycli run', cliSessionId: 'sid-9', typeId: 'cli' })], { agentTypes: [type] })
     const port = fakePort()
     const c = ctx(port)
     createSessionActions(c).resume('a1')
-    await Promise.resolve(); await Promise.resolve()
-    // the ORIGINAL command goes to detachedSpawn — a live host reattaches,
-    // a dead one is relaunched from this command; never the CLI resume command
-    expect(port.detachedSpawn).toHaveBeenCalledWith('a1', expect.stringContaining('mycli run'), '/repo', 'zsh', 48, 190)
+    await flush()
+    // a live host ignores the command and reattaches; a DEAD host relaunches
+    // it, so it must be the CLI's resume-by-id command (relaunching the bare
+    // launch command started a fresh conversation and lost the old one)
+    expect(port.detachedSpawn).toHaveBeenCalledWith('a1', "TOKEN='secret' mycli --resume sid-9", '/repo', 'zsh', 48, 190)
     expect(port.spawnSession).toHaveBeenCalledWith('a1', 'attach-cmd', '/repo', 48, 190, undefined, undefined)
     expect(c.probeCliSession).not.toHaveBeenCalled()
     expect(get('a1')?.log.at(-1)?.x).toContain('reattaching detached session')
@@ -145,7 +164,7 @@ describe('createSessionActions', () => {
     seed([agent({ status: 'idle', detached: true, cmd: attach })])
     const port = fakePort()
     createSessionActions(ctx(port)).resume('a1')
-    await Promise.resolve(); await Promise.resolve()
+    await flush()
     // '' tells the backend to relaunch from the host's on-disk spec, which
     // still holds the real command the legacy agent never persisted
     expect(port.detachedSpawn).toHaveBeenCalledWith('a1', '', '/repo', 'zsh', 48, 190)
@@ -156,7 +175,7 @@ describe('createSessionActions', () => {
     seed([agent({ status: 'idle', detached: true, cmd: 'mycli run' })])
     const port = fakePort({ detachedSpawn: vi.fn(async () => { throw new Error('detached session ended and its command was not recorded') }) })
     createSessionActions(ctx(port)).resume('a1')
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    await flush()
     expect(port.spawnSession).not.toHaveBeenCalled()
     expect(get('a1')?.status).toBe('error')
     expect(get('a1')?.log.at(-1)?.x).toContain('not recorded')
@@ -167,7 +186,7 @@ describe('createSessionActions', () => {
     seed([agent({ status: 'idle', cliSessionId: 'sid-9', typeId: 'cli', sandbox: { denyNetwork: true, extraPaths: ['/data'] } })], { agentTypes: [type] })
     const port = fakePort()
     createSessionActions(ctx(port)).resume('a1')
-    await Promise.resolve(); await Promise.resolve()
+    await flush()
     expect(port.sandboxWrapper).toHaveBeenCalledWith('a1', '/repo', ['/data'], true)
     expect(port.spawnSession).toHaveBeenCalledWith('a1', expect.stringMatching(/^sandbox-exec -f '\/fake\.sb' \/bin\/sh -c 'mycli --resume sid-9'/), '/repo', 48, 190, undefined, 'zsh')
   })
@@ -176,7 +195,7 @@ describe('createSessionActions', () => {
     seed([agent({ status: 'idle', sandbox: {} })])
     const port = fakePort({ sandboxWrapper: vi.fn(async () => { throw new Error('sandbox: bwrap is not installed') }) })
     createSessionActions(ctx(port)).resume('a1')
-    await Promise.resolve(); await Promise.resolve()
+    await flush()
     expect(port.spawnSession).not.toHaveBeenCalled()
     expect(get('a1')?.status).toBe('error')
     expect(get('a1')?.log.at(-1)?.x).toContain('bwrap')
@@ -201,7 +220,7 @@ describe('createSessionActions', () => {
     seed([agent({ status: 'idle', machineId: 'm1', machine, sandbox: {}, cwd: 'relative/path' })])
     const port = fakePort()
     expect(() => createSessionActions(ctx(port)).resume('a1')).not.toThrow()
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    await flush()
     expect(port.spawnSession).not.toHaveBeenCalled()
     expect(get('a1')?.status).toBe('error')
     expect(get('a1')?.log.at(-1)?.x).toContain('absolute path')
@@ -243,7 +262,7 @@ describe('createSessionActions', () => {
     seed([agent({ status: 'idle' })])
     const port = fakePort()
     createSessionActions(ctx(port)).resume('a1')
-    await Promise.resolve() // let the spawn promise settle
+    await flush() // let the spawn promise settle
     expect(port.repaintTerminal).not.toHaveBeenCalled() // waits for the CLI to boot
     await vi.advanceTimersByTimeAsync(500)
     expect(port.repaintTerminal).toHaveBeenCalledWith('a1')

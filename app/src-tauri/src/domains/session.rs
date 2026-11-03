@@ -294,6 +294,9 @@ impl SessionManager {
         let mut cmd = CommandBuilder::new(executable);
         cmd.args(args);
         cmd.env("TERM", "xterm-256color");
+        for key in crate::util::PARENT_AGENT_ENV {
+            cmd.env_remove(key);
+        }
         if let Some(shell) = shell_env {
             cmd.env("SHELL", shell);
         }
@@ -515,9 +518,25 @@ fn derive_session_id(kind: &str, path: &std::path::Path) -> Option<String> {
     match kind {
         // ~/.codex/sessions/.../rollout-<ts>-<uuid>.jsonl -> trailing UUID
         "codex" if stem.len() >= 36 => Some(stem[stem.len() - 36..].to_string()),
+        // ~/.omp/agent/sessions/<dir>/<ts>_<id>.jsonl -> the part after '_'
+        "omp" => stem.rsplit_once('_').map(|(_, id)| id.to_string()).filter(|id| !id.is_empty()),
         // Claude and OpenCode use the complete file stem.
         _ => Some(stem),
     }
+}
+
+/// The `cwd` recorded in an Oh My Pi session header (`{"type":"session",...}`,
+/// within the first few lines).
+fn omp_session_cwd(path: &std::path::Path) -> Option<String> {
+    use std::io::BufRead;
+    let file = std::fs::File::open(path).ok()?;
+    for line in std::io::BufReader::new(file).lines().take(5).map_while(Result::ok) {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+        if v.get("type").and_then(|t| t.as_str()) == Some("session") {
+            return v.get("cwd").and_then(|c| c.as_str()).map(|c| c.to_string());
+        }
+    }
+    None
 }
 
 fn select_session_id(
@@ -556,20 +575,33 @@ fn detect_cli_session_impl(
     let until = since.saturating_add(180_000);
 
     let (dir, recurse, matcher): SessionStoreSpec = match kind {
-        "claude" => {
-            let base = expand_tilde(
-                &cwd.filter(|c| !c.is_empty())
-                    .unwrap_or_else(|| home.clone()),
-            );
-            let encoded = base.replace(['/', '.'], "-");
-            let project = std::path::PathBuf::from(&home)
-                .join(".claude/projects")
-                .join(encoded);
-            (
-                project,
-                false,
-                Box::new(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl")),
-            )
+        "claude" => (
+            crate::util::claude_project_dir(&home, cwd.as_deref().unwrap_or("")),
+            false,
+            Box::new(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl")),
+        ),
+        // Oh My Pi: ~/.omp/agent/sessions/<encoded-cwd>/<ts>_<id>.jsonl (the
+        // root moves with PI_CODING_AGENT_DIR). The cwd encoding isn't a
+        // documented contract, so scan every project dir one level deep and
+        // match the session header's recorded cwd instead.
+        "omp" => {
+            let root = std::env::var("PI_CODING_AGENT_DIR")
+                .ok()
+                .filter(|d| !d.is_empty())
+                .map(|d| std::path::PathBuf::from(expand_tilde(&d)))
+                .unwrap_or_else(|| std::path::PathBuf::from(&home).join(".omp/agent"))
+                .join("sessions");
+            let want = cwd.filter(|c| !c.is_empty()).map(|c| expand_tilde(&c));
+            let mut candidates = Vec::new();
+            if let Ok(dirs) = std::fs::read_dir(&root) {
+                for d in dirs.flatten().filter(|d| d.path().is_dir()) {
+                    files_in_window(&d.path(), since, until, false, &|p: &std::path::Path| {
+                        p.extension().and_then(|e| e.to_str()) == Some("jsonl")
+                            && want.as_deref().is_none_or(|w| omp_session_cwd(p).as_deref() == Some(w))
+                    }, &mut candidates);
+                }
+            }
+            return select_session_id(kind, &mut candidates, exclude);
         }
         "codex" => (
             std::path::PathBuf::from(&home).join(".codex/sessions"),
@@ -896,6 +928,28 @@ mod tests {
             derive_session_id("opencode", Path::new("/x/ses_1a8d3093dffeV2rBjv.json")),
             Some("ses_1a8d3093dffeV2rBjv".to_string()),
         );
+        assert_eq!(
+            derive_session_id(
+                "omp",
+                Path::new("/x/2026-10-15T14-45-37-007Z_01a14006-9a6f-7000-9dd8-0cf86cffe79a.jsonl")
+            ),
+            Some("01a14006-9a6f-7000-9dd8-0cf86cffe79a".to_string()),
+        );
+    }
+
+    #[test]
+    fn reads_the_omp_session_header_cwd() {
+        let dir = std::env::temp_dir().join(format!("yaam-omp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("2026-10-15T14-45-37-007Z_abc.jsonl");
+        std::fs::write(
+            &file,
+            "{\"type\":\"title\",\"title\":\"t\"}\n{\"type\":\"session\",\"id\":\"abc\",\"cwd\":\"/w/my_app\"}\n",
+        )
+        .unwrap();
+        assert_eq!(super::omp_session_cwd(&file).as_deref(), Some("/w/my_app"));
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir(&dir);
     }
 
     #[test]

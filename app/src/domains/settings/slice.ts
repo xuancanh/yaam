@@ -28,7 +28,27 @@ export function freshSettingsSlice(): SettingsSlice {
       { id: 'kiro-acp', name: 'Kiro (ACP)', color: '#A78BFA', model: 'kiro-cli acp', tools: 6, desc: 'Kiro over the Agent Client Protocol — structured events and approvals.', enabled: false, acp: true },
       { id: 'gemini-acp', name: 'Gemini (ACP)', color: '#7FD1FF', model: 'gemini --acp', tools: 6, desc: 'Gemini CLI over the Agent Client Protocol.', enabled: false, acp: true },
       { id: 'claude-acp', name: 'Claude (ACP)', color: '#E8A87C', model: 'npx @agentclientprotocol/claude-agent-acp', tools: 6, desc: 'Claude Code over the Agent Client Protocol.', enabled: false, acp: true },
-      { id: 'gemini', name: 'Gemini CLI', color: '#6C8EF5', model: 'gemini', tools: 5, desc: 'Google CLI — very large-context refactors.', enabled: true },
+      { id: 'gemini', name: 'Gemini CLI', color: '#6C8EF5', model: 'gemini', tools: 5, desc: 'Google CLI — very large-context refactors.', enabled: true, resumeCmd: 'gemini --resume {id}', resumeFallbackCmd: 'gemini --resume latest', probe: 'gemini' },
+      { id: 'omp', name: 'Oh My Pi', color: '#F472B6', model: 'omp', tools: 6, desc: 'Oh My Pi (omp): multi-provider terminal agent, bring your own models.', enabled: true, resumeCmd: 'omp --resume {id}', resumeFallbackCmd: 'omp --continue', probe: 'omp' },
+      // DeepSeek's official coding-agent path is Claude Code against DeepSeek's
+      // Anthropic-compatible endpoint (api-docs.deepseek.com, Claude Code
+      // integration). The token reads DEEPSEEK_API_KEY from the login shell
+      // unless the user pastes a key in place of the reference.
+      {
+        id: 'deepseek', name: 'DeepSeek', color: '#4D6BFE', model: 'claude', tools: 6,
+        desc: 'Claude Code on DeepSeek models. Set DEEPSEEK_API_KEY in your shell profile, or paste the key into this type\'s env.',
+        enabled: true, resumeCmd: 'claude --resume {id}', resumeFallbackCmd: 'claude --continue', probe: 'claude',
+        env: [
+          'ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic',
+          'ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY',
+          'ANTHROPIC_MODEL=deepseek-flash[1m]',
+          'ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-flash[1m]',
+          'ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-flash[1m]',
+          'ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-flash',
+          'CLAUDE_CODE_SUBAGENT_MODEL=deepseek-flash',
+          'CLAUDE_CODE_AUTO_COMPACT_WINDOW=786432',
+        ].join('\n'),
+      },
       { id: 'aider', name: 'Aider', color: '#C77DFF', model: 'aider', tools: 6, desc: 'Pair-programming CLI — git-native diffs.', enabled: true, resumeCmd: 'aider --restore-chat-history' },
       { id: 'cursor', name: 'Cursor Agent', color: 'var(--mut2)', model: 'cursor-agent', tools: 4, desc: 'Background agent — repo-wide autonomous tasks.', enabled: false },
     ],

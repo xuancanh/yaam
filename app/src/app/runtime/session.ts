@@ -20,6 +20,7 @@ import { attachAcpEvents } from '../../domains/session/acp-events'
 import { attachMcpServe } from '../../domains/session/mcp-serve'
 import { subscribeSessionExits } from '../../domains/session/exit-handler'
 import { createLaunchRuntime } from '../../domains/session/launch-runtime'
+import { realSessionProcessPort } from '../../domains/session/ports'
 import { createMonitorRuntime } from '../../domains/master/monitor-runtime'
 import { resolveDecision } from '../../domains/master/harness-stats'
 import { createWatcherRuntime } from '../../domains/board/watcher-runtime'
@@ -188,7 +189,11 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
     start() {
       settle.start()
       offExit ??= subscribeSessionExits(exitCtx)
-      offHooks ??= attachHookEvents({ stateRef, setNeedsInput, clearNeeds })
+      offHooks ??= attachHookEvents({
+        stateRef, setNeedsInput, clearNeeds,
+        // re-point the structured transcript tail at the new conversation
+        onCliSessionChange: (agentId, sid, cwd, fresh) => { void realSessionProcessPort.watchTranscript(agentId, 'claude', cwd, sid, fresh).catch(() => {}) },
+      })
       offTranscript ??= attachTranscriptEvents({ stateRef })
       offOpencode ??= attachOpencodeEvents({ stateRef, setNeedsInput, clearNeeds })
       offAcp ??= attachAcpEvents({ stateRef, setNeedsInput, clearNeeds })

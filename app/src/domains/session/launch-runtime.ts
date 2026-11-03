@@ -10,7 +10,8 @@ import { dispatch } from '../../core/store'
 import { hasCreds } from '../../master'
 import { buildLaunch } from './launch'
 import { focusSessionIn } from './layout-state'
-import { adapterFor, shQuote } from '../../core/agent-adapters'
+import { adapterFor } from '../../core/agent-adapters'
+import { withSensingFlags } from './sensing-flags'
 import { envPrefix, sendLineToSession, typeForCommand } from './command'
 import { findMachine, wrapLaunch } from './remote-machine'
 import { sandboxLocalWrap, sandboxRemoteWrap } from './sandbox'
@@ -165,48 +166,13 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
           return
         }
         const sandbox = plan.agent.sandbox
-        // Structured sensing: local sessions of hook-capable CLIs get per-session
-        // settings pointing their lifecycle hooks at YAAM's loopback listener.
-        // Machine sessions can't reach localhost, plain terminals have no agent,
-        // and a user-supplied --settings wins over ours. Purely additive: an
-        // unreachable listener makes the hook fail fast and the CLI proceeds.
-        let launchCommand = spawnCommand
+        // Structured sensing (hooks, manager MCP, event server): local agent
+        // sessions only; machine sessions can't reach loopback and plain
+        // terminals have no agent
         const adapter = adapterFor(launchType, spawnCommand)
-        if (!machine && !opts?.terminalShell && adapter?.hookSettings && !/(^|\s)--settings(\s|=)/.test(spawnCommand)) {
-          const info = await port.hooksInfo().catch(() => null)
-          if (info) {
-            const url = `http://127.0.0.1:${info.port}/hook?token=${encodeURIComponent(info.token)}&agent=${encodeURIComponent(id)}`
-            launchCommand = `${spawnCommand} --settings ${shQuote(adapter.hookSettings(url))}`
-          }
-        }
-        // manager MCP server: the session gets report_status/get_task tools
-        // pointed at the same loopback listener (its /mcp route)
-        if (!machine && !opts?.terminalShell && adapter?.mcpConfigFlag && !/--strict-mcp-config/.test(spawnCommand)) {
-          const info = await port.hooksInfo().catch(() => null)
-          if (info) {
-            const url = `http://127.0.0.1:${info.port}/mcp?token=${encodeURIComponent(info.token)}&agent=${encodeURIComponent(id)}`
-            launchCommand = `${launchCommand} ${adapter.mcpConfigFlag(url)}`
-          }
-        }
-        // file-hook CLIs (kiro): refresh the global hook bridge with this run's
-        // listener address and export the session id so events map exactly
-        if (!machine && !opts?.terminalShell && adapter?.fileHooks === 'kiro') {
-          const info = await port.hooksInfo().catch(() => null)
-          if (info) {
-            void port.installKiroHooks(`http://127.0.0.1:${info.port}/hook?token=${encodeURIComponent(info.token)}`)
-            if (adapter.sessionEnv) launchCommand = `${adapter.sessionEnv(id)} ${launchCommand}`
-          }
-        }
-        // event-server CLIs (opencode): pin the server to a port we allocated
-        // and stream its SSE bus — authoritative status, permissions, and the
-        // session id its SQLite store hides from file detection
-        if (!machine && !opts?.terminalShell && adapter?.serverPortFlag && !/(^|\s)--port(\s|=)/.test(spawnCommand)) {
-          const serverPort = await port.freePort().catch(() => null)
-          if (serverPort) {
-            launchCommand = `${launchCommand} ${adapter.serverPortFlag(serverPort)}`
-            void port.watchOpencode(id, serverPort)
-          }
-        }
+        const launchCommand = !machine && !opts?.terminalShell && adapter
+          ? await withSensingFlags(port, id, spawnCommand, adapter)
+          : spawnCommand
         const base = `${envPrefix(launchType?.env)}${launchCommand}`
         // Machine session: the local PTY runs an ssh client into a remote tmux
         // session (the durability layer). The remote cwd is handled inside the

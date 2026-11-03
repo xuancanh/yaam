@@ -11,6 +11,8 @@ import { mkId } from '../../shared/id'
 import { dispatch } from '../../core/store'
 import { focusSessionIn, removeFromGroups } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
+import { adapterFor } from '../../core/agent-adapters'
+import { withSensingFlags } from './sensing-flags'
 import { killRemote, tmuxName, wrapLaunch } from './remote-machine'
 import { disposeQuickShell } from './QuickShell'
 import { sandboxLocalWrap, sandboxRemoteWrap } from './sandbox'
@@ -215,6 +217,13 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
     },
 
     resume: id => {
+      // resuming a minted-id CLI keeps writing the same transcript: tail only
+      // what the resumed process appends
+      const watchResumedTranscript = (sid: string, a: Agent, adapter: ReturnType<typeof adapterFor>) => {
+        if (adapter?.store.kind === 'claude-projects' && a.cliSessionId) {
+          void port.watchTranscript(sid, 'claude', a.cwd || '', a.cliSessionId, false)
+        }
+      }
       const agent = stateRef.current.agents.find(a => a.id === id)
       if (agent?.kind === 'chat') return // chat agents have no process; just send a message
       // ACP resume: respawn the stdio agent (a fresh protocol session for now;
@@ -270,9 +279,11 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
               ? `reattaching to ${machine.label} · tmux ${tmuxName(id)}`
               : `restarting on ${machine.label}`
           }
-        } else if (agent.detached) {
-          resumeNote = 'reattaching detached session — relaunches it if it had ended'
         } else if (type?.resumeCmd) {
+          // Local sessions, detached included: a live detached host ignores
+          // this command and is simply reattached, but a DEAD host relaunches
+          // it, and relaunching the bare launch command started a brand-new
+          // conversation and lost the old one (e.g. after a reboot)
           if (type.resumeCmd.includes('{id}')) {
             if (agent.cliSessionId) {
               cmd = type.resumeCmd.replace('{id}', agent.cliSessionId)
@@ -285,7 +296,11 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
             cmd = type.resumeCmd
             resumeNote = `resuming via · ${cmd}`
           }
+          if (agent.detached) resumeNote = `reattaching detached session (if it had ended: ${resumeNote})`
+        } else if (agent.detached) {
+          resumeNote = 'reattaching detached session — relaunches it if it had ended'
         }
+        const adapter = adapterFor(type, agent.cmd)
         // the respawn reuses this xterm. NEVER wipe the scrollback
         // automatically — re-normalize the modes (alt screen, mouse tracking,
         // …) and let the respawned CLI repaint its own content. If the old
@@ -331,21 +346,24 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           // is relaunched from the stored command. Legacy agents persisted the
           // attach wrapper as their cmd — pass '' so the host's on-disk spec
           // (which kept the real command) is reused instead.
-          const hostBase = cmd.includes('--yaam-attach') ? '' : `${envPrefix(type?.env)}${cmd}`.trim()
+          const legacyAttach = cmd.includes('--yaam-attach')
           const hostShell = terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
           const spawnHost = (hostCmd: string) => port.detachedSpawn(id, hostCmd, agent.cwd || undefined, hostShell, size?.rows, size?.cols)
             .then(attachCmd => port.spawnSession(id, attachCmd, agent.cwd || undefined, size?.rows, size?.cols, undefined, undefined))
             .then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
             .catch(failResume)
-          // a sandboxed relaunch rebuilds its wrapper first (fail closed); ''
-          // reuses the host's on-disk spec, which kept the wrap from launch
-          if (agent.sandbox && hostBase) {
-            port.sandboxWrapper(id, agent.cwd || '', agent.sandbox.extraPaths ?? [], !!agent.sandbox.denyNetwork)
-              .then(w => spawnHost(sandboxLocalWrap(w, hostBase)))
-              .catch(failResume)
-          } else void spawnHost(hostBase)
+          void (async () => {
+            const hostBase = legacyAttach ? ''
+              : `${envPrefix(type?.env)}${adapter && !terminalShell ? await withSensingFlags(port, id, cmd, adapter) : cmd}`.trim()
+            // a sandboxed relaunch rebuilds its wrapper first (fail closed); ''
+            // reuses the host's on-disk spec, which kept the wrap from launch
+            if (agent.sandbox && hostBase) {
+              const w = await port.sandboxWrapper(id, agent.cwd || '', agent.sandbox.extraPaths ?? [], !!agent.sandbox.denyNetwork)
+              await spawnHost(sandboxLocalWrap(w, hostBase))
+            } else await spawnHost(hostBase)
+          })().catch(failResume)
+          watchResumedTranscript(id, agent, adapter)
         } else {
-          const base = `${envPrefix(type?.env)}${cmd}`.trim()
           const commandShell = terminalShell ? undefined : (stateRef.current.settings?.shell || 'zsh')
           const spawnLocal = (spawnCommand: string) => port.spawnSession(id, spawnCommand, agent.cwd || undefined, size?.rows, size?.cols, terminalShell, commandShell)
             .then(() => {
@@ -353,15 +371,27 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
               // draw a correct first frame even if layout shifted meanwhile
               setTimeout(() => port.repaintTerminal(id), 400)
             })
-            .catch(failResume)
-          // fail closed: a sandboxed session that can't rebuild its wrapper
-          // errors instead of resuming unsandboxed
-          if (agent.sandbox && !terminalShell) {
-            port.sandboxWrapper(id, agent.cwd || '', agent.sandbox.extraPaths ?? [], !!agent.sandbox.denyNetwork)
-              .then(w => spawnLocal(sandboxLocalWrap(w, base)))
+          const spawnWith = (base: string) => {
+            // fail closed: a sandboxed session that can't rebuild its wrapper
+            // errors instead of resuming unsandboxed
+            if (agent.sandbox && !terminalShell) {
+              return port.sandboxWrapper(id, agent.cwd || '', agent.sandbox.extraPaths ?? [], !!agent.sandbox.denyNetwork)
+                .then(w => spawnLocal(sandboxLocalWrap(w, base)))
+            }
+            return spawnLocal(base)
+          }
+          // a resumed CLI is a new process: re-wire hooks/MCP/event server, or
+          // it runs blind (and /clear id changes go unseen) from here on
+          if (adapter && !terminalShell) {
+            withSensingFlags(port, id, cmd, adapter)
+              .then(c => spawnWith(`${envPrefix(type?.env)}${c}`.trim()))
               .catch(failResume)
-          } else void spawnLocal(base)
-          probeCliSession(id, cmd, agent.cwd || '', true)
+          } else spawnWith(`${envPrefix(type?.env)}${cmd}`.trim()).catch(failResume)
+          watchResumedTranscript(id, agent, adapter)
+          // minted ids (claude/gemini) are already known and kept by resume;
+          // file probing would only risk grabbing a sibling session born in the
+          // same folder. A /clear later is caught by the SessionStart hook.
+          if (!(adapter?.sessionId === 'mint' && agent.cliSessionId)) probeCliSession(id, cmd, agent.cwd || '', true)
         }
       }
       const event = createSessionActivity(stateRef.current, id, {
