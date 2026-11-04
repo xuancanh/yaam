@@ -637,6 +637,12 @@ export interface OrchestrationSettings {
   shell: string
   /** default working directory prefilled in the new-session dialog */
   defaultCwd: string
+  /** recently launched working folders, newest first (new-session dialog);
+   *  machineId set for folders on a saved remote machine */
+  recentCwds?: { path: string; machineId?: string; at: number }[]
+  /** launches per agent type id ('shell' = plain terminal); orders the
+   *  new-session dialog's type picker */
+  agentTypeUsage?: Record<string, { n: number; at: number }>
   /** Master brain: when enabled with an API key, Master is an LLM with tools */
   masterEnabled: boolean
   masterModel: string

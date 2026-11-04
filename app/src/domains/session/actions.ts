@@ -13,6 +13,8 @@ import { focusSessionIn, removeFromGroups } from './layout-state'
 import { envPrefix, typeForCommand } from './command'
 import { adapterFor } from '../../core/agent-adapters'
 import { withSensingFlags } from './sensing-flags'
+import { rememberCwd } from './recent-cwds'
+import { recordTypeUse } from './type-usage'
 import { killRemote, tmuxName, wrapLaunch } from './remote-machine'
 import { disposeQuickShell } from './QuickShell'
 import { sandboxLocalWrap, sandboxRemoteWrap } from './sandbox'
@@ -60,7 +62,7 @@ export interface SessionActions {
   /** user-initiated full terminal reset (modes + scrollback) — the manual fix
    *  for a corrupted pane; never triggered automatically */
   refreshTerminal: (id: string) => void
-  newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean, detached?: boolean, machineId?: string, sandbox?: SandboxConfig) => void
+  newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean, detached?: boolean, machineId?: string, sandbox?: SandboxConfig, typeId?: string) => void
   sendInput: (id: string, text: string) => void
   stopSession: (id: string) => void
   /** track a CLI session discovered in an on-disk store (started outside
@@ -413,9 +415,20 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       flash('Terminal cleared')
     },
 
-    newRealSession: (command, cwd, terminalShell, isolate, detached, machineId, sandbox) => {
-      const id = launchSession(command, cwd, undefined, undefined, undefined, { terminalShell, isolate, detached, machineId, sandbox })
+    newRealSession: (command, cwd, terminalShell, isolate, detached, machineId, sandbox, typeId) => {
+      // an explicit type matters when several types share a binary (DeepSeek
+      // runs `claude` with its own env); the command match is only a fallback
+      const id = launchSession(command, cwd, undefined, typeId, undefined, { terminalShell, isolate, detached, machineId, sandbox })
       if (id) {
+        const usedType = typeId || (terminalShell ? 'shell' : '')
+        dispatch(s => ({
+          ...s,
+          settings: {
+            ...s.settings,
+            ...(cwd.trim() ? { recentCwds: rememberCwd(s.settings.recentCwds, cwd, machineId) } : {}),
+            ...(usedType ? { agentTypeUsage: recordTypeUse(s.settings.agentTypeUsage, usedType) } : {}),
+          },
+        }))
         const label = command.trim().slice(0, 80)
         logEvent('route', id, `Launched session · ${label}`)
         const event = createSessionActivity(stateRef.current, id, {
