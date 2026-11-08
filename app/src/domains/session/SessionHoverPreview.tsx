@@ -11,8 +11,15 @@ type PreviewPlacement = 'vertical' | 'right'
 
 function previewLines(agent: Agent): string[] {
   const rendered = readScreen(agent.id, 12)
-  if (rendered.length) return rendered
-  return agent.log.slice(-12).map(line => line.x).filter(Boolean)
+  return dedent(rendered.length ? rendered : agent.log.slice(-12).map(line => line.x).filter(Boolean))
+}
+
+/** TUIs pad every row with the same left margin; in a 420px card that margin
+ *  is wasted width, so strip what all rows share. */
+export function dedent(lines: string[]): string[] {
+  const indents = lines.filter(l => l.trim()).map(l => l.length - l.trimStart().length)
+  const cut = indents.length ? Math.min(...indents) : 0
+  return cut ? lines.map(l => l.slice(cut)) : lines
 }
 
 function PreviewCard({ agent, task, anchor, placement }: { agent: Agent; task?: BoardTask; anchor: HTMLElement; placement: PreviewPlacement }) {
@@ -95,8 +102,14 @@ function PreviewCard({ agent, task, anchor, placement }: { agent: Agent; task?: 
           <span style={{ width: 5, height: 5, borderRadius: '50%', background: agent.responding ? 'var(--green)' : 'var(--dim)' }} />
           {briefsOn ? 'LIVE TERMINAL · EVIDENCE' : 'LIVE TERMINAL'}
         </div>
-        <div className="mono" style={{ height: 128, overflow: 'hidden', fontSize: 9.5, lineHeight: 1.32, color: 'var(--mut2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {lines.length ? lines.join('\n') : 'No terminal output yet.'}
+        {/* one terminal row per line, clipped rather than wrapped: TUI rows are
+            far wider than the card, and wrapping them shreds box drawing and
+            pushes the newest rows out of view. Bottom-anchored so the latest
+            output is what stays visible. */}
+        <div className="mono" style={{ height: 128, overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', fontSize: 9.5, lineHeight: 1.32, color: 'var(--mut2)' }}>
+          {lines.length
+            ? lines.map((line, i) => <div key={i} style={{ whiteSpace: 'pre', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0, minHeight: '1.32em' }}>{line}</div>)
+            : 'No terminal output yet.'}
         </div>
       </div>
     </div>

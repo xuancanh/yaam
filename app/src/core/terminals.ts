@@ -6,10 +6,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { WebglAddon } from '@xterm/addon-webgl'
-import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { onSessionData, openExternal, resizeSession, writeSession } from './native'
-import { filePathMatches } from './terminal-links'
+import { filePathMatches, urlLinksAt } from './terminal-links'
 import { TerminalInputBuffer } from './terminal-input'
 import { runTerminalSearch } from './terminal-search'
 
@@ -181,9 +180,26 @@ export function getTerminal(
     term.loadAddon(fit)
     // ctrl/cmd+click a URL → default browser. Plain clicks fall through to the
     // terminal (TUIs get their mouse events; no accidental navigation).
-    term.loadAddon(new WebLinksAddon((ev, uri) => {
-      if (ev.ctrlKey || ev.metaKey) void openExternal(uri)
-    }))
+    // Replaces the web-links addon, which only joins soft wraps and so broke
+    // on URLs a TUI wrapped onto the next row itself.
+    term.registerLinkProvider({
+      provideLinks(y, cb) {
+        const buf = term.buffer.active
+        const row = (i: number) => {
+          const line = buf.getLine(i)
+          return line ? { text: line.translateToString(true), wrapped: line.isWrapped } : undefined
+        }
+        const links = urlLinksAt(row, y - 1, term.cols)
+        cb(links.length ? links.map(link => ({
+          range: { start: link.start, end: link.end },
+          text: link.url,
+          decorations: { pointerCursor: true, underline: true },
+          activate(ev: MouseEvent) {
+            if (ev.ctrlKey || ev.metaKey) void openExternal(link.url)
+          },
+        })) : undefined)
+      },
+    })
     // ctrl/cmd+click a file path → the session's Files viewer. The mounted
     // pane owns resolution (cwd join) via its onOpenFile callback.
     term.registerLinkProvider({

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { filePathMatches, resolveTermPath } from './terminal-links'
+import { filePathMatches, resolveTermPath, urlLinksAt } from './terminal-links'
 
 const paths = (line: string) => filePathMatches(line).map(m => m.path)
 
@@ -29,7 +29,7 @@ describe('filePathMatches', () => {
     expect(paths('files: a/b.ts, c/d.ts')).toEqual(['a/b.ts', 'c/d.ts'])
   })
 
-  it('ignores the path-looking tail of a URL (web-links addon owns those)', () => {
+  it('ignores the path-looking tail of a URL (urlLinksAt owns those)', () => {
     expect(paths('visit https://example.com/deep/path.html today')).toEqual([])
   })
 
@@ -54,5 +54,66 @@ describe('resolveTermPath', () => {
     expect(resolveTermPath('src/app.ts', '/repo')).toBe('/repo/src/app.ts')
     expect(resolveTermPath('./x.sh', '/repo/')).toBe('/repo/x.sh')
     expect(resolveTermPath('x.sh', '')).toBe('x.sh')
+  })
+})
+
+describe('urlLinksAt', () => {
+  const COLS = 40
+  const screen = (rows: (string | [string, boolean])[]) => (y: number) => {
+    const r = rows[y]
+    if (r === undefined) return undefined
+    return typeof r === 'string' ? { text: r, wrapped: false } : { text: r[0], wrapped: r[1] }
+  }
+
+  it('finds a URL on one row', () => {
+    const [l] = urlLinksAt(screen(['see https://example.com/a.']), 0, COLS)
+    expect(l.url).toBe('https://example.com/a')
+    expect(l.start).toEqual({ x: 5, y: 1 })
+  })
+
+  it('joins a URL a TUI hard-wrapped onto an indented next row', () => {
+    const rows = screen([
+      '  Open https://github.com/org/repo/pull/', // 40 chars, full row
+      '  12345/files?diff=split now',
+    ])
+    for (const y of [0, 1]) {
+      const [l] = urlLinksAt(rows, y, COLS)
+      expect(l.url).toBe('https://github.com/org/repo/pull/12345/files?diff=split')
+      expect(l.start).toEqual({ x: 8, y: 1 })
+      expect(l.end).toEqual({ x: 24, y: 2 })
+    }
+  })
+
+  it('joins three rows when the middle one is a bare fragment', () => {
+    const rows = screen([
+      'go: https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'cccc',
+    ])
+    expect(urlLinksAt(rows, 2, COLS)[0].url).toBe(`https://${'a'.repeat(31)}${'b'.repeat(40)}cccc`)
+  })
+
+  it('follows xterm soft wraps', () => {
+    const rows = screen(['x https://example.com/aaaaaaaaaaaaaaaaaaaa', ['bbb done', true]])
+    expect(urlLinksAt(rows, 1, COLS)[0].url).toBe('https://example.com/aaaaaaaaaaaaaaaaaaaabbb')
+  })
+
+  it('does not glue a short row to the next line', () => {
+    const rows = screen(['see https://example.com', 'Next line'])
+    expect(urlLinksAt(rows, 0, COLS)[0].url).toBe('https://example.com')
+    expect(urlLinksAt(rows, 1, COLS)).toEqual([])
+  })
+
+  it('does not join when the full row ends in prose, not a URL', () => {
+    const rows = screen(['https://a.io is the link and some words', 'more'])
+    expect(urlLinksAt(rows, 0, COLS)[0].url).toBe('https://a.io')
+  })
+
+  it('strips box borders around wrapped text', () => {
+    const rows = screen([
+      '│ https://example.com/very/long/path/ │',
+      '│ continued/here                      │',
+    ])
+    expect(urlLinksAt(rows, 1, COLS)[0].url).toBe('https://example.com/very/long/path/continued/here')
   })
 })
