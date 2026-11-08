@@ -183,8 +183,10 @@ alternate-screen TUI corrupts it) and a `repaintSession` SIGWINCH jiggle instead
 ## LLM layer
 
 Provider-agnostic. `PROVIDERS` in `llm/client.ts`: `anthropic`, `openai`,
-`deepseek`, `kimi`, `gemini`, `glm`, `bedrock`, `custom` (OpenAI-compatible),
-`anthropic-compat`. Two wire protocols: Anthropic Messages and OpenAI
+`deepseek`, `kimi`, `gemini`, `glm`, `bedrock`, `local` (keyless Ollama / LM
+Studio / llama-server), `custom` (OpenAI-compatible), `anthropic-compat`.
+`buildMonitorCfg` lets monitors, watchers and addon agents run on the `local`
+provider (`settings.monitorProvider`) while Master stays remote. Two wire protocols: Anthropic Messages and OpenAI
 chat-completions, adapted to a common internal shape; `callApiStream` adds SSE
 streaming for both (Bedrock falls back to buffered). HTTP goes through the
 Tauri http plugin to dodge CORS.

@@ -5,7 +5,7 @@
 import type { MutableRefObject } from 'react'
 import type { Agent, AppState, BoardCol, EventType, NotifKind, TaskChatMsg } from '../../core/types'
 import type { ApiMessage } from '../../master'
-import { buildCfg, hasCreds } from '../../master'
+import { buildMonitorCfg, hasCreds } from '../../master'
 import { callApiStream } from '../../llm/client'
 import type { ApiResponse, LlmConfig } from '../../llm/client'
 import { runWatcherTurn } from './watcher'
@@ -284,7 +284,7 @@ export async function runWatcherLoop(ctx: WatcherCtx, taskId: string, note: stri
       try {
         const curState = ctx.stateRef.current
         const workspaceId = findTaskInState(curState, taskId)?.workspaceId
-        const reply = await runWatcherTurn(buildCfg(st, st.monitorModel || undefined), getTask, getAgents, current, history, exec, runSignal, stream.call, {
+        const reply = await runWatcherTurn(buildMonitorCfg(st), getTask, getAgents, current, history, exec, runSignal, stream.call, {
           memoryDigest: memoryDigest(wsMemory(curState, workspaceId), ['preferences', 'patterns', 'corrections']),
           calibration: calibrationNote(curState.harnessLog, 'watcher'),
           custom: curState.settings.assistantPrompts?.watcher,

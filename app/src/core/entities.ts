@@ -620,6 +620,10 @@ export interface BrainProfile {
   provider: string
   masterModel: string
   monitorModel: string
+  /** absent on profiles saved before local monitors existed; applying one of
+   *  those keeps the live monitor provider */
+  monitorProvider?: string
+  monitorBaseUrl?: string
   /** keychain-backed like the live settings key (see store/secrets) */
   apiKey: string
   baseUrl: string
@@ -648,6 +652,11 @@ export interface OrchestrationSettings {
   masterModel: string
   /** model for per-session monitor LLMs; empty = same as masterModel */
   monitorModel: string
+  /** provider for monitors/watchers: '' = same as Master, 'local' = an
+   *  OpenAI-compatible server on this machine (Master stays remote) */
+  monitorProvider?: string
+  /** endpoint for a local monitor provider; empty = the provider default */
+  monitorBaseUrl?: string
   apiKey: string
   /** LLM provider: anthropic | openai | deepseek | kimi | custom */
   provider: string

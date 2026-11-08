@@ -17,7 +17,8 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 - **Extensible via addons** — a real plugin system with a marketplace, sandboxed views, Master tools, hooks, and per-addon agents.
 - **Mobile companion** — a paired-device web app served from the desktop: drive tasks, chats, and sessions from your phone over LAN, Tailscale/WireGuard, or a Cloudflare Tunnel; execution never leaves the machine.
 - **Workspaces** — isolated sets of sessions, chats, boards, and schedules that keep running in the background.
-- **Multi-provider** — Anthropic, OpenAI, DeepSeek, Kimi, Gemini, GLM, AWS Bedrock, and OpenAI-/Anthropic-compatible custom endpoints.
+- **Multi-provider** — Anthropic, OpenAI, DeepSeek, Kimi, Gemini, GLM, AWS Bedrock, OpenAI-/Anthropic-compatible custom endpoints, and keyless local servers (Ollama, LM Studio, llama-server) that can run the per-session monitors while Master stays remote.
+- **Structured sensing** — beyond screen scraping, YAAM reads each CLI's own signals (Claude Code hooks and transcripts, Codex rollouts, OpenCode's event bus, Kiro hooks, ACP over stdio), so status, approvals, and results are exact.
 
 ## Sessions — real terminals
 
@@ -29,6 +30,12 @@ Built with [Tauri 2](https://tauri.app) + React + TypeScript.
 - Per-pane stop/resume/exit-code status, maximize/restore, and rename.
 - **Detachable sessions** — start a session in detached mode and its PTY lives in a separate host process with its own lifecycle: it keeps running when YAAM quits, and the app reattaches later (▶) with the recent output replayed. Stop ends it for real; everything else (monitors, remote companion, resize) works as usual.
 - **Remote machines** — save SSH hosts in **Settings → Machines** and run any session on one: by default the agent runs on the host over SSH just like a local session (it ends when you disconnect), and checking **Detached** keeps it alive in a **tmux** session across disconnects and app restarts (Resume reattaches, Stop ends it). The **Files and Git** panels operate over SSH on that host, multi-repo folders included. Auth is keys/ssh-agent only (no passwords; a **Test connection** check probes tmux, `base64`, git, and the working dir). A machine can be chosen in the New Session dialog and on templates, board tasks, and schedules.
+- **Resume** — sessions remember their CLI conversation id (Claude Code, including across `/clear`, Codex, Gemini CLI, Oh My Pi, DeepSeek), so a stopped or restarted session picks up the same conversation.
+- **Structured signals** — Claude Code reports lifecycle through per-session hooks and its transcript, Codex through its rollout files, OpenCode through its server event bus, and Kiro through file hooks; ACP agents run over stdio with structured permission requests. Sessions also get YAAM's manager MCP server (`report_status` / `get_task`), and exits produce typed run results.
+- **Adopt outside sessions** — CLI sessions started in a plain terminal show up in the rail and can be adopted into YAAM.
+- **New-session dialog** — recent folders first (local and remote), agent types sorted by how often you launch them, and template / sandbox / worktree options tucked under Advanced.
+- **Quick shell** (⌘J) — a scratch shell docked in the session pane, kept alive between toggles.
+- **Clickable output** — ⌘/Ctrl+click opens URLs (even when a TUI wrapped them across lines) and file paths (opened in the Files viewer). Hovering a tab previews the live terminal and its status brief.
 - **Compact session tabs** — a single color-coded dot carries each session's status (no text label), blinking sky-blue while the agent is streaming a response; focusing a tab clears its notifications.
 
 ## Master — orchestration with monitors
@@ -39,6 +46,8 @@ Master is a Claude model with tools (enable in Settings → Master Brain; model 
 - **Acts on your behalf** — tools to launch, message, and stop sessions; create/toggle/delete schedules; add board tasks; and change app settings and tool permissions straight from chat.
 - **Proactive** — session exits and failures trigger Master turns (follow mode).
 - **Works without a brain** — with the Master Brain off, deterministic heuristics take over: sessions still flag when they need input, task cards still reach a final state (review/failed) on exit, and session cards get a best-effort status digest that flags error-looking output — so the board and fleet never go stale.
+- **Runs rail and approvals inbox** — the sidebar groups sessions by working folder (archived ones expandable) and answers pending permission prompts inline.
+- **Mission Control (beta)** — a full-screen command deck: one Master chat beside a stage that follows whichever session needs a decision, with a keyboard layer and an event ticker. Enable it in Settings → Beta.
 
 ### Agents overview
 
@@ -120,7 +129,12 @@ Work is organized into **workspaces** (switcher in the title bar): each has its 
 - **MCP everywhere** — streamable-HTTP *and* local stdio servers, a curated one-click marketplace, import from Claude Desktop / Claude Code / Cursor / Codex / Windsurf configs, and `.mcpb`/`.dxt` Claude Desktop extension bundles.
 - **Claude plugin marketplaces** — browse repos like `anthropics/claude-plugins-official` and install plugins for chat: skills and commands become slash-invocable skill registries, agents become personas, `.mcp.json` servers register directly, and plugin `hooks/` configs are translated into addon hooks (Stop/SessionEnd → session-exit, Notification → needs-input; runs gated behind the never-auto-granted `exec` permission).
 - **Skills** — local instruction packs plus GitHub/local registries (a keychain-backed GitHub token lifts API rate limits).
-- **Appearance** — Dark / Midnight / Light / Paper (warm reader-style) / System themes with theme-aware terminal palettes, interface scale, layout density, UI + mono font choices, and markdown-table typography.
+- **Appearance** — Dark / Midnight / Forest / Light / Paper (warm reader-style) / Sakura / System themes, a custom accent color (optionally tinting every surface), an independent terminal theme, file-viewer syntax palettes, configurable tab and tab-group colors, interface scale, layout density, UI + mono font choices, and markdown-table typography.
+- **Command palette** (⌘K) — jump to sessions, terminals, views, and actions from the keyboard.
+- **Files viewer** — quick-open across the session tree, find-in-file, markdown preview, image / PDF / office / video / audio / CSV previews, and a dotfile toggle.
+- **Keep Awake** — hold off idle sleep while sessions run (or always), so a locked screen doesn't pause agents.
+- **Auto-update** — signed over-the-air updates, re-checked every 24 hours with one notification per version.
+- **Developer mode** — an in-app debug log (HTTP failures, console errors) and a Web Inspector button.
 - **Notifications & activity** — session exits, failures, cron runs, and Master decisions in the bell popover and Activity timeline, mirrored to the OS notification center when the app is in the background.
 - **Persistence** — sessions, board, schedules, templates, layouts, settings, memory, and more survive restarts.
 

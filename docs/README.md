@@ -34,6 +34,8 @@ planning document disagree, the implementation documents below are canonical.
   building and publishing a registry addon.
 - [Session sandbox audit (2026-07)](sandbox-audit-2026-07.md) — threat model,
   findings, executed hardening, lifecycle coverage, and residual limitations.
+- [On-device LLM for monitors](local-llm.md): local-server provider, the
+  built-in llama.cpp engine design, and the 2026-11 Qwen3 benchmark.
 - [Addon architecture and authoring](addons.md) — package format, permissions,
   view bridge, handlers, hooks, agents, and registry format.
 

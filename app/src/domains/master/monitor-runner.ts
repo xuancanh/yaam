@@ -5,7 +5,7 @@
 import type { MutableRefObject } from 'react'
 import type { AppState, EscOption, EventType, NotifKind } from '../../core/types'
 import type { ApiMessage } from '../../master'
-import { buildCfg, hasCreds } from '../../master'
+import { buildMonitorCfg, hasCreds } from '../../master'
 import { runMonitorTurn } from '../../monitor'
 import type { MonitorExec } from '../../monitor'
 import { mkId } from '../../shared/id'
@@ -101,7 +101,7 @@ export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) 
       }
       try {
         const cur = ctx.stateRef.current
-        await runMonitorTurn(buildCfg(st, st.monitorModel || undefined), agent, current, history, exec, runSignal, {
+        await runMonitorTurn(buildMonitorCfg(st), agent, current, history, exec, runSignal, {
           memoryDigest: memoryDigest(wsMemory(cur, agent.workspaceId), ['approvals', 'preferences', 'patterns']),
           calibration: calibrationNote(cur.harnessLog, 'monitor'),
           custom: cur.settings.assistantPrompts?.monitor,

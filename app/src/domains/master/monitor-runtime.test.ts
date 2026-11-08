@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MutableRefObject } from 'react'
 import type { Agent, AppState } from '../../core/types'
 
-vi.mock('../../master', () => ({ buildCfg: () => ({}), hasCreds: () => true }))
+vi.mock('../../master', () => ({ buildMonitorCfg: () => ({}), hasCreds: () => true }))
 vi.mock('../../core/terminals', () => ({ isAltScreen: () => false, readScreen: () => [] }))
 
 let releaseFirst: (() => void) | undefined

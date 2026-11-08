@@ -6,7 +6,7 @@
 import type { MutableRefObject } from 'react'
 import type { AppState, EventType } from '../../core/types'
 import type { ApiMessage } from '../../master'
-import { buildCfg, hasCreds } from '../../master'
+import { buildMonitorCfg, hasCreds } from '../../master'
 import type { AddonApi } from '../../core/addons'
 import { AbortRegistry, isAbortError } from '../../core/abort-registry'
 import { runAddonAgentTurn } from './addon-agent'
@@ -43,7 +43,7 @@ export function createAddonAgentRuntime(ports: AddonAgentPorts): AddonAgentRunti
           history = []
           histories.set(addonId, history)
         }
-        const reply = await runAddonAgentTurn(buildCfg(st, st.monitorModel || undefined), addon, note, history, ports.makeAddonApi(addonId), runSignal)
+        const reply = await runAddonAgentTurn(buildMonitorCfg(st), addon, note, history, ports.makeAddonApi(addonId), runSignal)
         return reply || '(acted without a reply)'
       } catch (e) {
         // the addon was removed mid-turn — stop quietly

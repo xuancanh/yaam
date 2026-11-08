@@ -5,7 +5,7 @@ import type { ApiMessage } from '../../llm/client'
 import { AbortRegistry } from '../../core/abort-registry'
 
 let creds = true
-vi.mock('../../master', () => ({ buildCfg: () => ({}), hasCreds: () => creds }))
+vi.mock('../../master', () => ({ buildMonitorCfg: () => ({}), hasCreds: () => creds }))
 vi.mock('../../core/terminals', () => ({ isAltScreen: () => false, readScreen: () => '' }))
 
 const turn = vi.fn(async (): Promise<string> => 'watcher reply')

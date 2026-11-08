@@ -57,6 +57,9 @@ export const PROVIDERS: ProviderDef[] = [
   { id: 'gemini', label: 'Google Gemini', base: 'https://generativelanguage.googleapis.com/v1beta/openai', protocol: 'openai', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], keyHint: 'AIza…' },
   { id: 'glm', label: 'GLM (Z.ai / Zhipu)', base: 'https://api.z.ai/api/paas/v4', protocol: 'openai', models: ['glm-4.6', 'glm-4.5-air'], keyHint: 'api key' },
   { id: 'bedrock', label: 'AWS Bedrock (Claude)', base: '', protocol: 'anthropic', models: ['us.anthropic.claude-sonnet-4-5-20250929-v1:0', 'us.anthropic.claude-haiku-4-5-20251001-v1:0', 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'], keyHint: 'no key — AWS credential chain' },
+  // Ollama's default port; LM Studio (:1234/v1) and llama-server (:8080/v1)
+  // speak the same protocol via a base URL override. No key needed.
+  { id: 'local', label: 'Local (Ollama / LM Studio / llama-server)', base: 'http://localhost:11434/v1', protocol: 'openai', models: ['qwen3:1.7b', 'qwen3:0.6b', 'llama3.2:1b', 'gemma3:1b'], keyHint: 'not needed' },
   { id: 'custom', label: 'Custom (OpenAI-compatible)', base: '', protocol: 'openai', models: [], keyHint: 'api key' },
   { id: 'anthropic-compat', label: 'Custom (Anthropic-compatible)', base: '', protocol: 'anthropic', models: [], keyHint: 'api key' },
 ]
@@ -375,23 +378,43 @@ function toOpenAiMessages(system: string, messages: ApiMessage[]): OaiMessage[] 
   return out
 }
 
+/** OpenAI-protocol endpoint root: custom and local providers take the
+ *  configured base URL; the rest use their fixed API host. */
+export function openAiBase(cfg: Pick<LlmConfig, 'provider' | 'baseUrl'>): string {
+  const overridable = cfg.provider.models.length === 0 || cfg.provider.id === 'local'
+  return (overridable && cfg.baseUrl.trim() ? cfg.baseUrl.trim() : cfg.provider.base).replace(/\/$/, '')
+}
+
+/** Qwen3 thinks before every answer unless told not to; on a small local
+ *  model that multiplies latency for monitor digests. The soft switch lives in
+ *  the chat template, so it works across Ollama, LM Studio and llama-server. */
+function localSystem(cfg: LlmConfig, system: string): string {
+  return cfg.provider.id === 'local' && /qwen3/i.test(cfg.model) && !cfg.thinking ? `${system}\n\n/no_think` : system
+}
+
+/** Local servers usually run without auth; an empty Bearer header can trip
+ *  ones started with --api-key into a confusing error, so omit it. */
+function bearer(key: string): Record<string, string> {
+  return key ? { authorization: `Bearer ${key}` } : {}
+}
+
 /** Adapt one request to OpenAI chat completions and normalize its response. */
 async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], signal?: AbortSignal): Promise<ApiResponse> {
-  const base = (cfg.provider.models.length === 0 && cfg.baseUrl ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
+  const base = openAiBase(cfg)
   if (!base) throw new Error('custom provider needs a base URL (Settings → Master Brain)')
   // Build the request with a supplied key so auth failures can refresh and retry once.
   const send = async (key: string) => doFetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${key}`,
+      ...bearer(key),
     },
     body: JSON.stringify({
       model: cfg.model,
       max_tokens: 8192,
       // reasoning models fix their own temperature and reject overrides
       ...(cfg.thinking ? { reasoning_effort: cfg.thinking } : { temperature: 0.2 }),
-      messages: toOpenAiMessages(system, messages),
+      messages: toOpenAiMessages(localSystem(cfg, system), messages),
       tools: (tools as Array<{ name: string; description: string; input_schema: unknown }>).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
     }),
     signal,
@@ -602,14 +625,14 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
 
 /** Streaming OpenAI chat-completions call: content deltas flow through onDelta. */
 async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta, signal?: AbortSignal): Promise<ApiResponse> {
-  const base = (cfg.provider.models.length === 0 && cfg.baseUrl ? cfg.baseUrl : cfg.provider.base).replace(/\/$/, '')
+  const base = openAiBase(cfg)
   if (!base) throw new Error('custom provider needs a base URL')
   const send = async (key: string) => doFetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       accept: 'text/event-stream',
-      authorization: `Bearer ${key}`,
+      ...bearer(key),
     },
     body: JSON.stringify({
       model: cfg.model,
@@ -618,7 +641,7 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
       ...(cfg.thinking ? { reasoning_effort: cfg.thinking } : { temperature: 0.2 }),
       stream: true,
       stream_options: { include_usage: true },
-      messages: toOpenAiMessages(system, messages),
+      messages: toOpenAiMessages(localSystem(cfg, system), messages),
       tools: (tools as Array<{ name: string; description: string; input_schema: unknown }>).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
     }),
     signal,
@@ -688,8 +711,11 @@ export function brainOn(settings: AppState['settings']): boolean {
 /** Whether the settings hold usable credentials for the chosen provider.
  *  Bedrock has no API key — it authenticates via the AWS credential chain. */
 export function hasCreds(settings: AppState['settings']): boolean {
-  return settings.provider === 'bedrock' || Boolean(settings.apiKey) || Boolean(settings.credCmd.trim())
+  return KEYLESS.has(settings.provider) || Boolean(settings.apiKey) || Boolean(settings.credCmd.trim())
 }
+
+/** Providers that authenticate without a key: the AWS chain, or none at all. */
+const KEYLESS = new Set(['bedrock', 'local'])
 
 /** Config for a chat-agent type: its own provider/key/base, falling back to
  *  the Master Brain credentials when it shares the provider and sets no key. */
@@ -717,7 +743,7 @@ export function chatTypeHasCreds(
   t: { provider: string; apiKey?: string },
   settings: AppState['settings'],
 ): boolean {
-  if (t.provider === 'bedrock') return true
+  if (KEYLESS.has(t.provider)) return true
   if (t.apiKey) return true
   return t.provider === settings.provider && (Boolean(settings.apiKey) || Boolean(settings.credCmd.trim()))
 }
@@ -734,4 +760,32 @@ export function buildCfg(settings: AppState['settings'], modelOverride?: string)
     awsRefreshCmd: settings.awsRefreshCmd,
     credCmd: settings.credCmd,
   }
+}
+
+/** Config for monitors, watchers and addon agents. With a local monitor
+ *  provider they run on this machine while Master keeps its remote provider;
+ *  otherwise they share Master's credentials with the optional cheaper model. */
+export function buildMonitorCfg(settings: AppState['settings']): LlmConfig {
+  const id = settings.monitorProvider ?? ''
+  if (!id || id === settings.provider) return buildCfg(settings, settings.monitorModel || undefined)
+  const provider = providerFor(id)
+  return {
+    provider,
+    baseUrl: settings.monitorBaseUrl ?? '',
+    apiKey: '',
+    model: settings.monitorModel || provider.models[0] || '',
+    awsRegion: settings.awsRegion,
+    awsProfile: settings.awsProfile,
+    awsRefreshCmd: settings.awsRefreshCmd,
+    credCmd: '',
+  }
+}
+
+/** Model ids an OpenAI-compatible server reports at GET /models (Ollama,
+ *  LM Studio and llama-server all implement it). Throws when unreachable. */
+export async function listServerModels(base: string, signal?: AbortSignal): Promise<string[]> {
+  const res = await doFetch(`${base.replace(/\/$/, '')}/models`, { method: 'GET', signal })
+  if (!res.ok) throw new Error(`server answered ${res.status}`)
+  const data = await readJsonBounded<{ data?: { id?: string }[] }>(res)
+  return (data.data ?? []).map(m => m.id ?? '').filter(Boolean)
 }

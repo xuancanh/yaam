@@ -5,7 +5,7 @@ import type { AppState, BoardTask } from '../../core/types'
 
 // Master config is trivially satisfied; the LLM turn is faked so we can control
 // exactly when (and whether) it settles.
-vi.mock('../../master', () => ({ buildCfg: () => ({}), hasCreds: () => true }))
+vi.mock('../../master', () => ({ buildMonitorCfg: () => ({}), hasCreds: () => true }))
 vi.mock('../../core/terminals', () => ({ isAltScreen: () => false, readScreen: () => '' }))
 
 let capturedSignal: AbortSignal | undefined

@@ -9,12 +9,13 @@ import { SectionLabel } from './SectionLabel'
 import { confirmAction } from '../../components/Confirm'
 
 /** The settings fields a Brain profile snapshots. */
-const BRAIN_KEYS = ['provider', 'masterModel', 'monitorModel', 'apiKey', 'baseUrl', 'awsRegion', 'awsProfile', 'awsRefreshCmd', 'credCmd'] as const
+const BRAIN_KEYS = ['provider', 'masterModel', 'monitorModel', 'monitorProvider', 'monitorBaseUrl', 'apiKey', 'baseUrl', 'awsRegion', 'awsProfile', 'awsRefreshCmd', 'credCmd'] as const
 
 /** Capture the current Master Brain fields from settings. */
 function snapshot(s: OrchestrationSettings): Omit<BrainProfile, 'id' | 'name'> {
   return {
     provider: s.provider, masterModel: s.masterModel, monitorModel: s.monitorModel,
+    monitorProvider: s.monitorProvider ?? '', monitorBaseUrl: s.monitorBaseUrl ?? '',
     apiKey: s.apiKey, baseUrl: s.baseUrl, awsRegion: s.awsRegion,
     awsProfile: s.awsProfile, awsRefreshCmd: s.awsRefreshCmd, credCmd: s.credCmd,
   }

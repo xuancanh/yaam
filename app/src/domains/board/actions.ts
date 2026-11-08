@@ -4,7 +4,7 @@
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { AppState, BoardCol, BoardTask } from '../../core/types'
-import { buildCfg, hasCreds } from '../../master'
+import { buildMonitorCfg, hasCreds } from '../../master'
 import { mkId } from '../../shared/id'
 import { worktreeMerge, worktreeRemove } from '../../core/native'
 import { realSessionProcessPort } from '../session/ports'
@@ -264,7 +264,7 @@ export function createBoardActions(ctx: BoardActionsCtx): BoardActions {
     draftTask: async input => {
       const st = stateRef.current.settings
       if (!(st.masterEnabled && hasCreds(st))) return null
-      return draftTaskSpec(buildCfg(st, st.monitorModel || undefined), input.title, input.description, input.criteria)
+      return draftTaskSpec(buildMonitorCfg(st), input.title, input.description, input.criteria)
     },
     renameTask: (id, title) => {
       const before = stateRef.current.tasks.find(t => t.id === id)

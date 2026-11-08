@@ -11,6 +11,7 @@ import { SectionLabel } from './SectionLabel'
 import { UpdateSection } from './UpdateSection'
 import { DeveloperSection } from './DeveloperSection'
 import { PowerSection } from './PowerSection'
+import { MonitorRows } from './MonitorRows'
 import { BetaSection } from './BetaSection'
 
 /** One connect link with a copy button (transient ✓ feedback). */
@@ -206,7 +207,7 @@ export function SettingsView() {
                 </div>
               </>
             )}
-            {providerFor(s.settings.provider).id === 'custom' && (
+            {(providerFor(s.settings.provider).id === 'custom' || providerFor(s.settings.provider).id === 'local') && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600 }}>Base URL</div>
@@ -215,7 +216,7 @@ export function SettingsView() {
                 <DraftInput
                   value={s.settings.baseUrl}
                   onCommit={v => updateSettings({ baseUrl: v })}
-                  placeholder="https://…/v1"
+                  placeholder={providerFor(s.settings.provider).base || 'https://…/v1'}
                   style={{ ...FIELD_STYLE, width: 260 }}
                 />
               </div>
@@ -236,22 +237,8 @@ export function SettingsView() {
                 {providerFor(s.settings.provider).models.map(m => <option key={m} value={m} />)}
               </datalist>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Monitor model</div>
-                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
-                  Each session gets its own monitor LLM that watches output and only escalates digests to Master. Use a cheap model.
-                </div>
-              </div>
-              <DraftInput
-                list="master-models"
-                value={s.settings.monitorModel}
-                onCommit={v => updateSettings({ monitorModel: v })}
-                placeholder="same as Master model"
-                style={{ ...FIELD_STYLE, width: 260 }}
-              />
-            </div>
-            {providerFor(s.settings.provider).id !== 'bedrock' && (
+            <MonitorRows />
+            {providerFor(s.settings.provider).id !== 'bedrock' && providerFor(s.settings.provider).id !== 'local' && (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
                   <div style={{ flex: 1 }}>
