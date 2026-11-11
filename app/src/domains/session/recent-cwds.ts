@@ -4,7 +4,7 @@ import type { OrchestrationSettings, SessionRecord } from '../../core/entities'
 
 export interface RecentCwd { path: string; machineId?: string; at: number }
 
-const MAX_RECENT = 12
+const MAX_RECENT = 40
 
 /** Normalize a typed path so `~/x`, `~/x/` and `~/x ` collapse to one entry. */
 function norm(path: string): string {
@@ -45,6 +45,16 @@ export function recentCwdsFor(
   }
   if (!m) add(settings.defaultCwd)
   return out.slice(0, limit)
+}
+
+/** Recent folders matching every space-separated word of `q` (case-insensitive,
+ *  anywhere in the path); folder-name matches rank before parent-path ones. */
+export function filterRecent(paths: string[], q: string): string[] {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!words.length) return paths
+  const hits = paths.filter(p => words.every(w => p.toLowerCase().includes(w)))
+  const inName = (p: string) => words.every(w => splitPath(p).name.toLowerCase().includes(w)) ? 0 : 1
+  return hits.map((p, i) => ({ p, i, r: inName(p) })).sort((a, b) => a.r - b.r || a.i - b.i).map(x => x.p)
 }
 
 /** Split a path into a display name (last segment) and its parent. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { recentCwdsFor, rememberCwd, splitPath } from './recent-cwds'
+import { filterRecent, recentCwdsFor, rememberCwd, splitPath } from './recent-cwds'
 
 describe('recent working folders', () => {
   it('moves a re-used folder to the front, per target, and caps the list', () => {
@@ -8,8 +8,8 @@ describe('recent working folders', () => {
     list = rememberCwd(list, '~/a', 'box', 3)
     list = rememberCwd(list, '~/a ', undefined, 4)
     expect(list.map(r => `${r.machineId ?? ''}:${r.path}`)).toEqual([':~/a', 'box:~/a', ':~/b'])
-    for (let i = 0; i < 20; i++) list = rememberCwd(list, `/p${i}`, undefined)
-    expect(list).toHaveLength(12)
+    for (let i = 0; i < 50; i++) list = rememberCwd(list, `/p${i}`, undefined)
+    expect(list).toHaveLength(40)
   })
 
   it('merges remembered folders with session folders, skipping worktrees and other targets', () => {
@@ -29,5 +29,14 @@ describe('recent working folders', () => {
     expect(splitPath('/Users/me/proj/')).toEqual({ name: 'proj', parent: '/Users/me' })
     expect(splitPath('/tmp')).toEqual({ name: 'tmp', parent: '/' })
     expect(splitPath('proj')).toEqual({ name: 'proj', parent: '' })
+  })
+})
+
+describe('filterRecent', () => {
+  const paths = ['~/work/yaam', '~/work/api-server', '~/yaam-notes/misc', '/tmp/x']
+  it('matches every word anywhere, folder-name hits first', () => {
+    expect(filterRecent(paths, 'yaam')).toEqual(['~/work/yaam', '~/yaam-notes/misc'])
+    expect(filterRecent(paths, 'work API')).toEqual(['~/work/api-server'])
+    expect(filterRecent(paths, '  ')).toEqual(paths)
   })
 })

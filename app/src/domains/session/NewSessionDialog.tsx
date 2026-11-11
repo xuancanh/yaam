@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { isTauri, pickFolder } from '../../core/native'
+import { isTauri, listDir, pickFolder } from '../../core/native'
 import { SHELLS } from '../../core/data'
-import { recentCwdsFor, splitPath } from './recent-cwds'
+import { filterRecent, recentCwdsFor, splitPath } from './recent-cwds'
 import { sortByUsage } from './type-usage'
+import { folderSuggestions, splitForComplete } from './path-complete'
 
 const FIELD_STYLE = {
   width: '100%', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 9,
@@ -76,6 +77,11 @@ export function NewSessionDialog({ onClose, initialCwd }: { onClose: () => void;
   const [task, setTask] = useState('')
 
   const [cwd, setCwd] = useState(initialCwd || s.settings.defaultCwd || '')
+  // folder autocomplete: listings cached per directory for the dialog's life
+  const dirCache = useRef(new Map<string, string[]>())
+  const [suggest, setSuggest] = useState<string[]>([])
+  const [suggestIdx, setSuggestIdx] = useState(-1)
+  const [suggestOpen, setSuggestOpen] = useState(false)
   const [isolate, setIsolate] = useState(false)
   const [sandbox, setSandbox] = useState(false)
   // detached by default: sessions survive quitting YAAM unless opted out
@@ -110,6 +116,28 @@ export function NewSessionDialog({ onClose, initialCwd }: { onClose: () => void;
     }
   }
 
+  useEffect(() => {
+    const split = machine || !isTauri ? null : splitForComplete(cwd)
+    if (!split) { setSuggest([]); return }
+    let live = true
+    const show = (names: string[]) => {
+      if (!live) return
+      setSuggest(folderSuggestions(split.dir, split.prefix, names).filter(p => p !== cwd))
+      setSuggestIdx(-1)
+    }
+    const cached = dirCache.current.get(split.dir)
+    if (cached) { show(cached); return () => { live = false } }
+    const t = setTimeout(() => {
+      listDir(split.dir)
+        .then(entries => entries.filter(e => e.isDir).map(e => e.name))
+        .catch(() => [] as string[])
+        .then(names => { dirCache.current.set(split.dir, names); show(names) })
+    }, 80)
+    return () => { live = false; clearTimeout(t) }
+  }, [cwd, machine])
+  const accept = (path: string) => { setCwd(path); setSuggestOpen(true) }
+  const showSuggest = suggestOpen && suggest.length > 0
+
   // Fill the working directory from the native folder picker.
   const browse = async () => {
     const dir = await pickFolder(cwd || undefined)
@@ -130,7 +158,9 @@ export function NewSessionDialog({ onClose, initialCwd }: { onClose: () => void;
     return Boolean(effectiveCommand.trim()) && Boolean(dir) && !(sandbox && !isShell && (dir === '~' || dir === '/'))
   }
   const canLaunch = canLaunchIn(cwd.trim())
-  const recent = useMemo(() => recentCwdsFor(s.settings, s.agents, machineId || undefined), [s.settings, s.agents, machineId])
+  const recentAll = useMemo(() => recentCwdsFor(s.settings, s.agents, machineId || undefined, 40), [s.settings, s.agents, machineId])
+  const [recentQ, setRecentQ] = useState('')
+  const recent = useMemo(() => filterRecent(recentAll, recentQ), [recentAll, recentQ])
   const [showAdvanced, setShowAdvanced] = useState(false)
   const advancedOn = [tpl && 'template', isolate && !machine && 'worktree', sandbox && !(isShell && !tpl) && 'sandbox'].filter(Boolean) as string[]
 
@@ -266,26 +296,98 @@ export function NewSessionDialog({ onClose, initialCwd }: { onClose: () => void;
 
               <div>
                 <FieldLabel aside={needsCwd ? <span style={{ color: 'var(--amber)' }}>required</span> : undefined}>{machine ? `Folder on ${machine.label || machine.host}` : 'Folder'}</FieldLabel>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, position: 'relative' }}>
                   <input
                     value={cwd}
-                    onChange={e => setCwd(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') launch() }}
+                    onChange={e => { setCwd(e.target.value); setSuggestOpen(true) }}
+                    onFocus={() => setSuggestOpen(true)}
+                    onBlur={() => setSuggestOpen(false)}
+                    onKeyDown={e => {
+                      if (showSuggest && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                        e.preventDefault()
+                        const n = suggest.length, d = e.key === 'ArrowDown' ? 1 : -1
+                        setSuggestIdx(i => (i + d + n + (i < 0 && d < 0 ? 1 : 0)) % n)
+                      } else if (showSuggest && e.key === 'Tab' && !e.shiftKey) {
+                        e.preventDefault()
+                        accept(suggest[Math.max(0, suggestIdx)])
+                      } else if (showSuggest && e.key === 'Escape') {
+                        e.preventDefault(); e.stopPropagation()
+                        setSuggestOpen(false)
+                      } else if (e.key === 'Enter') {
+                        if (showSuggest && suggestIdx >= 0) { e.preventDefault(); accept(suggest[suggestIdx]) }
+                        else launch()
+                      }
+                    }}
+                    role="combobox"
+                    aria-expanded={showSuggest}
+                    aria-autocomplete="list"
+                    autoComplete="off"
+                    spellCheck={false}
                     placeholder={machine ? '/path/on/remote/host' : '~/path/to/project'}
                     aria-label="Working folder"
                     aria-required
                     disabled={!isTauri}
                     style={FIELD_STYLE}
                   />
+                  {showSuggest && (
+                    <div role="listbox" style={{
+                      position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 20,
+                      background: 'var(--panel)', border: '1px solid var(--line2)', borderRadius: 9,
+                      boxShadow: '0 8px 24px rgba(0,0,0,.35)', overflow: 'hidden',
+                    }}>
+                      {suggest.map((path, i) => {
+                        const name = path.replace(/\/$/, '').split('/').pop()
+                        return (
+                          <div
+                            key={path}
+                            role="option"
+                            aria-selected={i === suggestIdx}
+                            // mousedown, not click: the input's blur would close the list first
+                            onMouseDown={e => { e.preventDefault(); accept(path) }}
+                            onMouseEnter={() => setSuggestIdx(i)}
+                            style={{
+                              display: 'flex', alignItems: 'baseline', gap: 9, padding: '6px 12px', cursor: 'pointer',
+                              background: i === suggestIdx ? 'var(--accent-faint)' : 'transparent',
+                              boxShadow: i === suggestIdx ? 'inset 2px 0 0 var(--accent)' : 'none',
+                            }}
+                          >
+                            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{name}/</span>
+                            <span className="mono" style={{ fontSize: 11, color: 'var(--dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{path}</span>
+                          </div>
+                        )
+                      })}
+                      <div style={{ padding: '4px 12px', fontSize: 10.5, color: 'var(--faint)', borderTop: '1px solid var(--line)' }}>↑↓ choose · Tab complete · Esc close</div>
+                    </div>
+                  )}
                   {!machine && (
                     <button className="open-btn" style={{ flex: 'none', padding: '0 14px' }} onClick={browse} disabled={!isTauri}>
                       Browse…
                     </button>
                   )}
                 </div>
-                {recent.length > 0 && (
+                {recentAll.length > 0 && (
                   <div style={{ marginTop: 8, border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' }}>
-                    <div style={{ padding: '6px 11px', fontSize: 10.5, color: 'var(--dim)', background: 'var(--bg)', borderBottom: '1px solid var(--line)', letterSpacing: 0.4 }}>RECENT</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px 4px 11px', background: 'var(--bg)', borderBottom: '1px solid var(--line)' }}>
+                      <span style={{ fontSize: 10.5, color: 'var(--dim)', letterSpacing: 0.4 }}>RECENT</span>
+                      {recentAll.length > 5 && (
+                        <input
+                          value={recentQ}
+                          onChange={e => setRecentQ(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Escape' && recentQ) { e.preventDefault(); e.stopPropagation(); setRecentQ('') }
+                            else if (e.key === 'Enter' && recent[0]) { e.preventDefault(); setCwd(recent[0]) }
+                          }}
+                          placeholder={`Search ${recentAll.length} folders`}
+                          aria-label="Search recent folders"
+                          spellCheck={false}
+                          style={{ marginLeft: 'auto', width: 190, background: 'transparent', border: '1px solid var(--line2)', borderRadius: 6, padding: '3px 8px', color: 'var(--text)', fontSize: 11.5, outline: 'none' }}
+                        />
+                      )}
+                    </div>
+                    <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                    {recent.length === 0 && (
+                      <div style={{ padding: '8px 11px', fontSize: 12, color: 'var(--dim)' }}>No recent folder matches "{recentQ}"</div>
+                    )}
                     {recent.map((path, i) => {
                       const { name, parent } = splitPath(path)
                       const active = cwd.trim().replace(/\/+$/, '') === path
@@ -309,6 +411,7 @@ export function NewSessionDialog({ onClose, initialCwd }: { onClose: () => void;
                         </button>
                       )
                     })}
+                    </div>
                   </div>
                 )}
               </div>
