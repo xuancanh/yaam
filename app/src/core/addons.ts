@@ -3,6 +3,7 @@
 // views render in a sandboxed iframe; tool handlers and hooks are JS run in
 // the app context against this curated API, so only install trusted packages.
 import type { Addon, AddonHookName, AddonPermission, AddonTool, AppState } from './types'
+import { parseContributes } from './addon-contributes'
 import { cronValidationError } from '../shared/cron-validation'
 
 /** full task spec accepted by tasks.add / tasks.update */
@@ -590,6 +591,7 @@ export function parseAddonPackage(json: string): Omit<Addon, 'id' | 'enabled' | 
   if (!html && !tools.length && !hasHooks && !agent) {
     throw new Error('package has no view, tools, hooks, or agent')
   }
+  const contributes = parseContributes(raw.contributes, { toolNames: tools.map(t => t.name), hasView: !!html })
   const allIds = ALL_PERMISSIONS.map(x => x.id)
   const permissions = Array.isArray(raw.permissions)
     ? (raw.permissions as unknown[]).filter((x): x is AddonPermission => allIds.includes(x as AddonPermission))
@@ -600,6 +602,7 @@ export function parseAddonPackage(json: string): Omit<Addon, 'id' | 'enabled' | 
     agent,
     hosts: hosts?.length ? hosts : undefined,
     secrets: secrets?.length ? secrets : undefined,
+    contributes,
     desc: typeof raw.description === 'string' ? raw.description : undefined,
     author: typeof raw.author === 'string' ? raw.author : undefined,
     permissions,
@@ -622,6 +625,7 @@ export function exportAddonPackage(a: Addon): string {
     agent: a.agent,
     hosts: a.hosts,
     secrets: a.secrets,
+    contributes: a.contributes,
     permissions: a.permissions,
   }, null, 2)
 }
@@ -668,6 +672,20 @@ export async function execAddonTool(s: AppState, name: string, input: Record<str
     }
   }
   return `no enabled addon provides tool ${plain}`
+}
+
+/** Run one specific addon's tool (a contribution's `run`), sandboxed like any
+ *  other handler. Returns the result as text. */
+export async function execOwnAddonTool(addon: Addon, tool: string, input: Record<string, unknown>, api: AddonApi): Promise<string> {
+  if (!addon.enabled) return `addon "${addon.name}" is disabled`
+  const t = addon.tools?.find(x => x.name === tool)
+  if (!t) return `addon "${addon.name}" has no tool ${tool}`
+  try {
+    const out = await runHandler(t.handler, input, api)
+    return typeof out === 'string' ? out : JSON.stringify(out ?? 'ok')
+  } catch (e) {
+    return `addon tool error: ${e instanceof Error ? e.message : String(e)}`
+  }
 }
 
 /** Fire a lifecycle hook across all enabled addons (errors contained). */

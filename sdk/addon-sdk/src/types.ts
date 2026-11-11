@@ -196,6 +196,22 @@ export type ToolHandler<I = Record<string, unknown>> =
 
 // ---------- manifest / package ----------
 
+/** A contribution's effect: run one of the addon's tools with the view
+ *  context as input, and/or open the view somewhere. */
+export interface AddonActionManifest {
+  run?: string
+  open?: 'popup' | 'panel' | 'tab'
+}
+export interface AddonContributes {
+  /** the view also docks inside each session pane, bound to that session */
+  panel?: { title: string }
+  /** palette commands; `key` = "mod+alt+x" | "mod+shift+x"; context "session"
+   *  also lists them in a session tab's right-click menu */
+  commands?: (AddonActionManifest & { id: string; title: string; key?: string; context?: 'global' | 'session' })[]
+  /** regexes for URLs ⌘/Ctrl-clicked in a terminal */
+  links?: (AddonActionManifest & { pattern: string })[]
+}
+
 export interface AddonToolManifest {
   name: string
   description?: string
@@ -233,6 +249,8 @@ export interface AddonManifest {
   /** hook name → path (folder) or source (packed); masterPromptAppend is a
    *  prompt fragment for Master, not JS */
   hooks?: Partial<Record<AddonHookName | 'masterPromptAppend', string>>
+  /** UI entry points beyond the tab (needs the `ui` grant); see docs/addons.md §4.5 */
+  contributes?: AddonContributes
   /** the addon's own LLM agent */
   agent?: {
     /** path (folder) or text (packed) of the system prompt */

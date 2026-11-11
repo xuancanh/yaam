@@ -25,7 +25,7 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
     return () => runtime.dispose()
   }, [runtime])
 
-  useGlobalEffects()
+  useGlobalEffects(runtime.actions)
 
   return <ActionsCtx.Provider value={runtime.actions}>{children}</ActionsCtx.Provider>
 }

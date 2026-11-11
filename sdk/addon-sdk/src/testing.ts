@@ -3,6 +3,7 @@
 // yaam:state / yaam:getState), enforces the same permission map, and backs
 // storage with an in-memory Map — so a view built on the bridge (or the React
 // bindings) runs unchanged in a plain browser tab or a jsdom test.
+import type { ViewContext } from './bridge.js'
 import { ADDON_RPC_METHODS, METHOD_PERMISSION, ALL_PERMISSIONS } from './permissions.js'
 import type { AddonPermission, AddonSnapshot, SnapshotTask } from './types.js'
 
@@ -16,6 +17,8 @@ export interface HostStubOptions {
   state?: Partial<AddonSnapshot>
   /** granted scopes; defaults to every permission */
   granted?: AddonPermission[] | 'all'
+  /** placement context answered to `yaam:getContext` (default: the tab) */
+  context?: ViewContext
   /** preloaded storage contents */
   storage?: Record<string, unknown>
   /** per-method overrides / additions, e.g. `{ 'http.request': async () => ... }` */
@@ -33,6 +36,8 @@ export interface HostStub {
   storage: Map<string, unknown>
   /** merge a patch into the snapshot and push it to subscribers */
   pushState: (patch?: Partial<AddonSnapshot>) => void
+  /** replace the view context and push it (e.g. simulate a panel or link) */
+  pushContext: (context: ViewContext) => void
   /** change grants at runtime (e.g. to test the ungranted state) */
   setGranted: (granted: AddonPermission[] | 'all') => void
   /** stop listening */
@@ -134,10 +139,12 @@ export function createHostStub(opts: HostStubOptions = {}): HostStub {
     return fn ? await fn(...args) : undefined
   }
 
+  let context: ViewContext = opts.context ?? { placement: 'tab' }
   const onMessage = (e: MessageEvent) => {
     const d = e.data as { type?: string; callId?: string; method?: string; args?: unknown[] } | null
     if (!d || typeof d !== 'object') return
     if (d.type === 'yaam:getState') pushTo(e.source)
+    if (d.type === 'yaam:getContext') post({ type: 'yaam:context', context }, e.source)
     if (d.type === 'yaam:call' && typeof d.callId === 'string' && typeof d.method === 'string') {
       const args = Array.isArray(d.args) ? d.args : []
       calls.push({ method: d.method, args })
@@ -156,6 +163,10 @@ export function createHostStub(opts: HostStubOptions = {}): HostStub {
     pushState: patch => {
       Object.assign(state, patch)
       pushTo()
+    },
+    pushContext: c => {
+      context = c
+      post({ type: 'yaam:context', context })
     },
     setGranted: g => {
       granted = g === 'all' ? ALL_PERMISSIONS.map(p => p.id) : g

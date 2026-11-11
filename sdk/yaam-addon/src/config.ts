@@ -38,6 +38,15 @@ export interface AddonConfig {
   hooks?: Partial<Record<AddonHookName, string>>
   /** prompt fragment appended to Master's system prompt (text, or a .md/.txt path) */
   masterPromptAppend?: string
+  /** UI entry points beyond the icon-rail tab (the host needs the `ui` grant):
+   *  a panel docked in each session pane, palette commands with shortcuts,
+   *  and handlers for links ⌘/Ctrl-clicked in a terminal. Each command/link
+   *  runs one of `tools` (`run`) and/or opens the view (`open`). */
+  contributes?: {
+    panel?: { title: string }
+    commands?: { id: string; title: string; run?: string; open?: 'popup' | 'panel' | 'tab'; key?: string; context?: 'global' | 'session' }[]
+    links?: { pattern: string; run?: string; open?: 'popup' | 'panel' }[]
+  }
   agent?: {
     /** path to the system prompt (.md/.txt), or the prompt text itself */
     system: string

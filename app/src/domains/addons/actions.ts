@@ -1,13 +1,15 @@
 // Addons-domain actions: open/toggle/grant, install (file/folder/URL), AI
 // generate, per-addon customization chat, RPC bridge, meta edit, export, and
 // remove. Composed into the provider's action surface.
+import { runContribution } from './contributions'
+import type { AddonAction, AddonViewContext } from '../../core/entities'
 import { useMemo } from 'react'
 import type { MutableRefObject } from 'react'
 import type { Addon, AddonPermission, AppState } from '../../core/types'
 import { buildCfg, hasCreds } from '../../master'
 import { realPackageIoPort } from './ports'
 import type { PackageIoPort } from './ports'
-import { appCompat, dispatchAddonRpc, exportAddonPackage, loadAddonFolder, parseAddonPackage } from '../../core/addons'
+import { appCompat, dispatchAddonRpc, execOwnAddonTool, exportAddonPackage, loadAddonFolder, parseAddonPackage } from '../../core/addons'
 import type { AddonApi } from '../../core/addons'
 import type { AddonInstallPreview } from './slice'
 import { generateAddonPackage } from './addon-gen'
@@ -47,6 +49,10 @@ export interface AddonsActions {
   exportAddon: (id: string) => void
   sendAddonChat: (id: string, text: string) => void
   addonRpc: (addonId: string, method: string, args: unknown[]) => Promise<unknown>
+  /** run one of an addon's own tools (a contributed command or link handler) */
+  runAddonTool: (addonId: string, tool: string, input: Record<string, unknown>) => Promise<string>
+  /** perform a contributed command / link action with its context */
+  runAddonContribution: (addonId: string, action: AddonAction, context: Omit<AddonViewContext, 'placement'>) => void
   updateAddonMeta: (id: string, patch: Partial<Pick<Addon, 'name' | 'version' | 'icon' | 'desc' | 'author'>>) => void
 }
 
@@ -136,6 +142,25 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
     sendAddonChat: (id, text) => { ctx.sendAddonChat(id, text) },
 
     addonRpc: (addonId, method, args) => dispatchAddonRpc(ctx.makeAddonApi(addonId), method, args),
+
+    runAddonTool: async (addonId, tool, input) => {
+      const addon = stateRef.current.addons.find(a => a.id === addonId)
+      if (!addon) return 'addon not installed'
+      return execOwnAddonTool(addon, tool, input, ctx.makeAddonApi(addonId))
+    },
+
+    runAddonContribution: (addonId, action, context) => {
+      const addon = stateRef.current.addons.find(a => a.id === addonId)
+      if (!addon) return
+      void runContribution({
+        runAddonTool: (id, tool, input) => {
+          const a = stateRef.current.addons.find(x => x.id === id)
+          return a ? execOwnAddonTool(a, tool, input, ctx.makeAddonApi(id)) : Promise.resolve('addon not installed')
+        },
+        openAddonTab: id => dispatch(s => ({ ...s, view: 'addon', activeAddon: id })),
+        flash,
+      }, addon, action, context)
+    },
 
     updateAddonMeta: (id, patch) => dispatch(s => ({
       ...s,

@@ -6,6 +6,19 @@ import type { AddonSnapshot, YaamApi } from './types.js'
 
 export type StateListener = (state: AddonSnapshot | null, denied?: string) => void
 
+/** Where the view is shown and why (pushed as `yaam:context`). A panel is
+ *  docked beside one session; a popup or panel opened from a command or a
+ *  terminal link also carries the selection / clicked URL. */
+export interface ViewContext {
+  placement: 'tab' | 'panel' | 'popup'
+  sessionId?: string
+  cwd?: string
+  url?: string
+  selection?: string
+  commandId?: string
+}
+export type ContextListener = (context: ViewContext) => void
+
 export interface YaamClient {
   /** typed RPC tree: `client.api.tasks.add('title')` → Promise */
   api: YaamApi
@@ -16,6 +29,10 @@ export interface YaamClient {
   onState: (cb: StateListener) => () => void
   /** the last snapshot received, if any */
   state: () => AddonSnapshot | null
+  /** subscribe to the view's placement context; fires immediately if known */
+  onContext: (cb: ContextListener) => () => void
+  /** the last context received, if any */
+  context: () => ViewContext | null
   /** await a call; on rejection report via `onError` and resolve `fallback` */
   guard: <T>(p: Promise<T>, fallback?: T) => Promise<T | undefined>
   /** remove the message listener (tests / harness teardown) */
@@ -41,9 +58,11 @@ export function createYaamClient(opts: YaamClientOptions = {}): YaamClient {
   const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
   const subs = new Set<StateListener>()
   let last: AddonSnapshot | null = null
+  const ctxSubs = new Set<ContextListener>()
+  let lastCtx: ViewContext | null = null
 
   const onMessage = (e: MessageEvent) => {
-    const d = e.data as { type?: string; callId?: string; result?: unknown; error?: string; state?: AddonSnapshot | null; denied?: string } | null
+    const d = e.data as { type?: string; callId?: string; result?: unknown; error?: string; state?: AddonSnapshot | null; denied?: string; context?: ViewContext } | null
     if (!d || typeof d !== 'object') return
     if (d.type === 'yaam:result' && typeof d.callId === 'string') {
       const p = pending.get(d.callId)
@@ -51,6 +70,12 @@ export function createYaamClient(opts: YaamClientOptions = {}): YaamClient {
       pending.delete(d.callId)
       if (d.error !== undefined) p.reject(new Error(String(d.error)))
       else p.resolve(d.result)
+    }
+    if (d.type === 'yaam:context' && d.context && typeof d.context === 'object') {
+      lastCtx = d.context
+      for (const cb of ctxSubs) {
+        try { cb(d.context) } catch (err) { console.error(err) }
+      }
     }
     if (d.type === 'yaam:state') {
       last = d.state ?? null
@@ -95,16 +120,26 @@ export function createYaamClient(opts: YaamClientOptions = {}): YaamClient {
     return () => { subs.delete(cb) }
   }
 
+  const onContext = (cb: ContextListener) => {
+    ctxSubs.add(cb)
+    if (lastCtx) cb(lastCtx)
+    target.postMessage({ type: 'yaam:getContext' }, '*')
+    return () => { ctxSubs.delete(cb) }
+  }
+
   return {
     api,
     call,
     onState,
     state: () => last,
+    onContext,
+    context: () => lastCtx,
     guard,
     dispose: () => {
       window.removeEventListener('message', onMessage)
       pending.clear()
       subs.clear()
+      ctxSubs.clear()
     },
   }
 }

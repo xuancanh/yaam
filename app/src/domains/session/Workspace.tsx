@@ -1,3 +1,5 @@
+import { contributedCommands } from '../addons/contributions'
+import { terminalSelection } from '../../core/terminals'
 import { useCallback, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
@@ -47,7 +49,10 @@ function TabContextMenu({ menu, onClose }: { menu: TabMenuState; onClose: () => 
   // the color highlight tracks the live agent record, not the snapshot the
   // menu opened with
   const liveColor = useConductorSelector(x => x.agents.find(a => a.id === menu.agent.id)?.color)
-  const { moveSessionToWorkspace, setTabColor } = useActions()
+  const { moveSessionToWorkspace, setTabColor, runAddonContribution } = useActions()
+  // addon commands that act on a session (context: session)
+  const addonsList = useConductorSelector(x => x.addons)
+  const sessionCmds = contributedCommands({ addons: addonsList }).filter(c => c.command.context === 'session')
   const sourceWorkspace = menu.agent.workspaceId ?? s.activeWorkspace
   const targets = s.workspaces.filter(w => w.id !== sourceWorkspace)
   const detached = new Set(s.detachedWorkspaces ?? [])
@@ -93,6 +98,25 @@ function TabContextMenu({ menu, onClose }: { menu: TabMenuState; onClose: () => 
                 </button>
               )
             })}
+        {sessionCmds.length > 0 && <>
+          <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0' }} />
+          <div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)', padding: '2px 9px 0' }}>ADDONS</div>
+          {sessionCmds.map(({ addon, command }) => (
+            <button
+              key={`${addon.id}:${command.id}`}
+              role="menuitem"
+              className="context-menu-item"
+              onClick={() => {
+                onClose()
+                const sel = terminalSelection(menu.agent.id)
+                runAddonContribution(addon.id, command, { commandId: command.id, sessionId: menu.agent.id, cwd: menu.agent.cwd, ...(sel ? { selection: sel.slice(0, 4000) } : {}) })
+              }}
+            >
+              <span style={{ width: 14, textAlign: 'center', flexShrink: 0 }}>{addon.icon}</span>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{command.title}</span>
+            </button>
+          ))}
+        </>}
     </ContextMenu>
   )
 }

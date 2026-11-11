@@ -155,6 +155,28 @@ not been moved through registered commands. The registry is therefore an active
 but partial boundary, not yet the single authorization or audit path for every
 actor.
 
+### Session peer tools
+
+Settings → General → "Sessions can coordinate each other" (off by default)
+adds `list_sessions`, `read_session`, `prompt_session`, `wait_for_session` and
+`spawn_session` to YAAM's in-session MCP server (`domains/hooks.rs`,
+`domains/session/mcp-peer.ts`). They are listed only while enabled and the
+setting is re-checked on every call. A session can only reach the other
+sessions of its own workspace, never itself. Prompting a session that is
+blocked on an approval is refused, so a peer can never answer another
+session's permission prompt. Screens are returned as untrusted data. Only the
+main window answers these calls, so a satellite window cannot double-send.
+Residual risk: with the setting on, a prompt-injected agent can type into its
+workspace peers; leave it off unless the sessions are trusted.
+
+### Addon contributions
+
+`contributes` entries (panels, commands, shortcuts, link handlers) need the
+addon enabled with the `ui` grant. They only open the already-sandboxed view or
+run one of the addon's own tools through its permission-checked API. Link
+handlers see the URL a user ⌘/Ctrl-clicked (holding Alt bypasses them).
+Shortcuts are validated at install never to shadow the app's own.
+
 ## Filesystem controls
 
 ### Canonically rooted operations

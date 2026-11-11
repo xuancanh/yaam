@@ -4,7 +4,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { createYaamClient } from './bridge.js'
-import type { YaamClient } from './bridge.js'
+import type { ViewContext, YaamClient } from './bridge.js'
 import type { AddonSnapshot, YaamApi } from './types.js'
 
 const YaamContext = createContext<YaamClient | null>(null)
@@ -49,6 +49,15 @@ export function useStateDenied(): boolean {
   const [denied, setDenied] = useState(false)
   useEffect(() => client.onState((_s, d) => { setDenied(d === 'state:read') }), [client])
   return denied
+}
+
+/** Where the view is shown (tab, a session's docked panel, or a popup) and
+ *  the session / URL / selection it was opened for. Null until the host says. */
+export function useViewContext(): ViewContext | null {
+  const client = useYaam()
+  const [ctx, setCtx] = useState<ViewContext | null>(() => client.context())
+  useEffect(() => client.onContext(setCtx), [client])
+  return ctx
 }
 
 export interface StorageCell<T> {

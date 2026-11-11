@@ -1,3 +1,4 @@
+import { AddonPopup } from './domains/addons/AddonPopup'
 import { lazy, Suspense } from 'react'
 import { ConductorProvider, useConductorSelector } from './store'
 import { TitleBar } from './domains/shell/TitleBar'
@@ -74,6 +75,7 @@ function Shell() {
       <SlideOver />
       <Drawer />
       <CommandPalette />
+      <AddonPopup />
       <Toast />
       <RemoteCompanion />
     </div>

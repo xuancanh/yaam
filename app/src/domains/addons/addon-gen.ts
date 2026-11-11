@@ -33,7 +33,8 @@ PACKAGE SHAPE (single-file, manifest 2)
   "hooks": { ... },                    // optional lifecycle hooks
   "agent": { "system": "...", "on": ["onSessionExit"], "every": "*/30 * * * *" },  // optional: the addon's own LLM agent; "every" = cron that wakes it periodically
   "hosts": ["api.github.com", "*.example.com"],   // http.request allowlist (https only); omit if no network
-  "secrets": [{ "name": "API_TOKEN", "label": "what to paste" }]     // keychain slots the user fills in the Addons view
+  "secrets": [{ "name": "API_TOKEN", "label": "what to paste" }],    // keychain slots the user fills in the Addons view
+  "contributes": { "panel": { "title": "…" }, "commands": [...], "links": [...] }  // optional UI entry points, see below
 }
 A package must contain at least one of html / tools / hooks / agent.
 
@@ -46,6 +47,7 @@ PERMISSION SCOPES (request only what the code calls)
 - schedules      → schedules.add({name, schedule: '5-field cron' | at: epochMs, cmd?, cwd?, task?: {title, description, criteria, cwd, machineId, isolate, sessionMode, startNow}}) · schedules.toggle(name, on?) · schedules.remove(name)
 - agent          → agent.wake(note) → Promise<reply string> (the addon's own agent; costs API tokens)
 - ui             → flash(text), notify(title, detail), logEvent(text), focusSession(id), focusTask(taskId)
+- contributes (optional, needs "ui"): { "panel": {"title"} (the view also docks inside each session pane, bound to that session) · "commands": [{id, title, run?: toolName, open?: "popup"|"panel"|"tab", key?: "mod+alt+x" | "mod+shift+x", context?: "session"}] (palette entries; context "session" also adds them to a session tab's right-click menu) · "links": [{pattern: regex, run?, open?: "popup"|"panel"}] (claims URLs ⌘/Ctrl-clicked in a terminal) }. A view learns where it is shown from a {type:'yaam:context', context:{placement, sessionId?, cwd?, url?, selection?}} message (ask with parent.postMessage({type:'yaam:getContext'},'*')); a "run" tool receives that context as its input.
 - storage        → storage.get(key), storage.set(key, value), storage.list(), storage.remove(key)   (persistent, namespaced per addon, 256KB/value)
 - http           → http.request(method, url, {headers?, body?}) → Promise<{status, contentType, text}> — url host MUST be in the manifest "hosts" (https only); header/body values may embed {{secret:NAME}}
 - secrets        → secrets.list() → [{name, label, set}] — no direct value reads; values are substituted from the OS keychain into allowed HTTP headers/bodies, so the destination receives them and its response is visible to addon code

@@ -76,6 +76,7 @@ export async function buildAddon(projectDir: string, opts: { outDir?: string; mi
     ...(cfg.hosts?.length ? { hosts: cfg.hosts } : {}),
     ...(cfg.secrets?.length ? { secrets: cfg.secrets } : {}),
     ...(cfg.permissions ? { permissions: cfg.permissions } : {}),
+    ...(cfg.contributes ? { contributes: cfg.contributes } : {}),
   }
 
   if (cfg.view) {

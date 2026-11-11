@@ -286,7 +286,11 @@ addons are packages (single-file manifest 2 JSON, or the folder format manifest 
 with four capability types — a sandboxed iframe **view**, sandboxed Master
 **tools**, lifecycle **hooks** (`onSessionExit`,
 `onNeedsInput`, `onTaskMoved`, `onCronFired`, `masterPromptAppend`), and an
-**agent** (its own LLM harness). All converge on one permission-enforced
+**agent** (its own LLM harness). A `contributes` block (parsed in
+`core/addon-contributes.ts`, needs the `ui` grant) adds UI entry points: a view
+panel docked in session panes, palette commands with shortcuts / session-tab
+menu items, and terminal link handlers; all host the view through
+`AddonFrame.tsx`. All converge on one permission-enforced
 `AddonApi` built by `app/runtime/addon.ts` and wrapped by `enforcePermissions()`.
 Scopes: `state:read`, `sessions:send`, `sessions:launch`, `tasks`, `schedules`,
 `agent`, `master:prompt`, `ui`, `storage`. Views talk to the app over postMessage

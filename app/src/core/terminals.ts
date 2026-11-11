@@ -153,6 +153,24 @@ function ensureListener() {
 }
 
 /** Return an existing terminal or create and wire one for a session id. */
+/** Addon link handlers: returns true when an addon took the URL. Installed by
+ *  the app runtime so this registry stays free of store/addon imports. */
+let linkInterceptor: ((sessionId: string, url: string) => boolean) | null = null
+export function setTerminalLinkInterceptor(fn: ((sessionId: string, url: string) => boolean) | null) {
+  linkInterceptor = fn
+}
+
+/** Whether the program in the terminal enabled bracketed paste (Claude Code,
+ *  Codex, zsh and most TUIs do): multi-line text can then go in as one paste. */
+export function bracketedPasteOn(id: string): boolean {
+  try { return Boolean(entries.get(id)?.term.modes.bracketedPasteMode) } catch { return false }
+}
+
+/** The text currently selected in a session's terminal ('' when none). */
+export function terminalSelection(id: string): string {
+  try { return entries.get(id)?.term.getSelection() ?? '' } catch { return '' }
+}
+
 export function getTerminal(
   id: string,
   onPlainLine?: (line: string) => void,
@@ -195,7 +213,10 @@ export function getTerminal(
           text: link.url,
           decorations: { pointerCursor: true, underline: true },
           activate(ev: MouseEvent) {
-            if (ev.ctrlKey || ev.metaKey) void openExternal(link.url)
+            if (!(ev.ctrlKey || ev.metaKey)) return
+            // an addon link handler may claim it; holding ⌥/Alt always opens the browser
+            if (!ev.altKey && linkInterceptor?.(id, link.url)) return
+            void openExternal(link.url)
           },
         })) : undefined)
       },

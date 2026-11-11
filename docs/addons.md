@@ -9,6 +9,7 @@ package (`*.yaam.json`) that can ship any mix of:
 | **tools** | New actions in Master's tool list | Opaque-origin handler sandbox + permission-checked RPC |
 | **hooks** | Reactions to app lifecycle + Master behavior changes | Opaque-origin handler sandbox + permission-checked RPC |
 | **agent** | The addon's own LLM harness (a mini-Master whose tools are the addon's API) | LLM loop over the permission-checked API |
+| **contributes** | UI entry points: a panel docked in session panes, palette commands with shortcuts, terminal link handlers | The same sandboxed view and handler sandbox |
 
 Built-in features are implemented against the same surface an addon gets —
 the kanban board is fully reproducible as an addon
@@ -407,6 +408,49 @@ in [`toolkit/README.md`](../toolkit/README.md).
 ```
 
 ---
+
+### 4.5 Contributions: panels, commands, shortcuts, links
+
+A view normally lives in its icon-rail tab. `contributes` puts the addon where
+the user is already working. It needs the `ui` grant (auto-granted, low risk);
+a `run` tool still goes through the addon's own permission-checked API.
+
+```yaml
+contributes:
+  panel:
+    title: Pull request          # docks the view inside every session pane
+  commands:
+    - id: explain
+      title: Explain selection
+      run: explain               # one of this addon's tools; gets the context as input
+      key: mod+alt+e             # mod = ⌘ on macOS, Ctrl elsewhere
+      context: session           # also in the session tab's right-click menu
+    - id: open
+      title: Open PR panel
+      open: panel                # popup | panel | tab
+  links:
+    - pattern: "^https://github\.com/[^/]+/[^/]+/pull/\d+"
+      open: panel                # ⌘/Ctrl-click such a link in a terminal
+```
+
+- **panel**: the session pane toolbar gets a puzzle button. The panel docks
+  left, right or bottom like Files and Git, and is bound to that session.
+- **commands** appear in the command palette (⌘K). `key` must be
+  `mod+alt+<key>` or `mod+shift+<key>`, and cannot take a shortcut the app
+  already uses. Install fails with a precise message otherwise.
+- **links** are regexes tested against URLs ⌘/Ctrl-clicked in a terminal; the
+  first matching enabled addon claims the link. Holding ⌥/Alt as well always
+  opens the browser instead. The YAML parser keeps backslashes as written
+  (write `\.` as above); in JSON (`addon.json`, `addon.config.ts`) escape them
+  as usual (`"\\."`).
+- Every action carries a **context** `{ placement, sessionId?, cwd?, url?,
+  selection?, commandId? }`. `selection` is the terminal's selected text. A
+  `run` tool receives it as `input`; its string result is flashed. A view
+  receives it as a `yaam:context` message (request it with
+  `parent.postMessage({ type: 'yaam:getContext' }, '*')`), or through
+  `yaam.onContext(cb)` (toolkit), `client.onContext(cb)` or
+  `useViewContext()` (SDK).
+- `open: panel` falls back to a popup when there is no session to dock beside.
 
 ## 5. Master tools
 

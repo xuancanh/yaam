@@ -11,6 +11,14 @@ import { checkAppUpdate } from '../infrastructure/native/app-update'
 import { driveKeepAwake } from './keep-awake'
 import { hookConsole } from '../core/debug-log'
 import { osNotify } from '../infrastructure/native/notify'
+import type { ConductorActions } from './actions'
+import { attentionTotal } from '../domains/session/attention-rollup'
+import { contributedCommands } from '../domains/addons/contributions'
+import { eventKey, matchLink } from '../core/addon-contributes'
+import { activeContributors } from '../domains/addons/contributions'
+import { setTerminalLinkInterceptor, terminalSelection } from '../core/terminals'
+import { setDockBadge } from '../infrastructure/native/windows'
+import { isSatelliteWindow } from '../core/window-role'
 
 // GitHub fetchers read the PAT lazily from the live store (set once, module scope)
 setGithubTokenSource(() => useAppStore.getState().settings.githubToken ?? '')
@@ -18,7 +26,13 @@ setGithubTokenSource(() => useAppStore.getState().settings.githubToken ?? '')
 // mirror console.error/warn into the in-app debug log (Settings → Developer)
 hookConsole()
 
-export function useGlobalEffects(): void {
+/** Selected text for a contributed command: the terminal's selection, else the page's. */
+const selectionFor = (sid: string | null | undefined): string =>
+  (sid ? terminalSelection(sid) : '') || window.getSelection()?.toString() || ''
+
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+
+export function useGlobalEffects(actions?: Pick<ConductorActions, 'jumpToAttention' | 'runAddonContribution'>): void {
   // appearance: stamp theme/density/typography onto <html> now and on every
   // settings change; re-resolve the 'system' theme when the OS scheme flips
   useEffect(() => {
@@ -79,6 +93,33 @@ export function useGlobalEffects(): void {
     }
   }, [])
 
+  // Dock badge = sessions waiting on the user (blocked or finished unseen).
+  // Main window only: a satellite owns no badge of its own.
+  useEffect(() => {
+    if (isSatelliteWindow()) return
+    let last = -1
+    const sync = () => {
+      const n = attentionTotal(useAppStore.getState())
+      if (n !== last) { last = n; void setDockBadge(n) }
+    }
+    sync()
+    const off = useAppStore.subscribe(sync)
+    return () => { off(); void setDockBadge(0) }
+  }, [])
+
+  // Terminal links ⌘/Ctrl-clicked: an addon link handler gets first refusal.
+  useEffect(() => {
+    if (!actions) return
+    setTerminalLinkInterceptor((sessionId, url) => {
+      const st = useAppStore.getState()
+      const hit = matchLink(activeContributors(st), url)
+      if (!hit) return false
+      actions.runAddonContribution(hit.addon.id, hit.handler, { url, sessionId, cwd: st.agents.find(a => a.id === sessionId)?.cwd })
+      return true
+    })
+    return () => setTerminalLinkInterceptor(null)
+  }, [actions])
+
   // Global keyboard shortcuts. ⌘ on mac / Ctrl elsewhere, except inside the
   // terminal where Ctrl belongs to the CLI (Ctrl+_ etc.) — there only ⌘ works.
   useEffect(() => {
@@ -108,6 +149,21 @@ export function useGlobalEffects(): void {
         })
       }
 
+      // addon-contributed shortcuts (validated at install never to shadow ours)
+      const combo = actions && (e.altKey || e.shiftKey) ? eventKey(e, IS_MAC) : null
+      const hit = combo ? contributedCommands(useAppStore.getState()).find(c => c.command.key === combo) : undefined
+      if (hit && actions) {
+        e.preventDefault()
+        const st = useAppStore.getState()
+        const sid = activeSessionId(st)
+        actions.runAddonContribution(hit.addon.id, hit.command, {
+          commandId: hit.command.id,
+          ...(sid ? { sessionId: sid, cwd: st.agents.find(x => x.id === sid)?.cwd } : {}),
+          ...(selectionFor(sid) ? { selection: selectionFor(sid).slice(0, 4000) } : {}),
+        })
+        return
+      }
+
       if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         dispatch(s => ({ ...s, paletteOpen: !s.paletteOpen, paletteQuery: '' }))
@@ -133,6 +189,9 @@ export function useGlobalEffects(): void {
           e.preventDefault()
           requestQuickShellToggle(sid)
         }
+      } else if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a' && actions) {
+        e.preventDefault() // ⌘⇧A — next session that needs you (blocked first, then unseen)
+        actions.jumpToAttention()
       } else if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'b') {
         e.preventDefault() // ⌘B — toggle the Master chat panel
         dispatch(s => ({ ...s, settings: { ...s.settings, sidebarHidden: !s.settings.sidebarHidden } }))
@@ -151,5 +210,5 @@ export function useGlobalEffects(): void {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [actions])
 }

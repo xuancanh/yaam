@@ -1,12 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
-import { useAppStore } from '../../core/store'
 import { AddonSource } from './AddonSource'
 import { AddonDetail } from './AddonDetail'
-import { withViewCsp } from './view-csp'
-import { isTauri, previewClear, previewStash } from '../../core/native'
-import { addonSnapshot } from '../../core/addons'
+import { AddonFrame } from './AddonFrame'
 import type { Addon } from '../../core/types'
 import { IC, Icon, MasterMark, ViewHeader } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
@@ -82,6 +79,8 @@ function AddonChat({ addon }: { addon: Addon }) {
   )
 }
 
+const TAB_CONTEXT = { placement: 'tab' } as const
+
 // VIEW_CSP/withViewCsp live in ./view-csp (pure module) so tests can exercise
 // the injection without importing the React view.
 
@@ -92,70 +91,9 @@ export function AddonView() {
   // imperatively from useAppStore.getState(), so we do not subscribe to the
   // whole store and rerender on unrelated terminal/chat activity.
   const s = useConductorSelector(x => ({ addons: x.addons, activeAddon: x.activeAddon }), shallowEqual)
-  const { removeAddon, addonRpc } = useActions()
+  const { removeAddon } = useActions()
   const [mode, setMode] = useState<'view' | 'source' | 'chat' | 'settings'>('view')
-  const iframeRef = useRef<HTMLIFrameElement>(null)
-
   const addon = s.addons.find(a => a.id === s.activeAddon)
-  const html = addon?.html
-
-  // Serve the view from the yaampreview origin: a srcdoc iframe INHERITS the
-  // app's strict CSP (script-src 'self'), which blocks every inline <script>
-  // an addon ships. The custom scheme gives the document its own policy
-  // container, where the prepended VIEW_CSP meta governs instead. Browser
-  // builds have no scheme and fall back to srcDoc (views degrade there).
-  const [viewUrl, setViewUrl] = useState<string | null>(null)
-  useEffect(() => {
-    if (!html) { setViewUrl(null); return }
-    let alive = true
-    let stashedId: string | null = null
-    void previewStash(withViewCsp(html)).then(res => {
-      if (!res) return
-      if (!alive) { void previewClear(res.id); return }
-      stashedId = res.id
-      setViewUrl(res.url)
-    })
-    return () => {
-      alive = false
-      if (stashedId) void previewClear(stashedId)
-      setViewUrl(null)
-    }
-  }, [html])
-
-  // Push the latest state snapshot into the addon iframe — only when the
-  // addon actually holds state:read; otherwise it gets a denial marker.
-  const push = useCallback(() => {
-    const st = useAppStore.getState()
-    const a = st.addons.find(x => x.id === st.activeAddon)
-    const allowed = !!a?.enabled && a.granted.includes('state:read')
-    iframeRef.current?.contentWindow?.postMessage(
-      { type: 'yaam:state', state: allowed ? addonSnapshot(st) : null, denied: allowed ? undefined : 'state:read' }, '*')
-  }, [])
-
-  useEffect(() => {
-    // Validate iframe RPC messages, dispatch them, and return correlated results.
-    const onMessage = (e: MessageEvent) => {
-      if (e.source !== iframeRef.current?.contentWindow) return
-      if (e.data?.type === 'yaam:getState') push()
-      if (e.data?.type === 'yaam:call' && typeof e.data.callId === 'string' && typeof e.data.method === 'string') {
-        const { callId, method } = e.data
-        const args = Array.isArray(e.data.args) ? e.data.args : []
-        const id = useAppStore.getState().activeAddon
-        if (!id) return
-        addonRpc(id, method, args).then(result => {
-          iframeRef.current?.contentWindow?.postMessage({ type: 'yaam:result', callId, result }, '*')
-        }).catch(err => {
-          iframeRef.current?.contentWindow?.postMessage({ type: 'yaam:result', callId, error: err instanceof Error ? err.message : String(err) }, '*')
-        })
-      }
-    }
-    window.addEventListener('message', onMessage)
-    const timer = window.setInterval(push, 3000)
-    return () => {
-      window.removeEventListener('message', onMessage)
-      window.clearInterval(timer)
-    }
-  }, [addonRpc, push])
 
   if (!addon) return null
   const effectiveMode = mode === 'view' && !addon.html ? 'chat' : mode
@@ -194,17 +132,7 @@ export function AddonView() {
           <Icon paths={IC.close} size={14} stroke={1.8} />
         </button>
       </ViewHeader>
-      {effectiveMode === 'view' && addon.html && (
-        <iframe
-          ref={iframeRef}
-          key={addon.id + addon.createdAt}
-          title={addon.name}
-          sandbox="allow-scripts"
-          {...(viewUrl ? { src: viewUrl } : isTauri ? {} : { srcDoc: withViewCsp(addon.html) })}
-          onLoad={push}
-          style={{ flex: 1, border: 'none', background: 'var(--bg2)' }}
-        />
-      )}
+      {effectiveMode === 'view' && addon.html && <AddonFrame addon={addon} context={TAB_CONTEXT} />}
       {effectiveMode === 'source' && <AddonSource addon={addon} />}
       {effectiveMode === 'chat' && <AddonChat addon={addon} />}
       {effectiveMode === 'settings' && (

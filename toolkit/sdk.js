@@ -9,6 +9,7 @@
  *   yaam.call('tasks.add', 'title', 'backlog', {...})  // raw dotted RPC → Promise
  *   yaam.api.tasks.add('title', 'backlog', {...})      // same, as a proxy tree
  *   yaam.onState(state => render(state))               // live snapshot pushes (~3s)
+ *   yaam.onContext(ctx => …)                            // { placement, sessionId?, url?, selection? }
  *   yaam.banner('something went wrong')                // error strip (auto-hides)
  *   yaam.guard(promise)                                // await + banner on rejection
  *   yaam.esc(text) · yaam.ago(ts) · yaam.el(...)       // small view helpers
@@ -23,6 +24,8 @@ const yaam = (() => {
   const pending = {}
   const stateSubs = []
   let lastState = null
+  let lastContext = null
+  const contextSubs = []
 
   function call(method, ...args){
     return new Promise((resolve, reject) => {
@@ -38,6 +41,10 @@ const yaam = (() => {
     if (d.type === 'yaam:result' && pending[d.callId]) {
       d.error ? pending[d.callId].reject(new Error(d.error)) : pending[d.callId].resolve(d.result)
       delete pending[d.callId]
+    }
+    if (d.type === 'yaam:context' && d.context) {
+      lastContext = d.context
+      for (const cb of contextSubs) { try { cb(d.context) } catch (err) { console.error(err) } }
     }
     if (d.type === 'yaam:state') {
       lastState = d.state
@@ -114,6 +121,14 @@ const yaam = (() => {
     }, 2600)
   }
 
+  // where the view is shown: { placement: 'tab'|'panel'|'popup', sessionId?, cwd?, url?, selection?, commandId? }
+  function onContext(cb){
+    contextSubs.push(cb)
+    if (lastContext) cb(lastContext)
+    parent.postMessage({ type: 'yaam:getContext' }, '*')
+    return () => { const i = contextSubs.indexOf(cb); if (i >= 0) contextSubs.splice(i, 1) }
+  }
+
   function onState(cb){
     stateSubs.push(cb)
     if (lastState) cb(lastState)
@@ -121,5 +136,5 @@ const yaam = (() => {
     return () => { const i = stateSubs.indexOf(cb); if (i >= 0) stateSubs.splice(i, 1) }
   }
 
-  return { call, api, onState, state: () => lastState, banner, guard, esc, ago, el, confirm }
+  return { call, api, onState, state: () => lastState, onContext, context: () => lastContext, banner, guard, esc, ago, el, confirm }
 })()
