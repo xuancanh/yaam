@@ -7,6 +7,11 @@ import { ColorSwatches } from '../../components/ColorSwatches'
 import { EditableName, IC, Icon, MasterMark } from '../../components/ui'
 import { keepAwakeDesired } from '../../app/keep-awake'
 import { confirmAction } from '../../components/Confirm'
+import { rollupByWorkspace } from '../session/attention-rollup'
+
+const BADGE = { fontSize: 9.5, fontWeight: 700, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' } as const
+const BADGE_BLOCKED = { background: 'var(--amber)', color: '#1a1300' } as const
+const BADGE_UNSEEN = { background: 'var(--accent-soft)', color: 'var(--accent)' } as const
 
 /** Switch, create, rename, delete, and spin workspace-scoped state pools out
  *  into their own OS window. In a spun-out (satellite) window this collapses to a
@@ -18,6 +23,10 @@ function WorkspaceSwitcher() {
   const active = s.workspaces.find(w => w.id === s.activeWorkspace)
   // Count visible sessions assigned to one workspace for its switcher badge.
   const countFor = (id: string) => s.agents.filter(a => !a.archived && (a.workspaceId ?? s.activeWorkspace) === id).length
+  const rollup = rollupByWorkspace(s)
+  // what's waiting in OTHER workspaces: the active one already flashes its tabs
+  const elsewhere = { blocked: 0, unseen: 0 }
+  for (const [id, r] of rollup) if (id !== s.activeWorkspace && !(s.detachedWorkspaces ?? []).includes(id)) { elsewhere.blocked += r.blocked; elsewhere.unseen += r.unseen }
 
   // Satellite window: pinned to one workspace — render a static badge, no switching.
   if (isSatelliteWindow()) {
@@ -46,6 +55,15 @@ function WorkspaceSwitcher() {
       >
         <span style={{ color: active?.color ?? 'var(--accent)', fontSize: 11 }}>▣</span>
         {active?.name ?? 'Default'}
+        {elsewhere.blocked + elsewhere.unseen > 0 && (
+          <span
+            title={`Other workspaces: ${elsewhere.blocked} waiting on you, ${elsewhere.unseen} finished unseen (⌘⇧A jumps)`}
+            className="mono"
+            style={{ ...BADGE, ...(elsewhere.blocked ? BADGE_BLOCKED : BADGE_UNSEEN) }}
+          >
+            {elsewhere.blocked + elsewhere.unseen}
+          </span>
+        )}
         <span style={{ color: 'var(--dim)', fontSize: 9, transform: open ? 'rotate(180deg)' : 'none' }}>▼</span>
       </button>
       {open && (
@@ -73,6 +91,12 @@ function WorkspaceSwitcher() {
                     ? <EditableName name={w.name} onRename={name => renameWorkspace(w.id, name)} fontSize={13} />
                     : <span style={{ fontWeight: 600 }}>{w.name}</span>}
                 </div>
+                {(rollup.get(w.id)?.blocked ?? 0) > 0 && (
+                  <span className="mono" title="waiting on you" style={{ ...BADGE, ...BADGE_BLOCKED }}>{rollup.get(w.id)!.blocked}</span>
+                )}
+                {(rollup.get(w.id)?.unseen ?? 0) > 0 && (
+                  <span className="mono" title="finished, not yet viewed" style={{ ...BADGE, ...BADGE_UNSEEN }}>{rollup.get(w.id)!.unseen}</span>
+                )}
                 <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>{countFor(w.id)}</span>
                 {s.workspaces.length > 1 && (
                   <button

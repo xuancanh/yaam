@@ -32,6 +32,13 @@ export async function closeWorkspaceWindow(workspaceId: string): Promise<void> {
   await w?.destroy().catch(() => {})
 }
 
+/** Show `n` on the app's Dock/taskbar icon (0 clears it). */
+export async function setDockBadge(n: number): Promise<void> {
+  if (!isTauri) return
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  await getCurrentWindow().setBadgeCount(n > 0 ? n : undefined).catch(() => {})
+}
+
 /** Ask a satellite to close GRACEFULLY via the close-request handshake: the
  *  satellite forwards its final slice over ws:reattach, then destroys itself.
  *  Use this to reclaim a workspace; destroy skips the handshake and loses the

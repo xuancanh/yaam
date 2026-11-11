@@ -7,6 +7,8 @@ import type { AppState } from '../../core/types'
 import type { Agent, ArchivedWorkspace, WorkspaceData } from '../../core/entities'
 import { mkId } from '../../shared/id'
 import { moveSessionIn, scopedFromState, switchWorkspaceIn } from './state'
+import { nextAttention } from '../session/attention-rollup'
+import { activeSessionId, focusSessionIn } from '../session/layout-state'
 import { MASTER_GREETING } from '../../core/data'
 import { realSessionProcessPort } from '../session/ports'
 import type { SessionProcessPort } from '../session/ports'
@@ -30,6 +32,9 @@ export interface WorkspaceActionsCtx {
 
 export interface WorkspaceActions {
   switchWorkspace: (id: string) => void
+  /** focus the next session that is blocked on the user or finished unseen,
+   *  switching workspace if needed; repeated calls cycle through them */
+  jumpToAttention: () => void
   createWorkspace: (name: string) => void
   renameWorkspace: (id: string, name: string) => void
   /** set a workspace's accent color (hex); tints the logo + switcher dot */
@@ -94,6 +99,13 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
   }
 
   return {
+    jumpToAttention: () => {
+      const s = stateRef.current
+      const next = nextAttention(s, activeSessionId(s))
+      if (!next) { flash('No session needs you right now'); return }
+      if (next.workspaceId !== s.activeWorkspace) doSwitch(next.workspaceId)
+      dispatch(x => ({ ...focusSessionIn(x, next.id), view: 'workspace' }))
+    },
     switchWorkspace: id => {
       // A detached workspace is owned by its satellite window — activating it
       // here too would have two windows driving the same sessions and PTYs.
