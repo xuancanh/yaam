@@ -3,6 +3,7 @@
 import * as native from '../../core/native'
 import { binOf } from '../../core/agent-adapters'
 import { useAppStore } from '../../core/store'
+import { bracketedPasteOn } from '../../core/terminals'
 import type { AppState } from '../../core/types'
 
 /** Resolve a configured agent type from the executable at the start of a command. */
@@ -42,6 +43,20 @@ export const KEYMAP: Record<string, string> = {
 
 /** Send text and Enter as separate writes; TUIs otherwise treat the combined
  *  chunk as pasted text and may insert a newline instead of submitting. */
+/** Send a prompt that may span lines. With bracketed paste on, the body goes
+ *  in as one paste so embedded newlines don't submit early; without it, the
+ *  lines are joined (a raw newline would submit each line on its own). */
+export function sendPromptToSession(id: string, text: string) {
+  const agent = useAppStore.getState().agents.find(a => a.id === id)
+  if (agent?.acp || !text.includes('\n')) { sendLineToSession(id, text); return }
+  if (bracketedPasteOn(id)) {
+    native.writeSession(id, `\x1b[200~${text.replace(/\r\n?/g, '\n')}\x1b[201~`).catch(() => {})
+    window.setTimeout(() => { native.writeSession(id, '\r').catch(() => {}) }, 350)
+    return
+  }
+  sendLineToSession(id, text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).join(' '))
+}
+
 export function sendLineToSession(id: string, text: string) {
   // ACP sessions have no PTY — a sent line IS the next prompt turn
   const agent = useAppStore.getState().agents.find(a => a.id === id)

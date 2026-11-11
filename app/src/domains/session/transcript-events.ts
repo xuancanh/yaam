@@ -7,6 +7,7 @@ import type { AppState } from '../../core/types'
 import { dispatch } from '../../core/store'
 import { onTranscriptLines } from '../../core/native'
 import type { TranscriptLinesEvent } from '../../core/native'
+import { dropFlow, ingestFlow, resetFlows } from './session-flow'
 
 const RING_CAP = 100
 
@@ -20,11 +21,13 @@ export function transcriptEventsFor(id: string): readonly Record<string, unknown
 /** Drop a session's transcript ring (archive/delete). */
 export function dropTranscriptEvents(id: string): void {
   rings.delete(id)
+  dropFlow(id)
 }
 
 /** Test/teardown helper. */
 export function resetTranscriptEvents(): void {
   rings.clear()
+  resetFlows()
 }
 
 export interface TranscriptEventsDeps {
@@ -39,6 +42,7 @@ export function applyTranscriptLines(deps: TranscriptEventsDeps, e: TranscriptLi
   if (!agent || agent.archived) return
   let sawActivity = false
   const ring = rings.get(e.agent) ?? []
+  const fresh: Record<string, unknown>[] = []
   for (const line of e.lines) {
     let ev: unknown
     try { ev = JSON.parse(line) } catch { continue }
@@ -48,7 +52,9 @@ export function applyTranscriptLines(deps: TranscriptEventsDeps, e: TranscriptLi
     // `response_item`/`event_msg` — all mean the agent is actively working
     if (rec.type === 'assistant' || rec.type === 'response_item' || rec.type === 'event_msg') sawActivity = true
     ring.push(rec)
+    fresh.push(rec)
   }
+  ingestFlow(e.agent, fresh)
   if (ring.length > RING_CAP) ring.splice(0, ring.length - RING_CAP)
   rings.set(e.agent, ring)
   if (sawActivity && agent.status === 'running' && !agent.responding) {

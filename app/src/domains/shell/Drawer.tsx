@@ -200,7 +200,7 @@ export function Drawer() {
           </button>
         </div>
         {isDiff
-          ? <GitWorkbench cwd={agent.cwd} worktree={agent.worktree} footer={<ReviewFooter agent={agent} />} />
+          ? <GitWorkbench agentId={agent.kind !== 'chat' && (agent.status === 'running' || agent.status === 'needs') ? agent.id : undefined} cwd={agent.cwd} worktree={agent.worktree} footer={<ReviewFooter agent={agent} />} />
           : <AgentBody agent={agent} />}
       </div>
     </>

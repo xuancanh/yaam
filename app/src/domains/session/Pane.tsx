@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useActions, useConductorSelector } from '../../store'
 import { ACCENT } from '../../core/data'
 import { openTerminalSearch } from '../../core/terminals'
@@ -20,6 +21,12 @@ import { SuggestionChips } from './SuggestionChips'
 import { TerminalPane } from './TerminalPane'
 import { QuickShell, disposeQuickShell, onQuickShellToggle } from './QuickShell'
 import { WorktreeMergeBar } from './WorktreeMergeBar'
+import { AddonFrame } from '../addons/AddonFrame'
+import { QuickPromptsPanel } from './QuickPromptsPanel'
+import { FlowPanel } from './FlowPanel'
+import { onAddonPanel } from '../addons/addon-ui-bus'
+import { panelAddons } from '../addons/contributions'
+import type { AddonViewContext } from '../../core/entities'
 
 // explorer/changes visibility survives tab switches (panes remount freely)
 const filesOpenCache = new Map<string, boolean>()
@@ -38,6 +45,14 @@ const historyDockCache = new Map<string, PanelDock>()
 // the quick shell — a scratch terminal in the session's folder (⌘J)
 const shellOpenCache = new Map<string, boolean>()
 const shellDockCache = new Map<string, PanelDock>()
+// native panels: quick prompts and the session flow timeline
+const promptsOpenCache = new Map<string, boolean>()
+const promptsDockCache = new Map<string, PanelDock>()
+const flowOpenCache = new Map<string, boolean>()
+const flowDockCache = new Map<string, PanelDock>()
+// addon panel: which addon is docked (by id) and the context it was opened with
+const addonPanelCache = new Map<string, { addonId: string; context: AddonViewContext } | null>()
+const addonDockCache = new Map<string, PanelDock>()
 // drag-resizable split ratios: each dock area's share of the pane
 const splitCache = new Map<string, { left: number; right: number; bottom: number }>()
 // "full tab" mode: the docked panels take the whole pane, terminal hidden
@@ -149,6 +164,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
   // session activity: task/work evidence + user actions, newest first
   const history = useConductorSelector(x => x.agents.find(a => a.id === agent.id)?.history)
   const [historyOpen, setHistoryOpen] = useState(historyOpenCache.get(agent.id) ?? false)
+  const toggleHistory = () => setHistoryOpen(v => { historyOpenCache.set(agent.id, !v); return !v })
   const [historyDock, setHistoryDock] = useState<PanelDock>(historyDockCache.get(agent.id) ?? 'right')
   const setHDock = (d: PanelDock) => { historyDockCache.set(agent.id, d); setHistoryDock(d) }
   // quick shell panel: docks bottom by default (a wide shell reads best);
@@ -173,14 +189,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
   // terminal (which stays alive — its xterm is registry-owned and re-attaches)
   const [panelFull, setPanelFull] = useState(panelFullCache.get(agent.id) ?? false)
   const toggleFull = () => setPanelFull(v => { panelFullCache.set(agent.id, !v); return !v })
-  const [settingsMenu, setSettingsMenu] = useState<{ x: number; y: number } | null>(null)
-  const settingsOpen = settingsMenu !== null
-  const settingsAnchor = useRef<HTMLDivElement>(null)
-  const toggleSettings = () => {
-    if (settingsMenu) { setSettingsMenu(null); return }
-    const rect = settingsAnchor.current?.getBoundingClientRect()
-    if (rect) setSettingsMenu({ x: rect.right - 210, y: rect.bottom + 5 })
-  }
+  const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null)
   // Toggle the pane-local file explorer and repaint the terminal after resizing.
   const toggleFiles = () => {
     setFilesOpen(v => {
@@ -195,6 +204,24 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
     setFocusedSession(agent.id)
     return () => clearFocusedSession(agent.id)
   }, [active, agent.id])
+  const [promptsOpen, setPromptsOpen] = useState(promptsOpenCache.get(agent.id) ?? false)
+  const [promptsDock, setPromptsDockState] = useState<PanelDock>(promptsDockCache.get(agent.id) ?? 'right')
+  const setPDock = (d: PanelDock) => { promptsDockCache.set(agent.id, d); setPromptsDockState(d) }
+  const togglePrompts = () => setPromptsOpen(v => { promptsOpenCache.set(agent.id, !v); return !v })
+  const [flowOpen, setFlowOpen] = useState(flowOpenCache.get(agent.id) ?? false)
+  const [flowDock, setFlowDockState] = useState<PanelDock>(flowDockCache.get(agent.id) ?? 'right')
+  const setFlDock = (d: PanelDock) => { flowDockCache.set(agent.id, d); setFlowDockState(d) }
+  const toggleFlow = () => setFlowOpen(v => { flowOpenCache.set(agent.id, !v); return !v })
+  // addon panels: views that dock beside this session and receive it as context
+  const panelCandidates = useConductorSelector(x => panelAddons(x).map(a => a.id).join('\n'))
+  const panelIds = useMemo(() => (panelCandidates ? panelCandidates.split('\n') : []), [panelCandidates])
+  const [addonPanel, setAddonPanelState] = useState(addonPanelCache.get(agent.id) ?? null)
+  const [addonDock, setAddonDockState] = useState<PanelDock>(addonDockCache.get(agent.id) ?? 'right')
+  const setAddonPanel = (v: { addonId: string; context: AddonViewContext } | null) => { addonPanelCache.set(agent.id, v); setAddonPanelState(v) }
+  const setADock = (d: PanelDock) => { addonDockCache.set(agent.id, d); setAddonDockState(d) }
+  const panelAddon = useConductorSelector(x => (addonPanel ? x.addons.find(a => a.id === addonPanel.addonId && a.enabled) : undefined))
+  const openAddonPanelHere = (addonId: string) => setAddonPanel({ addonId, context: { placement: 'panel', sessionId: agent.id, cwd: agent.cwd } })
+  useEffect(() => onAddonPanel(agent.id, r => setAddonPanel({ addonId: r.addonId, context: { ...r.context, cwd: agent.cwd } })), [agent.id, agent.cwd]) // eslint-disable-line react-hooks/exhaustive-deps
   // ctrl/cmd+clicking a file path in the terminal opens it in the Files panel
   useEffect(() => onEnsureFilesPanel(agent.id, () => {
     filesOpenCache.set(agent.id, true)
@@ -260,51 +287,78 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             <Icon paths={['M4 5h16v10H9l-4 4z']} size={15} stroke={1.7} />
           </button>
         )}
+        {/* panels that live in the More menu get a toolbar button while open, so
+            the open ones stay visible and one click closes them */}
+        {promptsOpen && (
+          <button className="icon-btn" title="Hide quick prompts" style={{ ...TB, color: 'var(--accent)' }} onClick={e => { e.stopPropagation(); togglePrompts() }}>
+            <Icon paths={PROMPTS_ICON} size={14} stroke={1.6} />
+          </button>
+        )}
+        {flowOpen && (
+          <button className="icon-btn" title="Hide the flow" style={{ ...TB, color: 'var(--accent)' }} onClick={e => { e.stopPropagation(); toggleFlow() }}>
+            <Icon paths={FLOW_ICON} size={14} stroke={1.7} />
+          </button>
+        )}
+        {historyOpen && (
+          <button className="icon-btn" title="Hide activity" style={{ ...TB, color: 'var(--accent)' }} onClick={e => { e.stopPropagation(); toggleHistory() }}>
+            <Icon paths={ACTIVITY_ICON} size={15} stroke={1.7} />
+          </button>
+        )}
+        {panelAddon && (
+          <button className="icon-btn" title={`Hide ${panelAddon.contributes?.panel?.title ?? panelAddon.name}`} style={{ ...TB, color: 'var(--accent)', fontSize: 13 }} onClick={e => { e.stopPropagation(); setAddonPanel(null) }}>
+            {panelAddon.icon || <Icon paths={ADDON_ICON} size={15} stroke={1.6} />}
+          </button>
+        )}
         <button
           className="icon-btn"
-          title={historyOpen ? 'Hide activity' : 'Activity — tasks, session work, file changes, and your actions'}
-          style={{ width: 27, height: 27, borderRadius: 7, color: historyOpen ? 'var(--accent)' : undefined }}
-          onClick={e => { e.stopPropagation(); setHistoryOpen(v => { historyOpenCache.set(agent.id, !v); return !v }) }}
+          title="More: panels, terminal tools, session settings"
+          aria-haspopup="menu"
+          style={{ ...TB, color: moreMenu ? 'var(--accent)' : undefined }}
+          onClick={e => {
+            e.stopPropagation()
+            if (moreMenu) { setMoreMenu(null); return }
+            const r = e.currentTarget.getBoundingClientRect()
+            setMoreMenu({ x: r.right - 236, y: r.bottom + 5 })
+          }}
         >
-          <Icon paths={['M12 7v5l3 2', 'M12 3a9 9 0 100 18 9 9 0 000-18z']} size={15} stroke={1.7} />
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
         </button>
-        <div ref={settingsAnchor} style={{ position: 'relative' }}>
-          <button
-            className="icon-btn"
-            title="Session settings — memory & context, tools & permissions"
-            style={{ width: 27, height: 27, borderRadius: 7, color: settingsOpen ? 'var(--accent)' : undefined }}
-            onClick={e => { e.stopPropagation(); toggleSettings() }}
-          >
-            <Icon paths={[...IC.sliders, 'M6 9m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 15m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']} size={15} />
-          </button>
-          {settingsMenu && (
-            <ContextMenu
-              x={settingsMenu.x}
-              y={settingsMenu.y}
-              width={210}
-              label={`Settings for ${agent.name}`}
-              onClose={() => setSettingsMenu(null)}
-              header={<div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)' }}>SESSION SETTINGS</div>}
-            >
-                <button
-                  role="menuitem"
-                  className="context-menu-item"
-                  onClick={() => { setSettingsMenu(null); openPanel(agent.id, 'memory') }}
-                >
-                  <Icon paths={['M7 7h10v10H7z', ...IC.chip]} size={14} />
-                  Memory & context
-                </button>
-                <button
-                  role="menuitem"
-                  className="context-menu-item"
-                  onClick={() => { setSettingsMenu(null); openPanel(agent.id, 'tools') }}
-                >
-                  <Icon paths={[...IC.sliders, 'M6 9m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 15m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']} size={14} />
-                  Tools & permissions
-                </button>
-            </ContextMenu>
-          )}
-        </div>
+        {moreMenu && (
+          <ContextMenu x={moreMenu.x} y={moreMenu.y} width={236} label={`More for ${agent.name}`} onClose={() => setMoreMenu(null)}>
+            <MenuSection label="PANELS" first />
+            {agent.kind !== 'chat' && <MenuToggle on={promptsOpen} icon={<Icon paths={PROMPTS_ICON} size={13} stroke={1.6} />} label="Quick prompts" onPick={() => { setMoreMenu(null); togglePrompts() }} />}
+            {agent.kind !== 'chat' && <MenuToggle on={flowOpen} icon={<Icon paths={FLOW_ICON} size={13} stroke={1.7} />} label="Flow timeline" onPick={() => { setMoreMenu(null); toggleFlow() }} />}
+            <MenuToggle on={historyOpen} icon={<Icon paths={ACTIVITY_ICON} size={14} stroke={1.7} />} label="Activity" onPick={() => { setMoreMenu(null); toggleHistory() }} />
+            {panelIds.map(id => (
+              <AddonMenuItem key={id} addonId={id} on={addonPanel?.addonId === id && !!panelAddon}
+                onPick={() => { setMoreMenu(null); if (addonPanel?.addonId === id && panelAddon) setAddonPanel(null); else openAddonPanelHere(id) }} />
+            ))}
+            {agent.kind !== 'chat' && <MenuSection label="TERMINAL" />}
+            {agent.kind !== 'chat' && (
+              <button role="menuitem" className="context-menu-item" onClick={() => { setMoreMenu(null); openTerminalSearch(agent.id) }}>
+                <Icon paths={['M11 5a6 6 0 100 12 6 6 0 000-12z', 'M15.5 15.5L20 20']} size={13} stroke={1.7} />
+                <span style={{ flex: 1 }}>Find in terminal</span>
+                <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>⌘F</span>
+              </button>
+            )}
+            {agent.kind !== 'chat' && (
+              <button role="menuitem" className="context-menu-item" title="Full reset of the display and scrollback (fixes a corrupted pane; a live TUI repaints with Ctrl+L)" onClick={() => { setMoreMenu(null); refreshTerminal(agent.id) }}>
+                <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={13} stroke={1.8} />
+                Clear terminal
+              </button>
+            )}
+            <MenuSection label="SESSION" />
+            <button role="menuitem" className="context-menu-item" onClick={() => { setMoreMenu(null); openPanel(agent.id, 'memory') }}>
+              <Icon paths={['M7 7h10v10H7z', ...IC.chip]} size={13} />
+              Memory & context
+            </button>
+            <button role="menuitem" className="context-menu-item" onClick={() => { setMoreMenu(null); openPanel(agent.id, 'tools') }}>
+              <Icon paths={[...IC.sliders, 'M6 9m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M12 15m-2 0a2 2 0 104 0 2 2 0 10-4 0', 'M18 7m-2 0a2 2 0 104 0 2 2 0 10-4 0']} size={13} />
+              Tools & permissions
+            </button>
+          </ContextMenu>
+        )}
+        <div style={SEP} />
         {agent.kind !== 'chat' && (agent.status === 'idle' || agent.status === 'error') && (
           <button className="icon-btn" title="Resume session" style={{ width: 27, height: 27, borderRadius: 7, color: 'var(--green)' }} onClick={e => { e.stopPropagation(); resume(agent.id) }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z" /></svg>
@@ -313,26 +367,6 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
         {agent.kind === 'real' && agent.status === 'running' && (
           <button className="icon-btn" title="Stop session" style={{ width: 27, height: 27, borderRadius: 7, color: 'var(--red-soft)' }} onClick={e => { e.stopPropagation(); stopSession(agent.id) }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-          </button>
-        )}
-        {agent.kind !== 'chat' && (
-          <button
-            className="icon-btn"
-            title="Find in terminal (Cmd+F / Ctrl+Shift+F)"
-            style={{ width: 27, height: 27, borderRadius: 7 }}
-            onClick={e => { e.stopPropagation(); openTerminalSearch(agent.id) }}
-          >
-            <Icon paths={['M11 5a6 6 0 100 12 6 6 0 000-12z', 'M15.5 15.5L20 20']} size={14} stroke={1.7} />
-          </button>
-        )}
-        {agent.kind !== 'chat' && (
-          <button
-            className="icon-btn"
-            title="Clear terminal — full reset of the display and scrollback (fixes a corrupted pane; a live TUI repaints with Ctrl+L)"
-            style={{ width: 27, height: 27, borderRadius: 7 }}
-            onClick={e => { e.stopPropagation(); refreshTerminal(agent.id) }}
-          >
-            <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={13} stroke={1.8} />
           </button>
         )}
         {!standalone && (
@@ -384,6 +418,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
           <>
             <DockStrip label="CHANGES" dock={gitDock} onDock={setDock} onPopup={() => setGitPopup(true)} onClose={closeGit} full={panelFull} onToggleFull={toggleFull} />
             <GitWorkbench
+              agentId={agent.kind !== 'chat' && (agent.status === 'running' || agent.status === 'needs') ? agent.id : undefined}
               cwd={agent.cwd}
               worktree={agent.worktree}
               fs={fs}
@@ -435,7 +470,28 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
             <QuickShell key={shellGen} agent={agent} />
           </>
         )
+        const addonPanelEl = addonPanel && panelAddon && (
+          <>
+            <DockStrip label={(panelAddon.contributes?.panel?.title ?? panelAddon.name).toUpperCase()} dock={addonDock} onDock={setADock} onClose={() => setAddonPanel(null)} full={panelFull} onToggleFull={toggleFull} />
+            <AddonFrame addon={panelAddon} context={addonPanel.context} />
+          </>
+        )
+        const promptsPanel = promptsOpen && (
+          <>
+            <DockStrip label="PROMPTS" dock={promptsDock} onDock={setPDock} onClose={togglePrompts} full={panelFull} onToggleFull={toggleFull} />
+            <QuickPromptsPanel agent={agent} />
+          </>
+        )
+        const flowPanel = flowOpen && (
+          <>
+            <DockStrip label="FLOW" dock={flowDock} onDock={setFlDock} onClose={toggleFlow} full={panelFull} onToggleFull={toggleFull} />
+            <FlowPanel agent={agent} />
+          </>
+        )
         const sidePanels = (side: PanelDock) => [
+          ...(promptsPanel && promptsDock === side ? [promptsPanel] : []),
+          ...(flowPanel && flowDock === side ? [flowPanel] : []),
+          ...(addonPanelEl && addonDock === side ? [addonPanelEl] : []),
           ...(filesPanel && filesDock === side ? [filesPanel] : []),
           ...(gitPanel && gitDock === side ? [gitPanel] : []),
           ...(watcherPanel && watcherDock === side ? [watcherPanel] : []),
@@ -514,4 +570,33 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
       {gitPopup && agent.cwd && <GitPopup agent={agent} onClose={() => setGitPopup(false)} />}
     </div>
   )
+}
+
+/** One row of the addon-panel picker. */
+// pane header toolbar: one size for every icon button, a hairline between groups
+const TB = { width: 27, height: 27, borderRadius: 7 } as const
+const SEP = { width: 1, height: 16, background: 'var(--line2)', margin: '0 2px', flexShrink: 0 } as const
+const PROMPTS_ICON = ['M13 2L4 14h7l-1 8 9-12h-7l1-8z']
+const FLOW_ICON = ['M5 4v16', 'M5 7h8', 'M5 12h12', 'M5 17h6']
+const ACTIVITY_ICON = ['M12 7v5l3 2', 'M12 3a9 9 0 100 18 9 9 0 000-18z']
+const ADDON_ICON = ['M10 4h4v3a2 2 0 104 0V4h2v6h-3a2 2 0 100 4h3v6h-6v-3a2 2 0 10-4 0v3H4v-6h3a2 2 0 100-4H4V4h6z']
+
+function MenuSection({ label, first }: { label: string; first?: boolean }) {
+  return <div className="mono" style={{ fontSize: 9, letterSpacing: .7, color: 'var(--dim)', padding: first ? '2px 9px 3px' : '8px 9px 3px', borderTop: first ? undefined : '1px solid var(--line)', marginTop: first ? 0 : 4 }}>{label}</div>
+}
+
+function MenuToggle({ on, icon, label, onPick }: { on: boolean; icon: ReactNode; label: string; onPick: () => void }) {
+  return (
+    <button role="menuitemcheckbox" aria-checked={on} className="context-menu-item" onClick={onPick} style={on ? { color: 'var(--accent)' } : undefined}>
+      <span style={{ width: 14, display: 'inline-flex', justifyContent: 'center' }}>{icon}</span>
+      <span style={{ flex: 1 }}>{label}</span>
+      {on && <span style={{ fontSize: 11 }}>✓</span>}
+    </button>
+  )
+}
+
+function AddonMenuItem({ addonId, on, onPick }: { addonId: string; on: boolean; onPick: () => void }) {
+  const a = useConductorSelector(x => x.addons.find(y => y.id === addonId))
+  if (!a) return null
+  return <MenuToggle on={on} icon={<span style={{ fontSize: 12 }}>{a.icon}</span>} label={a.contributes?.panel?.title ?? a.name} onPick={onPick} />
 }

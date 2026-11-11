@@ -7,6 +7,11 @@ import { Icon } from '../../components/ui'
 import { activeSessionId, workspaceTabOrder } from '../session/layout-state'
 import { requestQuickShellToggle } from '../session/QuickShell'
 import { brainOn } from '../../llm/client'
+import { contributedCommands } from '../addons/contributions'
+import { terminalSelection } from '../../core/terminals'
+import { promptsFor, quickPromptsOf } from '../session/quick-prompts'
+import { fillPrompt } from '../session/prompt-compose'
+import { keyLabel } from '../../core/addon-contributes'
 
 const ICONS: Record<string, string[]> = {
   route: ['M4 6h9', 'M4 18h6', 'M13 6l3 3-3 3', 'M20 6v12'],
@@ -42,7 +47,7 @@ interface Command {
 
 /** Filter keyboard actions and dispatch the selected command or session focus. */
 export function CommandPalette() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery, settings: x.settings }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery, settings: x.settings, addons: x.addons }), shallowEqual)
   const a = useActions()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -56,6 +61,7 @@ export function CommandPalette() {
       ...(master ? [{ id: 'route', label: 'Route a task…', hint: 'compose', icon: 'route', run: a.focusComposer }] : []),
       { id: 'new', label: 'New agent session', hint: '⌘T', icon: 'plus', run: a.openNewSession },
       { id: 'newtask', label: 'New board task', hint: '⌘N', icon: 'plus', run: a.openNewTask },
+      { id: 'attention', label: 'Jump to next session needing you', hint: '⌘⇧A', icon: 'go', run: a.jumpToAttention },
       { id: 'layout-1', label: 'Layout: single pane', hint: 'layout', icon: 'split', run: () => a.setPaneLayout([1]) },
       { id: 'layout-2', label: 'Layout: split vertical', hint: 'layout', icon: 'split', run: () => a.setPaneLayout([2]) },
       { id: 'layout-2h', label: 'Layout: split horizontal', hint: 'layout', icon: 'split', run: () => a.setPaneLayout([1, 1]) },
@@ -79,6 +85,40 @@ export function CommandPalette() {
       const step = (d: number) => a.focusTab(order[(at + d + order.length) % order.length])
       cmds.push({ id: 'term-next', label: 'Focus next terminal', hint: 'navigate', icon: 'term', run: () => step(1) })
       cmds.push({ id: 'term-prev', label: 'Focus previous terminal', hint: 'navigate', icon: 'term', run: () => step(-1) })
+    }
+    // quick prompts for the active terminal session
+    {
+      const sid = activeSessionId({ groups: s.groups, activeGroup: s.activeGroup })
+      const target = sid ? byId.get(sid) : undefined
+      if (target && target.kind !== 'chat') {
+        for (const p of promptsFor(quickPromptsOf({ settings: s.settings }), target.cwd)) {
+          cmds.push({
+            id: `qp:${p.id}`,
+            label: `Prompt: ${p.label}`,
+            hint: `quick prompt → ${target.name}`,
+            icon: 'go',
+            run: () => {
+              const text = fillPrompt(p.text, { selection: terminalSelection(target.id) })
+              if (text === null) a.flash('Select some terminal output first: this prompt uses {selection}')
+              else a.sendPrompt(target.id, text, `Quick prompt · ${p.label}`)
+            },
+          })
+        }
+      }
+    }
+    // addon-contributed commands (session-context ones get the active session)
+    for (const { addon, command } of contributedCommands({ addons: s.addons })) {
+      const sid = activeSessionId({ groups: s.groups, activeGroup: s.activeGroup })
+      cmds.push({
+        id: `addon:${addon.id}:${command.id}`,
+        label: `${addon.icon} ${command.title}`,
+        hint: [command.key ? keyLabel(command.key) : '', addon.name].filter(Boolean).join(' · '),
+        icon: 'build',
+        run: () => {
+          const sel = sid ? terminalSelection(sid) : ''
+          a.runAddonContribution(addon.id, command, { commandId: command.id, ...(sid ? { sessionId: sid, cwd: byId.get(sid)?.cwd } : {}), ...(sel ? { selection: sel.slice(0, 4000) } : {}) })
+        },
+      })
     }
     {
       // quick shell: toggle the scratch terminal docked in the active session
@@ -116,7 +156,7 @@ export function CommandPalette() {
       cmds.push({ id: `nav-${v}`, label, hint: kbd ?? 'navigate', icon: 'go', run: () => a.setView(v) }))
     const q = s.paletteQuery.toLowerCase().trim()
     return q ? cmds.filter(c => c.label.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q)) : cmds
-  }, [a, s.agents, s.activeWorkspace, s.groups, s.activeGroup, s.settings, s.paletteQuery])
+  }, [a, s.agents, s.activeWorkspace, s.groups, s.activeGroup, s.settings, s.paletteQuery, s.addons])
 
   // keyboard cursor over the filtered list; follows the query, resets on open
   const [sel, setSel] = useState(0)

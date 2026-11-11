@@ -4,6 +4,7 @@ import { clearTerminalSearch, disableGpuRenderer, enableGpuRenderer, findInTermi
 import { resolveTermPath } from '../../core/terminal-links'
 import type { Agent } from '../../core/types'
 import { requestOpenFile } from './open-file-bus'
+import { SelectionBar } from './SelectionBar'
 
 /** Attach a session's registry-owned xterm instance to the current pane DOM. */
 export function TerminalPane({ agent, active }: { agent: Agent; active: boolean }) {
@@ -178,6 +179,7 @@ export function TerminalPane({ agent, active }: { agent: Agent; active: boolean 
           </button>
         </div>
       )}
+      {agent.kind !== 'chat' && <SelectionBar agent={agent} />}
     </div>
   )
 }

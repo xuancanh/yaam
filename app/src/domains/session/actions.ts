@@ -10,7 +10,7 @@ import { defaultDetail, mkMemory, mkTools, TAB_COLORS } from '../../core/data'
 import { mkId } from '../../shared/id'
 import { dispatch } from '../../core/store'
 import { focusSessionIn, removeFromGroups } from './layout-state'
-import { envPrefix, typeForCommand } from './command'
+import { envPrefix, sendPromptToSession, typeForCommand } from './command'
 import { adapterFor } from '../../core/agent-adapters'
 import { withSensingFlags } from './sensing-flags'
 import { rememberCwd } from './recent-cwds'
@@ -64,6 +64,11 @@ export interface SessionActions {
   refreshTerminal: (id: string) => void
   newRealSession: (command: string, cwd: string, terminalShell?: string, isolate?: boolean, detached?: boolean, machineId?: string, sandbox?: SandboxConfig, typeId?: string) => void
   sendInput: (id: string, text: string) => void
+  /** send a possibly multi-line prompt (selection handoffs, quick prompts,
+   *  review comments) as one paste, with the same activity record as sendInput */
+  sendPrompt: (id: string, text: string, label?: string) => void
+  /** short toast for UI components */
+  flash: (text: string) => void
   stopSession: (id: string) => void
   /** track a CLI session discovered in an on-disk store (started outside
    *  YAAM): creates an idle session carrying the CLI id so ▶ resumes the
@@ -455,6 +460,20 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       // when no registry is wired (unit tests, standalone use)
       if (ctx.execCommand) void ctx.execCommand('send_to_session', { sessionId: id, text }, { actor: { kind: 'user' } })
       else port.sendLine(id, text)
+    },
+
+    flash: text => flash(text),
+
+    sendPrompt: (id, text, label) => {
+      armResponseWatch(id)
+      const event = createSessionActivity(stateRef.current, id, {
+        category: 'action', actor: 'user', kind: 'send', text: label ?? 'Sent a prompt', detail: text.trim().slice(0, 240) || undefined,
+      })
+      dispatch(s => withActivityTargets({
+        ...s,
+        agents: s.agents.map(a => a.id === id ? { ...a, log: a.log.concat([{ t: 'you', x: text }]) } : a),
+      }, event, { sessionId: id, taskId: event.taskId }))
+      sendPromptToSession(id, text)
     },
 
     adoptExternalSession: (kind, sessionId, cwd) => {

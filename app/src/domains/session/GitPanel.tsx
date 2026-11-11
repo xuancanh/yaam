@@ -1,6 +1,8 @@
+import { addComment, clearComments, commentsFor, onComments, removeComment, reviewPrompt, unifiedLineNumbers } from './review-comments'
+import type { ReviewComment } from './review-comments'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { useConductorSelector } from '../../store'
+import { useActions, useConductorSelector } from '../../store'
 import { worktreeDiff } from '../../core/native'
 import type { GitStatusResult } from '../../core/native'
 import { buildCfg, callApi, hasCreds } from '../../llm/client'
@@ -203,10 +205,49 @@ function SplitCellView({ cell, lang }: { cell: SplitCell; lang: HighlightLang })
   )
 }
 
+/** Live review comments for one reviewed folder. */
+function useReviewComments(key: string | undefined): ReviewComment[] {
+  const [, bump] = useState(0)
+  useEffect(() => onComments(() => bump(n => n + 1)), [])
+  return key ? commentsFor(key) : []
+}
+
+/** Inline editor for one review comment. */
+function CommentBox({ initial, onSave, onCancel }: { initial?: string; onSave: (text: string) => void; onCancel: () => void }) {
+  const [text, setText] = useState(initial ?? '')
+  return (
+    <div style={{ margin: '4px 14px 6px 28px', padding: 8, border: '1px solid var(--accent-border)', borderRadius: 8, background: 'var(--panel2)', fontFamily: 'var(--font-sans)' }}>
+      <textarea
+        autoFocus
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => {
+          e.stopPropagation()
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && text.trim()) onSave(text)
+          if (e.key === 'Escape') onCancel()
+        }}
+        rows={2}
+        placeholder="Comment for the agent (⌘Enter adds)"
+        style={{ width: '100%', resize: 'vertical', background: 'var(--bg)', border: '1px solid var(--line2)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)', fontSize: 12.5, outline: 'none', fontFamily: 'var(--font-sans)' }}
+      />
+      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+        <button className="open-btn" disabled={!text.trim()} onClick={() => onSave(text)} style={{ padding: '3px 11px', fontSize: 12 }}>Add comment</button>
+        <button className="open-btn" onClick={onCancel} style={{ padding: '3px 11px', fontSize: 12 }}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 /** colored diff body: unified, or side-by-side (old left, new right).
- *  `path` selects the syntax highlighter for the code content. */
-function DiffView({ diff, split, path }: { diff: string; split?: boolean; path?: string }) {
+ *  `path` selects the syntax highlighter for the code content. With a
+ *  `commentKey`, unified lines take review comments (click the gutter). */
+function DiffView({ diff, split, path, commentKey }: { diff: string; split?: boolean; path?: string; commentKey?: string }) {
   const lang = useMemo(() => (path ? langForFile(path) : 'text') as HighlightLang, [path])
+  const nums = useMemo(() => unifiedLineNumbers(diff), [diff])
+  const all = useReviewComments(commentKey)
+  const mine = path ? all.filter(c => c.path === path) : []
+  const [draftRow, setDraftRow] = useState<number | null>(null)
+  const canComment = Boolean(commentKey && path)
   if (!diff.trim()) return <div style={{ padding: 16, fontSize: 12, color: 'var(--dim)' }}>no diff — select a file on the left</div>
   if (split) {
     const rows = splitDiffRows(diff)
@@ -242,10 +283,37 @@ function DiffView({ diff, split, path }: { diff: string; split?: boolean; path?:
         }
         const mark = isAdd || isDel || line.startsWith(' ') ? line.slice(0, 1) : ''
         const code = mark ? line.slice(1) : line
+        const at = nums[i]
+        const here = at ? mine.filter(c => c.line === at.line && c.side === at.side) : []
         return (
-          <div key={i} style={{ padding: '0 14px', background: bg, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            <span style={{ color: markColor, userSelect: 'none' }}>{mark}</span>
-            <span dangerouslySetInnerHTML={hlHtml(code, lang)} />
+          <div key={i}>
+            <div className={canComment && at ? 'diff-line' : undefined} style={{ position: 'relative', padding: '0 14px', background: bg, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {canComment && at && (
+                <button
+                  className="diff-comment-btn"
+                  title={`Comment on line ${at.line}`}
+                  onClick={() => setDraftRow(i)}
+                  style={{ position: 'absolute', left: 0, top: 1, width: 12, height: 15, lineHeight: '13px', padding: 0, border: 'none', borderRadius: 3, background: 'var(--accent)', color: '#1a1300', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}
+                >+</button>
+              )}
+              <span style={{ color: markColor, userSelect: 'none' }}>{mark}</span>
+              <span dangerouslySetInnerHTML={hlHtml(code, lang)} />
+            </div>
+            {here.map(c => (
+              <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', margin: '3px 14px 5px 28px', padding: '6px 9px', borderRadius: 7, border: '1px solid var(--line2)', background: 'var(--panel2)', fontFamily: 'var(--font-sans)', fontSize: 12.5, whiteSpace: 'pre-wrap' }}>
+                <span style={{ color: 'var(--accent)', fontWeight: 700, fontSize: 11 }}>review</span>
+                <span style={{ flex: 1, minWidth: 0, color: 'var(--text)' }}>{c.text}</span>
+                <button className="icon-btn" title="Remove comment" style={{ width: 18, height: 18, borderRadius: 4 }} onClick={() => removeComment(commentKey!, c.id)}>
+                  <Icon paths={['M6 6l12 12', 'M18 6L6 18']} size={9} stroke={2} />
+                </button>
+              </div>
+            ))}
+            {draftRow === i && at && (
+              <CommentBox
+                onCancel={() => setDraftRow(null)}
+                onSave={text => { addComment(commentKey!, { path: path!, line: at.line, side: at.side, code, text: text.trim() }); setDraftRow(null) }}
+              />
+            )}
           </div>
         )
       })}
@@ -263,8 +331,10 @@ interface DiffSection {
 /** The shared git body: toolbar (repo picker, view toggle, refresh), the
  *  staged/unstaged tree + commit box on the left, diffs on the right, and an
  *  optional host-supplied footer (the review drawer's merge/approve row). */
-export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, ''), compact }: {
+export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, ''), compact, agentId }: {
   cwd?: string
+  /** the session that made the changes: review comments are sent to it */
+  agentId?: string
   /** worktree info when the work happens in an isolated mirror */
   worktree?: { root: string; base: string; workdir: string }
   footer?: ReactNode
@@ -290,6 +360,11 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
   const [viewMode, setViewMode] = useState<'single' | 'all'>('single')
   /** side-by-side (old | new) instead of the unified diff */
   const [sideBySide, setSideBySide] = useState(false)
+  // review comments (unified view): keyed by the reviewed folder; only when
+  // a session owns the changes, since the comments are sent to it
+  const reviewKey = agentId && cwd ? `${agentId}:${cwd}` : undefined
+  const reviewComments = useReviewComments(reviewKey)
+  const { sendPrompt } = useActions()
   /** editing the selected file in place of its diff */
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState<string | null>(null)
@@ -534,6 +609,22 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
             ? <Icon paths={['M4 5h16', 'M4 9h16', 'M4 13h16', 'M4 17h16']} size={13} stroke={1.8} />
             : <Icon paths={['M5 4h14v16H5z', 'M9 9h6', 'M9 13h6']} size={13} stroke={1.7} />}
         </button>
+        {reviewKey && reviewComments.length > 0 && <>
+          <button
+            className="open-btn"
+            title={reviewComments.map(c => `${c.path}:${c.line} ${c.text}`).join('\n')}
+            onClick={() => {
+              sendPrompt(agentId!, reviewPrompt(reviewComments), `Sent ${reviewComments.length} review comment${reviewComments.length > 1 ? 's' : ''}`)
+              clearComments(reviewKey)
+            }}
+            style={{ padding: '3px 10px', fontSize: 11.5, borderColor: 'var(--accent-border)', color: 'var(--accent)' }}
+          >
+            Send {reviewComments.length} comment{reviewComments.length > 1 ? 's' : ''} to agent
+          </button>
+          <button className="icon-btn" title="Discard review comments" onClick={() => clearComments(reviewKey)} style={{ width: 25, height: 25, borderRadius: 7 }}>
+            <Icon paths={['M6 6l12 12', 'M18 6L6 18']} size={11} stroke={2} />
+          </button>
+        </>}
         <button className="icon-btn" title="Refresh status" onClick={() => { void refresh() }} style={{ width: 25, height: 25, borderRadius: 7 }}>
           <Icon paths={['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']} size={13} stroke={1.8} />
         </button>
@@ -644,7 +735,7 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
                   onClose={() => { setEditing(false); setEditText(null); void refresh() }}
                 />
               ) : (
-                <DiffView diff={diff} split={sideBySide} path={selected?.path} />
+                <DiffView diff={diff} split={sideBySide} path={selected?.path} commentKey={reviewKey} />
               )}
             </>
           ) : sections.length ? (
@@ -668,7 +759,7 @@ export function GitWorkbench({ cwd, worktree, footer, fs = sessionFs(undefined, 
                     · {worktree ? 'vs fork point' : sec.staged ? 'staged' : 'unstaged'}
                   </span>
                 </div>
-                <DiffView diff={sec.diff} split={sideBySide} path={sec.label} />
+                <DiffView diff={sec.diff} split={sideBySide} path={sec.label} commentKey={reviewKey} />
               </div>
             ))
           ) : (
@@ -690,6 +781,7 @@ export function GitSidePanel({ agent, compact }: { agent: Agent; compact?: boole
   const fs = useMemo(() => sessionFs(agent.machine, agent.id), [agent.machine, agent.id])
   return (
     <GitWorkbench
+      agentId={agent.kind !== 'chat' && (agent.status === 'running' || agent.status === 'needs') ? agent.id : undefined}
       cwd={agent.cwd}
       worktree={agent.worktree}
       fs={fs}

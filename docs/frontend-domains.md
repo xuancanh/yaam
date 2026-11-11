@@ -285,6 +285,33 @@ at the pane header's Clear-terminal button — the explicit user-initiated full
 reset. History is never cleared automatically. Closing a pane stops the
 process and archives the session behind a confirmation.
 
+### Working with what's on screen
+
+Native features that turn terminal output and diffs into prompts. All send
+through the `sendPrompt` action (`sendPromptToSession` in `command.ts`), which
+pastes multi-line text as one bracketed paste when the program enabled it, so
+embedded newlines don't submit early. Builders live in `prompt-compose.ts`.
+
+- **Selection bar** (`SelectionBar.tsx`): selecting terminal text shows *Ask
+  about this…* (a note plus a target session: this one or a live peer in the
+  workspace, so output can be handed to another agent), *→ Task* (a backlog
+  task titled after the error line, with the output, session and folder) and
+  *Copy*.
+- **Quick prompts** (`quick-prompts.ts`, `QuickPromptsPanel.tsx`): saved
+  prompts in `settings.quickPrompts` (defaults until first edit), global or
+  scoped to a folder. `{selection}` inserts the terminal selection. A docked
+  PROMPTS panel sends one to this session or broadcasts it to every live
+  session in the tab group; they are also palette commands.
+- **Review comments** (`review-comments.ts`, `GitPanel.tsx`): in the unified
+  diff, hover a line and click `+` to comment. Comments collect per session and
+  folder (runtime only) and *Send N comments to agent* types them as one
+  review prompt grouped by file. Enabled while the session is live.
+- **Flow** (`session-flow.ts`, `FlowPanel.tsx`): `transcript-events.ts` feeds
+  each transcript batch into a capped per-session ring of compact steps
+  (prompts, tool calls with categories and ok/error status, replies) for Claude
+  Code and Codex. The FLOW panel groups them by turn, filters failures and
+  opens read/edited files in the Files panel.
+
 ### Remote machines
 
 A session can run on a saved remote machine (`settings.machines`, keys/ssh-agent
