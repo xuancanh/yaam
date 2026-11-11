@@ -287,20 +287,89 @@ pub fn kiro_hooks_install(url: String) -> Result<(), String> {
     std::fs::write(dir.join("yaam-bridge.json"), kiro_hooks_json(&url)).map_err(|e| e.to_string())
 }
 
+/// Where the listener's address is remembered between app runs. Debug and
+/// release builds keep separate files so a `tauri dev` run never steals the
+/// installed app's port.
+fn saved_info_path() -> std::path::PathBuf {
+    let name = if cfg!(debug_assertions) { "hook-listener-dev.json" } else { "hook-listener.json" };
+    std::path::PathBuf::from(crate::util::expand_tilde("~/.yaam")).join(name)
+}
+
+fn load_saved_info(path: &std::path::Path) -> Option<HookInfo> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let port = u16::try_from(v.get("port")?.as_u64()?).ok()?;
+    let token = v.get("token")?.as_str()?.to_string();
+    (port != 0 && token.len() >= 16).then_some(HookInfo { port, token })
+}
+
+fn save_info(path: &std::path::Path, info: &HookInfo) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let body = serde_json::json!({ "port": info.port, "token": info.token }).to_string();
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, body).is_err() {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    let _ = std::fs::rename(&tmp, path);
+}
+
+/// Bind the listener, preferring the previous run's port and token. Sessions
+/// outlive the app (detached hosts reattach on the next launch) with the hook
+/// and MCP URLs baked into their argv, so keeping the address stable is what
+/// lets them keep reporting after a restart or an update.
+fn bind_listener(saved: &std::path::Path) -> Result<(std::net::TcpListener, HookInfo), String> {
+    if let Some(prev) = load_saved_info(saved) {
+        if let Ok(l) = std::net::TcpListener::bind(("127.0.0.1", prev.port)) {
+            return Ok((l, prev));
+        }
+    }
+    // Mint from below the OS ephemeral range (49152+ on macOS, 32768+ on most
+    // Linux): a freed ephemeral port is soon handed to some outbound loopback
+    // connection, which would block rebinding it on the next run.
+    let mut listener = None;
+    for _ in 0..16 {
+        let mut b = [0u8; 2];
+        getrandom::getrandom(&mut b).map_err(|e| e.to_string())?;
+        let port = 20000 + u16::from_le_bytes(b) % 12000;
+        if let Ok(l) = std::net::TcpListener::bind(("127.0.0.1", port)) {
+            listener = Some(l);
+            break;
+        }
+    }
+    let listener = match listener {
+        Some(l) => l,
+        None => std::net::TcpListener::bind(("127.0.0.1", 0))
+            .map_err(|e| format!("could not bind hook listener: {e}"))?,
+    };
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let info = HookInfo { port, token: rand_token(32)? };
+    save_info(saved, &info);
+    Ok((listener, info))
+}
+
 /// Return the listener's address, starting it on first use. The server lives
-/// for the app's lifetime; a fresh token is minted per app run, so hook URLs
-/// from a previous run stop working (their POSTs fail fast and the CLI moves on).
+/// for the app's lifetime and is also started eagerly at launch (see setup),
+/// so reattached sessions find it before any new session is spawned.
 #[tauri::command]
 pub fn hooks_info(app: AppHandle, state: TauriState<HookListener>) -> Result<HookInfo, String> {
+    start(app, &state)
+}
+
+pub fn start(app: AppHandle, state: &HookListener) -> Result<HookInfo, String> {
     let mut slot = state.info.lock().map_err(|_| "hook listener lock poisoned".to_string())?;
     if let Some(info) = slot.as_ref() {
         return Ok(info.clone());
     }
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
-        .map_err(|e| format!("could not bind hook listener: {e}"))?;
+    let (listener, info) = bind_listener(&saved_info_path())?;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let token = rand_token(32)?;
+    let token = info.token.clone();
     let shared = Arc::new(Shared {
         app,
         token: token.clone(),
@@ -329,7 +398,6 @@ pub fn hooks_info(app: AppHandle, state: TauriState<HookListener>) -> Result<Hoo
             }
         });
     });
-    let info = HookInfo { port, token };
     *slot = Some(info.clone());
     Ok(info)
 }
@@ -337,6 +405,23 @@ pub fn hooks_info(app: AppHandle, state: TauriState<HookListener>) -> Result<Hoo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listener_reuses_the_saved_port_and_token_across_runs() {
+        let dir = std::env::temp_dir().join(format!("yaam-hooks-{}", std::process::id()));
+        let saved = dir.join("hook-listener.json");
+        let _ = std::fs::remove_file(&saved);
+        let (first, a) = bind_listener(&saved).unwrap();
+        drop(first);
+        let (_second, b) = bind_listener(&saved).unwrap();
+        assert_eq!((a.port, &a.token), (b.port, &b.token));
+        assert!((20000..32000).contains(&a.port));
+        // a port someone else holds falls back to a fresh address
+        let (_third, c) = bind_listener(&saved).unwrap();
+        assert_ne!(c.port, b.port);
+        assert_ne!(c.token, b.token);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn peer_tools_are_listed_separately_and_waits_get_longer_timeouts() {

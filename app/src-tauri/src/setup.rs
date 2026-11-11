@@ -1,8 +1,9 @@
 //! Platform and plugin setup run once at startup, kept out of the builder in
 //! `lib.rs` so the composition root stays readable.
-use tauri::App;
+use tauri::{App, Manager};
 
-/// Set the dock icon in dev and enable logging in debug builds.
+/// Set the dock icon in dev, start the hook listener, and enable logging in
+/// debug builds.
 pub fn init(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     // `tauri dev` runs a bare binary (no .app bundle), so macOS falls back to a
     // generic dock icon that doesn't match the bundled app — set it here.
@@ -19,6 +20,12 @@ pub fn init(app: &App) -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
         }
+    }
+    // Sessions that outlived the previous run reattach with hook/MCP URLs in
+    // their argv; start the listener now so they reach it immediately.
+    let listener = app.state::<crate::domains::hooks::HookListener>();
+    if let Err(e) = crate::domains::hooks::start(app.handle().clone(), &listener) {
+        log::warn!("hook listener did not start: {e}");
     }
     if cfg!(debug_assertions) {
         app.handle().plugin(
