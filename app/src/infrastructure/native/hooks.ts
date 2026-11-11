@@ -51,6 +51,13 @@ export async function mcpServeRespond(callId: number, result: Record<string, unk
   await invoke('mcp_serve_respond', { callId, result }).catch(() => {})
 }
 
+/** Mirror the "sessions can coordinate each other" setting into the MCP
+ *  listener, which only lists the peer tools while it is on. */
+export async function mcpServeSetPeerTools(enabled: boolean): Promise<void> {
+  if (!isTauri) return
+  await invoke('mcp_serve_set_peer_tools', { enabled }).catch(() => {})
+}
+
 /** Subscribe to manager-tool calls from sessions; returns an unsubscribe fn. */
 export function onMcpServeCall(cb: (e: McpServeCall) => void): () => void {
   if (!isTauri) return () => {}

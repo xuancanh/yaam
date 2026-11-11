@@ -135,6 +135,7 @@ pub fn run() {
             domains::hooks::hooks_info,
             domains::hooks::kiro_hooks_install,
             domains::hooks::mcp_serve_respond,
+            domains::hooks::mcp_serve_set_peer_tools,
             domains::transcript::transcript_watch,
             domains::transcript::transcript_unwatch,
             domains::transcript::discover_sessions,

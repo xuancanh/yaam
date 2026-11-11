@@ -148,7 +148,7 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
   const masterInterruptLine = (sid: string) =>
     void registry.execute('interrupt_turn', { sessionId: sid }, { actor: { kind: 'master' } }).catch(() => {})
 
-  const session = createSessionRuntime(kernel, refs)
+  const session = createSessionRuntime(kernel, refs, role.kind === 'main')
   const addon = createAddonSubsystem(kernel, refs, session, addonExec)
   const chat = createChatBoot(kernel, refs, session, role)
   const master = createMasterSubsystem(kernel, refs, session, addon, chat.runChatMessage, masterSendLine, masterStopLine, masterAnswerLine, masterInterruptLine, role)

@@ -652,6 +652,11 @@ export interface OrchestrationSettings {
   masterModel: string
   /** model for per-session monitor LLMs; empty = same as masterModel */
   monitorModel: string
+  /** saved prompts for the Quick prompts panel/palette; absent = defaults */
+  quickPrompts?: QuickPrompt[]
+  /** let agent sessions list, read, prompt, wait on and spawn the other
+   *  sessions of their workspace over YAAM's MCP server (off by default) */
+  peerTools?: boolean
   /** provider for monitors/watchers: '' = same as Master, 'local' = an
    *  OpenAI-compatible server on this machine (Master stays remote) */
   monitorProvider?: string
@@ -909,6 +914,62 @@ export interface Addon {
   createdAt: string
   /** dev install: source folder that is watched and hot-reinstalled on change */
   devPath?: string
+  /** UI entry points beyond the icon-rail tab (needs the `ui` grant) */
+  contributes?: AddonContributes
+}
+
+/** A saved prompt one click away in a session pane (herdr-plus "quick
+ *  actions", native). `{selection}` takes the terminal selection. */
+export interface QuickPrompt {
+  id: string
+  label: string
+  text: string
+  /** only offered for sessions under this folder; absent = everywhere */
+  folder?: string
+}
+
+/** Where an addon's UI shows up besides its own tab: a panel docked in each
+ *  session pane (bound to that session), palette commands with optional
+ *  shortcuts, and handlers for links clicked in a terminal. */
+export interface AddonContributes {
+  /** the view can dock inside a session pane; it receives that session as context */
+  panel?: { title: string }
+  commands?: AddonCommand[]
+  links?: AddonLinkHandler[]
+}
+
+/** What a contribution does when triggered: run one of the addon's tools with
+ *  the context as input (its text result is flashed), and/or open the view. */
+export interface AddonAction {
+  /** tool name from the addon's own `tools` */
+  run?: string
+  /** open the view: a modal popup, the session's docked panel, or its tab */
+  open?: 'popup' | 'panel' | 'tab'
+}
+
+export interface AddonCommand extends AddonAction {
+  id: string
+  title: string
+  /** shortcut such as "mod+alt+g" (mod = ⌘ on macOS, Ctrl elsewhere) */
+  key?: string
+  /** 'session' also lists it in a session tab's right-click menu */
+  context?: 'global' | 'session'
+}
+
+export interface AddonLinkHandler extends AddonAction {
+  /** regex tested against the full URL ⌘/Ctrl-clicked in a terminal */
+  pattern: string
+}
+
+/** Pushed to a view as `yaam:context`: where it is shown and why. */
+export interface AddonViewContext {
+  placement: 'tab' | 'panel' | 'popup'
+  sessionId?: string
+  /** the session's folder, when bound to one */
+  cwd?: string
+  url?: string
+  selection?: string
+  commandId?: string
 }
 
 export type View =

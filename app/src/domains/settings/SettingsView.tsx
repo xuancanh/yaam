@@ -339,6 +339,15 @@ export function SettingsView() {
                 <Switch on={s.settings[o.id]} onToggle={() => toggleSetting(o.id)} />
               </div>
             ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--line-soft)' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Sessions can coordinate each other</div>
+                <div style={{ fontSize: 12, color: 'var(--mut)', marginTop: 2 }}>
+                  Gives agent sessions MCP tools to list, read, prompt, wait on and start the other sessions in their workspace. They can never answer another session's approval prompt. New sessions pick it up; running ones after a restart.
+                </div>
+              </div>
+              <Switch on={Boolean(s.settings.peerTools)} onToggle={() => updateSettings({ peerTools: !s.settings.peerTools })} />
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>Desktop notifications</div>

@@ -18,6 +18,9 @@ import { attachTranscriptEvents } from '../../domains/session/transcript-events'
 import { attachOpencodeEvents } from '../../domains/session/opencode-events'
 import { attachAcpEvents } from '../../domains/session/acp-events'
 import { attachMcpServe } from '../../domains/session/mcp-serve'
+import { sendLineToSession } from '../../domains/session/command'
+import { mcpServeSetPeerTools } from '../../core/native'
+import { useAppStore } from '../../core/store'
 import { subscribeSessionExits } from '../../domains/session/exit-handler'
 import { createLaunchRuntime } from '../../domains/session/launch-runtime'
 import { realSessionProcessPort } from '../../domains/session/ports'
@@ -61,7 +64,7 @@ export interface SessionRuntime {
   dispose: () => void
 }
 
-export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): SessionRuntime {
+export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs, isMain = true): SessionRuntime {
   const { stateRef, later, flash, logEvent, notify } = k
   const { fireAddonHookRef, monitorEventRef, masterEventRef, runWatcherRef, spawnTaskSessionRef, userStoppedRef, taskSessionsRef } = refs
 
@@ -179,6 +182,7 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
   let offOpencode: (() => void) | undefined
   let offAcp: (() => void) | undefined
   let offMcpServe: (() => void) | undefined
+  let offPeerSetting: (() => void) | undefined
   return {
     sessionScreenTail, setNeedsInput, applyAgentStatus, appendTail,
     runMonitor, disposeMonitor: (id: string) => monitor.dispose(id),
@@ -197,7 +201,23 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
       offTranscript ??= attachTranscriptEvents({ stateRef })
       offOpencode ??= attachOpencodeEvents({ stateRef, setNeedsInput, clearNeeds })
       offAcp ??= attachAcpEvents({ stateRef, setNeedsInput, clearNeeds })
-      offMcpServe ??= attachMcpServe({ stateRef, applyAgentStatus, taskForSession })
+      offMcpServe ??= attachMcpServe({
+        stateRef, applyAgentStatus, taskForSession,
+        peer: isMain ? {
+          sessionScreenTail,
+          sendLine: (id, text) => { armResponseWatch(id); sendLineToSession(id, text) },
+          launchSession: (command, cwd, name, typeId, workspaceId, opts) => launchSession(command, cwd, name, typeId, workspaceId, opts),
+          logEvent,
+        } : undefined,
+      })
+      if (isMain && !offPeerSetting) {
+        let last = Boolean(stateRef.current.settings?.peerTools)
+        void mcpServeSetPeerTools(last)
+        offPeerSetting = useAppStore.subscribe(s => {
+          const on = Boolean(s.settings?.peerTools)
+          if (on !== last) { last = on; void mcpServeSetPeerTools(on) }
+        })
+      }
     },
     dispose() {
       settle.dispose()
@@ -207,6 +227,7 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs): Ses
       offOpencode?.(); offOpencode = undefined
       offAcp?.(); offAcp = undefined
       offMcpServe?.(); offMcpServe = undefined
+      offPeerSetting?.(); offPeerSetting = undefined
     },
   }
 }

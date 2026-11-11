@@ -8,6 +8,8 @@ import type { AppState, BoardTask } from '../../core/types'
 import { mcpServeRespond, onMcpServeCall } from '../../core/native'
 import type { McpServeCall } from '../../core/native'
 import { markStructuredSignal } from './signal-sources'
+import { PEER_TOOLS, applyPeerCall } from './mcp-peer'
+import type { PeerDeps } from './mcp-peer'
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 
@@ -20,6 +22,8 @@ export interface McpServeDeps {
   taskForSession: (sessionId: string) => { task: BoardTask } | undefined
   /** event subscription; defaults to the native bridge (injectable for tests) */
   subscribe?: (cb: (e: McpServeCall) => void) => () => void
+  /** peer-coordination tools (list/read/prompt/wait/spawn); absent = refused */
+  peer?: Omit<PeerDeps, 'stateRef'>
 }
 
 /** Answer one manager-tool call (exported for tests). */
@@ -51,8 +55,23 @@ export function applyMcpServeCall(deps: McpServeDeps, e: McpServeCall): Record<s
   }
 }
 
+/** Answer any manager-tool call, including the async peer tools. */
+export async function answerMcpServeCall(deps: McpServeDeps, e: McpServeCall): Promise<Record<string, unknown> | null> {
+  if (!e.name || !PEER_TOOLS.has(e.name)) return applyMcpServeCall(deps, e)
+  // every window hears the call; only the one holding peer deps (main) answers,
+  // so a satellite can never double-send a prompt
+  if (!deps.peer) return null
+  const caller = e.agent ? deps.stateRef.current.agents.find(a => a.id === e.agent && !a.archived) : undefined
+  if (!caller) return errorResult('unknown session — this tool is only available to sessions YAAM launched')
+  try {
+    return await applyPeerCall({ ...deps.peer, stateRef: deps.stateRef }, caller, e.name, e.arguments ?? {})
+  } catch (err) {
+    return errorResult(`peer tool failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
 /** Subscribe to manager-tool calls and answer them; returns an unsubscribe fn. */
 export function attachMcpServe(deps: McpServeDeps): () => void {
   const subscribe = deps.subscribe ?? onMcpServeCall
-  return subscribe(e => { void mcpServeRespond(e.callId, applyMcpServeCall(deps, e)) })
+  return subscribe(e => { void answerMcpServeCall(deps, e).then(r => { if (r) void mcpServeRespond(e.callId, r) }) })
 }
