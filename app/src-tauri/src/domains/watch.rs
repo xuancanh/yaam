@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Quiet window used to coalesce a burst of filesystem events into one emit. A
 /// save often produces several events (write, chmod, rename-in); batching them
@@ -125,18 +125,23 @@ impl WatchManager {
     }
 }
 
+// Off the main thread: canonicalizing a slow volume, starting an FSEvents
+// stream, and dropping one (which joins its run-loop thread) can all stall.
 #[tauri::command]
-pub fn watch_dir(
-    app: AppHandle,
-    state: State<'_, WatchManager>,
-    root: String,
-) -> Result<String, String> {
-    state.watch(app, root)
+pub async fn watch_dir(app: AppHandle, root: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<WatchManager>();
+        state.watch(app.clone(), root)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn unwatch_dir(state: State<'_, WatchManager>, root: String) {
-    state.unwatch(&root);
+pub async fn unwatch_dir(app: AppHandle, root: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<WatchManager>().unwatch(&root))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

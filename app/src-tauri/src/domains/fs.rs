@@ -502,67 +502,81 @@ async fn exec_command_impl(
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub fn list_dir(path: String, root: Option<String>) -> Result<Vec<DirEntryInfo>, String> {
-    list_dir_impl(root.as_deref(), &path)
+// Every file-pane command runs on the blocking pool: a sync Tauri command runs
+// on the main thread, so a large directory, a 25 MB preview read or the
+// quick-open walk would freeze the whole window while it ran.
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn list_files_recursive(path: String, root: Option<String>) -> Result<Vec<String>, String> {
-    list_files_recursive_impl(root.as_deref(), &path)
+pub async fn list_dir(path: String, root: Option<String>) -> Result<Vec<DirEntryInfo>, String> {
+    blocking(move || list_dir_impl(root.as_deref(), &path)).await
 }
 
 #[tauri::command]
-pub fn read_text_file(path: String, root: Option<String>) -> Result<String, String> {
-    read_text_impl(root.as_deref(), &path)
+pub async fn list_files_recursive(path: String, root: Option<String>) -> Result<Vec<String>, String> {
+    blocking(move || list_files_recursive_impl(root.as_deref(), &path)).await
 }
 
 #[tauri::command]
-pub fn read_text_range(
+pub async fn read_text_file(path: String, root: Option<String>) -> Result<String, String> {
+    blocking(move || read_text_impl(root.as_deref(), &path)).await
+}
+
+#[tauri::command]
+pub async fn read_text_range(
     path: String,
     offset: usize,
     limit: usize,
     root: Option<String>,
 ) -> Result<TextRange, String> {
-    read_text_range_impl(root.as_deref(), &path, offset, limit)
+    blocking(move || read_text_range_impl(root.as_deref(), &path, offset, limit)).await
 }
 
 #[tauri::command]
-pub fn read_file_b64(
+pub async fn read_file_b64(
     path: String,
     root: Option<String>,
     max_bytes: Option<u64>,
 ) -> Result<String, String> {
-    read_file_b64_impl(
-        root.as_deref(),
-        &path,
-        max_bytes.unwrap_or(25 * 1024 * 1024),
-    )
+    blocking(move || {
+        read_file_b64_impl(
+            root.as_deref(),
+            &path,
+            max_bytes.unwrap_or(25 * 1024 * 1024),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn write_text_file(path: String, contents: String, root: Option<String>) -> Result<(), String> {
-    write_text_impl(root.as_deref(), &path, &contents)
+pub async fn write_text_file(path: String, contents: String, root: Option<String>) -> Result<(), String> {
+    blocking(move || write_text_impl(root.as_deref(), &path, &contents)).await
 }
 
 #[tauri::command]
-pub fn create_dir(root: String, path: String) -> Result<(), String> {
-    create_dir_impl(&root, &path)
+pub async fn create_dir(root: String, path: String) -> Result<(), String> {
+    blocking(move || create_dir_impl(&root, &path)).await
 }
 
 #[tauri::command]
-pub fn move_path(root: String, from: String, to: String) -> Result<(), String> {
-    move_path_impl(&root, &from, &to)
+pub async fn move_path(root: String, from: String, to: String) -> Result<(), String> {
+    blocking(move || move_path_impl(&root, &from, &to)).await
 }
 
 #[tauri::command]
-pub fn copy_path(root: String, from: String, to: String) -> Result<(), String> {
-    copy_path_impl(&root, &from, &to)
+pub async fn copy_path(root: String, from: String, to: String) -> Result<(), String> {
+    blocking(move || copy_path_impl(&root, &from, &to)).await
 }
 
 #[tauri::command]
-pub fn delete_path(root: String, path: String) -> Result<(), String> {
-    delete_path_impl(&root, &path)
+pub async fn delete_path(root: String, path: String) -> Result<(), String> {
+    blocking(move || delete_path_impl(&root, &path)).await
 }
 
 #[tauri::command]

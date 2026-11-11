@@ -36,6 +36,7 @@
     "@xterm/xterm": "^6.0.0",
     "codemirror": "^6.0.2",
     "mammoth": "^1.12.0",
+    "marked": "^16.4.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "use-sync-external-store": "^1.6.0",

@@ -307,6 +307,13 @@ input {
   user-select: text;
 }
 
+/* reading surfaces opt back into selection (the app chrome stays unselectable) */
+.selectable,
+.selectable * {
+  user-select: text;
+  cursor: auto;
+}
+
 /* SheetJS-rendered workbook tables (file viewer office mode) */
 .sheet-html table {
   border-collapse: collapse;
@@ -966,3 +973,7 @@ button {
 .view-btn:hover {
   background: var(--panel3);
 }
+
+/* review comments: the "+" gutter button appears on hover of a diff line */
+.diff-line .diff-comment-btn { opacity: 0; transition: opacity .1s; }
+.diff-line:hover .diff-comment-btn { opacity: 1; }

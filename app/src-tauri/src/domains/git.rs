@@ -117,53 +117,73 @@ pub fn file_diff(cwd: &str, path: &str) -> Result<String, String> {
     Ok(diff_text(&out))
 }
 
-#[tauri::command]
-pub fn git_diff(cwd: String) -> Result<String, String> {
-    diff(&cwd)
+// Async + blocking pool for the same reason as the fs commands: a sync command
+// runs on the main thread, and `git status` on a big or cold repo (or many
+// untracked files) can take seconds, freezing the window on every refresh.
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_status(cwd: String) -> Result<GitStatusResult, String> {
-    status(&cwd)
+pub async fn git_diff(cwd: String) -> Result<String, String> {
+    blocking(move || diff(&cwd)).await
 }
 
 #[tauri::command]
-pub fn git_file_diff(cwd: String, path: String) -> Result<String, String> {
-    file_diff(&cwd, &path)
+pub async fn git_status(cwd: String) -> Result<GitStatusResult, String> {
+    blocking(move || status(&cwd)).await
+}
+
+#[tauri::command]
+pub async fn git_file_diff(cwd: String, path: String) -> Result<String, String> {
+    blocking(move || file_diff(&cwd, &path)).await
 }
 
 /// Full-context diff of one file for the staging UI: staged (index vs HEAD)
 /// or unstaged (worktree vs index).
 #[tauri::command]
-pub fn git_file_diff_side(cwd: String, path: String, staged: bool) -> Result<String, String> {
-    if staged {
-        run_git(&cwd, &["diff", "--no-color", "--cached", "--", &path])
-    } else {
-        run_git(&cwd, &["diff", "--no-color", "--", &path])
-    }
+pub async fn git_file_diff_side(cwd: String, path: String, staged: bool) -> Result<String, String> {
+    blocking(move || {
+        if staged {
+            run_git(&cwd, &["diff", "--no-color", "--cached", "--", &path])
+        } else {
+            run_git(&cwd, &["diff", "--no-color", "--", &path])
+        }
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn git_stage(cwd: String, paths: Vec<String>) -> Result<(), String> {
-    let mut args = vec!["add", "--"];
-    args.extend(paths.iter().map(String::as_str));
-    run_git(&cwd, &args).map(|_| ())
+pub async fn git_stage(cwd: String, paths: Vec<String>) -> Result<(), String> {
+    blocking(move || {
+        let mut args = vec!["add", "--"];
+        args.extend(paths.iter().map(String::as_str));
+        run_git(&cwd, &args).map(|_| ())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn git_unstage(cwd: String, paths: Vec<String>) -> Result<(), String> {
-    let mut args = vec!["restore", "--staged", "--"];
-    args.extend(paths.iter().map(String::as_str));
-    run_git(&cwd, &args).map(|_| ())
+pub async fn git_unstage(cwd: String, paths: Vec<String>) -> Result<(), String> {
+    blocking(move || {
+        let mut args = vec!["restore", "--staged", "--"];
+        args.extend(paths.iter().map(String::as_str));
+        run_git(&cwd, &args).map(|_| ())
+    })
+    .await
 }
 
 /// Commit the staged changes; returns git's one-line summary.
 #[tauri::command]
-pub fn git_commit(cwd: String, message: String) -> Result<String, String> {
+pub async fn git_commit(cwd: String, message: String) -> Result<String, String> {
     if message.trim().is_empty() {
         return Err("commit message is empty".into());
     }
-    run_git(&cwd, &["commit", "-m", &message])
+    blocking(move || run_git(&cwd, &["commit", "-m", &message])).await
 }
 
 #[cfg(test)]

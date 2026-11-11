@@ -6,7 +6,7 @@
 // red = deletion).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { highlight, langForFile } from '../../core/highlight'
-import { isTauri, onFsChange, openPath, previewClear, previewStash, unwatchDir, watchDir } from '../../core/native'
+import { isTauri, onFsChange, openExternal, openPath, previewClear, previewStash, unwatchDir, watchDir } from '../../core/native'
 import type { DirEntryInfo, OpenPathMode } from '../../core/native'
 import { sessionFs } from './remote-native'
 import type { SessionFs } from './remote-native'
@@ -17,13 +17,14 @@ import { IMG_MIME, MEDIA_MIME, isCsv, parseCsv, viewKind } from '../../shared/fi
 import { CodeEditor } from './lazy-editor'
 import { parseDiffLines } from './diff-marks'
 import { filterPaths } from './quick-open'
+import { ancestorDirs } from './tree-reveal'
 import type { Agent } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
 import { confirmAction } from '../../components/Confirm'
 import { FileIcon } from '../../components/FileIcon'
-import { Markdown } from '../../components/Markdown'
 import { ContextMenu } from '../../components/ContextMenu'
 import { artifactSrcDoc } from '../chat/artifacts'
+import { LINK_BRIDGE, markdownDoc, readDocTheme } from '../../shared/markdown-doc'
 import { requestAttach } from '../chat/attach-bus'
 import { onOpenFileRequest } from './open-file-bus'
 import { Divider } from './Divider'
@@ -295,6 +296,7 @@ function TreeLevel({ dir, depth, expanded, toggleDir, openFile, selected, git, r
               className="palette-item"
               onClick={() => (e.isDir ? toggleDir(e.path) : openFile(e.path))}
               onContextMenu={onMenu ? ev => onMenu(ev, e.path, e.isDir) : undefined}
+              data-tree-path={e.path}
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 6, border: 'none',
                 textAlign: 'left', padding: `3px 8px 3px ${8 + depth * 13}px`, borderRadius: 6,
@@ -500,13 +502,62 @@ const IC_NEW_FILE = ['M13 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V9z', 'M
 const IC_NEW_FOLDER = ['M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M12 11v5', 'M9.5 13.5h5']
 const IC_COLLAPSE = ['M7 11l5-5 5 5', 'M7 18l5-5 5 5']
 const IC_REFRESH = ['M21 12a9 9 0 11-2.6-6.4', 'M21 4v5h-5']
+const IC_LOCATE = ['M12 4a8 8 0 100 16 8 8 0 000-16z', 'M12 9a3 3 0 100 6 3 3 0 000-6z', 'M12 1v3', 'M12 20v3', 'M1 12h3', 'M20 12h3']
+
+/** "Reveal in explorer": expand the open file's folders, then scroll its row
+ *  into view and flash it. Rows load lazily, so poll for the row briefly
+ *  instead of assuming it is rendered on the next frame. */
+function useRevealInTree(opts: {
+  root: string
+  file: string | null
+  setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>
+  setShowHidden: (v: boolean) => void
+  showHidden: boolean
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const timer = useRef<number | null>(null)
+  useEffect(() => () => { if (timer.current !== null) window.clearInterval(timer.current) }, [])
+  const reveal = () => {
+    const { root, file } = opts
+    if (!file) return
+    const dirs = ancestorDirs(root, file)
+    opts.setExpanded(prev => {
+      if (dirs.every(d => prev.has(d))) return prev
+      const next = new Set(prev)
+      for (const d of dirs) next.add(d)
+      return next
+    })
+    const rel = file.startsWith(root.replace(/\/+$/, '') + '/') ? file.slice(root.replace(/\/+$/, '').length + 1) : file
+    if (!opts.showHidden && rel.split('/').some(seg => seg.startsWith('.'))) opts.setShowHidden(true)
+    if (timer.current !== null) window.clearInterval(timer.current)
+    const started = Date.now()
+    timer.current = window.setInterval(() => {
+      const box = scrollRef.current
+      const row = box?.querySelector<HTMLElement>(`[data-tree-path="${CSS.escape(file)}"]`)
+      if (row) {
+        row.scrollIntoView({ block: 'center' })
+        row.animate?.(
+          [{ boxShadow: 'inset 0 0 0 1px var(--accent)' }, { boxShadow: 'inset 0 0 0 1px transparent' }],
+          { duration: 1400, easing: 'ease-out' },
+        )
+      }
+      if (row || Date.now() - started > 3000) {
+        window.clearInterval(timer.current!)
+        timer.current = null
+      }
+    }, 50)
+  }
+  return { scrollRef, reveal }
+}
 
 const IC_EYE = ['M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z', 'M12 9.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5z']
 const IC_EYE_OFF = ['M4 4l16 16', 'M9.9 5.2A10.6 10.6 0 0112 5c6.5 0 10 7 10 7a17 17 0 01-3.2 3.9M6.1 6.9A16.7 16.7 0 002 12s3.5 7 10 7c1.2 0 2.3-.2 3.3-.6']
 
 /** The EXPLORER header row with the VSCode-style action cluster. */
-function ExplorerHeader({ root, refreshTitle, onNewFile, onNewFolder, onRefresh, onCollapseAll, showHidden, onToggleHidden }: {
+function ExplorerHeader({ root, refreshTitle, onNewFile, onNewFolder, onRefresh, onCollapseAll, showHidden, onToggleHidden, onReveal }: {
   root: string
+  /** expand to + highlight the open file; absent/undefined = no file open */
+  onReveal?: () => void
   refreshTitle: string
   onNewFile: () => void
   onNewFolder: () => void
@@ -534,6 +585,9 @@ function ExplorerHeader({ root, refreshTitle, onNewFile, onNewFolder, onRefresh,
         </button>
         <button className="icon-btn" title={showHidden ? 'Showing dotfiles — click to hide' : 'Dotfiles hidden — click to show'} onClick={onToggleHidden} style={{ ...btn, color: showHidden ? undefined : 'var(--accent)' }}>
           <Icon paths={showHidden ? IC_EYE : IC_EYE_OFF} size={12} stroke={1.6} />
+        </button>
+        <button className="icon-btn" title="Reveal open file in explorer" disabled={!onReveal} onClick={onReveal} style={{ ...btn, opacity: onReveal ? 1 : 0.4 }}>
+          <Icon paths={IC_LOCATE} size={12} stroke={1.7} />
         </button>
         <button className="icon-btn" title={refreshTitle} onClick={onRefresh} style={btn}>
           <Icon paths={IC_REFRESH} size={12} stroke={1.8} />
@@ -813,10 +867,13 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   const [sheetIx, setSheetIx] = useState(0)
   // html files render live in a sandboxed iframe; 'source' shows/edits markup
   const [htmlView, setHtmlView] = useState<'rendered' | 'source'>('rendered')
-  // opt-in: render the live page faithfully (external scripts, eval, network)
-  // instead of the locked-down no-network CSP. Still sandboxed to an opaque
-  // origin, so a trusted page still can't reach into the app.
-  const [htmlTrusted, setHtmlTrusted] = useState(false)
+  // html and rendered markdown run like a browser page by default (external
+  // scripts, network, storage); the lock toggle drops to the no-network,
+  // inline-scripts-only CSP. Either way the frame is sandboxed on its own
+  // origin, so a page can't reach into the app.
+  const [htmlLocked, setHtmlLocked] = useState(false)
+  const htmlTrusted = !htmlLocked
+  const previewFrameRef = useRef<HTMLIFrameElement>(null)
   // bumped by the refresh button to remount the preview iframe (re-run scripts)
   const [reloadKey, setReloadKey] = useState(0)
   // custom-scheme URL the HTML preview loads from (Tauri only, so the page gets
@@ -934,7 +991,7 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
     setSheetIx(0)
     setMdView('rendered')
     setHtmlView('rendered')
-    setHtmlTrusted(false)
+    setHtmlLocked(false)
     // reset the mode only when a different file is opened in this same viewer
     // (no remount) — a same-file reload must never kick the user out of editing
     if (pathChanged) {
@@ -955,22 +1012,38 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   // scheme so it escapes the app's inherited CSP (Tauri only). Re-stashes when
   // the file, the trust toggle, or the manual reload changes; the browser build
   // keeps previewUrl null and falls back to srcDoc.
+  const previewDoc = useMemo(() => {
+    if (editing || content === null) return null
+    if (kind === 'html' && htmlView === 'rendered') return artifactSrcDoc({ kind: 'html', source: content }, { trusted: htmlTrusted }) + LINK_BRIDGE
+    if (rendered) return artifactSrcDoc({ kind: 'html', source: markdownDoc(content, readDocTheme()) }, { trusted: htmlTrusted })
+    return null
+  }, [kind, htmlView, editing, content, htmlTrusted, rendered])
   useEffect(() => {
-    if (!isTauri || kind !== 'html' || htmlView !== 'rendered' || editing || content === null) {
+    if (!isTauri || previewDoc === null) {
       setPreviewUrl(null)
       return
     }
     let alive = true
     let stashedId: string | null = null
-    const doc = artifactSrcDoc({ kind: 'html', source: content }, { trusted: htmlTrusted })
-    void previewStash(doc).then(res => {
+    void previewStash(previewDoc).then(res => {
       if (!res) return
       if (!alive) { void previewClear(res.id); return }
       stashedId = res.id
       setPreviewUrl(res.url)
     })
     return () => { alive = false; if (stashedId) void previewClear(stashedId) }
-  }, [kind, htmlView, editing, content, htmlTrusted, reloadKey])
+  }, [previewDoc, reloadKey])
+  // links clicked inside the preview open in the default browser; only the
+  // frame we rendered may ask, and openExternal accepts http(s) only
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (!previewFrameRef.current || e.source !== previewFrameRef.current.contentWindow) return
+      const d = e.data as { type?: unknown; href?: unknown } | null
+      if (d?.type === 'yaam-preview:open' && typeof d.href === 'string') void openExternal(d.href)
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
 
   const allLines = (content ?? '').split('\n')
   const truncated = allLines.length > MAX_LINES
@@ -1122,7 +1195,7 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
             <span className="mono" style={{ fontSize: 10, fontWeight: 700 }}>M↓</span>
           </button>
         )}
-        {kind === 'html' && htmlView === 'rendered' && !editing && (
+        {previewDoc !== null && (
           <>
             <button
               className="icon-btn"
@@ -1135,9 +1208,9 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
             <button
               className="icon-btn"
               title={htmlTrusted
-                ? 'Network + full JavaScript ENABLED — click to lock down (no network, inline scripts only)'
-                : 'Locked down (no network, inline scripts only) — click to allow network + full JavaScript'}
-              onClick={() => { setHtmlTrusted(v => !v); setReloadKey(k => k + 1) }}
+                ? 'JavaScript and network on. Click to lock down (no network, inline scripts only)'
+                : 'Locked down (no network, inline scripts only). Click to allow JavaScript and network'}
+              onClick={() => { setHtmlLocked(v => !v); setReloadKey(k => k + 1) }}
               style={{ width: 26, height: 26, borderRadius: 6, color: htmlTrusted ? 'var(--accent)' : undefined }}
             >
               <Icon paths={htmlTrusted
@@ -1174,6 +1247,16 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
             style={{ width: 26, height: 26, borderRadius: 6, color: findOpen ? 'var(--accent)' : undefined }}
           >
             <Icon paths={['M11 4a7 7 0 100 14 7 7 0 000-14z', 'M21 21l-4.8-4.8']} size={13} stroke={1.8} />
+          </button>
+        )}
+        {isTauri && !fs.remote && (
+          <button
+            className="icon-btn"
+            title="Open in default app"
+            onClick={() => { void openPath(path, 'default').catch(() => {}) }}
+            style={{ width: 26, height: 26, borderRadius: 6 }}
+          >
+            <Icon paths={['M14 4h6v6', 'M20 4l-9 9', 'M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5']} size={13} stroke={1.8} />
           </button>
         )}
         <button
@@ -1283,7 +1366,7 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
             )}
             <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', justifyContent: 'center', padding: 16 }}>
               <div
-                className="slide-html"
+                className="slide-html selectable"
                 dangerouslySetInnerHTML={{ __html: office.slides?.[sheetIx]?.html ?? '<div>empty presentation</div>' }}
               />
             </div>
@@ -1309,13 +1392,13 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
               </div>
             )}
             <div
-              className="sheet-html"
+              className="sheet-html selectable"
               style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 12 }}
               dangerouslySetInnerHTML={{ __html: office.sheets?.[sheetIx]?.html ?? '<div>empty workbook</div>' }}
             />
           </div>
         )
-      ) : kind === 'html' && htmlView === 'rendered' ? (
+      ) : previewDoc !== null ? (
         content !== null ? (
           // Isolation boundary: the preview loads from a distinct scheme origin
           // (Tauri) or an opaque srcdoc origin (browser) and is sandboxed, so it
@@ -1325,15 +1408,17 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
           isTauri ? (
             previewUrl ? (
               <iframe
+                ref={previewFrameRef}
                 key={previewUrl}
                 title={name}
                 sandbox={htmlTrusted ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals' : 'allow-scripts'}
                 src={previewUrl}
-                style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }}
+                style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: kind === 'html' ? '#fff' : 'var(--bg)' }}
               />
             ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
           ) : (
-            <iframe key={`${reloadKey}-${htmlTrusted}`} title={name} sandbox="allow-scripts" srcDoc={artifactSrcDoc({ kind: 'html', source: content }, { trusted: htmlTrusted })} style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: '#fff' }} />
+            // srcDoc shares the app's origin unless sandboxed without allow-same-origin: never add it here
+            <iframe ref={previewFrameRef} key={`${reloadKey}-${htmlTrusted}`} title={name} sandbox="allow-scripts" srcDoc={previewDoc} style={{ flex: 1, width: '100%', minHeight: 0, border: 'none', background: kind === 'html' ? '#fff' : 'var(--bg)' }} />
           )
         ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
       ) : kind === 'image' ? (
@@ -1360,7 +1445,7 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
         ) : <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
       ) : csvTable ? (
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-          <table className="mono" style={{ borderCollapse: 'collapse', fontSize: 11.5, margin: 10 }}>
+          <table className="mono selectable" style={{ borderCollapse: 'collapse', fontSize: 11.5, margin: 10 }}>
             <thead>
               <tr>
                 {(csvTable.rows[0] ?? []).map((h, i) => (
@@ -1390,15 +1475,6 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
         </div>
       ) : content === null ? (
         <div style={{ padding: 18, fontSize: 12, color: 'var(--dim)' }}>Loading…</div>
-      ) : rendered ? (
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-          <div style={{
-            maxWidth: 760, padding: '18px 24px', fontSize: 13, lineHeight: 1.65, color: 'var(--text2)',
-            fontFamily: 'var(--font-sans)',
-          }}>
-            <Markdown text={content} />
-          </div>
-        </div>
       ) : (
         <div
           ref={scrollRef}
@@ -1483,6 +1559,7 @@ export function FilesPane({ agent }: { agent: Agent }) {
   // explorer/viewer split — fixed default width until first dragged
   const [treeShare, setTreeShare] = useState<number | null>(explorerSplitCache.get(agent.id) ?? null)
   const root = agent.cwd || '~'
+  const { scrollRef: treeScrollRef, reveal } = useRevealInTree({ root, file, setExpanded, setShowHidden, showHidden })
   // machine sessions browse the remote host over ssh (using the session's own
   // connection snapshot); local sessions use native fs. `root` scopes the
   // local adapter's mutating ops (create/move/delete).
@@ -1553,8 +1630,14 @@ export function FilesPane({ agent }: { agent: Agent }) {
   // terminal ctrl/cmd+click on a path lands here (path already cwd-resolved)
   useEffect(() => onOpenFileRequest(agent.id, openFile), [agent.id, openFile])
 
-  // Refresh repository status and rebuild the path-to-status lookup.
+  // Refresh repository status and rebuild the path-to-status lookup. One run
+  // at a time: a change burst during a build queues a single follow-up run
+  // instead of stacking parallel `git status` processes.
+  const gitRun = useRef<{ busy: boolean; again: boolean }>({ busy: false, again: false })
   const refreshGit = useCallback(() => {
+    const run = gitRun.current
+    if (run.busy) { run.again = true; return }
+    run.busy = true
     fs.gitStatus(root)
       .then(res => {
         const byPath = new Map<string, string>()
@@ -1571,6 +1654,10 @@ export function FilesPane({ agent }: { agent: Agent }) {
         setGit({ root: res.root, byPath, dirs })
       })
       .catch(() => setGit(null))
+      .finally(() => {
+        run.busy = false
+        if (run.again) { run.again = false; refreshGit() }
+      })
   }, [root, fs])
 
   // Desktop app: a native recursive watch on the workspace root drives tree +
@@ -1686,9 +1773,11 @@ export function FilesPane({ agent }: { agent: Agent }) {
           onCollapseAll={() => setExpanded(new Set())}
           showHidden={showHidden}
           onToggleHidden={() => setShowHidden(v => !v)}
+          onReveal={file ? reveal : undefined}
         />
         {opErr && <TreeOpError message={opErr} onDismiss={clearOpErr} />}
         <div
+          ref={treeScrollRef}
           style={{ flex: 1, overflowY: 'auto', padding: '5px 4px' }}
           onContextMenu={onTreeMenu ? ev => { if (ev.target === ev.currentTarget) onTreeMenu(ev, root, true) } : undefined}
         >
@@ -1765,6 +1854,7 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '', root) }: { 
   const [showHidden, setShowHidden] = useState(init.showHidden ?? true)
   const [quickOpen, setQuickOpen] = useState(false)
   const [menu, setMenu] = useState<TreeMenuState | null>(null)
+  const { scrollRef: treeScrollRef, reveal } = useRevealInTree({ root, file, setExpanded, setShowHidden, showHidden })
   const onTreeMenu = isTauri
     ? (ev: React.MouseEvent, path: string, isDir: boolean) => {
         ev.preventDefault()
@@ -1834,9 +1924,11 @@ export function FolderExplorer({ root, fs = sessionFs(undefined, '', root) }: { 
           onCollapseAll={() => setExpanded(new Set())}
           showHidden={showHidden}
           onToggleHidden={() => setShowHidden(v => !v)}
+          onReveal={file ? reveal : undefined}
         />
         {opErr && <TreeOpError message={opErr} onDismiss={clearOpErr} />}
         <div
+          ref={treeScrollRef}
           style={{ flex: 1, overflowY: 'auto', padding: '5px 4px' }}
           onContextMenu={onTreeMenu ? ev => { if (ev.target === ev.currentTarget) onTreeMenu(ev, root, true) } : undefined}
         >
