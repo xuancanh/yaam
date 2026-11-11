@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --bg:#0A0B0F; --panel:#0D0F14; --panel2:#12151C; --line:#23272F; --text:#E7E9F0; --mut:#8B93A1; --dim:#5B6472; --accent:#F5C451; --green:#5FD38D; --red:#F07178; --purple:#C77DFF; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 'IBM Plex Sans', system-ui, sans-serif; }
+  header { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; }
+  input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 6px 9px; font: 12px 'JetBrains Mono', monospace; outline: none; }
+  button { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 7px; padding: 5px 10px; font: 600 12px inherit; cursor: pointer; }
+  main { padding: 14px 16px 28px; }
+  h1 { font-size: 15px; line-height: 1.35; margin: 0 0 6px; }
+  .meta { color: var(--mut); font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 99px; font-weight: 700; font-size: 11px; }
+  .open { background: rgba(95,211,141,.15); color: var(--green); }
+  .closed { background: rgba(240,113,120,.15); color: var(--red); }
+  .merged { background: rgba(199,125,255,.16); color: var(--purple); }
+  .draft { background: var(--panel2); color: var(--mut); }
+  .label { padding: 1px 8px; border-radius: 99px; font-size: 11px; border: 1px solid var(--line); }
+  .stats { display: flex; gap: 14px; margin: 12px 0; font: 12px 'JetBrains Mono', monospace; color: var(--mut); }
+  .add { color: var(--green); } .del { color: var(--red); }
+  section { margin-top: 16px; }
+  h2 { font-size: 10.5px; letter-spacing: .8px; color: var(--dim); margin: 0 0 6px; text-transform: uppercase; }
+  .body { white-space: pre-wrap; word-break: break-word; color: #C9CED8; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; max-height: 340px; overflow: auto; }
+  .check { display: flex; gap: 8px; font-size: 12px; padding: 3px 0; }
+  .ok { color: var(--green); } .bad { color: var(--red); } .wait { color: var(--accent); }
+  .comment { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--panel); }
+  .comment b { font-size: 12px; } .comment small { color: var(--dim); margin-left: 6px; }
+  .comment div { white-space: pre-wrap; word-break: break-word; margin-top: 4px; color: #C9CED8; font-size: 12.5px; }
+  .empty { color: var(--mut); padding: 30px 6px; text-align: center; }
+  .err { color: var(--red); }
+  a { color: var(--accent); }
+  .recent { margin-top: 18px; } .recent button { display: block; width: 100%; text-align: left; margin-bottom: 5px; font: 12px 'JetBrains Mono', monospace; background: var(--panel); }
+</style>
+</head>
+<body>
+<header>
+  <input id="url" placeholder="https://github.com/owner/repo/pull/123" spellcheck="false">
+  <button id="go">Open</button>
+  <button id="refresh" title="Reload">↻</button>
+</header>
+<main id="out"><div class="empty">Cmd/Ctrl-click a GitHub pull request or issue link in the terminal, or paste one above.</div></main>
+<script>
+  const pend = {}
+  function yaam(method, ...args) {
+    return new Promise((res, rej) => {
+      const id = Math.random().toString(36).slice(2)
+      pend[id] = { res, rej }
+      parent.postMessage({ type: 'yaam:call', callId: id, method, args }, '*')
+    })
+  }
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const ago = iso => { const m = (Date.now() - new Date(iso).getTime()) / 60000; return m < 60 ? Math.round(m) + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago' }
+  const out = document.getElementById('out')
+  const box = document.getElementById('url')
+  let current = null
+  let hasToken = false
+
+  function parse(url) {
+    const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(pull|issues)\/(\d+)/.exec(String(url || '').trim())
+    return m ? { owner: m[1], repo: m[2], kind: m[3], num: m[4], url: m[0] } : null
+  }
+
+  async function gh(path) {
+    const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }
+    if (hasToken) headers.Authorization = 'Bearer {{secret:GITHUB_TOKEN}}'
+    const r = await yaam('http.request', 'GET', 'https://api.github.com' + path, { headers })
+    if (r.status === 404) throw new Error(hasToken ? 'Not found (or the token cannot see this repo)' : 'Not found. Private repo? Add a GITHUB_TOKEN in Addons → github-link-preview → Secrets.')
+    if (r.status === 403 || r.status === 429) throw new Error('GitHub rate limit hit. Add a GITHUB_TOKEN for a higher limit.')
+    if (r.status >= 400) throw new Error('GitHub answered ' + r.status)
+    return JSON.parse(r.text)
+  }
+
+  async function remember(url) {
+    try {
+      const list = (await yaam('storage.get', 'recent')) || []
+      await yaam('storage.set', 'recent', [url, ...list.filter(x => x !== url)].slice(0, 8))
+    } catch { /* storage is a convenience */ }
+  }
+
+  async function showRecent() {
+    let list = []
+    try { list = (await yaam('storage.get', 'recent')) || [] } catch {}
+    if (!list.length || current) return
+    out.innerHTML = '<div class="empty">Cmd/Ctrl-click a GitHub pull request or issue link in the terminal, or paste one above.</div>'
+      + '<div class="recent"><h2>Recent</h2>' + list.map(u => `<button data-u="${esc(u)}">${esc(u.replace('https://github.com/', ''))}</button>`).join('') + '</div>'
+    out.querySelectorAll('[data-u]').forEach(b => b.onclick = () => load(b.dataset.u))
+  }
+
+  async function load(url) {
+    const ref = parse(url)
+    if (!ref) { out.innerHTML = '<div class="empty err">Not a GitHub pull request or issue URL.</div>'; return }
+    current = ref
+    box.value = ref.url
+    out.innerHTML = '<div class="empty">Loading ' + esc(ref.owner + '/' + ref.repo + '#' + ref.num) + '…</div>'
+    try {
+      const base = `/repos/${ref.owner}/${ref.repo}`
+      const isPr = ref.kind === 'pull'
+      const [item, comments] = await Promise.all([
+        gh(`${base}/${isPr ? 'pulls' : 'issues'}/${ref.num}`),
+        gh(`${base}/issues/${ref.num}/comments?per_page=100`),
+      ])
+      if (current !== ref) return
+      let checks = null
+      if (isPr && item.head?.sha) {
+        try { checks = await gh(`${base}/commits/${item.head.sha}/check-runs?per_page=50`) } catch { checks = null }
+      }
+      if (current !== ref) return
+      render(ref, item, comments, checks)
+      remember(ref.url)
+    } catch (e) {
+      if (current === ref) out.innerHTML = '<div class="empty err">' + esc(e.message || e) + '</div>'
+    }
+  }
+
+  function render(ref, it, comments, checks) {
+    const isPr = ref.kind === 'pull'
+    const state = isPr && it.merged ? 'merged' : it.draft ? 'draft' : it.state
+    const labels = (it.labels || []).map(l => `<span class="label" style="border-color:#${esc(l.color)}">${esc(l.name)}</span>`).join('')
+    const runs = checks?.check_runs || []
+    const failed = runs.filter(c => ['failure', 'timed_out', 'cancelled', 'action_required'].includes(c.conclusion))
+    const pending = runs.filter(c => c.status !== 'completed')
+    const last = comments.slice(-5)
+    out.innerHTML = `
+      <h1>${esc(it.title)} <span style="color:var(--dim);font-weight:400">#${esc(ref.num)}</span></h1>
+      <div class="meta">
+        <span class="pill ${esc(state)}">${esc(state)}</span>
+        <span>${esc(it.user?.login)} · ${ago(it.created_at)}</span>
+        ${isPr ? `<span class="mono">${esc(it.head?.ref)} → ${esc(it.base?.ref)}</span>` : ''}
+        ${labels}
+      </div>
+      ${isPr ? `<div class="stats"><span class="add">+${it.additions}</span><span class="del">−${it.deletions}</span><span>${it.changed_files} files</span><span>${it.commits} commits</span>${it.mergeable_state ? `<span>${esc(it.mergeable_state)}</span>` : ''}</div>` : ''}
+      ${runs.length ? `<section><h2>Checks · ${runs.length - failed.length - pending.length} passed${failed.length ? ` · ${failed.length} failed` : ''}${pending.length ? ` · ${pending.length} running` : ''}</h2>
+        ${[...failed, ...pending].slice(0, 8).map(c => `<div class="check"><span class="${c.status !== 'completed' ? 'wait' : 'bad'}">${c.status !== 'completed' ? '●' : '✕'}</span>${esc(c.name)}</div>`).join('') || '<div class="check ok">✓ all checks passed</div>'}
+      </section>` : ''}
+      <section><h2>Description</h2><div class="body">${esc(it.body || 'No description.')}</div></section>
+      <section><h2>Comments · ${comments.length}</h2>
+        ${last.length ? last.map(c => `<div class="comment"><b>${esc(c.user?.login)}</b><small>${ago(c.created_at)}</small><div>${esc(c.body)}</div></div>`).join('') : '<div style="color:var(--mut)">No comments.</div>'}
+      </section>
+      <p style="margin-top:16px"><a href="#" id="ext">Open on GitHub ↗</a></p>`
+    document.getElementById('ext').onclick = e => { e.preventDefault(); yaam('flash', 'Hold Alt and Cmd/Ctrl-click the link in the terminal to open it in the browser') }
+  }
+
+  window.addEventListener('message', e => {
+    const d = e.data
+    if (!d || typeof d !== 'object') return
+    if (d.type === 'yaam:result' && pend[d.callId]) {
+      d.error ? pend[d.callId].rej(new Error(d.error)) : pend[d.callId].res(d.result)
+      delete pend[d.callId]
+    }
+    if (d.type === 'yaam:context' && d.context?.url && d.context.url !== current?.url) load(d.context.url)
+  })
+  document.getElementById('go').onclick = () => load(box.value)
+  document.getElementById('refresh').onclick = () => current && load(current.url)
+  box.onkeydown = e => { if (e.key === 'Enter') load(box.value) }
+
+  yaam('secrets.list').then(list => { hasToken = list.some(s => s.name === 'GITHUB_TOKEN' && s.set) }).catch(() => {})
+    .finally(() => { parent.postMessage({ type: 'yaam:getContext' }, '*'); setTimeout(showRecent, 300) })
+</script>
+</body>
+</html>

@@ -56,6 +56,20 @@
       "icon": "🧪",
       "description": "Developer reference — a tab that exercises every addon capability (state, sessions, tasks incl. review verbs, templates, schedules, storage, allowlisted HTTP, keychain secrets, the addon's own agent, UI calls), plus all four hooks, a Master tool, and a masterPromptAppend.",
       "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/dev-kitchen-sink.yaam.json"
+    },
+    {
+      "name": "github-link-preview",
+      "version": "1.0.0",
+      "icon": "🔗",
+      "description": "Cmd/Ctrl-click a GitHub pull request or issue link in a terminal to preview it in a panel beside the session: status, checks, diff size, description and latest comments. Hold Alt to open the browser instead.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/github-link-preview.yaam.json"
+    },
+    {
+      "name": "phone-alerts",
+      "version": "1.0.0",
+      "icon": "📲",
+      "description": "Push a phone notification when a session waits for input, finishes, or fails, through ntfy.sh (free, no account) or your own Telegram bot. Pick which events alert and mute while you are at the desk.",
+      "url": "https://raw.githubusercontent.com/xuancanh/yaam/main/registry/packages/phone-alerts.yaam.json"
     }
   ],
   "agents": [

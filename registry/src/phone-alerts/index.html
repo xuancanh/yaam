@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --bg:#0A0B0F; --panel:#0D0F14; --panel2:#12151C; --line:#23272F; --text:#E7E9F0; --mut:#8B93A1; --dim:#5B6472; --accent:#F5C451; --green:#5FD38D; --red:#F07178; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 'IBM Plex Sans', system-ui, sans-serif; padding: 22px; }
+  .wrap { max-width: 560px; }
+  h1 { font-size: 16px; margin: 0 0 2px; } p.sub { color: var(--mut); margin: 0 0 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 4px 16px; margin-bottom: 16px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row > div:first-child { flex: 1; } .row b { font-size: 13px; } .row small { display: block; color: var(--mut); font-size: 11.5px; }
+  input[type=text] { width: 240px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 6px 9px; font: 12px 'JetBrains Mono', monospace; outline: none; }
+  .seg { display: flex; gap: 4px; } .seg button.on { border-color: var(--accent); color: var(--accent); }
+  button { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 7px; padding: 6px 12px; font: 600 12px inherit; cursor: pointer; }
+  input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .status { min-height: 18px; font-size: 12px; margin-top: 8px; }
+  .hint { color: var(--dim); font-size: 11.5px; line-height: 1.6; }
+  code { font: 11.5px 'JetBrains Mono', monospace; color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📲 Phone alerts</h1>
+  <p class="sub">A push to your phone when a session needs you or finishes.</p>
+  <div class="card">
+    <div class="row"><div><b>Send through</b><small>ntfy needs no account; Telegram uses your own bot</small></div>
+      <div class="seg"><button data-via="ntfy">ntfy</button><button data-via="telegram">Telegram</button></div></div>
+    <div class="row" id="ntfyRow"><div><b>ntfy topic</b><small>Install the ntfy app and subscribe to this topic. Anyone who knows it can read it, so keep the random one.</small></div>
+      <input type="text" id="topic" spellcheck="false"></div>
+    <div class="row" id="tgRow"><div><b>Telegram chat id</b><small>Message your bot, then open <code>api.telegram.org/bot&lt;token&gt;/getUpdates</code> to find it. Put the bot token in Addons → phone-alerts → Secrets.</small></div>
+      <input type="text" id="chat" spellcheck="false"></div>
+  </div>
+  <div class="card">
+    <div class="row"><div><b>Needs input</b><small>approval prompts and questions</small></div><input type="checkbox" id="needsInput"></div>
+    <div class="row"><div><b>Failed</b><small>a session exited with an error</small></div><input type="checkbox" id="failed"></div>
+    <div class="row"><div><b>Finished</b><small>a session exited cleanly (one-shot runs)</small></div><input type="checkbox" id="finished"></div>
+    <div class="row"><div><b>Mute</b><small id="muteState">alerts are on</small></div>
+      <div class="seg"><button data-mute="60">1 h</button><button data-mute="240">4 h</button><button data-mute="0">Unmute</button></div></div>
+  </div>
+  <button id="test">Send a test</button>
+  <div class="status" id="status"></div>
+  <p class="hint">Alerts include the session name and its question. They leave this machine through ntfy.sh or api.telegram.org only.</p>
+</div>
+<script>
+  const pend = {}
+  function yaam(method, ...args) {
+    return new Promise((res, rej) => {
+      const id = Math.random().toString(36).slice(2)
+      pend[id] = { res, rej }
+      parent.postMessage({ type: 'yaam:call', callId: id, method, args }, '*')
+    })
+  }
+  window.addEventListener('message', e => {
+    const d = e.data
+    if (d && d.type === 'yaam:result' && pend[d.callId]) {
+      d.error ? pend[d.callId].rej(new Error(d.error)) : pend[d.callId].res(d.result)
+      delete pend[d.callId]
+    }
+  })
+  const $ = id => document.getElementById(id)
+  const status = (t, ok) => { $('status').textContent = t; $('status').style.color = ok ? 'var(--green)' : 'var(--red)' }
+  const randomTopic = () => 'yaam-' + Array.from(crypto.getRandomValues(new Uint8Array(9)), b => b.toString(36).padStart(2, '0')).join('').slice(0, 16)
+  let cfg = { via: 'ntfy', needsInput: true, finished: false, failed: true }
+
+  function paint() {
+    document.querySelectorAll('[data-via]').forEach(b => b.classList.toggle('on', b.dataset.via === cfg.via))
+    $('ntfyRow').style.display = cfg.via === 'ntfy' ? '' : 'none'
+    $('tgRow').style.display = cfg.via === 'telegram' ? '' : 'none'
+    $('topic').value = cfg.topic || ''
+    $('chat').value = cfg.chatId || ''
+    for (const k of ['needsInput', 'failed', 'finished']) $(k).checked = !!cfg[k]
+    const m = cfg.muteUntil && cfg.muteUntil > Date.now()
+    $('muteState').textContent = m ? 'muted until ' + new Date(cfg.muteUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'alerts are on'
+  }
+  async function save(patch) {
+    cfg = { ...cfg, ...patch }
+    paint()
+    try { await yaam('storage.set', 'config', cfg) } catch (e) { status(e.message, false) }
+  }
+
+  document.querySelectorAll('[data-via]').forEach(b => b.onclick = () => save({ via: b.dataset.via }))
+  document.querySelectorAll('[data-mute]').forEach(b => b.onclick = () => save({ muteUntil: Number(b.dataset.mute) ? Date.now() + Number(b.dataset.mute) * 60000 : 0 }))
+  $('topic').onchange = () => save({ topic: $('topic').value.trim() })
+  $('chat').onchange = () => save({ chatId: $('chat').value.trim() })
+  for (const k of ['needsInput', 'failed', 'finished']) $(k).onchange = () => save({ [k]: $(k).checked })
+  $('test').onclick = async () => {
+    status('sending…', true)
+    // the same path the hooks use, run through the addon's own tool
+    try {
+      const st = (await yaam('storage.get', 'config')) || cfg
+      if (st.via === 'ntfy' && !st.topic) { status('set an ntfy topic first', false); return }
+      const r = await yaam('http.request', 'POST', st.via === 'ntfy' ? 'https://ntfy.sh/' + st.topic : 'https://api.telegram.org/bot{{secret:TELEGRAM_BOT_TOKEN}}/sendMessage',
+        st.via === 'ntfy'
+          ? { headers: { Title: 'YAAM test alert' }, body: 'If you can read this on your phone, alerts work.' }
+          : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: st.chatId, text: 'YAAM test alert: if you can read this, alerts work.' }) })
+      r.status < 300 ? status('sent, check your phone', true) : status('failed: ' + r.status + ' ' + r.text.slice(0, 100), false)
+    } catch (e) { status(e.message, false) }
+  }
+
+  yaam('storage.get', 'config').then(c => {
+    cfg = { ...cfg, ...(c || {}) }
+    if (!cfg.topic) save({ topic: randomTopic() })
+    else paint()
+  }).catch(e => { paint(); status(e.message, false) })
+</script>
+</body>
+</html>

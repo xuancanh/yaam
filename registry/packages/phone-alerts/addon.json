@@ -1,0 +1,55 @@
+{
+  "manifest": 3,
+  "name": "phone-alerts",
+  "version": "1.0.0",
+  "minAppVersion": "0.11.0",
+  "icon": "📲",
+  "description": "Push a phone notification when a session waits for input, finishes, or fails, through ntfy.sh (free, no account) or your own Telegram bot. Pick which events alert and mute while you are at the desk.",
+  "author": "yaam",
+  "hosts": [
+    "ntfy.sh",
+    "api.telegram.org"
+  ],
+  "secrets": [
+    {
+      "name": "TELEGRAM_BOT_TOKEN",
+      "label": "Telegram bot token from @BotFather (only for Telegram)"
+    },
+    {
+      "name": "NTFY_TOKEN",
+      "label": "ntfy access token (only for reserved/protected topics)"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "http",
+    "secrets",
+    "ui"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "test",
+        "title": "Phone alerts: send a test",
+        "run": "send_test"
+      },
+      {
+        "id": "settings",
+        "title": "Phone alerts: settings",
+        "open": "popup"
+      }
+    ]
+  },
+  "view": "view.html",
+  "tools": [
+    {
+      "name": "send_test",
+      "description": "Send a test alert with the saved settings.",
+      "handler": "tools/send_test.js"
+    }
+  ],
+  "hooks": {
+    "onNeedsInput": "hooks/onNeedsInput.js",
+    "onSessionExit": "hooks/onSessionExit.js"
+  }
+}
