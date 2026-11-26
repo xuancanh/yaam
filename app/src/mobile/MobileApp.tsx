@@ -10,10 +10,11 @@ import { reconcile } from './reconcile'
 import { SessionFlow } from './SessionFlow'
 import type { RemoteSnapshot } from '../domains/remote/snapshot'
 import {
-  deviceToken, ensureUrlToken, fetchState, forgetPairing, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl, uploadImage,
+  deviceToken, ensureUrlToken, fetchState, forgetPairing, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl, uploadImage, flushOutbox, onOutbox, discardOutbox,
 } from './api'
 
 const POLL_MS = 2000
+const WATCHDOG_MS = 15_000
 const ATT_CONTENT_CAP = 6000
 
 type Pairing = 'checking' | 'bad-token' | 'unpaired' | 'waiting' | 'paired'
@@ -1210,10 +1211,42 @@ const HEAD_SUB: Record<Tab, (s: RemoteSnapshot) => string> = {
   approvals: s => (inboxCount(s) ? `${inboxCount(s)} waiting on you` : 'all clear'),
 }
 
+function ago(t: number): string {
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.round(s / 60)
+  return m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`
+}
+
+/** Says out loud what the red dot only hints at: the screen is a frozen copy,
+ *  and typed messages are waiting rather than gone. */
+function ConnBanner({ online, updatedAt }: { online: boolean; updatedAt: number }) {
+  const [queued, setQueued] = useState(0)
+  useEffect(() => onOutbox(setQueued), [])
+  const [, setNow] = useState(0)
+  useEffect(() => {
+    if (online) return
+    const iv = setInterval(() => setNow(n => n + 1), 15_000)
+    return () => clearInterval(iv)
+  }, [online])
+  if (online && !queued) return null
+  return (
+    <div className={`connbar${online ? ' sending' : ''}`} role="status">
+      <span className="ctext">
+        {online
+          ? `Sending ${queued} waiting message${queued === 1 ? '' : 's'}…`
+          : `Desktop unreachable${updatedAt ? ` · last update ${ago(updatedAt)}` : ''}${queued ? ` · ${queued} message${queued === 1 ? '' : 's'} will send on reconnect` : ''}`}
+      </span>
+      {!online && queued > 0 && <button className="cbtn" onClick={discardOutbox}>Discard</button>}
+    </div>
+  )
+}
+
 export function MobileApp() {
   const [pairing, setPairing] = useState<Pairing>('checking')
   const [snap, setSnap] = useState<RemoteSnapshot | null>(null)
   const [online, setOnline] = useState(true)
+  const [updatedAt, setUpdatedAt] = useState(0)
   const [tab, setTab] = useState<Tab>('master')
   const [detail, setDetail] = useState<Detail>(null)
   const wide = useWide()
@@ -1300,11 +1333,70 @@ export function MobileApp() {
       return () => clearInterval(iv)
     }
     if (pairing === 'paired') {
-      const tick = () => {
+      let dead = false
+      let es: EventSource | null = null
+      let iv: ReturnType<typeof setInterval> | null = null
+      let lastRaw = ''
+      let lastHeard = 0
+      let sseFails = 0
+      let nextSseAt = 0
+      // structural sharing: unchanged sessions/chats/messages keep their
+      // object identity, so memoized rows skip re-rendering on each push
+      const apply = (next: RemoteSnapshot) => setSnap(prev => (prev ? reconcile(prev, next) : next))
+      const heard = () => {
+        lastHeard = Date.now()
+        setOnline(true)
+        setUpdatedAt(lastHeard)
+        void flushOutbox()
+      }
+      const stopPolling = () => { if (iv) { clearInterval(iv); iv = null } }
+      const startPolling = () => {
+        if (iv || dead) return
+        iv = setInterval(tick, POLL_MS)
+      }
+      const dropStream = () => { es?.close(); es = null }
+      // the live stream is preferred; after it fails, polling carries the
+      // view and the stream is retried (backing off) whenever the desktop
+      // answers again, so one blip does not leave the app polling for good
+      const openStream = () => {
+        if (es || dead || Date.now() < nextSseAt) return
+        try {
+          const src = new EventSource(streamUrl())
+          es = src
+          src.onmessage = e => {
+            sseFails = 0
+            stopPolling()
+            heard()
+            const raw = String(e.data)
+            if (raw === lastRaw) return // keep-alive resend of the same state
+            try { apply(JSON.parse(raw) as RemoteSnapshot); lastRaw = raw } catch { /* partial frame */ }
+          }
+          src.onerror = () => {
+            if (es !== src) return
+            dropStream()
+            sseFails++
+            nextSseAt = Date.now() + Math.min(60_000, 2_000 * 2 ** sseFails)
+            startPolling()
+          }
+        } catch {
+          startPolling()
+        }
+      }
+      function tick() {
         fetchState()
-          .then(s => { apply(s); setOnline(true) })
+          .then(st => {
+            if (dead) return
+            apply(st)
+            heard()
+            openStream()
+          })
           .catch(e => {
+            if (dead) return
             setOnline(false)
+            // a sleeping laptop leaves the stream open but silent; once a
+            // direct fetch fails, stop trusting it and poll until it is back
+            dropStream()
+            startPolling()
             if (!String(e).includes('403')) return
             void pairingStatus()
               .then(async st => {
@@ -1316,31 +1408,30 @@ export function MobileApp() {
               .catch(() => setPairing('bad-token'))
           })
       }
-      let es: EventSource | null = null
-      let iv: ReturnType<typeof setInterval> | null = null
-      let lastRaw = ''
-      // structural sharing: unchanged sessions/chats/messages keep their
-      // object identity, so memoized rows skip re-rendering on each push
-      const apply = (next: RemoteSnapshot) => setSnap(prev => (prev ? reconcile(prev, next) : next))
-      const startPolling = () => {
-        if (iv) return
+      // an idle fleet pushes nothing, so silence alone proves nothing: after
+      // a quiet spell, ask directly
+      const watchdog = setInterval(() => {
+        if (es && Date.now() - lastHeard > WATCHDOG_MS) tick()
+      }, WATCHDOG_MS)
+      // phones suspend background tabs and kill their sockets: catch up the
+      // moment the app is in front again instead of waiting for a timer
+      const wake = () => {
+        if (document.visibilityState !== 'visible') return
+        nextSseAt = 0
         tick()
-        iv = setInterval(tick, POLL_MS)
       }
-      try {
-        es = new EventSource(streamUrl())
-        es.onmessage = e => {
-          const raw = String(e.data)
-          setOnline(true)
-          if (raw === lastRaw) return // keep-alive resend of the same state
-          try { apply(JSON.parse(raw) as RemoteSnapshot); lastRaw = raw } catch { /* partial frame */ }
-        }
-        es.onerror = () => { es?.close(); es = null; startPolling() }
-        tick()
-      } catch {
-        startPolling()
+      document.addEventListener('visibilitychange', wake)
+      window.addEventListener('online', wake)
+      openStream()
+      tick()
+      return () => {
+        dead = true
+        dropStream()
+        stopPolling()
+        clearInterval(watchdog)
+        document.removeEventListener('visibilitychange', wake)
+        window.removeEventListener('online', wake)
       }
-      return () => { es?.close(); if (iv) clearInterval(iv) }
     }
   }, [pairing])
 
@@ -1390,6 +1481,7 @@ export function MobileApp() {
           <span style={{ flex: 1 }} />
           <span className={`dot${online ? '' : ' off'}`} />
         </div>
+        <ConnBanner online={online} updatedAt={updatedAt} />
         <div className="cols">
           <nav className="rail">{navButtons}</nav>
           <div className="listcol">
@@ -1430,6 +1522,7 @@ export function MobileApp() {
           </div>
         </div>
       )}
+      <ConnBanner online={online} updatedAt={updatedAt} />
       {!snap ? (
         <div className="pairwrap"><div className="spinner" /></div>
       ) : tab === 'master' && !detail ? (

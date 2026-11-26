@@ -245,7 +245,9 @@ export function RemoteCompanion() {
         case 'chat_new': return void a.newChatSession(undefined, undefined, undefined, undefined, undefined, c.id || undefined)
         case 'task_chat': return a.sendTaskChat(c.id, c.text)
         case 'task_start': return a.startTask(c.id)
-        case 'session_input': return a.sendInput(c.id, c.text)
+        // phone drafts can span lines: paste them as one prompt so an embedded
+        // newline does not submit early
+        case 'session_input': return c.text.includes('\n') ? a.sendPrompt(c.id, c.text, 'Sent a prompt from the phone') : a.sendInput(c.id, c.text)
         case 'session_key': {
           const seq = REMOTE_KEY_BYTES[c.text]
           if (seq) void writeSession(c.id, seq).catch(() => {})

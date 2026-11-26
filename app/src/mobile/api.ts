@@ -150,8 +150,72 @@ export interface CommandInput {
   ok?: boolean
 }
 
-export async function sendCommand(cmd: CommandInput): Promise<void> {
+/** Typed messages are the one thing a dropped connection must not eat: the
+ *  composer has already cleared, so a failed POST would silently lose what
+ *  the user wrote. They wait here and go out, in order, once the desktop is
+ *  back. Taps (keys, approvals, stop) are deliberately NOT queued: replaying
+ *  an "Approve" minutes later, against whatever is on screen by then, would
+ *  be worse than failing. */
+const QUEUEABLE = new Set(['master_send', 'chat_send', 'task_chat', 'session_input'])
+const outbox: CommandInput[] = []
+const outboxListeners = new Set<(n: number) => void>()
+const notifyOutbox = () => outboxListeners.forEach(f => f(outbox.length))
+
+export function onOutbox(f: (n: number) => void): () => void {
+  outboxListeners.add(f)
+  f(outbox.length)
+  return () => { outboxListeners.delete(f) }
+}
+
+export function discardOutbox(): void {
+  outbox.length = 0
+  notifyOutbox()
+}
+
+async function postCommand(cmd: CommandInput): Promise<void> {
   await postJson('/api/command', { agent_id: '', text: '', ok: false, ...cmd }, { d: deviceToken() })
+}
+
+/** fetch rejects (TypeError) only when the request never got an answer —
+ *  an HTTP error status means the desktop saw it and said no */
+const unreachable = (e: unknown) => e instanceof TypeError
+
+let flushing: Promise<void> | null = null
+/** Send queued messages in order; stops at the first one that still cannot
+ *  get through. Safe to call often: concurrent callers share one pass. */
+export function flushOutbox(): Promise<void> {
+  if (flushing) return flushing
+  if (!outbox.length) return Promise.resolve()
+  flushing = (async () => {
+    while (outbox.length) {
+      try {
+        await postCommand(outbox[0])
+      } catch (e) {
+        if (unreachable(e)) return
+        // refused (e.g. that session is gone): drop it rather than block the rest
+      }
+      outbox.shift()
+      notifyOutbox()
+    }
+  })().finally(() => { flushing = null })
+  return flushing
+}
+
+export async function sendCommand(cmd: CommandInput): Promise<void> {
+  // keep order: once something is queued, later messages queue behind it
+  if (QUEUEABLE.has(cmd.kind) && outbox.length) {
+    outbox.push(cmd)
+    notifyOutbox()
+    void flushOutbox()
+    return
+  }
+  try {
+    await postCommand(cmd)
+  } catch (e) {
+    if (!QUEUEABLE.has(cmd.kind) || !unreachable(e)) throw e
+    outbox.push(cmd)
+    notifyOutbox()
+  }
 }
 
 /** Request/response bridge: queue an rpc command (fs/git browsing), then wait
