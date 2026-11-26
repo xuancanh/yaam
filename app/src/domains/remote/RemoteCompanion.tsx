@@ -54,8 +54,13 @@ function mintToken(): string {
 }
 
 /** One session's terminal, serialized with colors/layout for the mobile xterm. */
-function termFor(id: string): { data: string; cols: number } {
-  return { data: serializeScreen(id), cols: terminalSize(id)?.cols ?? 80 }
+type TermSnap = { data: string; cols: number; rows?: number }
+function termSize(id: string): Omit<TermSnap, 'data'> {
+  const sz = terminalSize(id)
+  return sz ? { cols: sz.cols, rows: sz.rows } : { cols: 80 }
+}
+function termFor(id: string): TermSnap {
+  return { data: serializeScreen(id), ...termSize(id) }
 }
 
 const RPC_READ_CAP = 200_000
@@ -175,8 +180,8 @@ export function RemoteCompanion() {
     // a healthy live view does not either (a serialize on every publish was
     // both desktop typing lag and a full phone re-render per push).
     const focusedRemote = new Set<string>()
-    const snapTermFor = (id: string): { data: string; cols: number } =>
-      (focusedRemote.has(id) ? termFor(id) : { data: '', cols: terminalSize(id)?.cols ?? 80 })
+    const snapTermFor = (id: string): TermSnap =>
+      (focusedRemote.has(id) ? termFor(id) : { data: '', ...termSize(id) })
     // sessions whose structured flow a phone has open (session_watch); the
     // flow ring lives outside the store, so its changes schedule a publish
     const watched = new Map<string, () => void>()
@@ -254,11 +259,14 @@ export function RemoteCompanion() {
         // fallback for its live byte stream)
         case 'session_focus': {
           try {
-            const d = JSON.parse(c.text || '{}') as { rows?: number; cols?: number; snap?: boolean }
+            const d = JSON.parse(c.text || '{}') as { rows?: number; cols?: number; snap?: boolean; mirror?: boolean }
             // older phones send no flag and only ever relied on the snapshot
             if (d.snap === false) focusedRemote.delete(c.id)
             else focusedRemote.add(c.id)
-            if (d.rows && d.cols) remoteResize(c.id, d.rows, d.cols)
+            // mirror: the phone renders the desktop's own layout and pans, so
+            // the desktop keeps (or takes back) its size instead of yielding
+            if (d.mirror) fitTerminal(c.id)
+            else if (d.rows && d.cols) remoteResize(c.id, d.rows, d.cols)
           } catch { focusedRemote.add(c.id) }
           return
         }

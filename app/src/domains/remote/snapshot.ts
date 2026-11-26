@@ -67,6 +67,9 @@ export interface RemoteSnapshot {
     term: string
     /** source terminal width, so the replay uses the same column count */
     cols: number
+    /** source terminal height; a phone mirroring the desktop layout (instead
+     *  of resizing the PTY to itself) needs both dimensions */
+    rows?: number
     /** structured timeline (prompts, tool calls, replies) from the CLI
      *  transcript: only for sessions a phone is viewing, absent otherwise */
     flow?: RemoteFlowStep[]
@@ -142,7 +145,7 @@ const FLOW_CAP = 150
 
 export function buildRemoteSnapshot(
   s: AppState,
-  readTerm: (id: string) => { data: string; cols: number } = () => ({ data: '', cols: 80 }),
+  readTerm: (id: string) => { data: string; cols: number; rows?: number } = () => ({ data: '', cols: 80 }),
   readFlow: (id: string) => readonly FlowStep[] | null = () => null,
 ): RemoteSnapshot {
   // scope to the ACTIVE workspace — tasks already are (workspaceData holds the
@@ -205,7 +208,7 @@ export function buildRemoteSnapshot(
         kind: a.kind ?? 'real',
         repo: a.repo,
         cwd: a.worktree?.workdir ?? a.cwd ?? '',
-        ...(() => { const t = readTerm(a.id); return { term: t.data, cols: t.cols } })(),
+        ...(() => { const t = readTerm(a.id); return t.rows ? { term: t.data, cols: t.cols, rows: t.rows } : { term: t.data, cols: t.cols } })(),
         ...(() => {
           const f = readFlow(a.id)
           if (!f) return {}

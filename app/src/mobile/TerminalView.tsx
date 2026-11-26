@@ -30,7 +30,21 @@ function b64Bytes(data: string): Uint8Array {
 
 // Memoized: in live mode the terminal drives itself from its own /api/term SSE,
 // so a whole-tree re-render on every state snapshot must not re-run this body.
-export const TerminalView = memo(function TerminalView({ sessionId, data }: { sessionId: string; data: string }) {
+const BASE_FONT = 11
+const LINE_HEIGHT = 1.25
+const MIRROR_KEY = 'yaam-remote-term-mirror'
+function savedMirror(): boolean {
+  try { return localStorage.getItem(MIRROR_KEY) === '1' } catch { return false }
+}
+
+/** `cols`/`rows` are the desktop terminal's size from the snapshot. In FIT
+ *  mode the phone claims the PTY at its own size (reflowed for the phone, but
+ *  the desktop pane shrinks with it). In MIRROR mode the phone adopts the
+ *  desktop's size and pans sideways, so watching never disturbs the desktop
+ *  layout or the TUI running in it. */
+export const TerminalView = memo(function TerminalView({ sessionId, data, cols, rows }: {
+  sessionId: string; data: string; cols: number; rows?: number
+}) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const lastRef = useRef<string>('')
@@ -39,13 +53,23 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
   liveRef.current = live
   const resetScrollRef = useRef<() => void>(() => {})
   const claimRef = useRef<() => void>(() => {})
+  const refitRef = useRef<() => void>(() => {})
+  const [mirror, setMirrorState] = useState(savedMirror)
+  const mirrorRef = useRef(mirror)
+  mirrorRef.current = mirror
+  const dimsRef = useRef({ cols, rows })
+  dimsRef.current = { cols, rows }
+  const setMirror = (v: boolean) => {
+    setMirrorState(v)
+    try { localStorage.setItem(MIRROR_KEY, v ? '1' : '0') } catch { /* private mode */ }
+  }
 
   useEffect(() => {
     const term = new Terminal({
       disableStdin: true,
       cursorBlink: false,
-      fontSize: 11,
-      lineHeight: 1.25,
+      fontSize: BASE_FONT,
+      lineHeight: LINE_HEIGHT,
       fontFamily: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace",
       scrollback: 600,
       theme: THEME,
@@ -71,14 +95,74 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
       focusTimer = setTimeout(() => {
         // snap: the desktop serializes this screen into snapshots ONLY while
         // our live byte stream is down (it is the fallback, not the feed)
-        void sendCommand({ kind: 'session_focus', id: sessionId, text: JSON.stringify({ rows: term.rows, cols: term.cols, snap: !liveRef.current }) })
+        const snap = !liveRef.current
+        const claim = mirrorRef.current ? { snap, mirror: true } : { rows: term.rows, cols: term.cols, snap }
+        void sendCommand({ kind: 'session_focus', id: sessionId, text: JSON.stringify(claim) })
       }, 250)
     }
+    // mirror mode: the screen is wider than the phone; a sideways drag pans it
+    let panX = 0
+    let fracY = 0
+    const screenOf = () => hostRef.current?.querySelector('.xterm-screen') as HTMLElement | null
+    const paint = () => {
+      const el = screenOf()
+      if (!el) return
+      // a mirrored screen taller than the phone even at the smallest font
+      // stays anchored to its bottom rows, where the prompt and cursor live
+      const host = hostRef.current
+      const lift = mirrorRef.current && host ? Math.min(0, host.clientHeight - el.offsetHeight) : 0
+      const y = lift + (fracY ? -fracY * (el.clientHeight / Math.max(1, term.rows)) : 0)
+      el.style.transform = panX || y ? `translate3d(${panX.toFixed(1)}px, ${y.toFixed(2)}px, 0)` : ''
+    }
+    const minPan = () => {
+      const el = screenOf()
+      const host = hostRef.current
+      return el && host ? Math.min(0, host.clientWidth - el.offsetWidth) : 0
+    }
+    const clampPan = () => {
+      const next = mirrorRef.current ? Math.max(minPan(), Math.min(0, panX)) : 0
+      if (next !== panX) { panX = next; paint() }
+    }
     const refit = () => {
-      try { fit.fit(); term.scrollToBottom() } catch { /* mid-unmount */ }
+      try {
+        if (mirrorRef.current) {
+          const d = dimsRef.current
+          const c = Math.min(400, Math.max(20, d.cols || 80))
+          const r = Math.min(120, Math.max(8, d.rows || term.rows))
+          if (c !== term.cols || r !== term.rows) term.resize(c, r)
+          // every desktop row has to be on screen (TUIs draw their input box
+          // at the bottom): shrink the font until the rows fit the height
+          const h = hostRef.current?.clientHeight ?? 0
+          const size = h ? Math.max(7, Math.min(BASE_FONT, Math.floor(h / r / LINE_HEIGHT))) : BASE_FONT
+          if (term.options.fontSize !== size) {
+            term.options.fontSize = size
+            // cell metrics settle next frame and xterm rounds row heights, so
+            // measure and step down until the rows really fit
+            const shrink = () => {
+              const el = screenOf()
+              const fs = term.options.fontSize ?? BASE_FONT
+              if (mirrorRef.current && el && h && el.offsetHeight > h && fs > 7) {
+                term.options.fontSize = fs - 1
+                requestAnimationFrame(shrink)
+                return
+              }
+              clampPan()
+              paint()
+            }
+            requestAnimationFrame(shrink)
+          }
+        } else {
+          if (term.options.fontSize !== BASE_FONT) term.options.fontSize = BASE_FONT
+          fit.fit()
+        }
+        term.scrollToBottom()
+        clampPan()
+        paint()
+      } catch { /* mid-unmount */ }
       claimFocus()
     }
     claimRef.current = claimFocus
+    refitRef.current = refit
     refit()
     const ro = new ResizeObserver(refit)
     ro.observe(hostRef.current!)
@@ -99,6 +183,10 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
       return h > 0 && term.rows > 0 ? h / term.rows : 13.75
     }
     let tracking = false
+    let axis: 'x' | 'y' | null = null
+    let startX = 0
+    let startY = 0
+    let lastX = 0
     let lastY = 0
     let lastT = 0
     let carry = 0 // fractional lines not yet handed to xterm (-1, 1)
@@ -106,10 +194,7 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
     let raf = 0
     let frameT = 0
     let pendingFrac: number | null = null
-    const setOffset = (frac: number) => {
-      const el = screenEl()
-      if (el) el.style.transform = frac ? `translate3d(0, ${(-frac * cellH()).toFixed(2)}px, 0)` : ''
-    }
+    const setOffset = (frac: number) => { fracY = frac; paint() }
     // a whole-row scroll repaints on xterm's next frame: keep the old offset
     // until then, or the content jumps back a row for one frame
     const rendered = term.onRender(() => {
@@ -161,6 +246,9 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
       if (e.pointerType === 'mouse') return // desktop keeps native wheel/select
       if (raf) { cancelAnimationFrame(raf); raf = 0 } // grab a live fling
       tracking = true
+      axis = null
+      startX = lastX = e.clientX
+      startY = e.clientY
       lastY = e.clientY
       lastT = e.timeStamp
       vel = 0
@@ -168,6 +256,20 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
     }
     const onMove = (e: PointerEvent) => {
       if (!tracking) return
+      // lock to the dominant axis once the finger has clearly moved; only a
+      // mirrored (wider than the phone) screen pans sideways
+      if (!axis) {
+        const ax = Math.abs(e.clientX - startX)
+        const ay = Math.abs(e.clientY - startY)
+        if (ax < 6 && ay < 6) return
+        axis = mirrorRef.current && ax > ay ? 'x' : 'y'
+      }
+      if (axis === 'x') {
+        panX = Math.max(minPan(), Math.min(0, panX + (e.clientX - lastX)))
+        lastX = e.clientX
+        paint()
+        return
+      }
       const dLines = (lastY - e.clientY) / cellH()
       const dt = e.timeStamp - lastT
       if (dt > 0) vel = 0.7 * vel + 0.3 * (dLines / dt)
@@ -179,6 +281,7 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
     const onUp = (e: PointerEvent) => {
       if (!tracking) return
       tracking = false
+      if (axis === 'x') return
       // a pause before lifting means "hold", not "fling"
       if (e.timeStamp - lastT > 80) vel = 0
       if (raf) cancelAnimationFrame(raf)
@@ -251,6 +354,11 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
   // tell the desktop whether it needs to ship our screen in snapshots
   useEffect(() => { claimRef.current() }, [live])
 
+  // switching fit/mirror re-lays out here and re-claims (mirror hands the
+  // desktop its size back); in mirror, follow the desktop's size as it changes
+  useEffect(() => { refitRef.current() }, [mirror])
+  useEffect(() => { if (mirrorRef.current) refitRef.current() }, [cols, rows])
+
   // a dropped live stream falls back to snapshots but keeps retrying — one
   // transient blip must not lock the view into flicker-prone full repaints
   useEffect(() => {
@@ -275,5 +383,16 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
     })
   }, [data, live])
 
-  return <div className="termfill"><div ref={hostRef} className="termfill-inner" /></div>
+  return (
+    <div className="termfill">
+      <div ref={hostRef} className="termfill-inner" />
+      <button
+        className={`termmode${mirror ? ' on' : ''}`}
+        onClick={() => setMirror(!mirror)}
+        title={mirror ? 'Mirroring the desktop layout (drag sideways to pan). Tap to fit this screen instead.' : 'Fitted to this phone (the desktop pane resizes too). Tap to mirror the desktop layout instead.'}
+      >
+        {mirror ? '⇔ Mirror' : '▣ Fit'}
+      </button>
+    </div>
+  )
 })

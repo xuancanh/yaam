@@ -10,7 +10,7 @@ import { reconcile } from './reconcile'
 import { SessionFlow } from './SessionFlow'
 import type { RemoteSnapshot } from '../domains/remote/snapshot'
 import {
-  deviceToken, ensureUrlToken, fetchState, forgetPairing, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl,
+  deviceToken, ensureUrlToken, fetchState, forgetPairing, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl, uploadImage,
 } from './api'
 
 const POLL_MS = 2000
@@ -156,33 +156,181 @@ function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) 
 
 // ---------------------------------------------------------------- shared
 
-function Composer({ placeholder, onSend, onAttach, children, lead }: {
+const DRAFT_PREFIX = 'yaam-remote-draft:'
+function loadDraft(key?: string): string {
+  if (!key) return ''
+  try { return localStorage.getItem(DRAFT_PREFIX + key) ?? '' } catch { return '' }
+}
+function saveDraft(key: string | undefined, text: string) {
+  if (!key) return
+  try {
+    if (text) localStorage.setItem(DRAFT_PREFIX + key, text)
+    else localStorage.removeItem(DRAFT_PREFIX + key)
+  } catch { /* private mode: drafts just do not survive */ }
+}
+
+/** Touch keyboards have no Shift+Enter, so Return must stay a newline there
+ *  (multi-line prompts) and the send button sends. A real keyboard keeps
+ *  Enter-to-send. */
+const coarsePointer = (): boolean => {
+  try { return window.matchMedia('(pointer: coarse)').matches } catch { return false }
+}
+
+type SpeechCtor = new () => {
+  lang: string; interimResults: boolean; continuous: boolean
+  onresult: ((e: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null
+  onend: (() => void) | null; onerror: (() => void) | null
+  start(): void; stop(): void
+}
+/** Web Speech needs a secure context, so over the plain-HTTP LAN link it is
+ *  absent and the keyboard's own dictation key is the way; behind an HTTPS
+ *  tunnel the composer gets its own mic button. */
+function speechCtor(): SpeechCtor | null {
+  if (typeof window === 'undefined' || !window.isSecureContext) return null
+  const w = window as unknown as { SpeechRecognition?: SpeechCtor; webkitSpeechRecognition?: SpeechCtor }
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
+}
+
+interface Photo { key: string; preview: string; path?: string; error?: string }
+
+function Composer({ placeholder, onSend, onAttach, children, lead, draftKey, photos }: {
   placeholder: string
   onSend: (text: string) => void
   onAttach?: () => void
   children?: React.ReactNode
   /** accessory rendered at the left of the input row (e.g. the terminal keys) */
   lead?: React.ReactNode
+  /** keeps the unsent draft across navigation and reloads */
+  draftKey?: string
+  /** offer a photo button; uploaded images are sent as desktop file paths
+   *  (CLI agents read an image when its path is in the prompt) */
+  photos?: boolean
 }) {
-  const [draft, setDraft] = useState('')
+  const [draft, setDraftState] = useState(() => loadDraft(draftKey))
+  const [shots, setShots] = useState<Photo[]>([])
+  const [listening, setListening] = useState(false)
+  const taRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const recRef = useRef<InstanceType<SpeechCtor> | null>(null)
+  const draftRef = useRef(draft)
+  const setDraft = (v: string) => { draftRef.current = v; setDraftState(v); saveDraft(draftKey, v) }
+
+  // switching conversations swaps in that conversation's draft
+  const keyRef = useRef(draftKey)
+  useEffect(() => {
+    if (keyRef.current === draftKey) return
+    keyRef.current = draftKey
+    const d = loadDraft(draftKey)
+    draftRef.current = d
+    setDraftState(d)
+    setShots([])
+  }, [draftKey])
+
+  // grow with the text up to the CSS max-height, then scroll inside
+  useLayoutEffect(() => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = `${ta.scrollHeight}px`
+  }, [draft])
+
+  const shotsRef = useRef(shots)
+  shotsRef.current = shots
+  useEffect(() => () => {
+    recRef.current?.stop()
+    shotsRef.current.forEach(p => URL.revokeObjectURL(p.preview))
+  }, [])
+
+  const uploading = shots.some(p => !p.path && !p.error)
+  const ready = shots.filter(p => p.path)
+  const canSend = !uploading && (!!draft.trim() || ready.length > 0 || !!children)
   const send = () => {
-    const text = draft.trim()
-    if (!text && !children) return
+    if (!canSend) return
+    const text = [draft.trim(), ...ready.map(p => p.path)].filter(Boolean).join(' ')
     onSend(text)
     setDraft('')
+    shots.forEach(p => URL.revokeObjectURL(p.preview))
+    setShots([])
   }
+
+  const pick = (files: FileList | null) => {
+    for (const f of Array.from(files ?? []).slice(0, 4)) {
+      const key = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      setShots(cur => cur.concat([{ key, preview: URL.createObjectURL(f) }]))
+      uploadImage(f).then(
+        path => setShots(cur => cur.map(p => (p.key === key ? { ...p, path } : p))),
+        (e: unknown) => setShots(cur => cur.map(p => (p.key === key ? { ...p, error: e instanceof Error ? e.message : 'upload failed' } : p))),
+      )
+    }
+  }
+  const dropShot = (key: string) => setShots(cur => cur.filter(p => {
+    if (p.key === key) URL.revokeObjectURL(p.preview)
+    return p.key !== key
+  }))
+
+  const Speech = speechCtor()
+  const toggleMic = () => {
+    if (!Speech) return
+    if (recRef.current) { recRef.current.stop(); return }
+    const rec = new Speech()
+    rec.lang = navigator.language || 'en-US'
+    rec.interimResults = false
+    rec.continuous = true
+    rec.onresult = e => {
+      let said = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) said += e.results[i][0].transcript
+      said = said.trim()
+      if (!said) return
+      const cur = draftRef.current
+      setDraft(cur ? `${cur}${/\s$/.test(cur) ? '' : ' '}${said}` : said)
+    }
+    rec.onend = rec.onerror = () => { recRef.current = null; setListening(false) }
+    recRef.current = rec
+    setListening(true)
+    try { rec.start() } catch { recRef.current = null; setListening(false) }
+  }
+
   return (
     <div className="composerwrap">
-      {children && <div className="attbar">{children}</div>}
+      {(children || shots.length > 0) && (
+        <div className="attbar">
+          {children}
+          {shots.map(p => (
+            <div key={p.key} className={`photochip${p.error ? ' err' : ''}`} title={p.error ?? p.path ?? 'Uploading…'}>
+              <img src={p.preview} alt="" />
+              {!p.path && !p.error && <span className="pspin" />}
+              {p.error && <span className="perr">!</span>}
+              <button className="arm" onClick={() => dropShot(p.key)} aria-label="Remove photo">✕</button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="composer">
         {lead}
         {onAttach && <button className="attachbtn" title="Attach a file from the working folder" onClick={onAttach}>＋</button>}
+        {photos && (
+          <>
+            <button className="attachbtn" title="Send a photo" aria-label="Send a photo" onClick={() => fileRef.current?.click()}>◩</button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={e => { pick(e.currentTarget.files); e.currentTarget.value = '' }}
+            />
+          </>
+        )}
         <textarea
+          ref={taRef}
           rows={1}
           value={draft}
           placeholder={placeholder}
+          enterKeyHint={coarsePointer() ? 'enter' : 'send'}
           onChange={e => setDraft(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !coarsePointer()) { e.preventDefault(); send() }
+          }}
           onFocus={e => {
             // iOS overlays the keyboard without resizing the layout — nudge
             // the composer back into the visible viewport
@@ -190,7 +338,10 @@ function Composer({ placeholder, onSend, onAttach, children, lead }: {
             setTimeout(() => el.scrollIntoView({ block: 'end' }), 250)
           }}
         />
-        <button className="sendbtn" disabled={!draft.trim() && !children} onClick={send} aria-label="Send">↑</button>
+        {Speech && (
+          <button className={`attachbtn${listening ? ' rec' : ''}`} title={listening ? 'Stop dictation' : 'Dictate'} aria-label="Dictate" onClick={toggleMic}>●</button>
+        )}
+        <button className="sendbtn" disabled={!canSend} onClick={send} aria-label="Send">↑</button>
       </div>
     </div>
   )
@@ -330,7 +481,7 @@ function TaskDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
         <div className="section">WATCHER</div>
         <Messages msgs={t.chat.map(m => ({ ...m, role: m.role === 'watcher' ? 'assistant' : m.role }))} echoes={echoes} botWho="watcher" />
       </div>
-      <Composer placeholder="Message the watcher…" onSend={text => { if (!text) return; addEcho(text); void sendCommand({ kind: 'task_chat', id: t.id, text }) }} />
+      <Composer placeholder="Message the watcher…" draftKey={`task:${t.id}`} onSend={text => { if (!text) return; addEcho(text); void sendCommand({ kind: 'task_chat', id: t.id, text }) }} />
     </>
   )
 }
@@ -405,6 +556,7 @@ function ChatDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
       </div>
       <Composer
         placeholder="Ask anything"
+        draftKey={`chat:${c.id}`}
         onSend={send}
         onAttach={folder ? () => setFilesOpen(true) : undefined}
       >
@@ -505,12 +657,12 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
       {reading ? (
         <>
           {view === 'term'
-            ? <div className="termarea"><TerminalView sessionId={s.id} data={s.term} /></div>
+            ? <div className="termarea"><TerminalView sessionId={s.id} data={s.term} cols={s.cols} rows={s.rows} /></div>
             : <SessionFlow sessionId={s.id} flow={s.flow} />}
           {live && s.actionNeeded && <DecisionBar id={s.id} text={s.actionNeeded} />}
           {live
             ? (
-              <Composer placeholder="Message this agent…" onSend={text => { if (text) void sendCommand({ kind: 'session_input', id: s.id, text }) }} lead={<SessionKeyStrip sessionId={s.id} />} />
+              <Composer placeholder="Message this agent…" draftKey={`session:${s.id}`} photos onSend={text => { if (text) void sendCommand({ kind: 'session_input', id: s.id, text }) }} lead={<SessionKeyStrip sessionId={s.id} />} />
               )
             : (
               <div className="composerwrap">
@@ -736,7 +888,7 @@ function MasterView({ snap }: { snap: RemoteSnapshot }) {
         <MasterApprovals snap={snap} />
         <MasterMessages msgs={m.msgs} echoes={echoes} />
       </div>
-      <Composer placeholder={m.brain ? 'Message Master…' : 'Message Master (brain off)'} onSend={send} />
+      <Composer placeholder={m.brain ? 'Message Master…' : 'Message Master (brain off)'} draftKey="master" onSend={send} />
     </>
   )
 }

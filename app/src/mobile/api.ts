@@ -179,4 +179,40 @@ export async function rpc<T>(kind: string, payload: string, timeoutMs = 15_000):
   throw new Error('the desktop did not answer in time')
 }
 
+const MAX_IMAGE_EDGE = 2048
+
+/** Decode any image the browser can show (incl. iPhone HEIC in Safari) and
+ *  re-encode it as a JPEG no larger than MAX_IMAGE_EDGE on its long side: a
+ *  12MP photo drops from several MB to a few hundred KB, which matters on a
+ *  phone uplink and is all an agent needs to read a screenshot or sketch. */
+async function toJpeg(file: Blob): Promise<Blob> {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode()
+    const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(img.naturalWidth, img.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return file
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b ?? file), 'image/jpeg', 0.85))
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+/** Send a photo to the desktop; resolves to the absolute path it was saved
+ *  at, which the composer drops into the message for the agent to read. */
+export async function uploadImage(file: Blob): Promise<string> {
+  let body = file
+  try { body = await toJpeg(file) } catch { /* undecodable here: let the desktop sniff the original */ }
+  const res = await fetch(apiUrl('/api/upload', { d: deviceToken() }), { method: 'POST', body })
+  const json = (await res.json().catch(() => ({}))) as { path?: string; error?: string }
+  if (!res.ok || !json.path) throw new Error(json.error ?? `HTTP ${res.status}`)
+  return json.path
+}
+
 export type { RemoteSnapshot }

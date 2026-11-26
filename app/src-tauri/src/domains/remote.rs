@@ -5,7 +5,9 @@
 //! explicit pairing approval on the desktop. The server itself executes
 //! nothing and holds no credentials — it stores the latest snapshot published
 //! by the desktop frontend and a queue of commands, which the frontend drains
-//! and applies through its normal action paths.
+//! and applies through its normal action paths. Its one write is phone photos:
+//! sniffed images only, under server-chosen names in ~/.yaam/remote-uploads
+//! (newest 40 kept), handed back as a path for the user to send to an agent.
 //!
 //! Threat model: the transport is plaintext HTTP, so this is a TRUSTED-LAN-ONLY
 //! feature — anyone on the network path (or on a hostile Wi-Fi) can read the
@@ -14,7 +16,8 @@
 //! interfaces are only advertised when nothing private exists, and then with an
 //! explicit warning surfaced in Settings. For exposure beyond the LAN, front it
 //! with an encrypted tunnel (Cloudflare Tunnel / Tailscale serve) instead.
-use axum::extract::{Query, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{header, HeaderValue, Request, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::Response;
@@ -71,6 +74,10 @@ const MAX_COMMAND_TEXT_BYTES: usize = 128 * 1024;
 const MAX_COMMAND_ID_BYTES: usize = 256;
 const MAX_RESPONSES: usize = 16;
 const MAX_RESPONSE_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+/// Phone photos are downscaled to JPEG client-side; this is a backstop.
+const MAX_UPLOAD_BYTES: usize = 12 * 1024 * 1024;
+/// Uploads are scratch files handed to agents by path; keep only the newest.
+const MAX_UPLOADS_KEPT: usize = 40;
 
 fn valid_command(cmd: &RemoteCommand) -> bool {
     const KINDS: &[&str] = &[
@@ -425,6 +432,78 @@ async fn stream_term(
     Ok(Sse::new(first.chain(live)).keep_alive(KeepAlive::default()))
 }
 
+fn uploads_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(crate::util::expand_tilde("~/.yaam/remote-uploads"))
+}
+
+/// Only image types an agent can read; anything else is refused so the
+/// endpoint cannot be used to drop arbitrary files on the desktop.
+fn upload_ext(body: &[u8]) -> Option<&'static str> {
+    let sniffed = if body.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("jpg")
+    } else if body.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("png")
+    } else if body.len() > 12 && &body[0..4] == b"RIFF" && &body[8..12] == b"WEBP" {
+        Some("webp")
+    } else if body.starts_with(b"GIF8") {
+        Some("gif")
+    } else {
+        None
+    };
+    sniffed
+}
+
+fn prune_uploads(dir: &std::path::Path, keep: usize) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = rd
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            m.is_file().then(|| (m.modified().unwrap_or(std::time::UNIX_EPOCH), e.path()))
+        })
+        .collect();
+    if files.len() <= keep {
+        return;
+    }
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, p) in files.into_iter().skip(keep) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+/// Raw image body in, absolute desktop path out. The name is server-chosen
+/// (random), the directory fixed, and the type sniffed from the bytes, so the
+/// phone controls nothing about where or what gets written.
+async fn upload(State(s): Shared, Query(q): Query<AuthQuery>, body: Bytes) -> (StatusCode, Json<serde_json::Value>) {
+    if !check_device(&s, &q) {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "not paired" })));
+    }
+    let Some(ext) = upload_ext(&body) else {
+        return (StatusCode::UNSUPPORTED_MEDIA_TYPE, Json(serde_json::json!({ "error": "only jpeg, png, webp or gif images" })));
+    };
+    let dir = uploads_dir();
+    let name = match rand_token(12) {
+        Ok(t) => format!("phone-{}-{t}.{ext}", now_ms()),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))),
+    };
+    let path = dir.join(name);
+    let written = tokio::task::spawn_blocking({
+        let (dir, path) = (dir.clone(), path.clone());
+        move || -> std::io::Result<()> {
+            std::fs::create_dir_all(&dir)?;
+            std::fs::write(&path, &body)?;
+            prune_uploads(&dir, MAX_UPLOADS_KEPT);
+            Ok(())
+        }
+    })
+    .await;
+    match written {
+        Ok(Ok(())) => (StatusCode::OK, Json(serde_json::json!({ "path": path.to_string_lossy() }))),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))),
+    }
+}
+
 fn router(shared: Arc<RemoteShared>) -> Router {
     Router::new()
         .route("/", get(app_page))
@@ -436,6 +515,7 @@ fn router(shared: Arc<RemoteShared>) -> Router {
         .route("/api/term", get(stream_term))
         .route("/api/command", post(command))
         .route("/api/rpc", get(rpc_result))
+        .route("/api/upload", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)))
         .fallback(get(app_page))
         .layer(middleware::from_fn(security_headers))
         .with_state(shared)
@@ -969,5 +1049,48 @@ mod tests {
         assert_eq!(c.agent_id, "a1");
         let c2: RemoteCommand = serde_json::from_str("{\"kind\":\"session_stop\",\"id\":\"s1\"}").unwrap();
         assert_eq!(c2.text, "");
+    }
+
+    #[test]
+    fn uploads_accept_only_sniffed_images() {
+        assert_eq!(upload_ext(&[0xFF, 0xD8, 0xFF, 0xE0, 0]), Some("jpg"));
+        assert_eq!(upload_ext(b"\x89PNG\r\n\x1a\nrest"), Some("png"));
+        assert_eq!(upload_ext(b"RIFF\0\0\0\0WEBPVP8 "), Some("webp"));
+        assert_eq!(upload_ext(b"GIF89a"), Some("gif"));
+        assert_eq!(upload_ext(b"#!/bin/sh\nrm -rf ~"), None);
+        assert_eq!(upload_ext(b""), None);
+    }
+
+    #[test]
+    fn prune_keeps_only_the_newest_uploads() {
+        let dir = std::env::temp_dir().join(format!("yaam-upl-{}", rand_token(8).unwrap()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..5 {
+            let p = dir.join(format!("f{i}.png"));
+            std::fs::write(&p, b"x").unwrap();
+            let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000 + i);
+            std::fs::File::options().write(true).open(&p).unwrap().set_modified(t).unwrap();
+        }
+        prune_uploads(&dir, 2);
+        let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, vec!["f3.png", "f4.png"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn upload_requires_pairing_and_an_image_body() {
+        let s = shared_with("base");
+        s.devices.lock().unwrap().insert(
+            "dev1".into(),
+            PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
+        );
+        let post = |uri: &str, body: &'static [u8]| {
+            Request::builder().method("POST").uri(uri).body(axum::body::Body::from(body)).unwrap()
+        };
+        let r = router(s.clone()).oneshot(post("/api/upload?t=base", b"\x89PNG\r\n\x1a\n")).await.unwrap();
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        let r = router(s.clone()).oneshot(post("/api/upload?t=base&d=devtok", b"#!/bin/sh")).await.unwrap();
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
 }

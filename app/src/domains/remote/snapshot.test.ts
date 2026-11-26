@@ -94,6 +94,13 @@ describe('buildRemoteSnapshot', () => {
     expect(snap.sessions.find(x => x.id === 'a3')).not.toHaveProperty('flow')
   })
 
+  it('carries the desktop terminal height when known, so a phone can mirror it', () => {
+    const s = state({ agents: [agent({ id: 'a1' }), agent({ id: 'a3', name: 'other' })] })
+    const snap = buildRemoteSnapshot(s, id => (id === 'a1' ? { data: '', cols: 132, rows: 40 } : { data: '', cols: 80 }))
+    expect(snap.sessions.find(x => x.id === 'a1')).toMatchObject({ cols: 132, rows: 40 })
+    expect(snap.sessions.find(x => x.id === 'a3')).not.toHaveProperty('rows')
+  })
+
   it('produces an empty but well-formed snapshot for a quiet fleet', () => {
     const snap = buildRemoteSnapshot(state({}))
     expect(snap.sessions).toEqual([])
