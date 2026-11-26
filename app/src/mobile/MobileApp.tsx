@@ -8,13 +8,16 @@ import { TerminalView } from './TerminalView'
 import { FilesBrowser, GitReview } from './FilesGit'
 import { reconcile } from './reconcile'
 import { SessionFlow } from './SessionFlow'
+import { PushCard } from './PushCard'
 import type { RemoteSnapshot } from '../domains/remote/snapshot'
 import {
-  deviceToken, ensureUrlToken, fetchState, forgetPairing, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl, uploadImage, flushOutbox, onOutbox, discardOutbox,
+  deviceToken, ensureUrlToken, fetchState, forgetPairing, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl, uploadImage, flushOutbox, onOutbox, discardOutbox, reportPresence, resyncPush,
 } from './api'
 
 const POLL_MS = 2000
 const WATCHDOG_MS = 15_000
+/** under the desktop's 25s presence window */
+const PRESENCE_EVERY_MS = 10_000
 const ATT_CONTENT_CAP = 6000
 
 type Pairing = 'checking' | 'bad-token' | 'unpaired' | 'waiting' | 'paired'
@@ -1182,6 +1185,7 @@ function Lists({ tab, snap, open, selected, onNewChat }: {
           </div>
         </div>
       ))}
+      <PushCard />
     </div>
   )
 }
@@ -1278,6 +1282,35 @@ export function MobileApp() {
     setDetail(d)
   }, [])
   const closeDetail = () => history.back()
+
+  // a tapped alert says where to go: ?open= on a cold start, or a message
+  // from the service worker when the app was already running
+  const goRef = useRef<(open: string) => void>(() => {})
+  goRef.current = (open: string) => {
+    const i = open.indexOf(':')
+    const kind = i < 0 ? open : open.slice(0, i)
+    const id = i < 0 ? '' : open.slice(i + 1)
+    const tabFor: Record<string, Tab> = { session: 'sessions', task: 'tasks', chat: 'chats', master: 'master', inbox: 'approvals' }
+    if (!tabFor[kind]) return
+    pickTab(tabFor[kind])
+    if (id && (kind === 'session' || kind === 'task' || kind === 'chat')) openDetail({ kind, id })
+  }
+  useEffect(() => {
+    if (pairing !== 'paired') return
+    const want = new URLSearchParams(location.search).get('open')
+    if (want) {
+      const url = new URL(location.href)
+      url.searchParams.delete('open')
+      history.replaceState(history.state, '', url.toString())
+      goRef.current(want)
+    }
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data as { type?: string; open?: unknown } | null
+      if (d?.type === 'yaam-open' && typeof d.open === 'string') goRef.current(d.open)
+    }
+    navigator.serviceWorker?.addEventListener('message', onMsg)
+    return () => navigator.serviceWorker?.removeEventListener('message', onMsg)
+  }, [pairing])
   // workspace switched: the open detail's entity lives in the OLD workspace —
   // drop back to the list without touching the history stack direction
   const leaveDetail = () => {
@@ -1422,10 +1455,20 @@ export function MobileApp() {
       }
       document.addEventListener('visibilitychange', wake)
       window.addEventListener('online', wake)
+      // "on screen" heartbeat: the desktop holds lock-screen alerts while the
+      // companion is open in front of the user, and resumes the moment it hides
+      const beat = () => reportPresence(document.visibilityState === 'visible')
+      const beatTimer = setInterval(() => { if (document.visibilityState === 'visible') beat() }, PRESENCE_EVERY_MS)
+      document.addEventListener('visibilitychange', beat)
+      beat()
+      void resyncPush().catch(() => {})
       openStream()
       tick()
       return () => {
         dead = true
+        clearInterval(beatTimer)
+        document.removeEventListener('visibilitychange', beat)
+        reportPresence(false)
         dropStream()
         stopPolling()
         clearInterval(watchdog)

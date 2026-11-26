@@ -16,15 +16,23 @@ import { useActions, useConductorSelector } from '../../store'
 import {
   gitFileDiffSide, gitStatus, listDir, readFileB64, readTextFile,
   remoteActive, remoteApprovePair, remoteDenyPair, remotePendingPairs, remotePublish,
-  remoteRespond, remoteSetDevices, remoteStart, remoteStop, remoteWaitCommands, writeSession,
+  remotePush, remotePushCount, remoteRespond, remoteSetDevices, remoteStart, remoteStop, remoteWaitCommands, writeSession,
 } from '../../core/native'
 import type { RemoteCommand } from '../../core/native'
 import { fitTerminal, remoteResize, serializeScreen, terminalSize } from '../../core/terminals'
 import { confirmAction } from '../../components/Confirm'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import { buildRemoteSnapshot } from './snapshot'
+import { newAlerts, pushCandidates } from './push-events'
 import { flowFor, onFlow } from '../session/session-flow'
 import { authorizedRemoteRoot, remoteCommandAllowed, remoteFileRoots } from './authorization'
+
+/** how often to re-read how many devices take push alerts */
+const PUSH_COUNT_EVERY_MS = 30_000
+/** desktop counts as attended this long after the last key/click (with focus) */
+const DESKTOP_ACTIVE_MS = 120_000
+/** cap a burst (e.g. several sessions blocking at once) */
+const MAX_ALERTS_AT_ONCE = 3
 
 // throttle, not debounce: chat deltas land in the store every animation frame,
 // and a debounce that restarts on each one starves the phone until the stream
@@ -186,8 +194,44 @@ export function RemoteCompanion() {
     // flow ring lives outside the store, so its changes schedule a publish
     const watched = new Map<string, () => void>()
     const snapFlowFor = (id: string) => (watched.has(id) ? flowFor(id) : null)
+    // lock-screen alerts. Unlike snapshots these matter most when NO phone is
+    // connected, so they run on their own (cheap: no terminals or flows) and
+    // only while some device has push turned on.
+    let pushSubs = 0
+    let alertKeys: Set<string> | null = null // null: next look only seeds
+    let alertWs = ''
+    let lastInput = 0
+    const onInput = () => { lastInput = Date.now() }
+    window.addEventListener('keydown', onInput, true)
+    window.addEventListener('pointerdown', onInput, true)
+    const refreshPushCount = () => {
+      void remotePushCount().then(n => {
+        if (dead) return
+        if (n && !pushSubs) alertKeys = null
+        pushSubs = n
+      }).catch(() => {})
+    }
+    refreshPushCount()
+    const pushTimer = setInterval(refreshPushCount, PUSH_COUNT_EVERY_MS)
+    const checkAlerts = () => {
+      if (!pushSubs) return
+      const snap = buildRemoteSnapshot(useAppStore.getState())
+      const cur = pushCandidates(snap)
+      const keys = new Set(cur.keys())
+      // first look, or a workspace switch: everything reads as new, but none
+      // of it just happened
+      if (!alertKeys || snap.workspaceId !== alertWs) { alertKeys = keys; alertWs = snap.workspaceId; return }
+      const fresh = newAlerts(alertKeys, cur)
+      alertKeys = keys
+      if (!fresh.length) return
+      // someone is working at the desktop right now: it already shows this
+      if (document.hasFocus() && Date.now() - lastInput < DESKTOP_ACTIVE_MS) return
+      for (const a of fresh.slice(0, MAX_ALERTS_AT_ONCE)) void remotePush(a).catch(() => {})
+    }
+
     const publish = () => {
       if (dead) return
+      checkAlerts()
       // skip snapshot building entirely while no phone is connected, or the
       // desktop pays that tax on every store change for nobody
       void remoteActive().then(active => {
@@ -364,6 +408,9 @@ export function RemoteCompanion() {
       dead = true
       if (throttle) clearTimeout(throttle)
       unsub()
+      clearInterval(pushTimer)
+      window.removeEventListener('keydown', onInput, true)
+      window.removeEventListener('pointerdown', onInput, true)
       for (const off of watched.values()) off()
       clearInterval(poll)
       void remoteStop()

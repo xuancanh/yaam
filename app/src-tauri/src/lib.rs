@@ -118,6 +118,8 @@ pub fn run() {
             domains::remote::remote_active,
             domains::remote::remote_take_commands,
             domains::remote::remote_wait_commands,
+            domains::remote::remote_push,
+            domains::remote::remote_push_count,
             domains::remote::remote_pending_pairs,
             domains::remote::remote_approve_pair,
             domains::remote::remote_deny_pair,

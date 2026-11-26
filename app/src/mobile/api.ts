@@ -279,4 +279,97 @@ export async function uploadImage(file: Blob): Promise<string> {
   return json.path
 }
 
+// ---------------------------------------------------------------- push
+
+export interface PushPrefs { needs: boolean; done: boolean }
+export type PushSupport = 'ok' | 'insecure' | 'ios-browser' | 'unsupported'
+
+/** Can this browser take push alerts from here? Push needs a secure context
+ *  (the HTTPS tunnel link, not the plain LAN one), and on iOS it only exists
+ *  inside a home-screen web app. */
+export function pushSupport(): PushSupport {
+  if (typeof window === 'undefined') return 'unsupported'
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent)
+  const standalone = (navigator as Navigator & { standalone?: boolean }).standalone === true
+    || window.matchMedia?.('(display-mode: standalone)').matches
+  if (!window.isSecureContext) return 'insecure'
+  if (ios && !standalone) return 'ios-browser'
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported'
+  return 'ok'
+}
+
+function b64uToBytes(s: string): Uint8Array<ArrayBuffer> {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)
+  const bin = atob(b64)
+  const out = new Uint8Array(new ArrayBuffer(bin.length))
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+interface PushServerState { key: string; endpoint: string | null; prefs: PushPrefs }
+
+async function pushServerState(): Promise<PushServerState> {
+  return await getJson<PushServerState>('/api/push/key', { d: deviceToken() })
+}
+
+async function registration(): Promise<ServiceWorkerRegistration> {
+  await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+  return await navigator.serviceWorker.ready
+}
+
+/** Is push on for this device, and with which preferences? */
+export async function pushStatus(): Promise<{ on: boolean; prefs: PushPrefs }> {
+  const st = await pushServerState()
+  if (pushSupport() !== 'ok' || Notification.permission !== 'granted') return { on: false, prefs: st.prefs }
+  const reg = await navigator.serviceWorker.getRegistration('/')
+  const sub = await reg?.pushManager.getSubscription()
+  return { on: Boolean(sub && st.endpoint === sub.endpoint), prefs: st.prefs }
+}
+
+/** Ask permission (must run from a tap), subscribe with the desktop's VAPID
+ *  key, and register the subscription for this paired device. A key change
+ *  (desktop store reset) replaces the stale subscription. */
+export async function enablePush(prefs: PushPrefs): Promise<void> {
+  if (Notification.permission !== 'granted' && (await Notification.requestPermission()) !== 'granted') {
+    throw new Error('Notifications are blocked for this site')
+  }
+  const { key } = await pushServerState()
+  const reg = await registration()
+  const appKey = b64uToBytes(key)
+  let sub = await reg.pushManager.getSubscription()
+  const current = sub?.options.applicationServerKey
+  if (sub && current && !sameBytes(new Uint8Array(current), appKey)) {
+    await sub.unsubscribe()
+    sub = null
+  }
+  sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey })
+  const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } }
+  await postJson('/api/push/subscribe', { endpoint: json.endpoint, keys: json.keys, prefs }, { d: deviceToken() })
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i])
+}
+
+export async function disablePush(): Promise<void> {
+  await postJson('/api/push/unsubscribe', {}, { d: deviceToken() })
+  const reg = await navigator.serviceWorker.getRegistration('/')
+  await (await reg?.pushManager.getSubscription())?.unsubscribe()
+}
+
+/** Re-register an existing subscription silently on launch (the desktop may
+ *  have dropped it: unpair/re-pair, a reset store). Never prompts. */
+export async function resyncPush(): Promise<void> {
+  if (pushSupport() !== 'ok' || Notification.permission !== 'granted') return
+  const reg = await navigator.serviceWorker.getRegistration('/')
+  if (!(await reg?.pushManager.getSubscription())) return
+  const st = await pushServerState()
+  await enablePush(st.prefs)
+}
+
+/** "Companion on screen" heartbeat: the desktop holds alerts while it is. */
+export function reportPresence(visible: boolean): void {
+  void fetch(apiUrl('/api/presence', { d: deviceToken(), v: visible ? '1' : '0' }), { keepalive: true }).catch(() => {})
+}
+
 export type { RemoteSnapshot }

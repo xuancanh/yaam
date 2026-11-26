@@ -109,3 +109,26 @@ export async function remoteSetDevices(devices: RemotePairedDevice[]): Promise<v
   if (!isTauri) return
   await invoke('remote_set_devices', { devices })
 }
+
+/** One lock-screen alert for subscribed phones (see domains/remote/push-events). */
+export interface RemotePushRequest {
+  kind: 'needs' | 'done'
+  title: string
+  body: string
+  tag: string
+  /** what tapping opens on the phone: session:<id>, task:<id>, chat:<id>, master, inbox */
+  open: string
+}
+
+/** Send a push alert; resolves to how many devices it reached (0 while a
+ *  phone has the companion on screen). */
+export async function remotePush(req: RemotePushRequest): Promise<number> {
+  if (!isTauri) return 0
+  return await invoke<number>('remote_push', { req })
+}
+
+/** How many paired devices take push alerts. */
+export async function remotePushCount(): Promise<number> {
+  if (!isTauri) return 0
+  return await invoke<number>('remote_push_count')
+}

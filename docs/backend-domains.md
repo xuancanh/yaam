@@ -55,7 +55,7 @@ expansion.
 | Search | `chat_search_reindex`, `chat_search` | chat search indexer/view |
 | Bedrock | `bedrock_invoke` | `llm/client.ts` through native adapter |
 | Secrets | `secret_set`, `secret_get`, `secret_delete` | persistence secret mirror |
-| Remote | `remote_start`, `remote_stop`, `remote_publish`, `remote_take_commands`, `remote_pending_pairs`, `remote_approve_pair`, `remote_deny_pair`, `remote_set_devices`, `remote_respond` | `infrastructure/native/remote.ts`, `RemoteCompanion` |
+| Remote | `remote_start`, `remote_stop`, `remote_publish`, `remote_take_commands`, `remote_pending_pairs`, `remote_approve_pair`, `remote_deny_pair`, `remote_set_devices`, `remote_respond`, `remote_wait_commands`, `remote_push`, `remote_push_count` | `infrastructure/native/remote.ts`, `RemoteCompanion` |
 | Detach | `detached_spawn`, `detached_list`, `detached_kill` | `infrastructure/native/detach.ts`, launch runtime + session actions |
 | Sandbox | `sandbox_wrapper` | session/template launch runtime |
 | Open/preview | `open_external`, `open_path`, `preview_stash`, `preview_clear` | FilesPane/TerminalPane rich preview and native-open actions |
@@ -395,6 +395,22 @@ Routes:
   (actions and `rpc_*` browsing requests alike);
 - `GET /api/rpc?t&d&id` — pick up a desktop rpc answer (consumed on read,
   store capped; answered via the `remote_respond` command).
+- `POST /api/upload?t&d` — raw image body (sniffed type, 12MB cap) saved to
+  `~/.yaam/remote-uploads`; answers the absolute path;
+- `GET /api/push/key?t&d`, `POST /api/push/subscribe?t&d`,
+  `POST /api/push/unsubscribe?t&d` — the VAPID public key and this device's
+  Web Push subscription + preferences (`remote_push.rs`);
+- `GET /api/presence?t&d&v` — "companion on screen" heartbeat; `remote_push`
+  sends nothing while a phone reported itself visible in the last 25s;
+- `GET /sw.js`, `/manifest.webmanifest`, `/icon.png` — public: the service
+  worker (`remote-sw.js`), install manifest, and icon.
+
+Push: `remote_push(req)` encrypts one payload per subscribed device whose
+preferences want its kind (`needs` | `done`) and POSTs it to that device's
+push service; 404/410 answers drop the subscription. The frontend decides
+WHAT to send (`domains/remote/push-events.ts` diffs alert keys on each
+throttled publish, only while `remote_push_count() > 0`, and skips while the
+desktop itself is focused and in use).
 
 State and command routes require BOTH the URL token and a paired device token
 (403 otherwise). Device tokens are minted only by `remote_approve_pair` —

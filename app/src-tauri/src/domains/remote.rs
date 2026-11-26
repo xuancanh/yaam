@@ -116,6 +116,11 @@ pub struct RemoteShared {
     /// ms timestamp of the last authenticated device request — lets the
     /// desktop skip building snapshots while no phone is actually connected
     last_seen: std::sync::atomic::AtomicU64,
+    /// ms timestamp of the last "app is on screen" heartbeat from a phone;
+    /// pushes are suppressed while someone is looking at the companion
+    visible_at: std::sync::atomic::AtomicU64,
+    /// push subscriptions + VAPID key, loaded from disk on first use
+    push: Mutex<Option<super::remote_push::PushFile>>,
 }
 
 impl Default for RemoteShared {
@@ -132,6 +137,8 @@ impl Default for RemoteShared {
             resp_tx: tokio::sync::watch::channel(0).0,
             cmd_notify: tokio::sync::Notify::new(),
             last_seen: std::sync::atomic::AtomicU64::new(0),
+            visible_at: std::sync::atomic::AtomicU64::new(0),
+            push: Mutex::new(None),
         }
     }
 }
@@ -244,6 +251,9 @@ struct AuthQuery {
     /// instead of making the phone poll
     #[serde(default)]
     wait: u64,
+    /// presence heartbeat: 1 = companion on screen, 0 = hidden
+    #[serde(default)]
+    v: u8,
 }
 
 fn token_eq(a: &str, b: &str) -> bool {
@@ -287,7 +297,7 @@ async fn security_headers(request: Request<axum::body::Body>, next: Next) -> Res
     let headers = response.headers_mut();
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+        HeaderValue::from_static("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: 'self'; font-src data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
     );
     headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
@@ -504,6 +514,130 @@ async fn upload(State(s): Shared, Query(q): Query<AuthQuery>, body: Bytes) -> (S
     }
 }
 
+// ---------------------------------------------------------------- push
+
+/// A phone that reported itself on screen this recently needs no push.
+const PRESENCE_MS: u64 = 25_000;
+
+const SW: &str = include_str!("remote-sw.js");
+const ICON: &[u8] = include_bytes!("../../icons/icon.png");
+
+/// Run `f` on the push store (loaded on first use); it returns whether it
+/// changed anything, which persists the store.
+fn with_push<R>(s: &RemoteShared, f: impl FnOnce(&mut super::remote_push::PushFile) -> (R, bool)) -> R {
+    let path = super::remote_push::store_path();
+    let mut guard = s.push.lock().unwrap();
+    let file = guard.get_or_insert_with(|| super::remote_push::load(&path));
+    let (out, changed) = f(file);
+    if changed {
+        if let Err(e) = super::remote_push::save(&path, file) {
+            log::warn!("[remote] could not save push subscriptions: {e}");
+        }
+    }
+    out
+}
+
+/// The paired device behind this request's device token.
+fn device_id(s: &RemoteShared, q: &AuthQuery) -> Option<String> {
+    if !check_device(s, q) {
+        return None;
+    }
+    s.devices.lock().unwrap().values().find(|d| token_eq(&d.token, &q.d)).map(|d| d.id.clone())
+}
+
+/// Public on purpose (no secrets): a service worker script, the install
+/// manifest and its icon must load without the URL token.
+async fn service_worker() -> Response {
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/javascript; charset=utf-8")
+        .body(axum::body::Body::from(SW))
+        .unwrap()
+}
+
+async fn manifest() -> Response {
+    // no start_url: the browser installs the page's own URL, connect token
+    // included, so the home-screen app opens already linked
+    let body = serde_json::json!({
+        "name": "YAAM Remote",
+        "short_name": "YAAM",
+        "display": "standalone",
+        "background_color": "#08090c",
+        "theme_color": "#08090c",
+        "icons": [{ "src": "/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }],
+    });
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/manifest+json")
+        .body(axum::body::Body::from(body.to_string()))
+        .unwrap()
+}
+
+async fn icon() -> Response {
+    Response::builder().header(header::CONTENT_TYPE, "image/png").body(axum::body::Body::from(ICON)).unwrap()
+}
+
+async fn push_key(State(s): Shared, Query(q): Query<AuthQuery>) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(dev) = device_id(&s, &q) else {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "not paired" })));
+    };
+    let res = with_push(&s, |f| match f.vapid_key() {
+        Ok((k, fresh)) => (super::remote_push::public_key(&k).map(|key| (key, f.subs.get(&dev).cloned())), fresh),
+        Err(e) => (Err(e), false),
+    });
+    match res {
+        Ok((key, sub)) => (StatusCode::OK, Json(serde_json::json!({
+            "key": key,
+            "endpoint": sub.as_ref().map(|x| x.endpoint.clone()),
+            "prefs": sub.map(|x| x.prefs).unwrap_or_default(),
+        }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))),
+    }
+}
+
+#[derive(Deserialize)]
+struct SubKeys {
+    p256dh: String,
+    auth: String,
+}
+
+#[derive(Deserialize)]
+struct SubscribeBody {
+    endpoint: String,
+    keys: SubKeys,
+    #[serde(default)]
+    prefs: super::remote_push::PushPrefs,
+}
+
+async fn push_subscribe(State(s): Shared, Query(q): Query<AuthQuery>, Json(body): Json<SubscribeBody>) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(dev) = device_id(&s, &q) else {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "not paired" })));
+    };
+    if !super::remote_push::valid_endpoint(&body.endpoint) || body.keys.p256dh.len() > 128 || body.keys.auth.len() > 64 {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "not a push service subscription" })));
+    }
+    let sub = super::remote_push::PushSub { endpoint: body.endpoint, p256dh: body.keys.p256dh, auth: body.keys.auth, prefs: body.prefs };
+    with_push(&s, |f| {
+        f.subs.insert(dev, sub);
+        ((), true)
+    });
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+}
+
+async fn push_unsubscribe(State(s): Shared, Query(q): Query<AuthQuery>) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(dev) = device_id(&s, &q) else {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "not paired" })));
+    };
+    with_push(&s, |f| ((), f.subs.remove(&dev).is_some()));
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+}
+
+async fn presence(State(s): Shared, Query(q): Query<AuthQuery>) -> StatusCode {
+    if !check_device(&s, &q) {
+        return StatusCode::FORBIDDEN;
+    }
+    s.visible_at.store(if q.v == 1 { now_ms() } else { 0 }, std::sync::atomic::Ordering::Relaxed);
+    StatusCode::NO_CONTENT
+}
+
 fn router(shared: Arc<RemoteShared>) -> Router {
     Router::new()
         .route("/", get(app_page))
@@ -516,6 +650,13 @@ fn router(shared: Arc<RemoteShared>) -> Router {
         .route("/api/command", post(command))
         .route("/api/rpc", get(rpc_result))
         .route("/api/upload", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)))
+        .route("/api/push/key", get(push_key))
+        .route("/api/push/subscribe", post(push_subscribe))
+        .route("/api/push/unsubscribe", post(push_unsubscribe))
+        .route("/api/presence", get(presence))
+        .route("/sw.js", get(service_worker))
+        .route("/manifest.webmanifest", get(manifest))
+        .route("/icon.png", get(icon))
         .fallback(get(app_page))
         .layer(middleware::from_fn(security_headers))
         .with_state(shared)
@@ -734,11 +875,109 @@ pub fn remote_respond(state: tauri::State<'_, RemoteManager>, id: String, json: 
 /// revoked there disappears here too.
 #[tauri::command]
 pub fn remote_set_devices(state: tauri::State<'_, RemoteManager>, devices: Vec<PairedDevice>) {
-    let mut map = state.shared.devices.lock().unwrap();
-    map.clear();
-    for d in devices {
-        map.insert(d.id.clone(), d);
+    let ids: std::collections::HashSet<String> = devices.iter().map(|d| d.id.clone()).collect();
+    {
+        let mut map = state.shared.devices.lock().unwrap();
+        map.clear();
+        for d in devices {
+            map.insert(d.id.clone(), d);
+        }
     }
+    // an unpaired device must stop getting alerts
+    with_push(&state.shared, |f| {
+        let before = f.subs.len();
+        f.subs.retain(|id, _| ids.contains(id));
+        ((), f.subs.len() != before)
+    });
+}
+
+/// How many paired devices currently take push alerts. The desktop only runs
+/// its alert diff while this is non-zero.
+#[tauri::command]
+pub fn remote_push_count(state: tauri::State<'_, RemoteManager>) -> usize {
+    with_push(&state.shared, |f| (f.subs.len(), false))
+}
+
+#[derive(Deserialize)]
+pub struct PushRequest {
+    /// "needs" | "done": matched against each device's preferences
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    /// same tag replaces the earlier notification on the phone
+    pub tag: String,
+    /// what tapping opens: "session:<id>", "task:<id>", "chat:<id>", "master", "inbox"
+    pub open: String,
+}
+
+fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// Send one alert to every subscribed device that wants this kind. Skipped
+/// entirely while a phone has the companion on screen. Returns how many
+/// devices it reached; dead subscriptions are dropped as they are found.
+#[tauri::command]
+pub async fn remote_push(state: tauri::State<'_, RemoteManager>, req: PushRequest) -> Result<usize, String> {
+    let shared = state.shared.clone();
+    let seen = shared.visible_at.load(std::sync::atomic::Ordering::Relaxed);
+    if seen != 0 && now_ms().saturating_sub(seen) < PRESENCE_MS {
+        return Ok(0);
+    }
+    let (pkcs8, targets) = with_push(&shared, |f| {
+        let key = f.vapid_key();
+        let fresh = key.as_ref().map(|k| k.1).unwrap_or(false);
+        let subs: Vec<(String, super::remote_push::PushSub)> =
+            f.subs.iter().filter(|(_, s)| s.prefs.wants(&req.kind)).map(|(id, s)| (id.clone(), s.clone())).collect();
+        ((key.map(|k| k.0), subs), fresh)
+    });
+    let pkcs8 = pkcs8?;
+    if targets.is_empty() {
+        return Ok(0);
+    }
+    let payload = serde_json::json!({
+        "title": clip(&req.title, 120),
+        "body": clip(&req.body, 600),
+        "tag": clip(&req.tag, 120),
+        "open": clip(&req.open, 200),
+    })
+    .to_string();
+    let client = tauri_plugin_http::reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let now_s = now_ms() / 1000;
+    let jobs: Vec<_> = targets
+        .into_iter()
+        .map(|(dev, sub)| {
+            let (client, pkcs8, payload, tag) = (client.clone(), pkcs8.clone(), payload.clone(), req.tag.clone());
+            tokio::spawn(async move { (dev, super::remote_push::send(&client, &sub, &pkcs8, payload.as_bytes(), &tag, now_s).await) })
+        })
+        .collect();
+    let mut reached = 0;
+    let mut gone = Vec::new();
+    for job in jobs {
+        match job.await {
+            Ok((_, super::remote_push::Sent::Ok)) => reached += 1,
+            Ok((dev, super::remote_push::Sent::Gone)) => gone.push(dev),
+            Ok((_, super::remote_push::Sent::Failed(e))) => log::warn!("[remote] push failed: {e}"),
+            Err(e) => log::warn!("[remote] push task failed: {e}"),
+        }
+    }
+    if !gone.is_empty() {
+        with_push(&shared, |f| {
+            for d in &gone {
+                f.subs.remove(d);
+            }
+            ((), true)
+        });
+    }
+    Ok(reached)
 }
 
 #[cfg(test)]
@@ -753,7 +992,7 @@ mod tests {
     }
 
     fn q(t: &str, d: &str, device: &str) -> AuthQuery {
-        AuthQuery { t: t.into(), d: d.into(), device: device.into(), id: String::new(), wait: 0 }
+        AuthQuery { t: t.into(), d: d.into(), device: device.into(), id: String::new(), wait: 0, v: 0 }
     }
 
     #[test]
@@ -1092,5 +1331,50 @@ mod tests {
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
         let r = router(s.clone()).oneshot(post("/api/upload?t=base&d=devtok", b"#!/bin/sh")).await.unwrap();
         assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    #[tokio::test]
+    async fn push_assets_are_public_and_push_routes_need_pairing() {
+        let s = shared_with("base");
+        s.devices.lock().unwrap().insert(
+            "dev1".into(),
+            PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
+        );
+        let get = |uri: &str| Request::builder().uri(uri).body(axum::body::Body::empty()).unwrap();
+        let r = router(s.clone()).oneshot(get("/sw.js")).await.unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(r.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/javascript"));
+        let r = router(s.clone()).oneshot(get("/manifest.webmanifest")).await.unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let csp = r.headers()[header::CONTENT_SECURITY_POLICY].to_str().unwrap().to_string();
+        assert!(csp.contains("worker-src 'self'") && csp.contains("manifest-src 'self'"));
+        assert_eq!(router(s.clone()).oneshot(get("/icon.png")).await.unwrap().status(), StatusCode::OK);
+
+        assert_eq!(router(s.clone()).oneshot(get("/api/push/key?t=base")).await.unwrap().status(), StatusCode::FORBIDDEN);
+        let post = |uri: &str, body: &'static str| {
+            Request::builder().method("POST").uri(uri).header(header::CONTENT_TYPE, "application/json").body(axum::body::Body::from(body)).unwrap()
+        };
+        let r = router(s.clone()).oneshot(post("/api/push/subscribe?t=base", r#"{"endpoint":"https://fcm.googleapis.com/x","keys":{"p256dh":"k","auth":"a"}}"#)).await.unwrap();
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        // a paired phone still cannot aim the desktop's POST at an arbitrary host
+        let r = router(s.clone()).oneshot(post("/api/push/subscribe?t=base&d=devtok", r#"{"endpoint":"https://10.0.0.5/admin","keys":{"p256dh":"k","auth":"a"}}"#)).await.unwrap();
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn presence_heartbeat_marks_the_companion_on_screen() {
+        let s = shared_with("base");
+        s.devices.lock().unwrap().insert(
+            "dev1".into(),
+            PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
+        );
+        let get = |uri: &str| Request::builder().uri(uri).body(axum::body::Body::empty()).unwrap();
+        let ord = std::sync::atomic::Ordering::Relaxed;
+        assert_eq!(router(s.clone()).oneshot(get("/api/presence?t=base&v=1")).await.unwrap().status(), StatusCode::FORBIDDEN);
+        assert_eq!(s.visible_at.load(ord), 0);
+        router(s.clone()).oneshot(get("/api/presence?t=base&d=devtok&v=1")).await.unwrap();
+        assert!(s.visible_at.load(ord) > 0);
+        router(s.clone()).oneshot(get("/api/presence?t=base&d=devtok&v=0")).await.unwrap();
+        assert_eq!(s.visible_at.load(ord), 0);
     }
 }

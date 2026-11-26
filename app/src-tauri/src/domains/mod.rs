@@ -13,6 +13,7 @@ pub mod detach;
 pub mod icons;
 pub mod preview;
 pub mod remote;
+pub mod remote_push;
 pub mod sandbox;
 pub mod search;
 pub mod secrets;

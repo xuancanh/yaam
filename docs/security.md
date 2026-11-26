@@ -332,6 +332,20 @@ is deliberately layered:
   chat/start, session input/stop/resume, approvals), so a paired phone's
   authority is exactly the desktop UI's.
 
+- **Two bounded writes.** Phone photos (`POST /api/upload`) are type-sniffed
+  (JPEG/PNG/WebP/GIF only), written under random server-chosen names in
+  `~/.yaam/remote-uploads` (newest 40 kept), and only their path goes back.
+  Push subscriptions (`/api/push/*`) are stored per paired device in
+  `~/.yaam/remote-push.json` (0600, with the VAPID signing key) and dropped
+  on unpair.
+- **Push without a relay, no SSRF.** Alerts go straight from the desktop to
+  the browser's push service, end-to-end encrypted (RFC 8291 aes128gcm) and
+  VAPID-signed (RFC 8292), so the push service sees only ciphertext.
+  Subscription endpoints must be https on a known push service (FCM, Apple,
+  Mozilla, WNS); a paired phone cannot aim the desktop's outbound POST at
+  another host. `/sw.js`, the manifest and the icon are public and hold no
+  secrets.
+
 Paired phones CAN type into live session terminals, message chat agents,
 stream raw terminal output, and browse files/diffs under live session working
 folders (rpc requests are path-scoped on the desktop before answering) —
