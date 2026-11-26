@@ -16,25 +16,32 @@ import { useActions, useConductorSelector } from '../../store'
 import {
   gitFileDiffSide, gitStatus, listDir, readFileB64, readTextFile,
   remoteActive, remoteApprovePair, remoteDenyPair, remotePendingPairs, remotePublish,
-  remoteRespond, remoteSetDevices, remoteStart, remoteStop, remoteTakeCommands, writeSession,
+  remoteRespond, remoteSetDevices, remoteStart, remoteStop, remoteWaitCommands, writeSession,
 } from '../../core/native'
 import type { RemoteCommand } from '../../core/native'
 import { fitTerminal, remoteResize, serializeScreen, terminalSize } from '../../core/terminals'
 import { confirmAction } from '../../components/Confirm'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import { buildRemoteSnapshot } from './snapshot'
+import { flowFor, onFlow } from '../session/session-flow'
 import { authorizedRemoteRoot, remoteCommandAllowed, remoteFileRoots } from './authorization'
 
-// short debounce: chat deltas land in the store per animation frame, and the
-// SSE stream pushes every publish — this is the streaming granularity remotes see
-const PUBLISH_DEBOUNCE_MS = 300
-const POLL_MS = 800 // command/pairing drain — rpc browsing rides this loop
+// throttle, not debounce: chat deltas land in the store every animation frame,
+// and a debounce that restarts on each one starves the phone until the stream
+// pauses. This is the streaming granularity remotes see.
+const PUBLISH_EVERY_MS = 200
+const POLL_MS = 800 // pairing + phone-presence checks
+const COMMAND_WAIT_MS = 1500 // long-poll window of the command drain
 
 const REMOTE_KEY_BYTES: Record<string, string> = {
   enter: '\r',
   esc: '\x1b',
   tab: '\t',
   'shift+tab': '\x1b[Z', // CSI Z — back-tab / reverse-tab
+  'ctrl+c': '\x03',
+  '1': '1',
+  '2': '2',
+  '3': '3',
   up: '\x1b[A',
   down: '\x1b[B',
   right: '\x1b[C',
@@ -159,17 +166,21 @@ export function RemoteCompanion() {
       return
     }
     let dead = false
-    let debounce: ReturnType<typeof setTimeout> | null = null
+    let throttle: ReturnType<typeof setTimeout> | null = null
 
     let wasActive = false
-    // Sessions a phone is actually viewing (session_focus/blur). The phone's
-    // terminal rides the live /api/term byte stream; the snapshot screen is
-    // only its fallback — so serialize just the focused session(s) instead of
-    // paying a full serialize of EVERY terminal on every publish (felt as
-    // typing lag in busy fleets).
+    // Sessions a phone is viewing whose LIVE byte stream is down (session_focus
+    // with snap:true). The phone's terminal normally rides /api/term; the
+    // serialized screen is only its fallback, so nobody else pays for it, and
+    // a healthy live view does not either (a serialize on every publish was
+    // both desktop typing lag and a full phone re-render per push).
     const focusedRemote = new Set<string>()
     const snapTermFor = (id: string): { data: string; cols: number } =>
       (focusedRemote.has(id) ? termFor(id) : { data: '', cols: terminalSize(id)?.cols ?? 80 })
+    // sessions whose structured flow a phone has open (session_watch); the
+    // flow ring lives outside the store, so its changes schedule a publish
+    const watched = new Map<string, () => void>()
+    const snapFlowFor = (id: string) => (watched.has(id) ? flowFor(id) : null)
     const publish = () => {
       if (dead) return
       // skip snapshot building entirely while no phone is connected, or the
@@ -178,7 +189,9 @@ export function RemoteCompanion() {
         if (dead) return
         wasActive = active
         if (!active) return
-        void remotePublish(JSON.stringify(buildRemoteSnapshot(useAppStore.getState(), snapTermFor)))
+        // ts zeroed: a clock in the payload would make every publish unique
+        // and defeat the server's skip-identical-snapshot check
+        void remotePublish(JSON.stringify({ ...buildRemoteSnapshot(useAppStore.getState(), snapTermFor, snapFlowFor), ts: 0 }))
       }).catch(() => {})
     }
 
@@ -203,10 +216,11 @@ export function RemoteCompanion() {
         dispatch(s => ({ ...s, toast: `Phone remote failed: ${e instanceof Error ? e.message : String(e)}` }))
       })
 
-    const unsub = useAppStore.subscribe(() => {
-      if (debounce) clearTimeout(debounce)
-      debounce = setTimeout(publish, PUBLISH_DEBOUNCE_MS)
-    })
+    const schedule = () => {
+      if (throttle) return
+      throttle = setTimeout(() => { throttle = null; publish() }, PUBLISH_EVERY_MS)
+    }
+    const unsub = useAppStore.subscribe(schedule)
 
     const applyCommand = (c: RemoteCommand) => {
       if (!remoteCommandAllowed(useAppStore.getState(), c)) {
@@ -239,16 +253,27 @@ export function RemoteCompanion() {
         // snapshots start carrying this session's serialized screen (the
         // fallback for its live byte stream)
         case 'session_focus': {
-          focusedRemote.add(c.id)
           try {
-            const d = JSON.parse(c.text || '{}') as { rows?: number; cols?: number }
+            const d = JSON.parse(c.text || '{}') as { rows?: number; cols?: number; snap?: boolean }
+            // older phones send no flag and only ever relied on the snapshot
+            if (d.snap === false) focusedRemote.delete(c.id)
+            else focusedRemote.add(c.id)
             if (d.rows && d.cols) remoteResize(c.id, d.rows, d.cols)
-          } catch { /* malformed dims */ }
+          } catch { focusedRemote.add(c.id) }
           return
         }
         case 'session_blur': {
           focusedRemote.delete(c.id)
           return fitTerminal(c.id) // desktop reclaims its size
+        }
+        case 'session_watch': {
+          if (!watched.has(c.id)) watched.set(c.id, onFlow(c.id, schedule))
+          return schedule()
+        }
+        case 'session_unwatch': {
+          watched.get(c.id)?.()
+          watched.delete(c.id)
+          return
         }
         case 'session_stop': return a.stopSession(c.id)
         case 'session_resume': return a.resume(c.id)
@@ -286,14 +311,25 @@ export function RemoteCompanion() {
       })
     }
 
+    // command drain: a long-poll that returns the moment a phone queues
+    // something, so taps and rpc browsing are not gated on a timer tick
+    void (async () => {
+      while (!dead) {
+        try {
+          const cs = await remoteWaitCommands(COMMAND_WAIT_MS)
+          // a wait still in flight across a restart already took these off the
+          // queue, so apply them rather than drop the phone's taps
+          for (const c of cs) applyCommand(c)
+          if (dead) return
+          // republish right away so the phone sees its own action reflected
+          if (cs.length) setTimeout(publish, 60)
+        } catch {
+          await new Promise(r => setTimeout(r, POLL_MS)) // server restarting
+        }
+      }
+    })()
+
     const poll = setInterval(() => {
-      void remoteTakeCommands().then(cs => {
-        if (dead) return
-        for (const c of cs) applyCommand(c)
-        // republish right away so the phone sees its own action reflected on
-        // the next poll instead of one debounce later
-        if (cs.length) setTimeout(publish, 120)
-      }).catch(() => {})
       void remotePendingPairs().then(reqs => {
         if (dead) return
         for (const r of reqs) promptPair(r)
@@ -304,6 +340,10 @@ export function RemoteCompanion() {
         if (dead) return
         if (!active) {
           wasActive = false
+          // every phone is gone: stop paying for their open views
+          for (const off of watched.values()) off()
+          watched.clear()
+          focusedRemote.clear()
         } else if (!wasActive) {
           publish()
         }
@@ -312,8 +352,9 @@ export function RemoteCompanion() {
 
     return () => {
       dead = true
-      if (debounce) clearTimeout(debounce)
+      if (throttle) clearTimeout(throttle)
       unsub()
+      for (const off of watched.values()) off()
       clearInterval(poll)
       void remoteStop()
       dispatch(s => (s.remoteInfo ? { ...s, remoteInfo: null } : s))

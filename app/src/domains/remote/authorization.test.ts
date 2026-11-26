@@ -50,6 +50,10 @@ describe('remote command authorization', () => {
 
   it('allows visible targets and matching pending approvals', () => {
     expect(remoteCommandAllowed(scoped, command('session_input', 'session'))).toBe(true)
+    expect(remoteCommandAllowed(scoped, command('session_watch', 'session'))).toBe(true)
+    expect(remoteCommandAllowed(scoped, command('session_unwatch', 'session'))).toBe(true)
+    expect(remoteCommandAllowed(scoped, command('session_watch', 'background'))).toBe(false)
+    expect(remoteCommandAllowed(scoped, command('session_watch', 'chat'))).toBe(false)
     expect(remoteCommandAllowed(scoped, command('chat_send', 'chat'))).toBe(true)
     expect(remoteCommandAllowed(scoped, command('task_start', 'task'))).toBe(true)
     expect(remoteCommandAllowed(scoped, command('chat_new', 'durable'))).toBe(true)

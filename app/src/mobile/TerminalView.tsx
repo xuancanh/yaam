@@ -35,6 +35,10 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
   const termRef = useRef<Terminal | null>(null)
   const lastRef = useRef<string>('')
   const [live, setLive] = useState(true)
+  const liveRef = useRef(live)
+  liveRef.current = live
+  const resetScrollRef = useRef<() => void>(() => {})
+  const claimRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     const term = new Terminal({
@@ -65,53 +69,93 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
     const claimFocus = () => {
       if (focusTimer) clearTimeout(focusTimer)
       focusTimer = setTimeout(() => {
-        void sendCommand({ kind: 'session_focus', id: sessionId, text: JSON.stringify({ rows: term.rows, cols: term.cols }) })
+        // snap: the desktop serializes this screen into snapshots ONLY while
+        // our live byte stream is down (it is the fallback, not the feed)
+        void sendCommand({ kind: 'session_focus', id: sessionId, text: JSON.stringify({ rows: term.rows, cols: term.cols, snap: !liveRef.current }) })
       }, 250)
     }
     const refit = () => {
       try { fit.fit(); term.scrollToBottom() } catch { /* mid-unmount */ }
       claimFocus()
     }
+    claimRef.current = claimFocus
     refit()
     const ro = new ResizeObserver(refit)
     ro.observe(hostRef.current!)
     // touch scrolling: xterm's canvas eats the touches before its scrollable
-    // viewport sees them — translate vertical drags into scrollLines ourselves.
-    // Pointer Events (with capture) work on BOTH Android Chrome and iOS Safari
-    // (13+ honors touch-action: none for them); plain touch handlers were
-    // Android-only in practice.
+    // viewport sees them, so vertical drags are translated ourselves. Pointer
+    // Events (with capture) work on BOTH Android Chrome and iOS Safari (13+
+    // honors touch-action: none for them).
+    //
+    // xterm can only scroll by whole rows, which on its own reads as a 14px
+    // stutter. The fractional remainder is shown as a GPU translate of the
+    // rendered screen, so the content tracks the finger pixel for pixel; whole
+    // rows go to scrollLines. The fling is time-based (same feel at 60 and
+    // 120 Hz) and settles onto a row boundary instead of stopping mid-row.
     const host = hostRef.current!
-    const cellH = Math.max(10, 11 * 1.25) // fontSize × lineHeight
+    const screenEl = () => host.querySelector('.xterm-screen') as HTMLElement | null
+    const cellH = () => {
+      const h = screenEl()?.clientHeight ?? 0
+      return h > 0 && term.rows > 0 ? h / term.rows : 13.75
+    }
     let tracking = false
     let lastY = 0
     let lastT = 0
-    let carry = 0 // fractional lines not yet applied
+    let carry = 0 // fractional lines not yet handed to xterm (-1, 1)
     let vel = 0 // smoothed velocity, lines per ms
     let raf = 0
-    // apply accumulated drag once per frame — scrollLines per pointermove
-    // (60–120Hz) forced extra renders between frames and stuttered
-    const flush = () => {
-      raf = 0
-      const lines = Math.trunc(carry)
-      if (lines !== 0) {
-        carry -= lines
-        term.scrollLines(lines)
-      }
+    let frameT = 0
+    let pendingFrac: number | null = null
+    const setOffset = (frac: number) => {
+      const el = screenEl()
+      if (el) el.style.transform = frac ? `translate3d(0, ${(-frac * cellH()).toFixed(2)}px, 0)` : ''
     }
-    const queue = () => { if (!raf) raf = requestAnimationFrame(flush) }
-    // momentum: keep scrolling after the finger lifts, decaying like a native
-    // fling — the dead stop on release is most of what felt non-native
-    const fling = () => {
-      raf = 0
-      if (tracking || Math.abs(vel) < 0.002) return
-      carry += vel * 16.7
-      vel *= 0.94
-      const lines = Math.trunc(carry)
+    // a whole-row scroll repaints on xterm's next frame: keep the old offset
+    // until then, or the content jumps back a row for one frame
+    const rendered = term.onRender(() => {
+      if (pendingFrac !== null) { setOffset(pendingFrac); pendingFrac = null }
+    })
+    /** Move by `carry`: whole rows to xterm, the rest as a pixel offset,
+     *  clamped at both ends of the buffer. Returns false at a hard edge. */
+    const apply = (): boolean => {
+      const buf = term.buffer.active
+      const lines = carry > 0 ? Math.floor(carry) : Math.ceil(carry)
+      let moved = false
       if (lines !== 0) {
-        carry -= lines
+        const before = buf.viewportY
         term.scrollLines(lines)
+        moved = term.buffer.active.viewportY !== before
+        carry -= lines
       }
-      raf = requestAnimationFrame(fling)
+      let edge = false
+      const b = term.buffer.active
+      if ((carry > 0 && b.viewportY >= b.baseY) || (carry < 0 && b.viewportY <= 0)) { carry = 0; edge = true }
+      if (moved) pendingFrac = carry
+      else setOffset(carry)
+      return !edge
+    }
+    const flush = () => { raf = 0; apply() }
+    const queue = () => { if (!raf) raf = requestAnimationFrame(flush) }
+    const settle = (t: number) => {
+      raf = 0
+      const dt = frameT ? Math.min(48, t - frameT) : 16.7
+      frameT = t
+      if (tracking) return
+      if (Math.abs(vel) > 0.0015) {
+        carry += vel * dt
+        vel *= Math.pow(0.95, dt / 16.7)
+        if (!apply()) vel = 0
+        raf = requestAnimationFrame(settle)
+        return
+      }
+      // coast onto the nearest row so text never rests half-cut
+      vel = 0
+      const target = Math.round(carry)
+      const diff = target - carry
+      if (Math.abs(diff) < 0.02) { carry = target; apply(); return }
+      carry += diff * Math.min(1, dt / 60)
+      apply()
+      raf = requestAnimationFrame(settle)
     }
     const onDown = (e: PointerEvent) => {
       if (e.pointerType === 'mouse') return // desktop keeps native wheel/select
@@ -119,15 +163,14 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
       tracking = true
       lastY = e.clientY
       lastT = e.timeStamp
-      carry = 0
       vel = 0
       try { host.setPointerCapture(e.pointerId) } catch { /* unsupported */ }
     }
     const onMove = (e: PointerEvent) => {
       if (!tracking) return
-      const dLines = (lastY - e.clientY) / cellH
+      const dLines = (lastY - e.clientY) / cellH()
       const dt = e.timeStamp - lastT
-      if (dt > 0) vel = 0.75 * vel + 0.25 * (dLines / dt)
+      if (dt > 0) vel = 0.7 * vel + 0.3 * (dLines / dt)
       carry += dLines
       lastY = e.clientY
       lastT = e.timeStamp
@@ -139,10 +182,20 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
       // a pause before lifting means "hold", not "fling"
       if (e.timeStamp - lastT > 80) vel = 0
       if (raf) cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(fling)
+      frameT = 0
+      raf = requestAnimationFrame(settle)
     }
     // belt for older iOS: keep the browser from rubber-banding the page
     const onTouchMove = (e: TouchEvent) => e.preventDefault()
+    /** live output snapped the view to the bottom: drop any partial offset */
+    resetScrollRef.current = () => {
+      if (tracking) return
+      if (raf) { cancelAnimationFrame(raf); raf = 0 }
+      vel = 0
+      carry = 0
+      pendingFrac = null
+      setOffset(0)
+    }
     host.addEventListener('pointerdown', onDown)
     host.addEventListener('pointermove', onMove)
     host.addEventListener('pointerup', onUp)
@@ -155,6 +208,8 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
       host.removeEventListener('pointercancel', onUp)
       host.removeEventListener('touchmove', onTouchMove)
       if (raf) cancelAnimationFrame(raf)
+      rendered.dispose()
+      resetScrollRef.current = () => {}
       ro.disconnect()
       if (focusTimer) clearTimeout(focusTimer)
       void sendCommand({ kind: 'session_blur', id: sessionId }) // desktop reclaims
@@ -182,7 +237,9 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
         const buf = term.buffer.active
         const wasAtBottom = fresh || buf.viewportY >= buf.baseY
         if (fresh) { fresh = false; lastRef.current = ''; term.write('\x1bc') }
-        term.write(b64Bytes(String(e.data)), () => { if (wasAtBottom) term.scrollToBottom() })
+        term.write(b64Bytes(String(e.data)), () => {
+          if (wasAtBottom) { term.scrollToBottom(); resetScrollRef.current() }
+        })
       }
       es.onerror = () => { es?.close(); setLive(false) } // fall back to snapshots
     } catch {
@@ -190,6 +247,9 @@ export const TerminalView = memo(function TerminalView({ sessionId, data }: { se
     }
     return () => es?.close()
   }, [live, sessionId])
+
+  // tell the desktop whether it needs to ship our screen in snapshots
+  useEffect(() => { claimRef.current() }, [live])
 
   // a dropped live stream falls back to snapshots but keeps retrying — one
   // transient blip must not lock the view into flicker-prone full repaints

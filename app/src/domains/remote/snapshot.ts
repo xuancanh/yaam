@@ -5,6 +5,10 @@
 // small even for long-running fleets.
 import type { AppState, BuildResult, BuildUI, Escalation, Message, RouteEntry } from '../../core/types'
 import { hasCreds } from '../../llm/client'
+import type { FlowStep } from '../session/session-flow'
+
+/** One transcript step for the phone's structured session view. */
+export type RemoteFlowStep = Pick<FlowStep, 'id' | 'at' | 'type' | 'kind' | 'tool' | 'label' | 'path' | 'status'>
 
 export interface RemoteApproval {
   /** routes the command back: 'master' → resolveToolApproval, 'chat' → approveChatTool */
@@ -63,6 +67,9 @@ export interface RemoteSnapshot {
     term: string
     /** source terminal width, so the replay uses the same column count */
     cols: number
+    /** structured timeline (prompts, tool calls, replies) from the CLI
+     *  transcript: only for sessions a phone is viewing, absent otherwise */
+    flow?: RemoteFlowStep[]
   }[]
   tasks: {
     id: string
@@ -131,9 +138,12 @@ export function masterMsgText(m: Message): string {
   return ''
 }
 
+const FLOW_CAP = 150
+
 export function buildRemoteSnapshot(
   s: AppState,
   readTerm: (id: string) => { data: string; cols: number } = () => ({ data: '', cols: 80 }),
+  readFlow: (id: string) => readonly FlowStep[] | null = () => null,
 ): RemoteSnapshot {
   // scope to the ACTIVE workspace — tasks already are (workspaceData holds the
   // rest), and showing a different world than the desktop reads as "not synced"
@@ -196,6 +206,15 @@ export function buildRemoteSnapshot(
         repo: a.repo,
         cwd: a.worktree?.workdir ?? a.cwd ?? '',
         ...(() => { const t = readTerm(a.id); return { term: t.data, cols: t.cols } })(),
+        ...(() => {
+          const f = readFlow(a.id)
+          if (!f) return {}
+          return {
+            flow: f.slice(-FLOW_CAP).map(x => ({
+              id: x.id, at: x.at, type: x.type, kind: x.kind, tool: x.tool, label: x.label, path: x.path, status: x.status,
+            })),
+          }
+        })(),
       })),
     tasks: s.tasks
       .filter(t => !t.archived)

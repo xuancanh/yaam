@@ -81,6 +81,19 @@ describe('buildRemoteSnapshot', () => {
     ])
   })
 
+  it('ships a structured flow only for sessions being watched', () => {
+    const s = state({ agents: [agent({ id: 'a1' }), agent({ id: 'a3', name: 'other' })] })
+    const steps = Array.from({ length: 200 }, (_, i) => ({
+      id: `f${i}`, at: i, type: 'tool' as const, kind: 'run' as const, tool: 'Bash', label: `cmd ${i}`, status: 'ok' as const, callId: `c${i}`,
+    }))
+    const snap = buildRemoteSnapshot(s, undefined, id => (id === 'a1' ? steps : null))
+    const a1 = snap.sessions.find(x => x.id === 'a1')!
+    expect(a1.flow).toHaveLength(150)
+    expect(a1.flow![149].label).toBe('cmd 199')
+    expect(a1.flow![0]).not.toHaveProperty('callId')
+    expect(snap.sessions.find(x => x.id === 'a3')).not.toHaveProperty('flow')
+  })
+
   it('produces an empty but well-formed snapshot for a quiet fleet', () => {
     const snap = buildRemoteSnapshot(state({}))
     expect(snap.sessions).toEqual([])

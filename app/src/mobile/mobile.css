@@ -60,7 +60,10 @@ input, textarea { font: inherit; }
 @keyframes cpulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.78); } }
 @keyframes cfade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes cdraw { from { transform: translateX(-100%); } to { transform: none; } }
-@keyframes cattn { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 176, 32, 0); } 50% { box-shadow: 0 0 0 3px rgba(255, 176, 32, .14); } }
+/* attention glow: the ring is a static shadow on a pseudo-element and only its
+   OPACITY animates, which the compositor handles. Animating box-shadow itself
+   repainted every attention card every frame and made list scrolling jank. */
+@keyframes cattn { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .shell {
@@ -70,7 +73,7 @@ input, textarea { font: inherit; }
   height: 100dvh;
   display: flex; flex-direction: column; position: relative; overflow: hidden;
 }
-.body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 14px 15px calc(18px + env(safe-area-inset-bottom)); }
+.body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 14px 15px calc(18px + env(safe-area-inset-bottom)); }
 .body::-webkit-scrollbar { width: 0; height: 0; }
 
 /* ── headers ── */
@@ -106,7 +109,15 @@ input, textarea { font: inherit; }
 }
 button.card:active { background: var(--panel2); }
 button.card.sel { border-color: var(--accent-border); background: var(--panel2); }
-.card.attn { border-color: rgba(255, 176, 32, .3); animation: cattn 2.6s ease-in-out infinite; }
+.card.attn { border-color: rgba(255, 176, 32, .3); position: relative; }
+.card.attn::after, .mcard.warncard.live::after {
+  content: ''; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 0 0 3px rgba(255, 176, 32, .14); opacity: 0; will-change: opacity;
+  animation: cattn 2.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card.attn::after, .mcard.warncard.live::after, .statuspill .sdot { animation: none !important; }
+}
 .row { display: flex; align-items: center; gap: 11px; }
 .avatar {
   width: 40px; height: 40px; border-radius: 11px; display: flex; align-items: center; justify-content: center;
@@ -161,6 +172,14 @@ button.card.sel { border-color: var(--accent-border); background: var(--panel2);
 
 /* ── chat ── */
 .msgs { display: flex; flex-direction: column; gap: 20px; padding: 4px 1px; }
+/* "new messages" jump: sticks to the bottom of the scroller while the reader
+   is up in the history */
+.newpill {
+  position: sticky; bottom: 8px; align-self: center; z-index: 3; margin-top: -8px;
+  border: 1px solid var(--accent-border); background: var(--panel2); color: var(--accent);
+  border-radius: 99px; padding: 7px 14px; font-size: 12.5px; font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .45); animation: cfade .18s ease;
+}
 .bubble-user {
   align-self: flex-end; max-width: 86%; background: var(--panel3); border: 1px solid var(--line2);
   border-radius: 16px 16px 5px 16px; padding: 11px 14px; font-size: 14.5px; line-height: 1.5; color: var(--text);
@@ -189,7 +208,7 @@ button.card.sel { border-color: var(--accent-border); background: var(--panel2);
   padding: 12px; color: var(--text2); animation: cfade .25s ease;
 }
 .mcard.warncard { background: rgba(255,176,32,.06); border-color: rgba(255,176,32,.35); border-left: 3px solid var(--amber); }
-.mcard.warncard.live { animation: cattn 2.6s ease-in-out infinite; }
+.mcard.warncard.live { position: relative; }
 .mcardlabel {
   color: var(--accent); font-family: var(--font-mono); font-size: 10px;
   font-weight: 700; letter-spacing: .45px; margin-bottom: 9px;
@@ -416,3 +435,34 @@ button.card.slim:active { background: var(--panel2); }
 .pairwrap input:focus { border-color: rgba(245, 196, 81, .5); }
 .pairwrap .btn { width: 100%; flex: none; }
 .crit { display: flex; gap: 8px; font-size: 13px; color: var(--text2); margin-top: 5px; align-items: baseline; line-height: 1.5; }
+/* sub-row scroll offset (TerminalView) rides a GPU translate; the clip keeps
+   the shifted screen inside the rounded frame */
+.termfill .xterm { overflow: hidden; }
+.termfill .xterm-screen { will-change: transform; }
+
+/* ── session decision bar (blocked session, answer in place) ── */
+.decisionbar {
+  margin: 0 12px 8px; padding: 10px 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 8px;
+  background: rgba(255, 176, 32, .08); border: 1px solid rgba(255, 176, 32, .35);
+}
+.decisionbar .dtext { font-size: 13px; color: var(--amber); line-height: 1.4; overflow-wrap: anywhere; }
+.decisionbar .dbtns { display: flex; gap: 8px; }
+.decisionbar .dbtns .btn { flex: 1; }
+
+/* ── structured session flow ── */
+.fhead { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--mut); margin-bottom: 10px; }
+.fchip { margin-left: auto; border: 1px solid var(--red-soft); color: var(--red-soft); background: transparent; border-radius: 99px; padding: 3px 10px; font-size: 11.5px; font-weight: 700; }
+.fchip.on { background: var(--red-soft); color: #1a0505; }
+.fturn { margin-bottom: 12px; }
+.fprompt { display: flex; gap: 8px; align-items: baseline; padding: 9px 11px; border-radius: 11px; background: var(--accent-soft); font-size: 13.5px; line-height: 1.4; margin-bottom: 4px; overflow-wrap: anywhere; }
+.fyou { color: var(--accent); font-weight: 700; flex-shrink: 0; }
+.ftime { font-family: var(--font-mono); font-size: 10.5px; color: var(--dim); flex-shrink: 0; }
+.fsay { padding: 4px 4px 4px 26px; font-size: 13px; line-height: 1.5; color: var(--text2); overflow-wrap: anywhere; }
+.fstep { display: flex; align-items: center; gap: 8px; padding: 5px 4px; font-size: 12.5px; min-height: 30px; }
+.fstep .fdot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--line2); }
+.fstep .fdot.running { background: var(--amber); }
+.fstep .fdot.error { background: var(--red-soft); }
+.fstep .fglyph { width: 18px; flex-shrink: 0; font-family: var(--font-mono); font-size: 12px; }
+.fstep .flabel { flex: 1; min-width: 0; font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.fstep.err .flabel { color: var(--red-soft); }
+.fstep .ftool { font-size: 10.5px; color: var(--faint); flex-shrink: 0; }

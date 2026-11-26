@@ -154,15 +154,21 @@ export async function sendCommand(cmd: CommandInput): Promise<void> {
   await postJson('/api/command', { agent_id: '', text: '', ok: false, ...cmd }, { d: deviceToken() })
 }
 
-/** Request/response bridge: queue an rpc command (fs/git browsing), then
- *  poll for the desktop's answer. Rejects on timeout or an error payload. */
+/** Request/response bridge: queue an rpc command (fs/git browsing), then wait
+ *  for the desktop's answer. The pickup is a long-poll the server holds open
+ *  until the answer lands, so a folder tap costs one round trip, not a
+ *  polling interval. (An older desktop ignores `wait` and answers at once;
+ *  the short pause keeps that case from spinning.) */
 export async function rpc<T>(kind: string, payload: string, timeoutMs = 15_000): Promise<T> {
   const id = `rpc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   await sendCommand({ kind, id, text: payload })
   const deadline = Date.now() + timeoutMs
+  let first = true
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 350))
-    const res = await fetch(apiUrl('/api/rpc', { d: deviceToken(), id }))
+    if (!first) await new Promise(r => setTimeout(r, 150))
+    first = false
+    const wait = String(Math.max(0, Math.min(8_000, deadline - Date.now())))
+    const res = await fetch(apiUrl('/api/rpc', { d: deviceToken(), id, wait }))
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const body = (await res.json()) as { ready: boolean; json?: T & { error?: string } }
     if (body.ready && body.json) {

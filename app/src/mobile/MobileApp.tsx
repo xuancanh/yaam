@@ -2,10 +2,12 @@
 // cards with tinted avatars and pulsing status pills, inbox-style approvals,
 // free-flowing assistant chat, and a pill composer with file attachments
 // pulled from the working folder via the rpc bridge.
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Markdown } from '../components/Markdown'
 import { TerminalView } from './TerminalView'
 import { FilesBrowser, GitReview } from './FilesGit'
+import { reconcile } from './reconcile'
+import { SessionFlow } from './SessionFlow'
 import type { RemoteSnapshot } from '../domains/remote/snapshot'
 import {
   deviceToken, ensureUrlToken, fetchState, forgetPairing, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl,
@@ -194,34 +196,81 @@ function Composer({ placeholder, onSend, onAttach, children, lead }: {
   )
 }
 
+/** Follow new content only while the reader is at the bottom. Scrolling up
+ *  to read history must not get yanked down by a streaming reply; instead a
+ *  "new messages" pill offers the jump. Sending (`mine` grows) always
+ *  follows. The scroller is the enclosing `.body`. */
+function useStickToBottom(count: number, lastLen: number, mine: number) {
+  const endRef = useRef<HTMLDivElement>(null)
+  const atBottom = useRef(true)
+  const [unseen, setUnseen] = useState(false)
+  const scroller = () => endRef.current?.closest('.body') as HTMLElement | null
+  useEffect(() => {
+    const sc = scroller()
+    if (!sc) return
+    const on = () => {
+      const b = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 56
+      atBottom.current = b
+      if (b) setUnseen(false)
+    }
+    sc.addEventListener('scroll', on, { passive: true })
+    return () => sc.removeEventListener('scroll', on)
+  }, [])
+  const prevMine = useRef(mine)
+  useLayoutEffect(() => {
+    const sc = scroller()
+    if (!sc) return
+    if (mine > prevMine.current) atBottom.current = true
+    prevMine.current = mine
+    if (atBottom.current) sc.scrollTop = sc.scrollHeight
+    else setUnseen(true)
+  }, [count, lastLen, mine])
+  const jump = () => {
+    const sc = scroller()
+    if (sc) sc.scrollTo({ top: sc.scrollHeight, behavior: 'smooth' })
+    atBottom.current = true
+    setUnseen(false)
+  }
+  return { endRef, unseen, jump }
+}
+
+function NewBelow({ show, onJump }: { show: boolean; onJump: () => void }) {
+  if (!show) return null
+  return <button className="newpill" onClick={onJump}>↓ New messages</button>
+}
+
+type ChatMsg = { id: string; role: string; text: string }
+
+const MsgRow = memo(function MsgRow({ m, botWho, botAvatar }: { m: ChatMsg; botWho?: string; botAvatar?: React.ReactNode }) {
+  if (m.role === 'user') return <div className="bubble-user">{m.text}</div>
+  if (m.role === 'system' || m.role === 'tool') return <div className="sysline">· {m.text.slice(0, 200)} ·</div>
+  return (
+    <div className="botrow">
+      <div className="botavatar" title={botWho}>{botAvatar ?? '⚡'}</div>
+      <div className="botbody"><Markdown text={m.text} /></div>
+    </div>
+  )
+})
+
 /** Chat transcript in the assistant design: user bubbles right, bot content
  *  free-flowing beside a small avatar, system lines centered mono. */
 function Messages({ msgs, echoes, botWho, botAvatar }: {
-  msgs: { id: string; role: string; text: string }[]
+  msgs: ChatMsg[]
   echoes: string[]
   botWho?: string
   botAvatar?: React.ReactNode
 }) {
-  const endRef = useRef<HTMLDivElement>(null)
   const count = msgs.length + echoes.length
   const lastLen = msgs.length ? msgs[msgs.length - 1].text.length : 0
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [count, lastLen])
+  const { endRef, unseen, jump } = useStickToBottom(count, lastLen, echoes.length)
   return (
     <div className="msgs">
-      {msgs.filter(m => m.text).map(m => {
-        if (m.role === 'user') return <div key={m.id} className="bubble-user">{m.text}</div>
-        if (m.role === 'system' || m.role === 'tool') return <div key={m.id} className="sysline">· {m.text.slice(0, 200)} ·</div>
-        return (
-          <div key={m.id} className="botrow">
-            <div className="botavatar" title={botWho}>{botAvatar ?? '⚡'}</div>
-            <div className="botbody"><Markdown text={m.text} /></div>
-          </div>
-        )
-      })}
+      {msgs.filter(m => m.text).map(m => <MsgRow key={m.id} m={m} botWho={botWho} botAvatar={botAvatar} />)}
       {echoes.map((text, i) => (
         <div key={`echo-${i}`} className="bubble-user" style={{ opacity: 0.55 }}>{text}</div>
       ))}
       <div ref={endRef} />
+      <NewBelow show={unseen} onJump={jump} />
     </div>
   )
 }
@@ -394,6 +443,7 @@ function SessionKeyStrip({ sessionId }: { sessionId: string }) {
           <div className="keypop-veil" onClick={() => setOpen(false)} />
           <div className="keypop">
             <button onClick={() => key('esc')}>Esc</button>
+            <button className="wide" onClick={() => key('ctrl+c')}>Ctrl‑C</button>
             <button onClick={() => key('tab')}>Tab</button>
             <button className="wide" onClick={() => key('shift+tab')}>⇧Tab</button>
             <button onClick={() => key('left')}>←</button>
@@ -401,6 +451,9 @@ function SessionKeyStrip({ sessionId }: { sessionId: string }) {
             <button onClick={() => key('down')}>↓</button>
             <button onClick={() => key('right')}>→</button>
             <button className="wide" onClick={() => key('enter')}>Enter</button>
+            <button onClick={() => key('1')}>1</button>
+            <button onClick={() => key('2')}>2</button>
+            <button onClick={() => key('3')}>3</button>
           </div>
         </>
       )}
@@ -408,26 +461,53 @@ function SessionKeyStrip({ sessionId }: { sessionId: string }) {
   )
 }
 
+type SessionView = 'flow' | 'term' | 'files' | 'git'
+const VIEW_KEY = 'yaam-remote-session-view'
+const SESSION_VIEWS: [SessionView, string][] = [['term', 'TERMINAL'], ['flow', 'FLOW'], ['files', 'FILES'], ['git', 'CHANGES']]
+function savedView(): SessionView {
+  try {
+    const v = localStorage.getItem(VIEW_KEY)
+    return v === 'flow' || v === 'term' ? v : 'term'
+  } catch { return 'term' }
+}
+
+/** A session waiting on the user: its question plus one-tap answers, right
+ *  where you are reading (terminal or flow) instead of only as a banner. */
+function DecisionBar({ id, text }: { id: string; text: string }) {
+  return (
+    <div className="decisionbar">
+      <div className="dtext">⚠ {text}</div>
+      <div className="dbtns">
+        <button className="btn primary" onClick={() => void sendCommand({ kind: 'prompt_approve', id })}>Approve</button>
+        <button className="btn ghost" onClick={() => void sendCommand({ kind: 'prompt_deny', id })}>Deny</button>
+      </div>
+    </div>
+  )
+}
+
 function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
-  const [view, setView] = useState<'term' | 'files' | 'git'>('term')
+  const [view, setViewState] = useState<SessionView>(savedView)
+  const setView = (v: SessionView) => {
+    setViewState(v)
+    if (v === 'flow' || v === 'term') { try { localStorage.setItem(VIEW_KEY, v) } catch { /* private mode */ } }
+  }
   const s = snap.sessions.find(x => x.id === id)
   if (!s) return <div className="empty">This session is gone.</div>
   const live = s.status === 'running' || s.status === 'needs'
+  const reading = view === 'term' || view === 'flow'
   return (
     <>
       <div className="subtabs bar">
-        {(['term', 'files', 'git'] as const).map(v => (
-          <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
-            {v === 'term' ? 'TERMINAL' : v === 'files' ? 'FILES' : 'CHANGES'}
-          </button>
+        {SESSION_VIEWS.map(([v, label]) => (
+          <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{label}</button>
         ))}
-        {s.actionNeeded && view === 'term' && <span className="warn" style={{ margin: '0 0 0 auto', fontSize: 11, alignSelf: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>⚠ {s.actionNeeded}</span>}
       </div>
-      {view === 'term' ? (
+      {reading ? (
         <>
-          <div className="termarea">
-            <TerminalView sessionId={s.id} data={s.term} />
-          </div>
+          {view === 'term'
+            ? <div className="termarea"><TerminalView sessionId={s.id} data={s.term} /></div>
+            : <SessionFlow sessionId={s.id} flow={s.flow} />}
+          {live && s.actionNeeded && <DecisionBar id={s.id} text={s.actionNeeded} />}
           {live
             ? (
               <Composer placeholder="Message this agent…" onSend={text => { if (text) void sendCommand({ kind: 'session_input', id: s.id, text }) }} lead={<SessionKeyStrip sessionId={s.id} />} />
@@ -581,27 +661,28 @@ function MasterPayload({ msg }: { msg: MasterMsg }) {
   )
 }
 
+const MasterRow = memo(function MasterRow({ m }: { m: MasterMsg }) {
+  if (m.role === 'user') return <div className="bubble-user">{m.text}</div>
+  return (
+    <div className="botrow masterrow">
+      <div className="botavatar masteravatar" title="Master"><MobileMasterMark size={24} /></div>
+      <div className="masterbody"><MasterPayload msg={m} /></div>
+    </div>
+  )
+})
+
 function MasterMessages({ msgs, echoes }: { msgs: MasterMsg[]; echoes: string[] }) {
-  const endRef = useRef<HTMLDivElement>(null)
   const count = msgs.length + echoes.length
   const lastLen = msgs.length ? msgs[msgs.length - 1].text.length : 0
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [count, lastLen])
+  const { endRef, unseen, jump } = useStickToBottom(count, lastLen, echoes.length)
   return (
     <div className="msgs">
-      {msgs.map(m => (
-        m.role === 'user'
-          ? <div key={m.id} className="bubble-user">{m.text}</div>
-          : (
-            <div key={m.id} className="botrow masterrow">
-              <div className="botavatar masteravatar" title="Master"><MobileMasterMark size={24} /></div>
-              <div className="masterbody"><MasterPayload msg={m} /></div>
-            </div>
-            )
-      ))}
+      {msgs.map(m => <MasterRow key={m.id} m={m} />)}
       {echoes.map((text, i) => (
         <div key={`echo-${i}`} className="bubble-user" style={{ opacity: 0.55 }}>{text}</div>
       ))}
       <div ref={endRef} />
+      <NewBelow show={unseen} onJump={jump} />
     </div>
   )
 }
@@ -734,6 +815,72 @@ function StopButton({ onStop }: { onStop: () => void }) {
 
 const COL_ORDER = ['progress', 'review', 'backlog', 'done', 'failed']
 
+type Open = (d: Detail) => void
+const cardCls = (sel: boolean, attn = false) => `card${sel ? ' sel' : ''}${attn ? ' attn' : ''}`
+
+// Memoized cards: with reconciled snapshots an unchanged session/chat/task is
+// the same object push after push, so only the cards that changed render.
+const TaskCard = memo(function TaskCard({ t, sel, open }: { t: RemoteSnapshot['tasks'][number]; sel: boolean; open: Open }) {
+  return (
+    <button className={cardCls(sel, t.awaitingUser)} onClick={() => open({ kind: 'task', id: t.id })}>
+      <div className="row">
+        <span className="name">{t.title}</span>
+        <StatusPill status={t.col} />
+      </div>
+      {t.watcherNote && <div className="lastline">⌁ {t.watcherNote}</div>}
+      <div className="cardmeta">
+        {t.chat.length > 0 && <span>💬 {t.chat.length}</span>}
+        {t.criteria.length > 0 && <span>{t.criteria.length} criteria</span>}
+        {t.awaitingUser && <span style={{ color: 'var(--amber)' }}>waiting on you</span>}
+      </div>
+    </button>
+  )
+})
+
+const ChatCard = memo(function ChatCard({ c, sel, open }: { c: RemoteSnapshot['chats'][number]; sel: boolean; open: Open }) {
+  return (
+    <button className={cardCls(sel)} onClick={() => open({ kind: 'chat', id: c.id })}>
+      <div className="row">
+        <Avatar name={c.name} size={34} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="name">
+            {c.pinned && <span style={{ color: 'var(--accent)', fontSize: 10, marginRight: 5 }}>◆</span>}
+            {c.name}
+          </div>
+          {c.busy
+            ? <div className="meta" style={{ color: 'var(--accent)' }}>thinking…</div>
+            : c.msgs.length > 0 && <div className="meta">{c.msgs[c.msgs.length - 1].text.slice(0, 80)}</div>}
+        </div>
+        <span className="pill">{c.model}</span>
+      </div>
+    </button>
+  )
+})
+
+const SessionCard = memo(function SessionCard({ s, sel, open }: { s: RemoteSnapshot['sessions'][number]; sel: boolean; open: Open }) {
+  return (
+    <button className={cardCls(sel, !!s.actionNeeded || s.attention)} onClick={() => open({ kind: 'session', id: s.id })}>
+      <div className="row">
+        <Avatar name={s.name} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="name">{s.name}</div>
+          <div className="meta">{s.repo}{s.task ? ` · ${s.task}` : ''}</div>
+        </div>
+        <StatusPill status={s.status} />
+      </div>
+      {(s.summary || s.actionNeeded) && (
+        <div className="lastline" style={s.actionNeeded ? { color: 'var(--amber)' } : undefined}>
+          {s.actionNeeded ? `⚠ ${s.actionNeeded}` : s.summary}
+        </div>
+      )}
+      <div className="cardmeta">
+        <span>${s.cost.toFixed(2)}</span>
+        <span style={{ marginLeft: 'auto', color: 'var(--faint)' }}>{s.kind}</span>
+      </div>
+    </button>
+  )
+})
+
 function Lists({ tab, snap, open, selected, onNewChat }: {
   tab: Tab
   snap: RemoteSnapshot
@@ -742,7 +889,6 @@ function Lists({ tab, snap, open, selected, onNewChat }: {
   /** start a fresh conversation with a durable agent */
   onNewChat?: (durableAgentId: string) => void
 }) {
-  const cardCls = (id: string, attn = false) => `card${selected === id ? ' sel' : ''}${attn ? ' attn' : ''}`
   // design pickups: status filter chips on Agents, live search on Chat
   const [filter, setFilter] = useState<'all' | 'running' | 'needs' | 'idle'>('all')
   const [query, setQuery] = useState('')
@@ -751,42 +897,13 @@ function Lists({ tab, snap, open, selected, onNewChat }: {
     return (
       <div className="body">
         {tasks.length === 0 && <div className="empty">No tasks on the board.</div>}
-        {tasks.map(t => (
-          <button key={t.id} className={cardCls(t.id, t.awaitingUser)} onClick={() => open({ kind: 'task', id: t.id })}>
-            <div className="row">
-              <span className="name">{t.title}</span>
-              <StatusPill status={t.col} />
-            </div>
-            {t.watcherNote && <div className="lastline">⌁ {t.watcherNote}</div>}
-            <div className="cardmeta">
-              {t.chat.length > 0 && <span>💬 {t.chat.length}</span>}
-              {t.criteria.length > 0 && <span>{t.criteria.length} criteria</span>}
-              {t.awaitingUser && <span style={{ color: 'var(--amber)' }}>waiting on you</span>}
-            </div>
-          </button>
-        ))}
+        {tasks.map(t => <TaskCard key={t.id} t={t} sel={selected === t.id} open={open} />)}
       </div>
     )
   }
   if (tab === 'chats') {
     const q = query.trim().toLowerCase()
-    const chatRow = (c: RemoteSnapshot['chats'][number]) => (
-      <button key={c.id} className={cardCls(c.id)} onClick={() => open({ kind: 'chat', id: c.id })}>
-        <div className="row">
-          <Avatar name={c.name} size={34} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="name">
-              {c.pinned && <span style={{ color: 'var(--accent)', fontSize: 10, marginRight: 5 }}>◆</span>}
-              {c.name}
-            </div>
-            {c.busy
-              ? <div className="meta" style={{ color: 'var(--accent)' }}>thinking…</div>
-              : c.msgs.length > 0 && <div className="meta">{c.msgs[c.msgs.length - 1].text.slice(0, 80)}</div>}
-          </div>
-          <span className="pill">{c.model}</span>
-        </div>
-      </button>
-    )
+    const chatRow = (c: RemoteSnapshot['chats'][number]) => <ChatCard key={c.id} c={c} sel={selected === c.id} open={open} />
     if (q) {
       const chats = snap.chats.filter(c => (c.name + ' ' + (c.msgs[c.msgs.length - 1]?.text ?? '')).toLowerCase().includes(q))
       return (
@@ -860,35 +977,44 @@ function Lists({ tab, snap, open, selected, onNewChat }: {
             <div className="section" style={{ marginTop: 14, ...(g.id === 'needs' ? { color: 'var(--amber)' } : {}) }}>
               {g.label} <span style={{ color: 'var(--faint)' }}>{g.items.length}</span>
             </div>
-            {g.items.map(s => (
-              <button key={s.id} className={cardCls(s.id, !!s.actionNeeded || s.attention)} onClick={() => open({ kind: 'session', id: s.id })}>
-                <div className="row">
-                  <Avatar name={s.name} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="name">{s.name}</div>
-                    <div className="meta">{s.repo}{s.task ? ` · ${s.task}` : ''}</div>
-                  </div>
-                  <StatusPill status={s.status} />
-                </div>
-                {(s.summary || s.actionNeeded) && (
-                  <div className="lastline" style={s.actionNeeded ? { color: 'var(--amber)' } : undefined}>
-                    {s.actionNeeded ? `⚠ ${s.actionNeeded}` : s.summary}
-                  </div>
-                )}
-                <div className="cardmeta">
-                  <span>${s.cost.toFixed(2)}</span>
-                  <span style={{ marginLeft: 'auto', color: 'var(--faint)' }}>{s.kind}</span>
-                </div>
-              </button>
-            ))}
+            {g.items.map(s => <SessionCard key={s.id} s={s} sel={selected === s.id} open={open} />)}
           </div>
         ))}
       </div>
     )
   }
+  // one inbox for everything waiting on the user: blocked sessions (answer
+  // in place), tool approvals, and tasks whose watcher asked a question
+  const blocked = snap.sessions.filter(x => x.actionNeeded || x.status === 'needs')
+  const waitingTasks = snap.tasks.filter(t => t.awaitingUser)
   return (
     <div className="body">
-      {snap.approvals.length === 0 && <div className="empty">All clear — nothing waiting on you. 🎉</div>}
+      {inboxCount(snap) === 0 && <div className="empty">All clear. Nothing is waiting on you.</div>}
+      {blocked.map(x => (
+        <div key={`s:${x.id}`} className="inboxcard">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="tag">SESSION</span>
+            <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--mut2)' }}>{x.name} · {x.repo}</span>
+          </div>
+          <div className="ititle">{x.actionNeeded || 'Waiting for input'}</div>
+          {x.summary && <div className="icmd">{x.summary}</div>}
+          <div className="btnrow">
+            <button className="btn primary" onClick={() => void sendCommand({ kind: 'prompt_approve', id: x.id })}>Approve</button>
+            <button className="btn ghost" onClick={() => void sendCommand({ kind: 'prompt_deny', id: x.id })}>Deny</button>
+            <button className="btn ghost" onClick={() => open({ kind: 'session', id: x.id })}>Open</button>
+          </div>
+        </div>
+      ))}
+      {waitingTasks.map(t => (
+        <button key={`t:${t.id}`} className="inboxcard" style={{ width: '100%', textAlign: 'left', color: 'inherit' }} onClick={() => open({ kind: 'task', id: t.id })}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="tag">TASK</span>
+            <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--mut2)' }}>watcher asked</span>
+          </div>
+          <div className="ititle">{t.title}</div>
+          {t.watcherNote && <div className="icmd">{t.watcherNote}</div>}
+        </button>
+      ))}
       {snap.approvals.map(a => (
         <div key={`${a.kind}:${a.id}`} className="inboxcard">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -909,6 +1035,13 @@ function Lists({ tab, snap, open, selected, onNewChat }: {
 
 // ---------------------------------------------------------------- app
 
+/** Everything waiting on the user, for the Inbox badge and header. */
+function inboxCount(s: RemoteSnapshot): number {
+  return s.approvals.length
+    + s.sessions.filter(x => x.actionNeeded || x.status === 'needs').length
+    + s.tasks.filter(t => t.awaitingUser).length
+}
+
 const TABS: { id: Tab; label: string; glyph: string }[] = [
   { id: 'master', label: 'Master', glyph: '✦' },
   { id: 'tasks', label: 'Tasks', glyph: '▦' },
@@ -922,7 +1055,7 @@ const HEAD_SUB: Record<Tab, (s: RemoteSnapshot) => string> = {
   tasks: s => `${s.tasks.length} on the board`,
   chats: s => `${s.chats.length} conversations`,
   sessions: s => `${s.sessions.length} sessions`,
-  approvals: s => (s.approvals.length ? `${s.approvals.length} waiting on you` : 'all clear'),
+  approvals: s => (inboxCount(s) ? `${inboxCount(s)} waiting on you` : 'all clear'),
 }
 
 export function MobileApp() {
@@ -952,10 +1085,13 @@ export function MobileApp() {
     setTab(t)
     setDetail(null)
   }
-  const openDetail = (d: Detail) => {
-    if (d) history.pushState({ tab, d }, '')
+  // stable identity so memoized list cards don't re-render on every push
+  const tabRef = useRef(tab)
+  tabRef.current = tab
+  const openDetail = useCallback((d: Detail) => {
+    if (d) history.pushState({ tab: tabRef.current, d }, '')
     setDetail(d)
-  }
+  }, [])
   const closeDetail = () => history.back()
   // workspace switched: the open detail's entity lives in the OLD workspace —
   // drop back to the list without touching the history stack direction
@@ -1014,7 +1150,7 @@ export function MobileApp() {
     if (pairing === 'paired') {
       const tick = () => {
         fetchState()
-          .then(s => { setSnap(s); setOnline(true) })
+          .then(s => { apply(s); setOnline(true) })
           .catch(e => {
             setOnline(false)
             if (!String(e).includes('403')) return
@@ -1030,6 +1166,10 @@ export function MobileApp() {
       }
       let es: EventSource | null = null
       let iv: ReturnType<typeof setInterval> | null = null
+      let lastRaw = ''
+      // structural sharing: unchanged sessions/chats/messages keep their
+      // object identity, so memoized rows skip re-rendering on each push
+      const apply = (next: RemoteSnapshot) => setSnap(prev => (prev ? reconcile(prev, next) : next))
       const startPolling = () => {
         if (iv) return
         tick()
@@ -1038,7 +1178,10 @@ export function MobileApp() {
       try {
         es = new EventSource(streamUrl())
         es.onmessage = e => {
-          try { setSnap(JSON.parse(String(e.data)) as RemoteSnapshot); setOnline(true) } catch { /* partial frame */ }
+          const raw = String(e.data)
+          setOnline(true)
+          if (raw === lastRaw) return // keep-alive resend of the same state
+          try { apply(JSON.parse(raw) as RemoteSnapshot); lastRaw = raw } catch { /* partial frame */ }
         }
         es.onerror = () => { es?.close(); es = null; startPolling() }
         tick()
@@ -1080,7 +1223,7 @@ export function MobileApp() {
     <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => pickTab(t.id)}>
       <span className="glyph">
         {t.glyph}
-        {t.id === 'approvals' && (snap?.approvals.length ?? 0) > 0 && <span className="badge">{snap!.approvals.length}</span>}
+        {t.id === 'approvals' && snap && inboxCount(snap) > 0 && <span className="badge">{inboxCount(snap)}</span>}
       </span>
       <span className="tlabel">{t.label}</span>
     </button>

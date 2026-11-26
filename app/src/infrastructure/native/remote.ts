@@ -74,6 +74,13 @@ export async function remoteTakeCommands(): Promise<RemoteCommand[]> {
   return await invoke<RemoteCommand[]>('remote_take_commands')
 }
 
+/** Long-poll drain: resolves as soon as a command is queued (or after
+ *  `timeoutMs` with an empty list), so phone taps apply without timer lag. */
+export async function remoteWaitCommands(timeoutMs: number): Promise<RemoteCommand[]> {
+  if (!isTauri) return []
+  return await invoke<RemoteCommand[]>('remote_wait_commands', { timeoutMs })
+}
+
 /** Pairing requests awaiting approval on this desktop. */
 export async function remotePendingPairs(): Promise<RemotePairRequest[]> {
   if (!isTauri) return []

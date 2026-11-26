@@ -75,7 +75,7 @@ const MAX_RESPONSE_TOTAL_BYTES: usize = 16 * 1024 * 1024;
 fn valid_command(cmd: &RemoteCommand) -> bool {
     const KINDS: &[&str] = &[
         "master_send", "chat_send", "chat_new", "chat_reply", "chat_rate", "task_chat", "task_start",
-        "session_input", "session_key", "session_focus", "session_blur",
+        "session_input", "session_key", "session_focus", "session_blur", "session_watch", "session_unwatch",
         "prompt_answer", "prompt_approve", "prompt_deny", "session_stop",
         "session_resume", "approve_master", "approve_chat", "workspace_switch", "rpc_fs_list",
         "rpc_fs_read", "rpc_fs_b64", "rpc_git_status", "rpc_git_diff",
@@ -101,6 +101,11 @@ pub struct RemoteShared {
     snap_tx: tokio::sync::watch::Sender<u64>,
     /// rpc answers keyed by request id (fs/git browsing) — small and capped
     responses: Mutex<HashMap<String, String>>,
+    /// bumped on every rpc answer — long-polling pickups wake on it
+    resp_tx: tokio::sync::watch::Sender<u64>,
+    /// signalled when a command is queued, so the desktop's long-poll drain
+    /// applies it at once instead of on its next timer tick
+    cmd_notify: tokio::sync::Notify,
     /// ms timestamp of the last authenticated device request — lets the
     /// desktop skip building snapshots while no phone is actually connected
     last_seen: std::sync::atomic::AtomicU64,
@@ -117,6 +122,8 @@ impl Default for RemoteShared {
             unclaimed: Mutex::new(HashMap::new()),
             snap_tx: tokio::sync::watch::channel(0).0,
             responses: Mutex::new(HashMap::new()),
+            resp_tx: tokio::sync::watch::channel(0).0,
+            cmd_notify: tokio::sync::Notify::new(),
             last_seen: std::sync::atomic::AtomicU64::new(0),
         }
     }
@@ -226,6 +233,10 @@ struct AuthQuery {
     /// session id for the terminal byte stream
     #[serde(default)]
     id: String,
+    /// rpc pickup: hold the request open up to this many ms for the answer
+    /// instead of making the phone poll
+    #[serde(default)]
+    wait: u64,
 }
 
 fn token_eq(a: &str, b: &str) -> bool {
@@ -347,9 +358,16 @@ async fn rpc_result(State(s): Shared, Query(q): Query<AuthQuery>) -> (StatusCode
     if !check_device(&s, &q) {
         return (StatusCode::FORBIDDEN, "{\"error\":\"not paired\"}".into());
     }
-    match s.responses.lock().unwrap().remove(&q.id) {
-        Some(json) => (StatusCode::OK, format!("{{\"ready\":true,\"json\":{json}}}")),
-        None => (StatusCode::OK, "{\"ready\":false}".into()),
+    // subscribe BEFORE the first look so an answer landing in between still wakes us
+    let mut rx = s.resp_tx.subscribe();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(q.wait.min(10_000));
+    loop {
+        if let Some(json) = s.responses.lock().unwrap().remove(&q.id) {
+            return (StatusCode::OK, format!("{{\"ready\":true,\"json\":{json}}}"));
+        }
+        if tokio::time::timeout_at(deadline, rx.changed()).await.map_or(true, |r| r.is_err()) {
+            return (StatusCode::OK, "{\"ready\":false}".into());
+        }
     }
 }
 
@@ -365,6 +383,8 @@ async fn command(State(s): Shared, Query(q): Query<AuthQuery>, Json(cmd): Json<R
         return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({ "error": "command queue is full" })));
     }
     commands.push(cmd);
+    drop(commands);
+    s.cmd_notify.notify_one();
     (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
 }
 
@@ -548,7 +568,15 @@ pub fn remote_stop(state: tauri::State<'_, RemoteManager>) {
 
 #[tauri::command]
 pub fn remote_publish(state: tauri::State<'_, RemoteManager>, json: String) {
-    *state.shared.snapshot.lock().unwrap() = json;
+    {
+        let mut snap = state.shared.snapshot.lock().unwrap();
+        // most store changes don't touch what the phone sees — an identical
+        // snapshot must not wake every stream and re-render every phone
+        if *snap == json {
+            return;
+        }
+        *snap = json;
+    }
     state.shared.snap_tx.send_modify(|v| *v = v.wrapping_add(1));
 }
 
@@ -564,6 +592,20 @@ pub fn remote_active(state: tauri::State<'_, RemoteManager>) -> bool {
 #[tauri::command]
 pub fn remote_take_commands(state: tauri::State<'_, RemoteManager>) -> Vec<RemoteCommand> {
     std::mem::take(&mut *state.shared.commands.lock().unwrap())
+}
+
+/// Long-poll drain: returns queued commands at once, or waits up to
+/// `timeout_ms` for the next one to arrive (phone taps apply immediately).
+#[tauri::command]
+pub async fn remote_wait_commands(state: tauri::State<'_, RemoteManager>, timeout_ms: u64) -> Result<Vec<RemoteCommand>, String> {
+    let shared = state.shared.clone();
+    let take = |s: &RemoteShared| std::mem::take(&mut *s.commands.lock().unwrap());
+    let now = take(&shared);
+    if !now.is_empty() {
+        return Ok(now);
+    }
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms.min(5_000)), shared.cmd_notify.notified()).await;
+    Ok(take(&shared))
 }
 
 #[tauri::command]
@@ -604,6 +646,8 @@ pub fn remote_respond(state: tauri::State<'_, RemoteManager>, id: String, json: 
         map.clear(); // stale pile-up — rpc answers are ephemeral by design
     }
     map.insert(id, json);
+    drop(map);
+    state.shared.resp_tx.send_modify(|v| *v = v.wrapping_add(1));
 }
 
 /// Hydrate the paired-device set (frontend persists it in settings); anything
@@ -629,7 +673,7 @@ mod tests {
     }
 
     fn q(t: &str, d: &str, device: &str) -> AuthQuery {
-        AuthQuery { t: t.into(), d: d.into(), device: device.into(), id: String::new() }
+        AuthQuery { t: t.into(), d: d.into(), device: device.into(), id: String::new(), wait: 0 }
     }
 
     #[test]
@@ -884,6 +928,35 @@ mod tests {
         qagain.id = "req1".into();
         let (_, body) = rpc_result(State(s.clone()), Query(qagain)).await;
         assert!(body.contains("\"ready\":false"), "consumed on first read");
+    }
+
+    #[tokio::test]
+    async fn rpc_pickup_long_polls_until_the_answer_lands() {
+        let s = shared_with("base");
+        s.devices.lock().unwrap().insert(
+            "dev1".into(),
+            PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
+        );
+        let mut qw = q("base", "devtok", "");
+        qw.id = "req2".into();
+        qw.wait = 3_000;
+        let s2 = s.clone();
+        let answer = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            s2.responses.lock().unwrap().insert("req2".into(), "{\"ok\":1}".into());
+            s2.resp_tx.send_modify(|v| *v += 1);
+        });
+        let started = std::time::Instant::now();
+        let (_, body) = rpc_result(State(s.clone()), Query(qw)).await;
+        answer.await.unwrap();
+        assert!(body.contains("\"ready\":true"), "{body}");
+        assert!(started.elapsed() < std::time::Duration::from_millis(1_500));
+        // nothing pending: a short wait times out cleanly
+        let mut qt = q("base", "devtok", "");
+        qt.id = "none".into();
+        qt.wait = 30;
+        let (_, body) = rpc_result(State(s.clone()), Query(qt)).await;
+        assert!(body.contains("\"ready\":false"));
     }
 
     #[test]
