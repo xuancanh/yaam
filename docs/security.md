@@ -330,13 +330,17 @@ is deliberately layered:
 - **Revocable on both ends.** Paired devices persist in settings and render
   as revocable chips; the frontend re-hydrates the server's device set on
   every start and settings change, so a revoke locks the device out
-  immediately. The phone stores its token in localStorage.
+  immediately, including streams it already has open: every SSE stream
+  re-checks its credentials whenever they change (revoke, token rotation,
+  remote off) and ends. The phone stores its token in localStorage.
 - **Command queue, not execution.** The server executes nothing and holds no
   credentials — it stores the frontend-published snapshot and a queue of
   `{ kind, id, text, ok }` commands. The frontend applies each through the
   same gated conductor actions as the desktop buttons (chat send, task
   chat/start, session input/stop/resume, approvals), so a paired phone's
-  authority is exactly the desktop UI's.
+  authority is exactly the desktop UI's. Routes with a body check the device
+  before reading it (no unauthenticated 12 MB buffering), and the terminal
+  byte stream is limited to sessions in the published snapshot.
 
 - **Two bounded writes.** Phone photos (`POST /api/upload`) are type-sniffed
   (JPEG/PNG/WebP/GIF only), written under random server-chosen names in

@@ -37,12 +37,15 @@ export function remoteCommandAllowed(s: AppState, command: RemoteCommand): boole
     case 'task_chat':
     case 'task_start':
       return !!task
+    // releasing a view only drops a desktop-side listener or refits a pane:
+    // always allowed, so an archived or deleted session's leftovers go away
+    case 'session_unwatch':
+    case 'session_blur':
+      return true
     case 'session_input':
     case 'session_key':
     case 'session_focus':
-    case 'session_blur':
     case 'session_watch':
-    case 'session_unwatch':
     case 'session_stop':
     case 'session_resume':
     case 'prompt_answer':

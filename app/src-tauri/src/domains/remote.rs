@@ -20,7 +20,7 @@ use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{header, HeaderValue, Request, StatusCode};
 use axum::middleware::{self, Next};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::Html;
 use axum::routing::{get, post};
@@ -48,6 +48,10 @@ pub struct RemoteCommand {
     pub text: String,
     #[serde(default)]
     pub ok: bool,
+    /// client-generated id for a message the phone may resend after a lost
+    /// response: a repeat of a recent one is acknowledged, not queued twice
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cid: String,
 }
 
 /// A device that completed the pairing handshake. Persisted by the desktop
@@ -92,6 +96,7 @@ fn valid_command(cmd: &RemoteCommand) -> bool {
         && cmd.id.len() <= MAX_COMMAND_ID_BYTES
         && cmd.agent_id.len() <= MAX_COMMAND_ID_BYTES
         && cmd.text.len() <= MAX_COMMAND_TEXT_BYTES
+        && cmd.cid.len() <= 64
 }
 
 pub struct RemoteShared {
@@ -118,7 +123,10 @@ pub struct RemoteShared {
     last_seen: std::sync::atomic::AtomicU64,
     /// ms timestamp of the last "app is on screen" heartbeat from a phone;
     /// pushes are suppressed while someone is looking at the companion
-    visible_at: std::sync::atomic::AtomicU64,
+    /// device id -> ms of its last "on screen" heartbeat. Per device: with one
+    /// global value, a second phone hiding re-enabled alerts while the first
+    /// was still open in front of the user.
+    visible_at: Mutex<HashMap<String, u64>>,
     /// push subscriptions + VAPID key, loaded from disk on first use
     push: Mutex<Option<super::remote_push::PushFile>>,
     /// bumped whenever credentials change (stop, token rotation, device list).
@@ -126,7 +134,11 @@ pub struct RemoteShared {
     /// re-checks on this signal and ends once its device is no longer valid,
     /// so a revoked phone or a stopped server cuts live streams too.
     auth_tx: tokio::sync::watch::Sender<u64>,
+    /// client ids of recently queued commands (dedupe of resends)
+    recent_cids: Mutex<std::collections::VecDeque<String>>,
 }
+
+const RECENT_CIDS: usize = 256;
 
 impl Default for RemoteShared {
     fn default() -> Self {
@@ -142,9 +154,10 @@ impl Default for RemoteShared {
             resp_tx: tokio::sync::watch::channel(0).0,
             cmd_notify: tokio::sync::Notify::new(),
             last_seen: std::sync::atomic::AtomicU64::new(0),
-            visible_at: std::sync::atomic::AtomicU64::new(0),
+            visible_at: Mutex::new(HashMap::new()),
             push: Mutex::new(None),
             auth_tx: tokio::sync::watch::channel(0).0,
+            recent_cids: Mutex::new(std::collections::VecDeque::new()),
         }
     }
 }
@@ -425,9 +438,20 @@ async fn command(State(s): Shared, Query(q): Query<AuthQuery>, Json(cmd): Json<R
     if !valid_command(&cmd) {
         return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "invalid or oversized command" })));
     }
+    if !cmd.cid.is_empty() && s.recent_cids.lock().unwrap().contains(&cmd.cid) {
+        // already queued once: the phone lost our answer and resent it
+        return (StatusCode::OK, Json(serde_json::json!({ "ok": true, "duplicate": true })));
+    }
     let mut commands = s.commands.lock().unwrap();
     if commands.len() >= MAX_COMMANDS {
         return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({ "error": "command queue is full" })));
+    }
+    if !cmd.cid.is_empty() {
+        let mut recent = s.recent_cids.lock().unwrap();
+        recent.push_back(cmd.cid.clone());
+        while recent.len() > RECENT_CIDS {
+            recent.pop_front();
+        }
     }
     commands.push(cmd);
     drop(commands);
@@ -464,6 +488,12 @@ async fn stream_term(
     if !check_device(&s, &q) || q.id.is_empty() {
         return Err(StatusCode::FORBIDDEN);
     }
+    // only a session the phone is shown (the active workspace's, as published
+    // in the snapshot), the same scope its commands are held to: any session
+    // id used to stream, including other workspaces' and archived ones
+    if !snapshot_lists_session(&s.snapshot.lock().unwrap(), &q.id) {
+        return Err(StatusCode::NOT_FOUND);
+    }
     let Some((backlog, rx)) = crate::domains::session::tap_subscribe(&q.id) else {
         return Err(StatusCode::NOT_FOUND);
     };
@@ -477,6 +507,19 @@ async fn stream_term(
         .map(|bytes| Ok(Event::default().data(B64.encode(bytes))));
     let stream = futures_util::StreamExt::take_until(first.chain(live), revoked(s.clone(), q.t.clone(), q.d.clone()));
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+fn snapshot_lists_session(snapshot: &str, id: &str) -> bool {
+    #[derive(Deserialize)]
+    struct Ids {
+        #[serde(default)]
+        sessions: Vec<Id>,
+    }
+    #[derive(Deserialize)]
+    struct Id {
+        id: String,
+    }
+    serde_json::from_str::<Ids>(snapshot).is_ok_and(|s| s.sessions.iter().any(|x| x.id == id))
 }
 
 fn uploads_dir() -> std::path::PathBuf {
@@ -668,14 +711,33 @@ async fn push_unsubscribe(State(s): Shared, Query(q): Query<AuthQuery>) -> (Stat
 }
 
 async fn presence(State(s): Shared, Query(q): Query<AuthQuery>) -> StatusCode {
-    if !check_device(&s, &q) {
+    let Some(dev) = device_id(&s, &q) else {
         return StatusCode::FORBIDDEN;
+    };
+    let mut seen = s.visible_at.lock().unwrap();
+    if q.v == 1 {
+        seen.insert(dev, now_ms());
+    } else {
+        seen.remove(&dev);
     }
-    s.visible_at.store(if q.v == 1 { now_ms() } else { 0 }, std::sync::atomic::Ordering::Relaxed);
     StatusCode::NO_CONTENT
 }
 
+/// Auth before the body is read. The handlers' own checks ran only after the
+/// Json/Bytes extractors had buffered the whole body, so anyone on the network
+/// could hold many 12 MB uploads in desktop memory without a token.
+async fn require_device(State(s): Shared, request: Request<axum::body::Body>, next: Next) -> Response {
+    let ok = Query::<AuthQuery>::try_from_uri(request.uri())
+        .map(|Query(q)| check_device(&s, &q))
+        .unwrap_or(false);
+    if !ok {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(request).await
+}
+
 fn router(shared: Arc<RemoteShared>) -> Router {
+    let gate = || middleware::from_fn_with_state(shared.clone(), require_device);
     Router::new()
         .route("/", get(app_page))
         .route("/api/ping", get(ping))
@@ -684,12 +746,12 @@ fn router(shared: Arc<RemoteShared>) -> Router {
         .route("/api/state", get(state))
         .route("/api/stream", get(stream_state))
         .route("/api/term", get(stream_term))
-        .route("/api/command", post(command))
+        .route("/api/command", post(command).route_layer(gate()))
         .route("/api/rpc", get(rpc_result))
-        .route("/api/upload", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)))
+        .route("/api/upload", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)).route_layer(gate()))
         .route("/api/push/key", get(push_key))
-        .route("/api/push/subscribe", post(push_subscribe))
-        .route("/api/push/unsubscribe", post(push_unsubscribe))
+        .route("/api/push/subscribe", post(push_subscribe).route_layer(gate()))
+        .route("/api/push/unsubscribe", post(push_unsubscribe).route_layer(gate()))
         .route("/api/presence", get(presence))
         .route("/sw.js", get(service_worker))
         .route("/manifest.webmanifest", get(manifest))
@@ -741,7 +803,9 @@ pub struct RemoteInfo {
     pub warning: Option<String>,
 }
 
-#[tauri::command]
+// Off the main thread: a token change restarts the server and the bind can
+// retry for up to 2s while the old listener lets go of the port.
+#[tauri::command(async)]
 pub fn remote_start(state: tauri::State<'_, RemoteManager>, port: Option<u16>, token: Option<String>) -> Result<RemoteInfo, String> {
     let port = port.unwrap_or(8712);
     let mut stop_slot = state.stop.lock().unwrap();
@@ -898,7 +962,8 @@ pub fn remote_deny_pair(state: tauri::State<'_, RemoteManager>, device_id: Strin
 
 /// Desktop answers an rpc request (fs/git browsing computed via its native
 /// adapters); the phone picks it up from /api/rpc. `json` must be valid JSON.
-#[tauri::command]
+// rpc answers (file reads, diffs) can be several MB
+#[tauri::command(async)]
 pub fn remote_respond(state: tauri::State<'_, RemoteManager>, id: String, json: String) {
     let mut map = state.shared.responses.lock().unwrap();
     let json = if json.len() > MAX_RESPONSE_TOTAL_BYTES {
@@ -938,9 +1003,10 @@ pub fn remote_set_devices(state: tauri::State<'_, RemoteManager>, devices: Vec<P
 
 /// How many paired devices currently take push alerts. The desktop only runs
 /// its alert diff while this is non-zero.
-#[tauri::command]
-pub fn remote_push_count(state: tauri::State<'_, RemoteManager>) -> usize {
-    with_push(&state.shared, |f| (f.subs.len(), false))
+// reads the push store from disk on first use
+#[tauri::command(async)]
+pub fn remote_push_count(state: tauri::State<'_, RemoteManager>) -> Result<usize, String> {
+    Ok(with_push(&state.shared, |f| (f.subs.len(), false)))
 }
 
 #[derive(Deserialize)]
@@ -964,14 +1030,18 @@ fn clip(s: &str, max: usize) -> String {
     out
 }
 
+fn any_phone_on_screen(s: &RemoteShared) -> bool {
+    let now = now_ms();
+    s.visible_at.lock().unwrap().values().any(|&at| now.saturating_sub(at) < PRESENCE_MS)
+}
+
 /// Send one alert to every subscribed device that wants this kind. Skipped
 /// entirely while a phone has the companion on screen. Returns how many
 /// devices it reached; dead subscriptions are dropped as they are found.
 #[tauri::command]
 pub async fn remote_push(state: tauri::State<'_, RemoteManager>, req: PushRequest) -> Result<usize, String> {
     let shared = state.shared.clone();
-    let seen = shared.visible_at.load(std::sync::atomic::Ordering::Relaxed);
-    if seen != 0 && now_ms().saturating_sub(seen) < PRESENCE_MS {
+    if any_phone_on_screen(&shared) {
         return Ok(0);
     }
     let (pkcs8, targets) = with_push(&shared, |f| {
@@ -1090,6 +1160,7 @@ mod tests {
                 agent_id: "chat-1".into(),
                 text: "Yes".into(),
                 ok: true,
+                cid: String::new(),
             }));
         }
     }
@@ -1162,7 +1233,7 @@ mod tests {
         let (code, _) = command(
             State(s.clone()),
             Query(q("base", "guess", "")),
-            Json(RemoteCommand { kind: "chat_send".into(), id: "c1".into(), agent_id: String::new(), text: "hi".into(), ok: false }),
+            Json(RemoteCommand { kind: "chat_send".into(), id: "c1".into(), agent_id: String::new(), text: "hi".into(), ok: false, cid: String::new() }),
         )
         .await;
         assert_eq!(code, StatusCode::FORBIDDEN);
@@ -1178,7 +1249,7 @@ mod tests {
         );
         let auth = || Query(q("base", "devtok", ""));
         let make = |kind: &str, text: String| RemoteCommand {
-            kind: kind.into(), id: "master".into(), agent_id: String::new(), text, ok: false,
+            kind: kind.into(), id: "master".into(), agent_id: String::new(), text, ok: false, cid: String::new(),
         };
 
         let (code, _) = command(State(s.clone()), auth(), Json(make("unknown", String::new()))).await;
@@ -1413,14 +1484,20 @@ mod tests {
             "dev1".into(),
             PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
         );
+        s.devices.lock().unwrap().insert(
+            "dev2".into(),
+            PairedDevice { id: "dev2".into(), name: "tablet".into(), token: "devtok2".into(), at: 1 },
+        );
         let get = |uri: &str| Request::builder().uri(uri).body(axum::body::Body::empty()).unwrap();
-        let ord = std::sync::atomic::Ordering::Relaxed;
         assert_eq!(router(s.clone()).oneshot(get("/api/presence?t=base&v=1")).await.unwrap().status(), StatusCode::FORBIDDEN);
-        assert_eq!(s.visible_at.load(ord), 0);
+        assert!(!any_phone_on_screen(&s));
         router(s.clone()).oneshot(get("/api/presence?t=base&d=devtok&v=1")).await.unwrap();
-        assert!(s.visible_at.load(ord) > 0);
+        assert!(any_phone_on_screen(&s));
+        // another device going to the background must not clear this one
+        router(s.clone()).oneshot(get("/api/presence?t=base&d=devtok2&v=0")).await.unwrap();
+        assert!(any_phone_on_screen(&s));
         router(s.clone()).oneshot(get("/api/presence?t=base&d=devtok&v=0")).await.unwrap();
-        assert_eq!(s.visible_at.load(ord), 0);
+        assert!(!any_phone_on_screen(&s));
     }
 
     #[tokio::test]
@@ -1466,6 +1543,42 @@ mod tests {
         })
         .await;
         assert!(r.is_err(), "a still-valid stream ended");
+    }
+
+    #[tokio::test]
+    async fn a_resent_command_is_queued_once() {
+        let s = shared_with("base");
+        s.devices.lock().unwrap().insert(
+            "dev1".into(),
+            PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
+        );
+        let cmd = || RemoteCommand { kind: "master_send".into(), id: "master".into(), agent_id: String::new(), text: "hi".into(), ok: false, cid: "c-1".into() };
+        let (a, _) = command(State(s.clone()), Query(q("base", "devtok", "")), Json(cmd())).await;
+        let (b, _) = command(State(s.clone()), Query(q("base", "devtok", "")), Json(cmd())).await;
+        assert_eq!((a, b), (StatusCode::OK, StatusCode::OK));
+        assert_eq!(s.commands.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn body_routes_refuse_before_reading_the_body() {
+        let s = shared_with("base");
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/command?t=base")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from("{not json"))
+            .unwrap();
+        // without the gate this is a 400/422 from the Json extractor
+        assert_eq!(router(s).oneshot(req).await.unwrap().status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn terminal_streams_are_scoped_to_published_sessions() {
+        let snap = r#"{"sessions":[{"id":"s1","name":"a","term":"x"}],"chats":[{"id":"c1"}]}"#;
+        assert!(snapshot_lists_session(snap, "s1"));
+        assert!(!snapshot_lists_session(snap, "c1"));
+        assert!(!snapshot_lists_session(snap, "other"));
+        assert!(!snapshot_lists_session("", "s1"));
     }
 }
 

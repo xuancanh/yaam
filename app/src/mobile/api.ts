@@ -127,10 +127,23 @@ export async function requestPairing(name: string): Promise<string> {
 }
 
 /** Poll until the desktop approves; stores the minted token when it arrives. */
-export async function pairingStatus(): Promise<'pending' | 'paired' | 'unknown'> {
+export async function pairingStatus(): Promise<'pending' | 'paired' | 'unknown' | 'lost'> {
   const res = await getJson<{ status: string; token?: string }>('/api/pair/status', { device: deviceId() })
-  if (res.status === 'paired' && res.token) storeDeviceToken(res.token)
+  if (res.status === 'paired') {
+    if (res.token) storeDeviceToken(res.token)
+    // The desktop hands a device token out exactly once. If that answer was
+    // lost, this phone is "paired" with nothing to prove it, and every call
+    // failed forever: start over with a fresh device id instead.
+    else if (!deviceToken()) return 'lost'
+  }
   return (res.status as 'pending' | 'paired' | 'unknown') ?? 'unknown'
+}
+
+/** Drop this phone's identity entirely (token and device id), so the next
+ *  pairing request is a new device. */
+export function resetDevice(): void {
+  store.removeItem(DEVICE_TOKEN_KEY)
+  store.removeItem(DEVICE_ID_KEY)
 }
 
 /** SSE stream URL for live snapshot pushes. */
@@ -145,6 +158,8 @@ export async function fetchState(): Promise<RemoteSnapshot> {
 export interface CommandInput {
   kind: string
   id: string
+  /** set for queueable messages: lets the desktop drop a resend */
+  cid?: string
   agent_id?: string
   text?: string
   ok?: boolean
@@ -157,9 +172,28 @@ export interface CommandInput {
  *  an "Approve" minutes later, against whatever is on screen by then, would
  *  be worse than failing. */
 const QUEUEABLE = new Set(['master_send', 'chat_send', 'task_chat', 'session_input'])
-const outbox: CommandInput[] = []
+const OUTBOX_KEY = 'yaam-remote-outbox'
+
+// Messages typed while the desktop is unreachable. Persisted: iOS kills a
+// backgrounded tab, and the banner had promised they would send. Each carries
+// a client id (`cid`) so a resend after a lost response is acknowledged by the
+// desktop instead of delivered twice.
+const loadOutbox = (): CommandInput[] => {
+  try {
+    const raw = localStorage.getItem(OUTBOX_KEY)
+    const parsed = raw ? JSON.parse(raw) as unknown : []
+    return Array.isArray(parsed) ? parsed.filter((c): c is CommandInput => !!c && typeof c === 'object' && typeof (c as CommandInput).kind === 'string') : []
+  } catch { return [] }
+}
+const outbox: CommandInput[] = loadOutbox()
 const outboxListeners = new Set<(n: number) => void>()
-const notifyOutbox = () => outboxListeners.forEach(f => f(outbox.length))
+const notifyOutbox = () => {
+  try {
+    if (outbox.length) localStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox))
+    else localStorage.removeItem(OUTBOX_KEY)
+  } catch { /* private mode: the queue still works for this page */ }
+  outboxListeners.forEach(f => f(outbox.length))
+}
 
 export function onOutbox(f: (n: number) => void): () => void {
   outboxListeners.add(f)
@@ -172,6 +206,12 @@ export function discardOutbox(): void {
   notifyOutbox()
 }
 
+const newCid = () => {
+  const b = new Uint8Array(9)
+  crypto.getRandomValues(b)
+  return Array.from(b, x => x.toString(16).padStart(2, '0')).join('')
+}
+
 async function postCommand(cmd: CommandInput): Promise<void> {
   await postJson('/api/command', { agent_id: '', text: '', ok: false, ...cmd }, { d: deviceToken() })
 }
@@ -179,6 +219,8 @@ async function postCommand(cmd: CommandInput): Promise<void> {
 /** fetch rejects (TypeError) only when the request never got an answer —
  *  an HTTP error status means the desktop saw it and said no */
 const unreachable = (e: unknown) => e instanceof TypeError
+/** the desktop's queue is momentarily full: try again later, don't drop */
+const busy = (e: unknown) => e instanceof Error && e.message.includes('429')
 
 let flushing: Promise<void> | null = null
 /** Send queued messages in order; stops at the first one that still cannot
@@ -188,13 +230,15 @@ export function flushOutbox(): Promise<void> {
   if (!outbox.length) return Promise.resolve()
   flushing = (async () => {
     while (outbox.length) {
+      const head = outbox[0]
       try {
-        await postCommand(outbox[0])
+        await postCommand(head)
       } catch (e) {
-        if (unreachable(e)) return
+        if (unreachable(e) || busy(e)) return
         // refused (e.g. that session is gone): drop it rather than block the rest
       }
-      outbox.shift()
+      // a discard during the await emptied the queue: don't drop a newer one
+      if (outbox[0] === head) outbox.shift()
       notifyOutbox()
     }
   })().finally(() => { flushing = null })
@@ -202,6 +246,7 @@ export function flushOutbox(): Promise<void> {
 }
 
 export async function sendCommand(cmd: CommandInput): Promise<void> {
+  if (QUEUEABLE.has(cmd.kind) && !cmd.cid) cmd = { ...cmd, cid: newCid() }
   // keep order: once something is queued, later messages queue behind it
   if (QUEUEABLE.has(cmd.kind) && outbox.length) {
     outbox.push(cmd)
@@ -212,7 +257,7 @@ export async function sendCommand(cmd: CommandInput): Promise<void> {
   try {
     await postCommand(cmd)
   } catch (e) {
-    if (!QUEUEABLE.has(cmd.kind) || !unreachable(e)) throw e
+    if (!QUEUEABLE.has(cmd.kind) || !(unreachable(e) || busy(e))) throw e
     outbox.push(cmd)
     notifyOutbox()
   }

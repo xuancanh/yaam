@@ -143,6 +143,27 @@ export function masterMsgText(m: Message): string {
 
 const FLOW_CAP = 150
 
+// The snapshot is rebuilt on every throttled store change while a phone is
+// connected (and for the push-alert check). Most transcripts are unchanged
+// between builds, so their projected rows are cached by array identity, and
+// only a tail is ever walked: filtering whole chat logs, and mapping every
+// Master message before slicing, scaled with history length.
+const chatRows = new WeakMap<readonly unknown[], unknown>()
+function cachedRows<T, R>(src: readonly T[], build: (src: readonly T[]) => R): R {
+  const hit = chatRows.get(src)
+  if (hit !== undefined) return hit as R
+  const out = build(src)
+  chatRows.set(src, out)
+  return out
+}
+
+/** The last `n` items matching `keep`, in order, walking from the end. */
+function lastMatching<T>(src: readonly T[], n: number, keep: (x: T) => boolean): T[] {
+  const out: T[] = []
+  for (let i = src.length - 1; i >= 0 && out.length < n; i--) if (keep(src[i])) out.push(src[i])
+  return out.reverse()
+}
+
 export function buildRemoteSnapshot(
   s: AppState,
   readTerm: (id: string) => { data: string; cols: number; rows?: number } = () => ({ data: '', cols: 80 }),
@@ -178,10 +199,8 @@ export function buildRemoteSnapshot(
   const fallbackDurable = durables.find(d => d.builtin)?.id ?? 'agent-default'
   const durableOf = (a: (typeof live)[number]) =>
     (durables.some(d => d.id === a.durableAgentId) ? a.durableAgentId! : fallbackDurable)
-  const lastChatAt = (a: (typeof live)[number]) => {
-    const msgs = (a.chatLog ?? []).filter(m => m.role === 'user' || m.role === 'assistant')
-    return msgs[msgs.length - 1]?.at ?? 0
-  }
+  const lastChatAt = (a: (typeof live)[number]) =>
+    lastMatching(a.chatLog ?? [], 1, m => m.role === 'user' || m.role === 'assistant')[0]?.at ?? 0
   return {
     ts: Date.now(),
     workspace: s.workspaces.find(w => w.id === s.activeWorkspace)?.name ?? 'yaam',
@@ -231,7 +250,7 @@ export function buildRemoteSnapshot(
         awaitingUser: Boolean(t.awaitingUser),
         description: clip(t.description ?? ''),
         criteria: t.criteria ?? [],
-        chat: (t.chat ?? []).slice(-MSG_CAP).map(m => ({ id: m.id, role: m.role, text: clip(m.text), at: m.at })),
+        chat: cachedRows(t.chat ?? [], c => c.slice(-MSG_CAP).map(m => ({ id: m.id, role: m.role, text: clip(m.text), at: m.at }))),
       })),
     durables: durables.map(d => ({
       id: d.id,
@@ -251,15 +270,13 @@ export function buildRemoteSnapshot(
         pinned: Boolean(a.chatPinned),
         busy: a.status === 'running',
         lastAt: lastChatAt(a),
-        msgs: (a.chatLog ?? [])
-          .filter(m => m.role !== 'thinking')
-          .slice(-MSG_CAP)
-          .map(m => ({ id: m.id, role: m.role, text: clip(m.text), at: m.at, approval: m.approval, suggestions: m.suggestions, feedback: m.feedback })),
+        msgs: cachedRows(a.chatLog ?? [], log => lastMatching(log, MSG_CAP, m => m.role !== 'thinking')
+          .map(m => ({ id: m.id, role: m.role, text: clip(m.text), at: m.at, approval: m.approval, suggestions: m.suggestions, feedback: m.feedback }))),
       })),
     master: {
       busy: Boolean(s.masterBusy),
       brain: Boolean(s.settings.masterEnabled && hasCreds(s.settings)),
-      msgs: s.messages
+      msgs: cachedRows(s.messages, all => lastMatching(all, MSG_CAP, m => !!m.text || m.kind !== 'text')
         .map(m => ({
           id: m.id,
           role: m.role === 'you' ? 'user' : 'assistant',
@@ -273,8 +290,8 @@ export function buildRemoteSnapshot(
           build: m.build,
           buildUI: m.buildUI,
         }))
-        .filter(m => m.text || m.kind !== 'text')
-        .slice(-MSG_CAP),
+        // clip() can't empty a non-empty text, so the pre-filter matches
+        .filter(m => m.text || m.kind !== 'text')),
     },
     approvals,
   }

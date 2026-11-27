@@ -9,6 +9,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { apiUrl, deviceToken, sendCommand } from './api'
+import { useReclaim } from './reclaim'
 
 // desktop dark terminal palette (core/terminals.ts DARK_TERM)
 const THEME = {
@@ -353,6 +354,7 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
 
   // tell the desktop whether it needs to ship our screen in snapshots
   useEffect(() => { claimRef.current() }, [live])
+  useReclaim(() => claimRef.current())
 
   // switching fit/mirror re-lays out here and re-claims (mirror hands the
   // desktop its size back); in mirror, follow the desktop's size as it changes

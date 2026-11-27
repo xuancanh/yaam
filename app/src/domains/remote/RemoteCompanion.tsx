@@ -12,7 +12,8 @@
 import { useEffect, useRef } from 'react'
 import { isSatelliteWindow } from '../../core/window-role'
 import { dispatch, useAppStore } from '../../core/store'
-import { useActions, useConductorSelector } from '../../store'
+import { useActions, useConductorSelector, sameAgentsIgnoringOutput } from '../../store'
+import type { AppState } from '../../core/types'
 import {
   gitFileDiffSide, gitStatus, listDir, readFileB64, readTextFile,
   remoteActive, remoteApprovePair, remoteDenyPair, remotePendingPairs, remotePublish,
@@ -182,12 +183,17 @@ export function RemoteCompanion() {
     let throttle: ReturnType<typeof setTimeout> | null = null
 
     let wasActive = false
+    let lastPublished = ''
     // Sessions a phone is viewing whose LIVE byte stream is down (session_focus
     // with snap:true). The phone's terminal normally rides /api/term; the
     // serialized screen is only its fallback, so nobody else pays for it, and
     // a healthy live view does not either (a serialize on every publish was
     // both desktop typing lag and a full phone re-render per push).
     const focusedRemote = new Set<string>()
+    // PTYs sized to a phone (fit mode). A phone that vanishes (tab killed,
+    // network gone) never sends session_blur, so these are handed back to
+    // the desktop's own size once no phone is connected.
+    const resizedByPhone = new Set<string>()
     const snapTermFor = (id: string): TermSnap =>
       (focusedRemote.has(id) ? termFor(id) : { data: '', ...termSize(id) })
     // sessions whose structured flow a phone has open (session_watch); the
@@ -213,9 +219,21 @@ export function RemoteCompanion() {
     }
     refreshPushCount()
     const pushTimer = setInterval(refreshPushCount, PUSH_COUNT_EVERY_MS)
+    // what alerts depend on, by identity: output churn (every 100ms while a
+    // session prints) leaves it all unchanged, and the full snapshot build
+    // then ran for nothing up to five times a second
+    let alertInputs: { agents: AppState['agents']; tasks: unknown; messages: unknown; approvals: unknown; busy: unknown; ws: string } | null = null
+    const alertInputsSame = (st: AppState) => {
+      const prev = alertInputs
+      alertInputs = { agents: st.agents, tasks: st.tasks, messages: st.messages, approvals: st.pendingToolApprovals, busy: st.masterBusy, ws: st.activeWorkspace }
+      return !!prev && prev.tasks === st.tasks && prev.messages === st.messages && prev.approvals === st.pendingToolApprovals
+        && prev.busy === st.masterBusy && prev.ws === st.activeWorkspace && sameAgentsIgnoringOutput(prev.agents, st.agents)
+    }
     const checkAlerts = () => {
       if (!pushSubs) return
-      const snap = buildRemoteSnapshot(useAppStore.getState())
+      const st = useAppStore.getState()
+      if (alertKeys && alertInputsSame(st)) return
+      const snap = buildRemoteSnapshot(st)
       const cur = pushCandidates(snap)
       const keys = new Set(cur.keys())
       // first look, or a workspace switch: everything reads as new, but none
@@ -236,11 +254,16 @@ export function RemoteCompanion() {
       // desktop pays that tax on every store change for nobody
       void remoteActive().then(active => {
         if (dead) return
+        if (!active || !wasActive) lastPublished = '' // a reconnecting phone needs a send
         wasActive = active
         if (!active) return
         // ts zeroed: a clock in the payload would make every publish unique
         // and defeat the server's skip-identical-snapshot check
-        void remotePublish(JSON.stringify({ ...buildRemoteSnapshot(useAppStore.getState(), snapTermFor, snapFlowFor), ts: 0 }))
+        const json = JSON.stringify({ ...buildRemoteSnapshot(useAppStore.getState(), snapTermFor, snapFlowFor), ts: 0 })
+        // the same bytes again: skip the IPC hop and the server's compare
+        if (json === lastPublished) return
+        lastPublished = json
+        void remotePublish(json)
       }).catch(() => {})
     }
 
@@ -311,13 +334,14 @@ export function RemoteCompanion() {
             else focusedRemote.add(c.id)
             // mirror: the phone renders the desktop's own layout and pans, so
             // the desktop keeps (or takes back) its size instead of yielding
-            if (d.mirror) fitTerminal(c.id)
-            else if (d.rows && d.cols) remoteResize(c.id, d.rows, d.cols)
+            if (d.mirror) { fitTerminal(c.id); resizedByPhone.delete(c.id) }
+            else if (d.rows && d.cols) { remoteResize(c.id, d.rows, d.cols); resizedByPhone.add(c.id) }
           } catch { focusedRemote.add(c.id) }
           return
         }
         case 'session_blur': {
           focusedRemote.delete(c.id)
+          resizedByPhone.delete(c.id)
           return fitTerminal(c.id) // desktop reclaims its size
         }
         case 'session_watch': {
@@ -398,6 +422,8 @@ export function RemoteCompanion() {
           for (const off of watched.values()) off()
           watched.clear()
           focusedRemote.clear()
+          for (const id of resizedByPhone) fitTerminal(id)
+          resizedByPhone.clear()
         } else if (!wasActive) {
           publish()
         }
@@ -412,6 +438,7 @@ export function RemoteCompanion() {
       window.removeEventListener('keydown', onInput, true)
       window.removeEventListener('pointerdown', onInput, true)
       for (const off of watched.values()) off()
+      for (const id of resizedByPhone) fitTerminal(id) // the remote is going away
       clearInterval(poll)
       void remoteStop()
       dispatch(s => (s.remoteInfo ? { ...s, remoteInfo: null } : s))

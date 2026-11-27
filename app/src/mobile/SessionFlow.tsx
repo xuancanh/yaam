@@ -6,6 +6,7 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RemoteFlowStep } from '../domains/remote/snapshot'
 import { sendCommand } from './api'
+import { useReclaim } from './reclaim'
 
 const KIND: Record<string, { glyph: string; color: string }> = {
   read: { glyph: '◔', color: 'var(--mut)' },
@@ -55,6 +56,7 @@ export function SessionFlow({ sessionId, flow }: { sessionId: string; flow?: Rem
     void sendCommand({ kind: 'session_watch', id: sessionId })
     return () => { void sendCommand({ kind: 'session_unwatch', id: sessionId }) }
   }, [sessionId])
+  useReclaim(() => { void sendCommand({ kind: 'session_watch', id: sessionId }) })
 
   // follow the newest step only while the reader is at the bottom
   const scRef = useRef<HTMLDivElement>(null)

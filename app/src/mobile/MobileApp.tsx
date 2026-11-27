@@ -9,9 +9,10 @@ import { FilesBrowser, GitReview } from './FilesGit'
 import { reconcile } from './reconcile'
 import { SessionFlow } from './SessionFlow'
 import { PushCard } from './PushCard'
+import { RECLAIM_EVENT, RECLAIM_AFTER_MS } from './reclaim'
 import type { RemoteSnapshot } from '../domains/remote/snapshot'
 import {
-  deviceToken, ensureUrlToken, fetchState, forgetPairing, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl, uploadImage, flushOutbox, onOutbox, discardOutbox, reportPresence, resyncPush,
+  deviceToken, ensureUrlToken, fetchState, forgetPairing, resetDevice, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl, uploadImage, flushOutbox, onOutbox, discardOutbox, reportPresence, resyncPush,
 } from './api'
 
 const POLL_MS = 2000
@@ -1380,7 +1381,12 @@ export function MobileApp() {
   const pair = useCallback((name: string) => {
     setPairing('waiting')
     void requestPairing(name).then(status => {
-      if (status === 'already-paired' && deviceToken()) setPairing('paired')
+      if (status !== 'already-paired') return
+      if (deviceToken()) { setPairing('paired'); return }
+      // paired on the desktop but this phone never got its token: ask again
+      // as a new device rather than waiting on a token that will not come
+      resetDevice()
+      void requestPairing(name)
     })
   }, [])
 
@@ -1390,6 +1396,7 @@ export function MobileApp() {
         void pairingStatus().then(s => {
           if (s === 'paired') setPairing('paired')
           if (s === 'unknown') setPairing('unpaired')
+          if (s === 'lost') { resetDevice(); setPairing('unpaired') }
         }).catch(() => {})
       }, 1500)
       return () => clearInterval(iv)
@@ -1405,10 +1412,14 @@ export function MobileApp() {
       // structural sharing: unchanged sessions/chats/messages keep their
       // object identity, so memoized rows skip re-rendering on each push
       const apply = (next: RemoteSnapshot) => setSnap(prev => (prev ? reconcile(prev, next) : next))
-      const heard = () => {
+      const heard = (fresh = false) => {
+        const gap = Date.now() - lastHeard
         lastHeard = Date.now()
-        setOnline(true)
-        setUpdatedAt(lastHeard)
+        setOnline(true) // a no-op render while already online
+        // The desktop forgets a phone's open views (flow watch, terminal
+        // focus) after ~15s without it, and they are only claimed on mount:
+        // after a gap or a new stream, ask open views to claim again.
+        if (fresh || gap > RECLAIM_AFTER_MS) window.dispatchEvent(new Event(RECLAIM_EVENT))
         void flushOutbox()
       }
       const stopPolling = () => { if (iv) { clearInterval(iv); iv = null } }
@@ -1425,10 +1436,12 @@ export function MobileApp() {
         try {
           const src = new EventSource(streamUrl())
           es = src
+          let first = true
           src.onmessage = e => {
             sseFails = 0
             stopPolling()
-            heard()
+            heard(first)
+            first = false
             const raw = String(e.data)
             if (raw === lastRaw) return // keep-alive resend of the same state
             try { apply(JSON.parse(raw) as RemoteSnapshot); lastRaw = raw } catch { /* partial frame */ }
@@ -1455,6 +1468,7 @@ export function MobileApp() {
           .catch(e => {
             if (dead) return
             setOnline(false)
+            setUpdatedAt(lastHeard) // shown only while offline
             // a sleeping laptop leaves the stream open but silent; once a
             // direct fetch fails, stop trusting it and poll until it is back
             dropStream()
@@ -1462,6 +1476,7 @@ export function MobileApp() {
             if (!String(e).includes('403')) return
             void pairingStatus()
               .then(async st => {
+                if (st === 'lost') { resetDevice(); setPairing('unpaired'); setSnap(null); return }
                 if (st !== 'unknown') return
                 await new Promise(r => setTimeout(r, 1500))
                 const again = await pairingStatus().catch(() => 'pending' as const)
