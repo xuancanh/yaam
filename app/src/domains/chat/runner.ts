@@ -349,6 +349,7 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       : a),
   }))
   let autoCompact = false
+  let forceCompact = false
   try {
     let history = ctx.histories.get(agentId)
     if (!history) {
@@ -612,7 +613,17 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
     console.error('[yaam] chat turn failed:', e) // reaches the dev/webview log for debugging
     const error = e instanceof Error ? e.message : String(e)
     updateTurn({ status: 'failed', completedAt: Date.now(), error })
-    ctx.pushChatLog(agentId, { role: 'assistant', text: `Error: ${error}`, turnId })
+    // Auto-compaction otherwise only runs after a SUCCESSFUL turn, so a model
+    // with a smaller window than the threshold failed every turn from here on.
+    const overflow = isContextOverflow(error)
+    if (overflow) forceCompact = true
+    ctx.pushChatLog(agentId, {
+      role: 'assistant',
+      text: overflow
+        ? `Error: ${error}\n\nThe conversation no longer fits this model's context, so it is being compacted now. Send your message again once that finishes.`
+        : `Error: ${error}`,
+      turnId,
+    })
   } finally {
     const released = ctx.aborts.clear(agentId, runSignal)
     if (released || !ctx.aborts.has(agentId)) {
@@ -620,7 +631,13 @@ export async function runChatMessageTurn(ctx: ChatCtx, agentId: string, text: st
       ctx.dispatch(s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, status: 'idle' as const, attention: false, chatActivity: undefined } : a)) }))
     }
   }
-  if (autoCompact) void compactConversation(ctx, agentId).catch(() => {})
+  if (forceCompact) void compactConversation(ctx, agentId, true).catch(() => {})
+  else if (autoCompact) void compactConversation(ctx, agentId).catch(() => {})
+}
+
+/** Provider errors that mean the request exceeded the context window. */
+export function isContextOverflow(message: string): boolean {
+  return /context[_ ](length|window)|prompt is too long|too many (input )?tokens|maximum context|exceeds? (the )?(model'?s? )?(maximum )?context|reduce the length/i.test(message)
 }
 
 /** Distill a durable-agent conversation's new messages into its journal and

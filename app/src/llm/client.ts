@@ -108,6 +108,48 @@ function anthropicTuning(thinking?: ThinkingEffort): Record<string, unknown> {
  *  turn's signed thinking back verbatim); everything else — unsigned blocks
  *  from OpenAI-protocol models, or any thinking block while the feature is
  *  off — must be stripped or the API rejects the whole request. */
+/** Prompt-cache breakpoints for a first-party Anthropic request: the tool
+ *  list, the system prompt, and the newest message. Every loop (Master's tool
+ *  iterations, chat's up-to-24 rounds, monitors and watchers) re-sends the same
+ *  tools, system and history each round; with these three markers the prefix
+ *  is read from cache at a fraction of the input price instead of re-billed.
+ *  Three of the four allowed breakpoints. Only for api.anthropic.com:
+ *  compatible gateways and Bedrock model versions differ in support. */
+export function withCacheBreakpoints(system: string, messages: ApiMessage[], tools: unknown[]): { system: unknown; messages: ApiMessage[]; tools: unknown[] } {
+  const mark = { type: 'ephemeral' }
+  const cachedTools = tools.length
+    ? tools.map((t, i) => (i === tools.length - 1 && t && typeof t === 'object' ? { ...(t as object), cache_control: mark } : t))
+    : tools
+  // a prompt with live state after CACHE_SPLIT caches only the stable head
+  const at = system.indexOf(CACHE_SPLIT)
+  const head = at < 0 ? system : system.slice(0, at)
+  const tail = at < 0 ? '' : system.slice(at + CACHE_SPLIT.length)
+  const cachedSystem = head
+    ? [{ type: 'text', text: head, cache_control: mark }, ...(tail ? [{ type: 'text', text: tail }] : [])]
+    : tail
+  const last = messages[messages.length - 1]
+  if (!last) return { system: cachedSystem, messages, tools: cachedTools }
+  let content: unknown = last.content
+  if (typeof content === 'string') {
+    content = content ? [{ type: 'text', text: content, cache_control: mark }] : content
+  } else if (Array.isArray(content) && content.length) {
+    // the marker goes on the last block that can carry one (not thinking)
+    const blocks = content as Array<Record<string, unknown>>
+    let at = blocks.length - 1
+    while (at >= 0 && (blocks[at]?.type === 'thinking' || blocks[at]?.type === 'redacted_thinking')) at--
+    if (at >= 0) content = blocks.map((b, i) => (i === at ? { ...b, cache_control: mark } : b))
+  }
+  return { system: cachedSystem, messages: messages.slice(0, -1).concat([{ ...last, content }]), tools: cachedTools }
+}
+
+const cachesPrompts = (cfg: LlmConfig) => cfg.provider.id === 'anthropic'
+
+/** Put this between a system prompt's stable instructions and its per-turn
+ *  live state: Anthropic requests cache the part before it. Elsewhere it is
+ *  just a line break. */
+export const CACHE_SPLIT = '\n\u0000cache-split\u0000\n'
+const unsplit = (system: string) => (system.includes(CACHE_SPLIT) ? system.split(CACHE_SPLIT).join('\n') : system)
+
 export function forAnthropicWire(messages: ApiMessage[], thinkingOn: boolean): ApiMessage[] {
   return messages.map(m => {
     if (!Array.isArray(m.content)) return m
@@ -151,7 +193,12 @@ export function normalizeApiUsage(raw: unknown): ApiUsage | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const root = raw as Record<string, unknown>
   const value = root.usage && typeof root.usage === 'object' ? root.usage as Record<string, unknown> : root
-  const input = value.inputTokens ?? value.input_tokens ?? value.prompt_tokens
+  const base = value.inputTokens ?? value.input_tokens ?? value.prompt_tokens
+  // with prompt caching, Anthropic's input_tokens counts only the uncached
+  // tail; the cached prefix is reported separately and is still context sent
+  const cached = [value.cache_read_input_tokens, value.cache_creation_input_tokens]
+    .reduce<number>((n, v) => n + (typeof v === 'number' ? v : 0), 0)
+  const input = typeof base === 'number' ? base + cached : cached || base
   const output = value.outputTokens ?? value.output_tokens ?? value.completion_tokens
   if (typeof input !== 'number' && typeof output !== 'number') return undefined
   return {
@@ -190,6 +237,19 @@ export interface LlmConfig {
 const CRED_TTL_MS = 15 * 60 * 1000
 let credCache: { cmd: string; key: string; exp: number } | null = null
 
+/** When to re-run for a token expiring at `ms`: a minute early, but never in
+ *  the past. A token already inside that minute used to be uncacheable, so
+ *  every call ran the command (and again on the 401). */
+function refreshAt(ms: number): number {
+  return Math.max(ms - 60_000, Date.now() + CRED_MIN_CACHE_MS)
+}
+const CRED_MIN_CACHE_MS = 10_000
+// One run at a time per command: when the cache expires, every concurrent
+// monitor, watcher, chat and Master call used to spawn its own login shell.
+// A failure is remembered briefly so a broken command isn't re-run per call.
+let credInflight: { cmd: string; p: Promise<{ key: string; exp: number }> } | null = null
+let credFailure: { cmd: string; until: number; error: unknown } | null = null
+
 /** Dig a credential + optional expiry out of command output. */
 function parseCredOutput(raw: string): { key: string; exp: number } {
   let exp = Date.now() + CRED_TTL_MS
@@ -217,11 +277,11 @@ function parseCredOutput(raw: string): { key: string; exp: number } {
   if (typeof expiresAt === 'number') {
     // epoch seconds (< ~2001 when read as ms) vs milliseconds
     const ms = expiresAt < 1e12 ? expiresAt * 1000 : expiresAt
-    exp = Math.min(exp, ms - 60_000)
+    exp = Math.min(exp, refreshAt(ms))
   }
   else if (typeof expiresAt === 'string') {
     const t = Date.parse(expiresAt)
-    if (!Number.isNaN(t)) exp = Math.min(exp, t - 60_000)
+    if (!Number.isNaN(t)) exp = Math.min(exp, refreshAt(t))
   }
   return { key, exp }
 }
@@ -233,9 +293,21 @@ async function resolveKey(cfg: LlmConfig, forceRefresh = false): Promise<string>
   if (!forceRefresh && credCache && credCache.cmd === cmd && Date.now() < credCache.exp) {
     return credCache.key
   }
-  const parsed = parseCredOutput(await runCredentialCommand(cmd))
-  credCache = { cmd, key: parsed.key, exp: parsed.exp }
-  return parsed.key
+  if (credInflight?.cmd === cmd) return (await credInflight.p).key
+  if (credFailure?.cmd === cmd && Date.now() < credFailure.until) throw credFailure.error
+  const p = runCredentialCommand(cmd).then(parseCredOutput)
+  credInflight = { cmd, p }
+  try {
+    const parsed = await p
+    credCache = { cmd, key: parsed.key, exp: parsed.exp }
+    credFailure = null
+    return parsed.key
+  } catch (e) {
+    credFailure = { cmd, until: Date.now() + 5_000, error: e }
+    throw e
+  } finally {
+    if (credInflight?.p === p) credInflight = null
+  }
 }
 
 /** Claude Code OAuth tokens authenticate as Bearer, not x-api-key. */
@@ -308,7 +380,9 @@ async function callAnthropic(cfg: LlmConfig, system: string, messages: ApiMessag
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model: cfg.model, ...anthropicTuning(cfg.thinking), system, messages: wireMessages, tools }),
+    body: JSON.stringify(cachesPrompts(cfg)
+      ? { model: cfg.model, ...anthropicTuning(cfg.thinking), ...withCacheBreakpoints(system, wireMessages, tools) }
+      : { model: cfg.model, ...anthropicTuning(cfg.thinking), system, messages: wireMessages, tools }),
     signal,
   })
   const res = await sendWithRetry(cfg, send)
@@ -449,6 +523,7 @@ async function callOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage[]
 
 /** Route a normalized LLM request to the configured wire-protocol adapter. */
 export function callApi(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], signal?: AbortSignal): Promise<ApiResponse> {
+  if (!cachesPrompts(cfg)) system = unsplit(system)
   return cfg.provider.protocol === 'anthropic' ? callAnthropic(cfg, system, messages, tools, signal) : callOpenAi(cfg, system, messages, tools, signal)
 }
 
@@ -563,7 +638,9 @@ async function streamAnthropic(cfg: LlmConfig, system: string, messages: ApiMess
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({ model: cfg.model, ...anthropicTuning(cfg.thinking), system, messages: forAnthropicWire(messages, !!cfg.thinking), tools, stream: true }),
+    body: JSON.stringify(cachesPrompts(cfg)
+      ? { model: cfg.model, ...anthropicTuning(cfg.thinking), ...withCacheBreakpoints(system, forAnthropicWire(messages, !!cfg.thinking), tools), stream: true }
+      : { model: cfg.model, ...anthropicTuning(cfg.thinking), system, messages: forAnthropicWire(messages, !!cfg.thinking), tools, stream: true }),
     signal,
   })
   const res = await sendWithRetry(cfg, send)
@@ -696,6 +773,7 @@ async function streamOpenAi(cfg: LlmConfig, system: string, messages: ApiMessage
  *  model produces them. Bedrock's invoke bridge cannot stream — it falls back
  *  to the buffered call (onDelta simply never fires). */
 export function callApiStream(cfg: LlmConfig, system: string, messages: ApiMessage[], tools: unknown[], onDelta: StreamDelta, signal?: AbortSignal): Promise<ApiResponse> {
+  if (!cachesPrompts(cfg)) system = unsplit(system)
   if (cfg.provider.id === 'bedrock') return callAnthropic(cfg, system, messages, tools, signal)
   return cfg.provider.protocol === 'anthropic'
     ? streamAnthropic(cfg, system, messages, tools, onDelta, signal)

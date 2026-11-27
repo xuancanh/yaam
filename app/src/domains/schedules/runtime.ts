@@ -17,8 +17,8 @@ import { cronMatches } from './cron'
 export interface SchedulerDeps {
   state: StatePort
   clock: ClockPort
-  logEvent: (type: EventType, agentId: string | null, text: string) => void
-  notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
+  logEvent: (type: EventType, agentId: string | null, text: string, workspaceId?: string) => void
+  notify: (kind: NotifKind, title: string, detail: string, agentId: string | null, workspaceId?: string) => void
   launchSession: (command: string, cwd: string, nameHint?: string, typeId?: string, workspaceId?: string, opts?: { ephemeral?: boolean; autoArchive?: boolean; templateId?: string; terminalShell?: string; isolate?: boolean }) => string | null
   spawnTaskSession: (taskId: string, opts?: { extraInstructions?: string; briefWatcher?: boolean; workspaceId?: string }) => string | null
   /** deliver a scheduled prompt to a durable agent's conversation (its loop);
@@ -42,6 +42,8 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
   const { state, clock, logEvent, notify, launchSession, spawnTaskSession, fireAddonHook, wakeAddonAgent, canLaunch } = deps
   // addonId -> last minute its agent.every fired (once-per-minute guard)
   const agentWakes = new Map<string, string>()
+  // previous tick, so a late tick also checks the minutes it skipped
+  let lastTickMs: number | undefined
 
   const tick = () => {
     const st = state.get()
@@ -50,6 +52,8 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
     // schedule that restoration is about to re-arm)
     if (st.bootStatus !== 'ready' && st.bootStatus !== 'failed') return
     const now = new Date(clock.now())
+    const since = new Date(lastTickMs ?? now.getTime())
+    lastTickMs = now.getTime()
     const minuteKey = now.toISOString().slice(0, 16)
     const timeLabel = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     // schedules fire in every workspace this window owns, active or not —
@@ -63,7 +67,7 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
       ...Object.entries(st.workspaceData ?? {}).map(([wid, d]) => ({ wid, crons: d.crons ?? [] })),
     ].filter(p => !detached.has(p.wid))
     for (const pool of pools) {
-      const due = collectDueSchedules(pool.crons, now)
+      const due = collectDueSchedules(pool.crons, now, since)
       if (!due.length) continue
       state.update(s => {
         // one-time schedules (at) disarm after firing
@@ -99,8 +103,8 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
             ok: !!convId,
             agentId: convId ?? undefined,
           })
-          logEvent('cron', convId, `${c.name} fired · prompted durable agent`)
-          notify('cron', `${c.name} fired`, c.agentPrompt.slice(0, 60), convId)
+          logEvent('cron', convId, `${c.name} fired · prompted durable agent`, pool.wid)
+          notify('cron', `${c.name} fired`, c.agentPrompt.slice(0, 60), convId, pool.wid)
           continue
         }
         if (c.boardTask) {
@@ -128,8 +132,8 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
             return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, tasks: d.tasks.concat([newTask]) } } }
           })
           recordRun(c.id, { at: now.getTime(), note: `added task “${bt.title.slice(0, 48)}”${bt.startNow ? ' · starting' : ' · to backlog'}`, ok: true, taskId: newTask.id })
-          logEvent('cron', null, `${c.name} fired · added board task “${bt.title.slice(0, 48)}”`)
-          notify('cron', `${c.name} fired`, `added task: ${bt.title.slice(0, 60)}`, null)
+          logEvent('cron', null, `${c.name} fired · added board task “${bt.title.slice(0, 48)}”`, pool.wid)
+          notify('cron', `${c.name} fired`, `added task: ${bt.title.slice(0, 60)}`, null, pool.wid)
           continue
         }
         const tpl = c.templateId ? (st.templates ?? []).find(t => t.id === c.templateId) : undefined
@@ -148,8 +152,8 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
             return { ...s, workspaceData: { ...s.workspaceData, [pool.wid]: { ...d, tasks: d.tasks.concat([newTask]) } } }
           })
           recordRun(c.id, { at: now.getTime(), note: `queued task for template “${tpl.name}”`, ok: true, taskId: newTask.id })
-          logEvent('cron', null, `${c.name} fired · queued board task for template “${tpl.name}”`)
-          notify('cron', `${c.name} fired`, `board task queued · template ${tpl.name}`, null)
+          logEvent('cron', null, `${c.name} fired · queued board task for template “${tpl.name}”`, pool.wid)
+          notify('cron', `${c.name} fired`, `board task queued · template ${tpl.name}`, null, pool.wid)
           continue
         }
         const launchedId = !canLaunch ? null
@@ -161,8 +165,8 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
           ok: !c.cmd || !!launchedId,
           agentId: launchedId ?? undefined,
         })
-        logEvent('cron', launchedId, `${c.name} fired${c.cmd ? ` · launching ${c.cmd}` : ''}`)
-        notify('cron', `${c.name} fired`, c.cmd ? `launched: ${c.cmd}` : 'schedule ran', launchedId)
+        logEvent('cron', launchedId, `${c.name} fired${c.cmd ? ` · launching ${c.cmd}` : ''}`, pool.wid)
+        notify('cron', `${c.name} fired`, c.cmd ? `launched: ${c.cmd}` : 'schedule ran', launchedId, pool.wid)
       }
     }
 
@@ -189,7 +193,7 @@ export function createSchedulerRuntime(deps: SchedulerDeps): SchedulerRuntime {
         // (or in a browser build that can't launch) so it doesn't refire every tick
         const id = canLaunch ? spawnTaskSession(t.id, { workspaceId: pool.wid, briefWatcher: true }) : null
         if (!id) state.update(s => updateLocatedTask(s, t.id, x => ({ ...x, scheduleAt: undefined }), pool.wid))
-        notify('cron', id ? 'Scheduled task started' : 'Scheduled task could not start', t.title.slice(0, 60), id)
+        notify('cron', id ? 'Scheduled task started' : 'Scheduled task could not start', t.title.slice(0, 60), id, pool.wid)
       }
     }
   }

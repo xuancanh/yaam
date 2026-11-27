@@ -21,11 +21,18 @@ struct CachedClient {
     client: Client,
     /// when the exported credentials lapse; None = chain-managed (no expiry here)
     expires: Option<SystemTime>,
+    /// identifies this build, so a caller that saw it fail can tell whether a
+    /// concurrent refresh already replaced it
+    built: std::time::Instant,
 }
 
 #[derive(Default)]
 pub struct BedrockState {
     clients: Mutex<HashMap<String, CachedClient>>,
+    /// one credential refresh at a time: concurrent auth failures (Master plus
+    /// several monitors) each ran the refresh command, so `aws sso login`
+    /// opened a browser tab per call
+    refresh: tokio::sync::Mutex<()>,
 }
 
 /// Parse ISO text or epoch seconds/milliseconds into a credential expiry time.
@@ -39,6 +46,11 @@ fn parse_expiration(v: &serde_json::Value) -> Option<SystemTime> {
     if let Some(n) = v.as_f64() {
         // heuristics: epoch millis vs seconds
         let secs = if n > 1e12 { n / 1000.0 } else { n };
+        // from_secs_f64 panics on negative, NaN or overflowing input, and this
+        // is command output: reject what can't be a real expiry
+        if !secs.is_finite() || !(0.0..1e11).contains(&secs) {
+            return None;
+        }
         return Some(std::time::UNIX_EPOCH + Duration::from_secs_f64(secs));
     }
     None
@@ -158,6 +170,7 @@ async fn make_client(region: &str, profile: &str, cred_cmd: &str) -> Result<Cach
     Ok(CachedClient {
         client: Client::new(&loader.load().await),
         expires,
+        built: std::time::Instant::now(),
     })
 }
 
@@ -181,13 +194,18 @@ async fn invoke(client: &Client, model: &str, body: &str) -> Result<String, Stri
 /// Classify SDK error text that can be recovered by refreshing credentials.
 fn is_auth_error(msg: &str) -> bool {
     let m = msg.to_lowercase();
+    // a dispatch failure is usually the network (DNS, refused, timeout), and
+    // a model-access denial is a permission refresh can't grant: re-running
+    // the refresh command for those only opened login prompts while offline
+    let network = ["dns", "connect", "timed out", "timeout", "io error", "unreachable"].iter().any(|w| m.contains(w));
+    let model_access = m.contains("access to the model");
     m.contains("expired")
         || m.contains("credential")
         || m.contains("security token")
         || m.contains("unauthorized")
-        || m.contains("accessdenied")
+        || (m.contains("accessdenied") && !model_access)
         || m.contains("no providers in chain")
-        || m.contains("dispatch failure")
+        || (m.contains("dispatch failure") && !network)
 }
 
 /// Keep cached clients only when credentials outlive the five-minute safety margin.
@@ -234,6 +252,12 @@ pub async fn invoke_model(
         Err(e) => return Err(e),
     };
 
+    let _refreshing = state.refresh.lock().await;
+    // another call refreshed while we waited: retry on its client
+    let newer = state.clients.lock().unwrap().get(&key).filter(|c| c.built != client.built && still_fresh(c)).cloned();
+    if let Some(c) = newer {
+        return invoke(&c.client, &model, &body).await;
+    }
     // credentials look stale — refresh (optional command through a login shell,
     // so aws/corporate CLIs resolve), rebuild the client, retry once
     if !refresh_cmd.is_empty() {
@@ -338,6 +362,14 @@ mod tests {
     }
 
     #[test]
+    fn rejects_expiries_that_would_panic() {
+        for v in [serde_json::json!(-5.0), serde_json::json!(1e300)] {
+            assert!(parse_expiration(&v).is_none(), "{v}");
+        }
+        assert!(parse_expiration(&serde_json::json!(1_900_000_000)).is_some());
+    }
+
+    #[test]
     fn classifies_only_refreshable_bedrock_failures_as_auth_errors() {
         for message in [
             "ExpiredTokenException",
@@ -348,7 +380,13 @@ mod tests {
         ] {
             assert!(is_auth_error(message), "did not classify {message:?}");
         }
-        for message in ["model not found", "invalid JSON body", "request timed out"] {
+        for message in [
+            "model not found",
+            "invalid JSON body",
+            "request timed out",
+            "dispatch failure: io error: dns error: failed to lookup address",
+            "AccessDeniedException: You don't have access to the model with the specified model ID.",
+        ] {
             assert!(!is_auth_error(message), "misclassified {message:?}");
         }
     }

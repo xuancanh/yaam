@@ -16,6 +16,7 @@ import { extractOptions } from '../session/prompt-detection'
 import type { AbortRegistry } from '../../core/abort-registry'
 import { isAbortError } from '../../core/abort-registry'
 import { untrustedBlock } from '../../llm/untrusted'
+import { isProgressNote } from '../board/watcher-notes'
 
 export interface MonitorCtx {
   stateRef: MutableRefObject<AppState>
@@ -32,12 +33,28 @@ export interface MonitorCtx {
   masterEvent: (note: string, agentId?: string) => void
 }
 
+const MONITOR_QUEUE_CAP = 8
+const MONITOR_QUEUE_CHARS = 24_000
+
+/** Queue a note for a busy monitor. A full-screen TUI snapshot supersedes the
+ *  previous undelivered one (each is the whole screen, up to 12k chars, and
+ *  they overlap); plain-terminal checkpoints carry new lines only, so they all
+ *  stay, but the queue is bounded in characters too: it used to join up to
+ *  eight 12k notes into one ~96k message. Oldest go first. */
+export function enqueueMonitorNote(queue: string[], note: string): string[] {
+  const isScreen = (n: string) => isProgressNote(n) && n.includes('Current rendered screen')
+  const next = (isScreen(note) ? queue.filter(n => !isScreen(n)) : queue).concat([note]).slice(-MONITOR_QUEUE_CAP)
+  let total = next.reduce((n, x) => n + x.length, 0)
+  while (next.length > 1 && total > MONITOR_QUEUE_CHARS) total -= next.shift()!.length
+  return next
+}
+
 /** Serialize private monitor turns per session and cap their retained history. */
 export async function runMonitorLoop(ctx: MonitorCtx, id: string, note: string) {
   const st = ctx.stateRef.current.settings
   if (!(st.masterEnabled && hasCreds(st) && st.followMode)) return
   if (ctx.busy.has(id)) {
-    ctx.queue.set(id, [...(ctx.queue.get(id) ?? []), note].slice(-8))
+    ctx.queue.set(id, enqueueMonitorNote(ctx.queue.get(id) ?? [], note))
     return
   }
   ctx.busy.add(id)

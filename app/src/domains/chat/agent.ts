@@ -760,7 +760,10 @@ export async function runChatTurn(
     }
     // interim text streamed before this tool round becomes its own bubble
     onEvent({ kind: 'round', text: '' })
-    const results = await Promise.all(res.content
+    // Stop must end the turn now: long tools (run_command up to 60s, MCP
+    // calls) used to keep the chat busy, rejecting the next message, until
+    // they finished. Their late results are discarded.
+    const results = await untilAborted(signal, Promise.all(res.content
       .filter((b): b is ApiContentBlock => b.type === 'tool_use')
       .map(async b => {
         const name = b.name ?? ''
@@ -821,7 +824,7 @@ export async function runChatTurn(
           },
         })
         return { type: 'tool_result', tool_use_id: b.id, content: content.slice(0, 50_000) }
-      }))
+      })))
     // unsigned thinking blocks never go back over the wire — providers reject
     // or mis-handle replayed reasoning. SIGNED blocks (Anthropic extended
     // thinking) must be retained: the API requires them back verbatim during a
@@ -832,4 +835,18 @@ export async function runChatTurn(
   // cap the persistent conversation so long chats stay affordable
   capChatHistory(history, 60)
   return usage ? { ...usage, contextInputTokens } : undefined
+}
+
+/** Resolve with `work`, or reject with an AbortError as soon as `signal` fires. */
+function untilAborted<T>(signal: AbortSignal | undefined, work: Promise<T>): Promise<T> {
+  if (!signal) return work
+  if (signal.aborted) return Promise.reject(Object.assign(new Error('stopped'), { name: 'AbortError' }))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(Object.assign(new Error('stopped'), { name: 'AbortError' }))
+    signal.addEventListener('abort', onAbort, { once: true })
+    work.then(
+      v => { signal.removeEventListener('abort', onAbort); resolve(v) },
+      e => { signal.removeEventListener('abort', onAbort); reject(e) },
+    )
+  })
 }

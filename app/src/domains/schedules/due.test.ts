@@ -50,3 +50,15 @@ describe('collectDueTasks', () => {
     ], now)).toEqual([])
   })
 })
+
+describe('collectDueSchedules catch-up', () => {
+  it('fires a schedule whose minute a late tick skipped, once', () => {
+    const cron = { id: 'c', on: true, schedule: '0 9 * * *' } as unknown as Cron
+    const before = new Date(2026, 0, 5, 8, 59, 50)
+    const late = new Date(2026, 0, 5, 9, 1, 5)
+    expect(collectDueSchedules([cron], late)).toEqual([])
+    expect(collectDueSchedules([cron], late, before).map(c => c.id)).toEqual(['c'])
+    const next = new Date(2026, 0, 5, 9, 1, 20)
+    expect(collectDueSchedules([cron], next, late)).toEqual([])
+  })
+})

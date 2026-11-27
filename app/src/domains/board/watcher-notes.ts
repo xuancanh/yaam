@@ -23,7 +23,7 @@ export const WATCHER_QUEUE_CAP = 12
  * screen tails, so only the latest is worth sending; concatenating them all
  * (the old behavior) just fed the LLM redundant, confusing near-duplicates.
  * Event notes always accumulate in order, capped at WATCHER_QUEUE_CAP (newest
- * kept). Mirrors the session monitor's latest-wins queue. Pure — returns the
+ * kept). The session monitor uses the same queue. Pure — returns the
  * next queue.
  */
 export function enqueueWatcherNote(queue: string[], note: string): string[] {

@@ -26,6 +26,11 @@ export function createMasterRuntime(ports: MasterPorts): MasterRuntime {
         signal: () => aborts.signal('master'),
       }, eventNote)
     },
-    abort: () => aborts.abort('master'),
+    abort: () => {
+      aborts.abort('master')
+      // queued notes belong to the turn's workspace: replaying them after a
+      // switch or teardown would run them against the wrong one
+      masterQueued.current = null
+    },
   }
 }

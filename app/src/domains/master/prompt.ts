@@ -1,6 +1,7 @@
 // Master's system prompt: role, rules, and the serialized app state.
 import type { AppState } from '../../core/types'
 import type { ApiMessage } from '../../llm/client'
+import { CACHE_SPLIT } from '../../llm/client'
 import { addonPromptAppends } from '../../core/addons'
 import { memoryDigest, wsMemory } from './assistant-memory'
 import { pendingEscalation } from '../session/escalations'
@@ -88,7 +89,7 @@ Events tagged [user-watching] concern the session whose pane the user has focuse
 
 You share a multi-file memory with the session monitors, task watchers, and chat agents: memory_lookup searches it; memory_save adds distilled facts (user decisions, corrections, stable preferences). Consult it before guessing how the user wants something handled, and save anything durable you learn.
 
-CURRENT STATE
+${CACHE_SPLIT}CURRENT STATE
 ${describeState(s)}${addonPromptAppends(s)}${promptExtraSections({
     memoryDigest: memoryDigest(wsMemory(s), ['preferences', 'corrections']),
     calibration: calibrationNote(s.harnessLog, 'master'),
@@ -111,7 +112,11 @@ export function chatHistory(s: AppState, eventNote?: string): ApiMessage[] {
     if (last && last.role === 'user') last.content = `${last.content}\n${eventNote}`
     else msgs.push({ role: 'user', content: eventNote })
   }
-  while (msgs.length && msgs[0].role !== 'user') msgs.shift()
-  if (!msgs.length) msgs.push({ role: 'user', content: eventNote || 'Hello' })
-  return msgs.slice(-30)
+  // window first, then drop a leading assistant turn: roles alternate and the
+  // list ends on the user, so a plain slice(-30) of a long chat started with
+  // the assistant, which strict providers reject
+  const recent = msgs.slice(-30)
+  while (recent.length && recent[0].role !== 'user') recent.shift()
+  if (!recent.length) recent.push({ role: 'user', content: eventNote || 'Hello' })
+  return recent
 }

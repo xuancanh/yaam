@@ -87,8 +87,8 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
 
   // permission gates: global Tools registry + per-session overrides
   // Apply the global Auto/Ask/Off policy before a Master tool side effect.
-  const catalogGate = (toolId: string): string | null => {
-    const perm = stateRef.current.toolsCatalog.find(t => t.id === toolId)?.perm ?? 'Auto'
+  const catalogGate = (toolId: string, fallback: 'Auto' | 'Ask first' = 'Auto'): string | null => {
+    const perm = stateRef.current.toolsCatalog.find(t => t.id === toolId)?.perm ?? fallback
     if (perm === 'Off') return `blocked: the user disabled "${toolId}" in the Tools registry`
     if (perm === 'Approval') return `blocked: "${toolId}" is set to Approval — ask the user to change it in Tools`
     if (perm === 'Ask first') {
@@ -291,6 +291,10 @@ export async function runMasterLoop(ctx: MasterCtx, eventNote?: string) {
     removeAddon: name => {
       const addon = stateRef.current.addons.find(a => a.name === name)
       if (!addon) return `no addon named ${name}`
+      // destructive (its storage and chats go too) and reachable by a
+      // prompt-injected turn: ask first unless the user set this tool to Auto
+      const gated = catalogGate('remove_addon', 'Ask first')
+      if (gated) return gated
       ctx.disposeAddon(addon.id)
       dispatch(s2 => {
         const addonStorage = { ...s2.addonStorage }

@@ -81,16 +81,26 @@ export function createMasterSubsystem(k: ConductorKernel, refs: RuntimeRefs, ses
     applyAgentStatus: session.applyAgentStatus, setNeedsInput: session.setNeedsInput, makeAddonApi: addon.makeAddonApi,
     sendLine, stopLine, answerLine, interruptLine,
   })
-  const runMaster: MasterRuntime['run'] = isMain ? master.run : () => {}
+  // Updates about a session the user is watching first-hand. Master is told to
+  // write nothing for those, and the monitor already keeps the card current,
+  // so each one used to cost a full Master turn (whole state in the prompt, up
+  // to 10 iterations) for no visible result. They ride along with the next
+  // real turn instead, so Master's picture stays current.
+  const watchedNotes: string[] = []
+  const withWatched = (note?: string) => {
+    if (!watchedNotes.length) return note
+    const ctx = `[user-watching] Updates on sessions the user was watching directly (no narration needed; act only if something requires it):\n${watchedNotes.splice(0).join('\n\n')}`
+    return note ? `${ctx}\n\n---\n\n${note}` : ctx
+  }
+  const runMaster: MasterRuntime['run'] = isMain ? note => master.run(withWatched(note)) : () => {}
   masterEventRef.current = isMain ? (note, agentId) => {
-    // the user is watching this session's pane right now: Master still gets
-    // the update (context stays current) but is told not to narrate it —
-    // the user already sees the terminal first-hand
-    if (agentId && isUserWatching(agentId)) {
-      note = `[user-watching] ${note}`
-    }
     const s = stateRef.current
     const wid = widOf(s, agentId ?? null)
+    if (agentId && wid === s.activeWorkspace && isUserWatching(agentId)) {
+      watchedNotes.push(note)
+      if (watchedNotes.length > 5) watchedNotes.splice(0, watchedNotes.length - 5)
+      return
+    }
     if (wid === s.activeWorkspace) { void runMaster(note); return }
     dispatch(s2 => {
       const d = s2.workspaceData[wid]

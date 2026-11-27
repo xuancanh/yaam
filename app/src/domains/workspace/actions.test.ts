@@ -62,7 +62,8 @@ describe('createWorkspaceActions.deleteWorkspace', () => {
     }), port)
     h.actions.deleteWorkspace('ws-b')
 
-    expect(h.ctx.abortMaster).toHaveBeenCalledOnce() // cancel any in-flight Master turn
+    // ws-b is a background workspace: Master's turn in ws-a keeps running
+    expect(h.ctx.abortMaster).not.toHaveBeenCalled()
     for (const id of ['a1', 'a2']) {
       expect(h.ctx.markUserStopped).toHaveBeenCalledWith(id)
       expect(port.killSession).toHaveBeenCalledWith(id)
@@ -97,7 +98,7 @@ describe('createWorkspaceActions.archiveWorkspace', () => {
     }), port)
     h.actions.archiveWorkspace('ws-b')
 
-    expect(h.ctx.abortMaster).toHaveBeenCalledOnce()
+    expect(h.ctx.abortMaster).not.toHaveBeenCalled() // background teardown
     for (const id of ['a1', 'a2']) {
       expect(port.killSession).toHaveBeenCalledWith(id)
       expect(h.ctx.disposeSessionRuntime).toHaveBeenCalledWith(id)
@@ -336,5 +337,20 @@ describe('createWorkspaceActions.switchWorkspace', () => {
     expect(h.state().activeWorkspace).toBe('ws-b')
     expect(h.state().detachedWorkspaces).not.toContain('ws-b')
     now.mockRestore()
+  })
+})
+
+describe('Master turns and workspace changes', () => {
+  it('deleting the active workspace stops its Master turn', () => {
+    const h = harness(baseState(), fakePort())
+    h.actions.deleteWorkspace('ws-a')
+    expect(h.ctx.abortMaster).toHaveBeenCalledOnce()
+  })
+
+  it('switching workspaces stops a Master turn working on the one left behind', () => {
+    const h = harness(baseState({ workspaceData: { 'ws-b': { messages: [], events: [], notifications: [], crons: [], tasks: [], minimizedIds: [], pendingMasterNotes: [] } } as unknown as AppState['workspaceData'] }), fakePort())
+    h.actions.switchWorkspace('ws-b')
+    expect(h.ctx.abortMaster).toHaveBeenCalledOnce()
+    expect(h.state().activeWorkspace).toBe('ws-b')
   })
 })

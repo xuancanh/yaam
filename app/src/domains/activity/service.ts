@@ -12,15 +12,17 @@ import { mkId } from '../../shared/id'
 export interface ActivityService {
   /** the workspace that should own an event/notification for a session. */
   widOf: (s: AppState, agentId: string | null) => string
-  logEvent: (type: EventType, agentId: string | null, text: string) => void
-  notify: (kind: NotifKind, title: string, detail: string, agentId: string | null) => void
+  /** `workspaceId` places an event with no session (a schedule firing in a
+   *  background workspace) in that workspace instead of the active one. */
+  logEvent: (type: EventType, agentId: string | null, text: string, workspaceId?: string) => void
+  notify: (kind: NotifKind, title: string, detail: string, agentId: string | null, workspaceId?: string) => void
 }
 
 const stamp = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
 export function createActivityService(state: StatePort): ActivityService {
-  const widOf = (s: AppState, agentId: string | null): string => {
-    if (!agentId) return s.activeWorkspace
+  const widOf = (s: AppState, agentId: string | null, hint?: string): string => {
+    if (!agentId) return hint && (hint === s.activeWorkspace || s.workspaceData[hint]) ? hint : s.activeWorkspace
     const agent = s.agents.find(a => a.id === agentId)
     return agent?.workspaceId && s.workspaces.some(w => w.id === agent.workspaceId)
       ? agent.workspaceId
@@ -28,17 +30,17 @@ export function createActivityService(state: StatePort): ActivityService {
   }
   return {
     widOf,
-    logEvent: (type, agentId, text) => {
+    logEvent: (type, agentId, text, workspaceId) => {
       const item = { id: mkId('e'), type, agentId, text, time: stamp() }
       state.update(s => {
-        const wid = widOf(s, agentId)
+        const wid = widOf(s, agentId, workspaceId)
         if (wid === s.activeWorkspace) return { ...s, events: [item].concat(s.events).slice(0, 200) }
         const d = s.workspaceData[wid]
         if (!d) return s
         return { ...s, workspaceData: { ...s.workspaceData, [wid]: { ...d, events: [item].concat(d.events).slice(0, 200) } } }
       })
     },
-    notify: (kind, title, detail, agentId) => {
+    notify: (kind, title, detail, agentId, workspaceId) => {
       // the user is actively watching this session's pane — they see the
       // prompt/result first-hand, so any notification would just be noise
       if (agentId && isUserWatching(agentId)) return
@@ -50,7 +52,7 @@ export function createActivityService(state: StatePort): ActivityService {
         void osNotify(title, detail)
       }
       state.update(s => {
-        const wid = widOf(s, agentId)
+        const wid = widOf(s, agentId, workspaceId)
         if (wid === s.activeWorkspace) return { ...s, notifications: [item].concat(s.notifications).slice(0, 30) }
         const d = s.workspaceData[wid]
         if (!d) return s

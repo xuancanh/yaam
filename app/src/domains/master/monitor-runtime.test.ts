@@ -51,3 +51,17 @@ describe('monitor runtime queue', () => {
     rt.dispose('a1')
   })
 })
+
+describe('enqueueMonitorNote', () => {
+  it('keeps only the newest full-screen snapshot and bounds the total size', async () => {
+    const { enqueueMonitorNote } = await import('./monitor-runner')
+    const screen = (x: string) => `[progress] The session "s" is still running. Current rendered screen:\n${x}`
+    let q = enqueueMonitorNote([], screen('one'))
+    q = enqueueMonitorNote(q, '[user terminal input] ls')
+    q = enqueueMonitorNote(q, screen('two'))
+    expect(q).toEqual(['[user terminal input] ls', screen('two')])
+    const big = '[progress] New terminal output:\n' + 'x'.repeat(10_000)
+    for (let i = 0; i < 5; i++) q = enqueueMonitorNote(q, big)
+    expect(q.reduce((n, x) => n + x.length, 0)).toBeLessThanOrEqual(24_000)
+  })
+})

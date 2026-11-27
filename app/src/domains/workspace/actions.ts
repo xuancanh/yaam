@@ -88,6 +88,10 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
   // The plain switch: stash the current workspace, hydrate the target, and
   // replay any Master events that queued while it was in the background.
   const doSwitch = (id: string) => {
+    // A Master turn works on the active workspace's flat slice: left running,
+    // its later iterations described the new workspace and its answer landed
+    // in that workspace's chat. Stop it with the workspace it belongs to.
+    if (id !== stateRef.current.activeWorkspace) ctx.abortMaster()
     const pending = stateRef.current.workspaceData[id]?.pendingMasterNotes ?? []
     dispatch(s => switchWorkspaceIn(s, id, MASTER_GREETING))
     if (pending.length) {
@@ -199,7 +203,9 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
       }
       // a spun-out workspace closes its window first, then tears down
       if ((s0.detachedWorkspaces ?? []).includes(id)) void closeWorkspaceWindow(id)
-      ctx.abortMaster() // cancel any in-flight Master turn tied to this teardown
+      // Master only ever works on the active workspace: tearing down a
+      // background one must not cancel the turn in the one the user is in
+      if (s0.activeWorkspace === id) ctx.abortMaster()
       killWorkspaceSessions(s0.agents.filter(a => a.workspaceId === id))
       dispatch(s => {
         let next = s
@@ -229,7 +235,7 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
       // close its window (if spun out), cancel any Master turn, then kill every
       // session — running AND detached — before stashing the state
       if ((s0.detachedWorkspaces ?? []).includes(id)) void closeWorkspaceWindow(id)
-      ctx.abortMaster()
+      if (s0.activeWorkspace === id) ctx.abortMaster()
       killWorkspaceSessions(s0.agents.filter(a => a.workspaceId === id))
       dispatch(s => {
         const ws = s.workspaces.find(w => w.id === id)
