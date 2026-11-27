@@ -118,7 +118,10 @@ export async function ping(): Promise<boolean> {
  *  'bad' (the desktop answered and refused this link's token). */
 export async function pingStatus(): Promise<'ok' | 'bad' | 'unreachable'> {
   try {
-    await getJson<{ ok: boolean }>('/api/ping')
+    // a paired phone also proves itself with its device token, so a rotated
+    // connect link (an old URL or home-screen bookmark) keeps working
+    const d = deviceToken()
+    await getJson<{ ok: boolean }>('/api/ping', d ? { d } : {})
     return 'ok'
   } catch (e) {
     return e instanceof TypeError ? 'unreachable' : 'bad'

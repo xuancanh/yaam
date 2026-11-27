@@ -138,7 +138,7 @@ function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) 
     return (
       <div className="pairwrap">
         <h2>Link out of date</h2>
-        <p>The token in this link is no longer current (it may have rotated). Open the newest link from Settings → Remote Control on your desktop — this device's pairing is kept, no re-pairing needed.</p>
+        <p>This connect link is no longer current (it was rotated). Open the newest link from Settings → Remote Control on your desktop to pair this device. Devices that are already paired keep working on old links.</p>
       </div>
     )
   }

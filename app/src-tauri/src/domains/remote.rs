@@ -292,8 +292,15 @@ fn check_base(shared: &RemoteShared, q: &AuthQuery) -> bool {
 }
 
 /// Whether the device credentials in `q` are still valid (no side effects).
+///
+/// A paired device authenticates with its own minted token alone. The URL
+/// token is the PAIRING credential (it lets a new device ask to pair); it
+/// rotates (manually or on a schedule) to retire old connect links, and that
+/// must not lock out devices that are already paired: they keep working until
+/// revoked. An empty server token means the remote is stopped, which ends
+/// every device's access.
 fn device_valid(shared: &RemoteShared, q: &AuthQuery) -> bool {
-    check_base(shared, q)
+    !shared.token.lock().unwrap().is_empty()
         && !q.d.is_empty()
         && shared.devices.lock().unwrap().values().any(|dev| token_eq(&dev.token, &q.d))
 }
@@ -317,9 +324,7 @@ fn bump_auth(shared: &RemoteShared) {
 
 /// URL token + paired-device token (everything else).
 fn check_device(shared: &RemoteShared, q: &AuthQuery) -> bool {
-    let ok = check_base(shared, q)
-        && !q.d.is_empty()
-        && shared.devices.lock().unwrap().values().any(|dev| token_eq(&dev.token, &q.d));
+    let ok = device_valid(shared, q);
     if ok {
         shared.last_seen.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
     }
@@ -348,11 +353,15 @@ async fn security_headers(request: Request<axum::body::Body>, next: Next) -> Res
     response
 }
 
+/// Link check at startup: the current URL token, or (for a paired phone
+/// opened from an older link after a rotation) its device token. `link`
+/// tells the phone whether its URL token is still the current one.
 async fn ping(State(s): Shared, Query(q): Query<AuthQuery>) -> (StatusCode, Json<serde_json::Value>) {
-    if !check_base(&s, &q) {
+    let link = check_base(&s, &q);
+    if !link && !device_valid(&s, &q) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "bad token" })));
     }
-    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true, "link": link })))
 }
 
 #[derive(Deserialize)]
@@ -1170,7 +1179,7 @@ mod tests {
     }
 
     #[test]
-    fn device_auth_requires_both_tokens() {
+    fn paired_devices_survive_url_token_rotation() {
         let s = shared_with("base");
         s.devices.lock().unwrap().insert(
             "dev1".into(),
@@ -1179,7 +1188,31 @@ mod tests {
         assert!(check_device(&s, &q("base", "devtok", "")));
         assert!(!check_device(&s, &q("base", "", "")), "url token alone is not enough");
         assert!(!check_device(&s, &q("base", "wrong", "")));
-        assert!(!check_device(&s, &q("wrong", "devtok", "")), "device token alone is not enough");
+        // the link was rotated: a paired phone still opened from the old one
+        *s.token.lock().unwrap() = "rotated".into();
+        assert!(check_device(&s, &q("base", "devtok", "")), "rotation must not lock out a paired device");
+        assert!(check_device(&s, &q("", "devtok", "")));
+        // but new pairing needs the current link
+        assert!(!check_base(&s, &q("base", "", "")));
+        // a stopped remote (token cleared) admits nobody
+        s.token.lock().unwrap().clear();
+        assert!(!check_device(&s, &q("base", "devtok", "")));
+    }
+
+    #[tokio::test]
+    async fn ping_accepts_a_paired_device_on_an_old_link() {
+        let s = shared_with("current");
+        s.devices.lock().unwrap().insert(
+            "dev1".into(),
+            PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
+        );
+        let (code, body) = ping(State(s.clone()), Query(q("old", "devtok", ""))).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(body.0["link"], false);
+        let (code, _) = ping(State(s.clone()), Query(q("old", "", ""))).await;
+        assert_eq!(code, StatusCode::FORBIDDEN);
+        let (_, body) = ping(State(s.clone()), Query(q("current", "", ""))).await;
+        assert_eq!(body.0["link"], true);
     }
 
     #[test]

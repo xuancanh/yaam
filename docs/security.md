@@ -321,18 +321,20 @@ The opt-in mobile companion (Settings → Remote Control) is the one place YAAM
 *listens* on the network: a Rust axum server on `0.0.0.0:8712`. Its exposure
 is deliberately layered:
 
-- **Two secrets per request.** State/command routes require the per-start
-  24-character URL token AND a 32-character per-device token. Device tokens
-  are minted only by `remote_approve_pair` — an explicit confirmation dialog
-  the user answers on the desktop. Possessing the connect link alone gets a
-  device only as far as requesting a pairing (pending list capped at 5,
-  device ids validated and deduped).
+- **Pairing credential vs device credential.** The 24-character URL token is
+  the pairing credential: it lets a device ask to pair, nothing more
+  (pending list capped at 5, device ids validated and deduped). State and
+  command routes require a 32-character per-device token, minted only by
+  `remote_approve_pair` (an explicit confirmation dialog the user answers on
+  the desktop). Rotating the URL token retires old connect links for NEW
+  pairings; devices already paired keep working on any link until revoked
+  or until the remote is turned off.
 - **Revocable on both ends.** Paired devices persist in settings and render
   as revocable chips; the frontend re-hydrates the server's device set on
   every start and settings change, so a revoke locks the device out
   immediately, including streams it already has open: every SSE stream
-  re-checks its credentials whenever they change (revoke, token rotation,
-  remote off) and ends. The phone stores its token in localStorage.
+  re-checks its credentials whenever they change (revoke, remote off) and
+  ends. The phone stores its token in localStorage.
 - **Command queue, not execution.** The server executes nothing and holds no
   credentials — it stores the frontend-published snapshot and a queue of
   `{ kind, id, text, ok }` commands. The frontend applies each through the

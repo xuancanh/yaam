@@ -476,7 +476,7 @@ export function SettingsView() {
                 />
                 <button
                   className="open-btn"
-                  title="Mint a new token now — existing connect links stop working"
+                  title="Mint a new token now. Old connect links can no longer pair new devices; already paired devices keep working"
                   style={{ padding: '7px 11px', fontSize: 11.5, flexShrink: 0 }}
                   onClick={() => updateSettings({ remoteToken: Array.from(crypto.getRandomValues(new Uint8Array(24)), b => (b % 36).toString(36)).join(''), remoteTokenAt: Date.now() })}
                 >
