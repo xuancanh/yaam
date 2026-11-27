@@ -141,6 +141,7 @@ pub fn run() {
             domains::hooks::mcp_serve_respond,
             domains::hooks::mcp_serve_set_peer_tools,
             domains::transcript::transcript_watch,
+            domains::transcript::claude_transcript_exists,
             domains::transcript::transcript_unwatch,
             domains::transcript::discover_sessions,
             domains::opencode::free_port,

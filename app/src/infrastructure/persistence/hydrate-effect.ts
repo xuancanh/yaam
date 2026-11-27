@@ -27,6 +27,9 @@ export interface HydrationCtx {
   /** A line the user submitted in a restored terminal: records it and, for
    *  ACP sessions (no PTY echo), forwards it as the next prompt turn. */
   onTerminalSubmit?: (id: string, text: string, writeln: (line: string) => void) => void
+  /** a session found still running (live PTY or detached host): re-attach
+   *  its structured transcript tail */
+  onSessionRevived?: (id: string) => void
   /** Satellites render a workspace slice only; the main window owns secrets. */
   resolveSecrets?: boolean
 }
@@ -72,6 +75,7 @@ export function runHydration(ctx: HydrationCtx): void {
             // live PTY: never inject text (it corrupts TUI screens) —
             // nudge the app to repaint itself once the pane has mounted
             window.setTimeout(() => repaintSession(a.id), 1200)
+            ctx.onSessionRevived?.(a.id)
           } else if (a.detached && hosts.has(a.id)) {
             const host = hosts.get(a.id)!
             const attach = host.attach || a.cmd!
@@ -88,6 +92,7 @@ export function runHydration(ctx: HydrationCtx): void {
                     : agent),
                 }))
                 window.setTimeout(() => repaintSession(a.id), 1200)
+                ctx.onSessionRevived?.(a.id)
               })
               .catch(e => {
                 term.writeln(`\x1b[31m── could not reattach detached session · ${String(e)} ──\x1b[0m`)

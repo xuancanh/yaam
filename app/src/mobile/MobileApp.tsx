@@ -9,10 +9,12 @@ import { FilesBrowser, GitReview } from './FilesGit'
 import { reconcile } from './reconcile'
 import { SessionFlow } from './SessionFlow'
 import { PushCard } from './PushCard'
+import { useInstallOffer } from './pwa'
+import { IconAgents, IconBack, IconChat, IconClose, IconDownload, IconInbox, IconKeys, IconMaster, IconMic, IconPhoto, IconPlus, IconSend, IconShare, IconStop, IconTasks } from './icons'
 import { RECLAIM_EVENT, RECLAIM_AFTER_MS } from './reclaim'
 import type { RemoteSnapshot } from '../domains/remote/snapshot'
 import {
-  deviceToken, ensureUrlToken, fetchState, forgetPairing, resetDevice, pairingStatus, ping, rememberUrlToken, requestPairing, sendCommand, streamUrl, uploadImage, flushOutbox, onOutbox, discardOutbox, reportPresence, resyncPush,
+  deviceToken, ensureUrlToken, fetchState, forgetPairing, resetDevice, pairingStatus, pingStatus, rememberUrlToken, requestPairing, sendCommand, streamUrl, uploadImage, flushOutbox, onOutbox, discardOutbox, reportPresence, resyncPush,
 } from './api'
 
 const POLL_MS = 2000
@@ -21,8 +23,8 @@ const WATCHDOG_MS = 15_000
 const PRESENCE_EVERY_MS = 10_000
 const ATT_CONTENT_CAP = 6000
 
-type Pairing = 'checking' | 'bad-token' | 'unpaired' | 'waiting' | 'paired'
-type Tab = 'master' | 'tasks' | 'chats' | 'sessions' | 'approvals'
+type Pairing = 'checking' | 'bad-token' | 'unreachable' | 'unpaired' | 'waiting' | 'paired'
+type Tab = 'sessions' | 'approvals' | 'tasks' | 'chats' | 'master'
 type Detail = { kind: 'task' | 'chat' | 'session'; id: string } | null
 interface Attachment { name: string; path: string; text: string }
 
@@ -79,7 +81,7 @@ const border = (hex: string) => {
   const n = parseInt(hex.slice(1), 16)
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},.4)`
 }
-const initials = (name: string) => name.split(/[\s-_]+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '??'
+const initials = (name: string) => (name.match(/[\p{L}\p{N}]+/gu) ?? []).map(w => w[0]).slice(0, 2).join('').toUpperCase() || '··'
 
 function Avatar({ name, size = 40 }: { name: string; size?: number }) {
   const c = tint(name)
@@ -140,6 +142,15 @@ function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) 
       </div>
     )
   }
+  if (state === 'unreachable') {
+    return (
+      <div className="pairwrap">
+        <h2>Can't reach your desktop</h2>
+        <p>YAAM on your computer didn't answer. Check that it's running and that this phone can reach it (same network, or the tunnel link).</p>
+        <button className="btn accent" onClick={() => location.reload()}>Try again</button>
+      </div>
+    )
+  }
   if (state === 'waiting') {
     return (
       <div className="pairwrap">
@@ -155,6 +166,20 @@ function PairScreen({ state, onPair }: { state: Pairing; onPair: (name: string) 
       <p>YAAM pairs devices explicitly: send a request, then approve it on your desktop. The minted device token is stored on both ends until you revoke it.</p>
       <input value={name} onChange={e => { edited.current = true; setName(e.target.value) }} placeholder="Device name" maxLength={40} />
       <button className="btn accent" onClick={() => onPair(name.trim() || detectDeviceName())}>Request pairing</button>
+    </div>
+  )
+}
+
+/** Opened offline with nothing received yet (an installed app launched while
+ *  the desktop sleeps): say so instead of an endless spinner. The connection
+ *  loop keeps retrying and fills the screen in once the desktop answers. */
+function OfflineHero() {
+  return (
+    <div className="emptyhero" style={{ flex: 1, justifyContent: 'center' }}>
+      <span className="ehicon"><IconAgents size={26} /></span>
+      <div className="ehtitle">Waiting for your desktop</div>
+      <div className="ehsub">It isn't reachable right now. This screen fills in by itself once it is. Messages you send are kept and delivered then.</div>
+      <div className="spinner" style={{ marginTop: 10, width: 20, height: 20, borderWidth: 2 }} />
     </div>
   )
 }
@@ -312,10 +337,10 @@ function Composer({ placeholder, onSend, onAttach, children, lead, draftKey, pho
       )}
       <div className="composer">
         {lead}
-        {onAttach && <button className="attachbtn" title="Attach a file from the working folder" onClick={onAttach}>＋</button>}
+        {onAttach && <button className="attachbtn" title="Attach a file from the working folder" aria-label="Attach a file" onClick={onAttach}><IconPlus /></button>}
         {photos && (
           <>
-            <button className="attachbtn" title="Send a photo" aria-label="Send a photo" onClick={() => fileRef.current?.click()}>◩</button>
+            <button className="attachbtn" title="Send a photo" aria-label="Send a photo" onClick={() => fileRef.current?.click()}><IconPhoto /></button>
             <input
               ref={fileRef}
               type="file"
@@ -344,9 +369,9 @@ function Composer({ placeholder, onSend, onAttach, children, lead, draftKey, pho
           }}
         />
         {Speech && (
-          <button className={`attachbtn${listening ? ' rec' : ''}`} title={listening ? 'Stop dictation' : 'Dictate'} aria-label="Dictate" onClick={toggleMic}>●</button>
+          <button className={`attachbtn${listening ? ' rec' : ''}`} title={listening ? 'Stop dictation' : 'Dictate'} aria-label="Dictate" onClick={toggleMic}><IconMic /></button>
         )}
-        <button className="sendbtn" disabled={!canSend} onClick={send} aria-label="Send">↑</button>
+        <button className="sendbtn" disabled={!canSend} onClick={send} aria-label="Send"><IconSend /></button>
       </div>
     </div>
   )
@@ -622,7 +647,7 @@ function SessionKeyStrip({ sessionId }: { sessionId: string }) {
         aria-label="Terminal keys"
         onClick={() => setOpen(v => !v)}
       >
-        ⌨
+        <IconKeys />
       </button>
       {open && (
         <>
@@ -649,7 +674,7 @@ function SessionKeyStrip({ sessionId }: { sessionId: string }) {
 
 type SessionView = 'flow' | 'term' | 'files' | 'git'
 const VIEW_KEY = 'yaam-remote-session-view'
-const SESSION_VIEWS: [SessionView, string][] = [['term', 'TERMINAL'], ['flow', 'FLOW'], ['files', 'FILES'], ['git', 'CHANGES']]
+const SESSION_VIEWS: [SessionView, string][] = [['term', 'Terminal'], ['flow', 'Flow'], ['files', 'Files'], ['git', 'Changes']]
 function savedView(): SessionView {
   try {
     const v = localStorage.getItem(VIEW_KEY)
@@ -691,7 +716,7 @@ function SessionDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
       {reading ? (
         <>
           {view === 'term'
-            ? <div className="termarea"><TerminalView sessionId={s.id} data={s.term} cols={s.cols} rows={s.rows} /></div>
+            ? <div className="termarea"><TerminalView sessionId={s.id} data={s.term} cols={s.cols} rows={s.rows} appScroll={s.appScroll} /></div>
             : <SessionFlow sessionId={s.id} flow={s.flow} />}
           {live && s.actionNeeded && <DecisionBar id={s.id} text={s.actionNeeded} />}
           {live
@@ -987,12 +1012,12 @@ function StopButton({ onStop }: { onStop: () => void }) {
     <button
       onClick={() => { if (armed) { onStop(); setArmed(false) } else setArmed(true) }}
       style={{
-        flexShrink: 0, border: `1px solid ${armed ? 'var(--red)' : 'rgba(255,92,92,.4)'}`, borderRadius: 10,
-        background: armed ? 'var(--red)' : 'rgba(255,92,92,.12)', color: armed ? '#fff' : 'var(--red-soft)',
-        padding: '7px 12px', fontSize: 12, fontWeight: 600,
+        flexShrink: 0, border: `1px solid ${armed ? 'var(--red)' : 'rgba(255,92,92,.32)'}`, borderRadius: 999,
+        background: armed ? 'var(--red)' : 'rgba(255,92,92,.1)', color: armed ? '#fff' : 'var(--red-soft)',
+        padding: '7px 13px', fontSize: 12.5, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6,
       }}
     >
-      {armed ? 'Confirm stop' : '■ Stop'}
+      {armed ? 'Confirm stop' : <><IconStop /> Stop</>}
     </button>
   )
 }
@@ -1015,7 +1040,7 @@ const TaskCard = memo(function TaskCard({ t, sel, open }: { t: RemoteSnapshot['t
       </div>
       {t.watcherNote && <div className="lastline">⌁ {t.watcherNote}</div>}
       <div className="cardmeta">
-        {t.chat.length > 0 && <span>💬 {t.chat.length}</span>}
+        {t.chat.length > 0 && <span>{t.chat.length} message{t.chat.length === 1 ? '' : 's'}</span>}
         {t.criteria.length > 0 && <span>{t.criteria.length} criteria</span>}
         {t.awaitingUser && <span style={{ color: 'var(--amber)' }}>waiting on you</span>}
       </div>
@@ -1043,29 +1068,66 @@ const ChatCard = memo(function ChatCard({ c, sel, open }: { c: RemoteSnapshot['c
   )
 })
 
-const SessionCard = memo(function SessionCard({ s, sel, open }: { s: RemoteSnapshot['sessions'][number]; sel: boolean; open: Open }) {
+type SessionRow = RemoteSnapshot['sessions'][number]
+type Triage = 'needs' | 'running' | 'idle'
+const triageOf = (s: SessionRow): Triage =>
+  (s.status === 'needs' || s.actionNeeded ? 'needs' : s.status === 'running' ? 'running' : 'idle')
+
+/** One agent, triage-first: what state it is in at a glance, and when it is
+ *  waiting on you, the question with one-tap answers right on the card. */
+const SessionCard = memo(function SessionCard({ s, sel, open }: { s: SessionRow; sel: boolean; open: Open }) {
+  const t = triageOf(s)
+  const tone = t === 'needs' ? 'needs' : t === 'running' ? 'running' : s.status === 'error' ? 'error' : s.attention ? 'done' : 'idle'
+  const label = { needs: 'Needs you', running: 'Running', error: 'Failed', done: 'Finished', idle: 'Idle' }[tone]
+  const sub = [s.repo, s.task].filter(Boolean).join(' · ')
   return (
-    <button className={cardCls(sel, !!s.actionNeeded || s.attention)} onClick={() => open({ kind: 'session', id: s.id })}>
-      <div className="row">
-        <Avatar name={s.name} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="name">{s.name}</div>
-          <div className="meta">{s.repo}{s.task ? ` · ${s.task}` : ''}</div>
-        </div>
-        <StatusPill status={s.status} />
-      </div>
-      {(s.summary || s.actionNeeded) && (
-        <div className="lastline" style={s.actionNeeded ? { color: 'var(--amber)' } : undefined}>
-          {s.actionNeeded ? `⚠ ${s.actionNeeded}` : s.summary}
+    <div className={`acard ${tone}${sel ? ' sel' : ''}`}>
+      <button className="amain" onClick={() => open({ kind: 'session', id: s.id })}>
+        <span className="aav"><Avatar name={s.name} size={40} /><span className={`adot ${tone}`} /></span>
+        <span className="abody">
+          <span className="atop">
+            <span className="aname">{s.name}</span>
+            <span className={`astate ${tone}`}>{label}</span>
+          </span>
+          {sub && <span className="asub">{sub}</span>}
+          {t !== 'needs' && s.summary && <span className="aline">{s.summary}</span>}
+        </span>
+      </button>
+      {t === 'needs' && (
+        <div className="aask">
+          <div className="aq">{s.actionNeeded || 'Waiting for your input'}</div>
+          <div className="aacts">
+            <button className="pbtn go" onClick={() => void sendCommand({ kind: 'prompt_approve', id: s.id })}>Approve</button>
+            <button className="pbtn" onClick={() => void sendCommand({ kind: 'prompt_deny', id: s.id })}>Deny</button>
+            <button className="pbtn ghost" onClick={() => open({ kind: 'session', id: s.id })}>Open</button>
+          </div>
         </div>
       )}
-      <div className="cardmeta">
-        <span>${s.cost.toFixed(2)}</span>
-        <span style={{ marginLeft: 'auto', color: 'var(--faint)' }}>{s.kind}</span>
-      </div>
-    </button>
+    </div>
   )
 })
+
+/** Install nudge: one tap on Android/desktop Chrome, the Share instruction on
+ *  iPhone (which has no install API). Dismissal is remembered. */
+function InstallCard() {
+  const { offer, dismiss } = useInstallOffer()
+  if (!offer) return null
+  return (
+    <div className="installcard">
+      <img src="/icon-192.png" alt="" width={40} height={40} />
+      <div className="itext">
+        <div className="ititle2">Install YAAM</div>
+        <div className="isub">
+          {offer.kind === 'prompt'
+            ? 'Open it like an app, full screen, with lock-screen alerts.'
+            : <>Tap <span className="ishare"><IconShare size={13} /></span> then <b>Add to Home Screen</b>.</>}
+        </div>
+      </div>
+      {offer.kind === 'prompt' && <button className="ibtn" onClick={offer.install}><IconDownload size={16} /> Install</button>}
+      <button className="iclose" aria-label="Dismiss" onClick={dismiss}><IconClose size={14} /></button>
+    </div>
+  )
+}
 
 function Lists({ tab, snap, open, selected, onNewChat }: {
   tab: Tab
@@ -1076,7 +1138,7 @@ function Lists({ tab, snap, open, selected, onNewChat }: {
   onNewChat?: (durableAgentId: string) => void
 }) {
   // design pickups: status filter chips on Agents, live search on Chat
-  const [filter, setFilter] = useState<'all' | 'running' | 'needs' | 'idle'>('all')
+  const [filter, setFilter] = useState<'all' | Triage>('all')
   const [query, setQuery] = useState('')
   if (tab === 'tasks') {
     const tasks = [...snap.tasks].sort((a, b) => COL_ORDER.indexOf(a.col) - COL_ORDER.indexOf(b.col))
@@ -1140,31 +1202,45 @@ function Lists({ tab, snap, open, selected, onNewChat }: {
     )
   }
   if (tab === 'sessions') {
-    const sessions = filter === 'all' ? snap.sessions
-      : filter === 'idle' ? snap.sessions.filter(s => s.status !== 'running' && s.status !== 'needs')
-      : snap.sessions.filter(s => s.status === filter)
-    // triage grouping mirrors the desktop Runs rail: anything waiting on the
-    // user first, live work second, everything else after
-    const triageOf = (s: RemoteSnapshot['sessions'][number]) =>
-      (s.status === 'needs' || s.attention || s.actionNeeded ? 'needs' : s.status === 'running' ? 'running' : 'idle')
-    const triage = ([
-      ['needs', 'NEEDS YOU'], ['running', 'RUNNING'], ['idle', 'IDLE'],
-    ] as const).map(([id, label]) => ({ id, label, items: sessions.filter(s => triageOf(s) === id) }))
+    const counts: Record<Triage, number> = { needs: 0, running: 0, idle: 0 }
+    for (const x of snap.sessions) counts[triageOf(x)]++
+    const sessions = filter === 'all' ? snap.sessions : snap.sessions.filter(x => triageOf(x) === filter)
+    // triage order mirrors the desktop Runs rail: waiting on you, live, rest
+    const groups = ([['needs', 'Needs you'], ['running', 'Running'], ['idle', 'Idle']] as const)
+      .map(([id, label]) => ({ id, label, items: sessions.filter(x => triageOf(x) === id) }))
+      .filter(g => g.items.length > 0)
     return (
       <div className="body">
-        <div className="chips" style={{ margin: '0 0 12px' }}>
-          {([['all', 'All'], ['running', 'Running'], ['needs', 'Blocked'], ['idle', 'Idle']] as const).map(([id, label]) => (
-            <button key={id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>{label}</button>
-          ))}
-        </div>
-        {sessions.length === 0 && <div className="empty">No sessions{filter !== 'all' ? ' in this state' : ''}.</div>}
-        {triage.filter(g => g.items.length > 0).map(g => (
-          <div key={g.id}>
-            <div className="section" style={{ marginTop: 14, ...(g.id === 'needs' ? { color: 'var(--amber)' } : {}) }}>
-              {g.label} <span style={{ color: 'var(--faint)' }}>{g.items.length}</span>
-            </div>
-            {g.items.map(s => <SessionCard key={s.id} s={s} sel={selected === s.id} open={open} />)}
+        <InstallCard />
+        {snap.sessions.length > 0 && (
+          <div className="stats" role="tablist" aria-label="Filter agents">
+            {([['needs', 'Needs you'], ['running', 'Running'], ['idle', 'Idle']] as const).map(([id, label]) => (
+              <button
+                key={id} role="tab" aria-selected={filter === id}
+                className={`stat ${id}${filter === id ? ' on' : ''}`}
+                onClick={() => setFilter(f => (f === id ? 'all' : id))}
+              >
+                <b>{counts[id]}</b>
+                <span>{label}</span>
+              </button>
+            ))}
           </div>
+        )}
+        {snap.sessions.length === 0 && (
+          <div className="emptyhero">
+            <span className="ehicon"><IconAgents size={26} /></span>
+            <div className="ehtitle">No agents yet</div>
+            <div className="ehsub">Start a session on the desktop and it shows up here, live.</div>
+          </div>
+        )}
+        {snap.sessions.length > 0 && sessions.length === 0 && <div className="empty">Nothing {filter === 'needs' ? 'needs you' : `is ${filter}`} right now.</div>}
+        {groups.map(g => (
+          <section key={g.id}>
+            {(groups.length > 1 || filter === 'all') && (
+              <div className={`group ${g.id}`}>{g.label}<span>{g.items.length}</span></div>
+            )}
+            {g.items.map(x => <SessionCard key={x.id} s={x} sel={selected === x.id} open={open} />)}
+          </section>
         ))}
       </div>
     )
@@ -1229,19 +1305,27 @@ function inboxCount(s: RemoteSnapshot): number {
     + s.tasks.filter(t => t.awaitingUser).length
 }
 
-const TABS: { id: Tab; label: string; glyph: string }[] = [
-  { id: 'master', label: 'Master', glyph: '✦' },
-  { id: 'tasks', label: 'Tasks', glyph: '▦' },
-  { id: 'chats', label: 'Chat', glyph: '◍' },
-  { id: 'sessions', label: 'Agents', glyph: '⌘' },
-  { id: 'approvals', label: 'Inbox', glyph: '◔' },
+const ALL_TABS: { id: Tab; label: string; Icon: (p: { size?: number }) => React.ReactNode }[] = [
+  { id: 'sessions', label: 'Agents', Icon: IconAgents },
+  { id: 'approvals', label: 'Inbox', Icon: IconInbox },
+  { id: 'tasks', label: 'Tasks', Icon: IconTasks },
+  { id: 'chats', label: 'Chat', Icon: IconChat },
+  { id: 'master', label: 'Master', Icon: IconMaster },
 ]
+/** Master is optional: its tab exists only while the desktop has a Master
+ *  brain configured. Agents is home either way. */
+const tabsFor = (snap: RemoteSnapshot | null) => ALL_TABS.filter(t => t.id !== 'master' || !!snap?.master?.brain)
 
 const HEAD_SUB: Record<Tab, (s: RemoteSnapshot) => string> = {
   master: s => (s.master?.brain ? (s.master.busy ? 'thinking…' : 'orchestrator') : 'brain off'),
   tasks: s => `${s.tasks.length} on the board`,
   chats: s => `${s.chats.length} conversations`,
-  sessions: s => `${s.sessions.length} sessions`,
+  sessions: s => {
+    const needs = s.sessions.filter(x => triageOf(x) === 'needs').length
+    const running = s.sessions.filter(x => triageOf(x) === 'running').length
+    if (!s.sessions.length) return 'nothing running'
+    return [needs && `${needs} need${needs === 1 ? 's' : ''} you`, running && `${running} running`].filter(Boolean).join(' · ') || 'all idle'
+  },
   approvals: s => (inboxCount(s) ? `${inboxCount(s)} waiting on you` : 'all clear'),
 }
 
@@ -1281,7 +1365,7 @@ export function MobileApp() {
   const [snap, setSnap] = useState<RemoteSnapshot | null>(null)
   const [online, setOnline] = useState(true)
   const [updatedAt, setUpdatedAt] = useState(0)
-  const [tab, setTab] = useState<Tab>('master')
+  const [tab, setTab] = useState<Tab>('sessions')
   const [detail, setDetail] = useState<Detail>(null)
   const wide = useWide()
 
@@ -1289,7 +1373,7 @@ export function MobileApp() {
   // back gesture closes a detail (or steps back a tab switch) instead of
   // leaving the app
   useEffect(() => {
-    history.replaceState({ tab: 'master', d: null }, '')
+    history.replaceState({ tab: 'sessions', d: null }, '')
     const onPop = (e: PopStateEvent) => {
       const st = e.state as { tab?: Tab; d?: Detail } | null
       if (!st) return
@@ -1320,7 +1404,7 @@ export function MobileApp() {
     const i = open.indexOf(':')
     const kind = i < 0 ? open : open.slice(0, i)
     const id = i < 0 ? '' : open.slice(i + 1)
-    const tabFor: Record<string, Tab> = { session: 'sessions', task: 'tasks', chat: 'chats', master: 'master', inbox: 'approvals' }
+    const tabFor: Record<string, Tab> = { session: 'sessions', agents: 'sessions', task: 'tasks', chat: 'chats', master: 'master', inbox: 'approvals' }
     if (!tabFor[kind]) return
     pickTab(tabFor[kind])
     if (id && (kind === 'session' || kind === 'task' || kind === 'chat')) openDetail({ kind, id })
@@ -1341,6 +1425,15 @@ export function MobileApp() {
     navigator.serviceWorker?.addEventListener('message', onMsg)
     return () => navigator.serviceWorker?.removeEventListener('message', onMsg)
   }, [pairing])
+  // Master is optional: when its brain is off (or turned off while open), the
+  // Master tab does not exist, so land on Agents instead
+  const brainOn = !!snap?.master?.brain
+  useEffect(() => {
+    if (snap && !brainOn && tab === 'master') {
+      history.replaceState({ tab: 'sessions', d: null }, '')
+      setTab('sessions')
+    }
+  }, [snap, brainOn, tab])
   // workspace switched: the open detail's entity lives in the OLD workspace —
   // drop back to the list without touching the history stack direction
   const leaveDetail = () => {
@@ -1372,7 +1465,11 @@ export function MobileApp() {
       // bookmark reconnects instead of dead-ending on "link out of date")
       const token = ensureUrlToken()
       if (!token) { setPairing('bad-token'); return }
-      if (!(await ping())) { setPairing('bad-token'); return }
+      const st = await pingStatus()
+      // unreachable is not a bad link: a paired phone opens (offline banner,
+      // queued messages, automatic reconnect) instead of "link out of date"
+      if (st === 'unreachable' && deviceToken()) { setOnline(false); setPairing('paired'); return }
+      if (st !== 'ok') { setPairing(st === 'unreachable' ? 'unreachable' : 'bad-token'); return }
       rememberUrlToken(token) // known-good — reuse it if the URL is ever blank
       setPairing(deviceToken() ? 'paired' : 'unpaired')
     })()
@@ -1549,11 +1646,13 @@ export function MobileApp() {
     : detail?.kind === 'session' ? <SessionDetail snap={snap} id={detail.id} />
     : null
 
-  const navButtons = TABS.map(t => (
-    <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => pickTab(t.id)}>
+  const tabs = tabsFor(snap)
+  const inbox = snap ? inboxCount(snap) : 0
+  const navButtons = tabs.map(t => (
+    <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => pickTab(t.id)} aria-label={t.label} aria-current={tab === t.id ? 'page' : undefined}>
       <span className="glyph">
-        {t.glyph}
-        {t.id === 'approvals' && snap && inboxCount(snap) > 0 && <span className="badge">{inboxCount(snap)}</span>}
+        <t.Icon size={22} />
+        {t.id === 'approvals' && inbox > 0 && <span className="badge">{inbox > 99 ? '99+' : inbox}</span>}
       </span>
       <span className="tlabel">{t.label}</span>
     </button>
@@ -1589,7 +1688,7 @@ export function MobileApp() {
     <div className="shell">
       {detail ? (
         <div className="detailhead">
-          <button className="back" onClick={closeDetail}>‹</button>
+          <button className="back" onClick={closeDetail} aria-label="Back"><IconBack /></button>
           {detail.kind !== 'task' && <Avatar name={detailTitle} size={34} />}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="htitle">{detailTitle}</div>
@@ -1602,16 +1701,18 @@ export function MobileApp() {
       ) : (
         <div className="pagehead">
           <div className="titlerow">
-            <h1>{TABS.find(t => t.id === tab)?.label}</h1>
-            {snap && <span className="sub">{HEAD_SUB[tab](snap)}</span>}
-            {snap && <span style={{ marginLeft: 'auto', alignSelf: 'center' }}><WorkspaceSwitcher snap={snap} onSwitched={leaveDetail} /></span>}
-            <span className={`dot${online ? '' : ' off'}`} style={{ marginLeft: snap ? 8 : 'auto' }} />
+            <h1>{ALL_TABS.find(t => t.id === tab)?.label}</h1>
+            <span className="hright">
+              {snap && <WorkspaceSwitcher snap={snap} onSwitched={leaveDetail} />}
+              <span className={`dot${online ? '' : ' off'}`} title={online ? 'Connected' : 'Desktop unreachable'} />
+            </span>
           </div>
+          {snap && <div className="sub">{HEAD_SUB[tab](snap)}</div>}
         </div>
       )}
       <ConnBanner online={online} updatedAt={updatedAt} />
       {!snap ? (
-        <div className="pairwrap"><div className="spinner" /></div>
+        online ? <div className="pairwrap"><div className="spinner" /></div> : <OfflineHero />
       ) : tab === 'master' && !detail ? (
         <MasterView snap={snap} />
       ) : (

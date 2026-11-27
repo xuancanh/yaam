@@ -110,11 +110,18 @@ async function postJson<T>(path: string, body: unknown, params: Record<string, s
 
 /** Validate the URL token before showing the pairing screen. */
 export async function ping(): Promise<boolean> {
+  return (await pingStatus()) === 'ok'
+}
+
+/** 'unreachable' (no answer at all: the desktop is asleep, off the network,
+ *  or the app is launching offline from its cached shell) is not the same as
+ *  'bad' (the desktop answered and refused this link's token). */
+export async function pingStatus(): Promise<'ok' | 'bad' | 'unreachable'> {
   try {
     await getJson<{ ok: boolean }>('/api/ping')
-    return true
-  } catch {
-    return false
+    return 'ok'
+  } catch (e) {
+    return e instanceof TypeError ? 'unreachable' : 'bad'
   }
 }
 

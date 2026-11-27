@@ -101,7 +101,7 @@ export function createLaunchRuntime(ctx: LaunchRuntimeCtx): LaunchRuntime {
           }))
           // codex: the captured id names its rollout file — start the
           // structured tail (whole file on a fresh launch, new lines on resume)
-          if (probeType.probe === 'codex') void port.watchTranscript(id, 'codex', '', sid, !isResume)
+          if (probeType.probe === 'codex') void port.watchTranscript(id, 'codex', '', sid, !isResume, isResume)
         }).catch(() => {})
       }
       later(7000, tryDetect)

@@ -50,7 +50,7 @@ export function applyTranscriptLines(deps: TranscriptEventsDeps, e: TranscriptLi
     const rec = ev as Record<string, unknown>
     // claude transcripts stream `assistant` entries; codex rollouts stream
     // `response_item`/`event_msg` — all mean the agent is actively working
-    if (rec.type === 'assistant' || rec.type === 'response_item' || rec.type === 'event_msg') sawActivity = true
+    if (!e.backfill && (rec.type === 'assistant' || rec.type === 'response_item' || rec.type === 'event_msg')) sawActivity = true
     ring.push(rec)
     fresh.push(rec)
   }

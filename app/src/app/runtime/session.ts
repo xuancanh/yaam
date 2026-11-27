@@ -18,7 +18,8 @@ import { attachTranscriptEvents } from '../../domains/session/transcript-events'
 import { attachOpencodeEvents } from '../../domains/session/opencode-events'
 import { attachAcpEvents } from '../../domains/session/acp-events'
 import { attachMcpServe } from '../../domains/session/mcp-serve'
-import { sendLineToSession } from '../../domains/session/command'
+import { sendLineToSession, typeForCommand } from '../../domains/session/command'
+import { adapterFor } from '../../core/agent-adapters'
 import { mcpServeSetPeerTools } from '../../core/native'
 import { useAppStore } from '../../core/store'
 import { subscribeSessionExits } from '../../domains/session/exit-handler'
@@ -35,6 +36,8 @@ import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
 
 export interface SessionRuntime {
+  /** re-attach the transcript tail of a session found still running at boot */
+  rewatchTranscript: (id: string) => void
   sessionScreenTail: (id: string) => string
   setNeedsInput: (id: string, question: string, options?: EscOption[], cursorNum?: number) => void
   applyAgentStatus: (sid: string, task?: string, summary?: string, nextAction?: string, actionNeeded?: string) => void
@@ -196,7 +199,22 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs, isMa
   let offAcp: (() => void) | undefined
   let offMcpServe: (() => void) | undefined
   let offPeerSetting: (() => void) | undefined
+  // A session still running after an app restart (a reattached PTY or a
+  // detached host) had no transcript tail: nothing restarted it, so its flow
+  // timeline and transcript signals stayed empty for the rest of its life.
+  // Re-tail it with recent history read back.
+  const rewatchTranscript = (id: string) => {
+    const a = stateRef.current.agents.find(x => x.id === id)
+    if (!a?.cliSessionId || !a.cmd || a.machine) return
+    const type = stateRef.current.agentTypes.find(t => t.id === a.typeId) ?? typeForCommand(a.cmd, stateRef.current.agentTypes)
+    const adapter = adapterFor(type, a.cmd)
+    const kind = adapter?.store.kind === 'claude-projects' ? 'claude' : type?.probe === 'codex' ? 'codex' : null
+    if (!kind) return
+    void realSessionProcessPort.watchTranscript(id, kind, kind === 'claude' ? (a.cwd || '') : '', a.cliSessionId, false, true)
+  }
+
   return {
+    rewatchTranscript,
     sessionScreenTail, setNeedsInput, applyAgentStatus, appendTail,
     runMonitor, disposeMonitor: (id: string) => monitor.dispose(id),
     taskForSession, pushTaskChat,
@@ -209,7 +227,7 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs, isMa
       offHooks ??= attachHookEvents({
         stateRef, setNeedsInput, clearNeeds,
         // re-point the structured transcript tail at the new conversation
-        onCliSessionChange: (agentId, sid, cwd, fresh) => { void realSessionProcessPort.watchTranscript(agentId, 'claude', cwd, sid, fresh).catch(() => {}) },
+        onCliSessionChange: (agentId, sid, cwd, fresh) => { void realSessionProcessPort.watchTranscript(agentId, 'claude', cwd, sid, fresh, !fresh).catch(() => {}) },
       })
       offTranscript ??= attachTranscriptEvents({ stateRef })
       offOpencode ??= attachOpencodeEvents({ stateRef, setNeedsInput, clearNeeds })

@@ -28,6 +28,24 @@ pub struct TranscriptManager {
 struct TranscriptLines {
     agent: String,
     lines: Vec<String>,
+    /// history read when the watch started (not new activity): consumers
+    /// build the flow timeline from it but must not treat it as live work
+    backfill: bool,
+}
+
+/// How much of an existing transcript a resumed or reattached session reads
+/// back, so its flow timeline shows recent history instead of starting empty.
+const BACKFILL_BYTES: u64 = 512 * 1024;
+
+/// Where a watch starts reading.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Start {
+    /// the whole file (a fresh conversation)
+    Beginning,
+    /// only what is appended from now on
+    End,
+    /// the last BACKFILL_BYTES, then everything appended
+    Backfill,
 }
 
 /// Claude Code transcript file for a session (see util::claude_project_dir).
@@ -72,23 +90,43 @@ fn find_codex_rollout(home: &str, session_id: &str) -> Option<std::path::PathBuf
     None
 }
 
-fn tail_loop(app: AppHandle, agent: String, path: std::path::PathBuf, stop: Arc<AtomicBool>, from_start: bool) {
-    // existing file = resume: only stream what the session writes from now on
-    // (unless the caller knows the whole file belongs to this fresh session)
-    let mut offset: u64 = if from_start {
-        0
-    } else {
-        std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+fn tail_loop(
+    app: AppHandle,
+    agent: String,
+    mut path: std::path::PathBuf,
+    stop: Arc<AtomicBool>,
+    start: Start,
+    relocate: Option<(String, String)>,
+) {
+    let len0 = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let mut offset: u64 = match start {
+        Start::Beginning => 0,
+        Start::End => len0,
+        Start::Backfill => len0.saturating_sub(BACKFILL_BYTES),
     };
     let mut carry: Vec<u8> = Vec::new();
-    // inside a pathological line that was dropped: discard through its end
-    let mut skipping = false;
+    // inside a pathological line that was dropped (or, for a backfill, the
+    // partial line the window starts in): discard through its end
+    let mut skipping = start == Start::Backfill && offset > 0;
+    let mut backfill = start == Start::Backfill;
+    let mut misses = 0u32;
     loop {
         if stop.load(Ordering::Relaxed) {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
-        let Ok(meta) = std::fs::metadata(&path) else { continue };
+        let Ok(meta) = std::fs::metadata(&path) else {
+            // Claude's project folder name is derived from the cwd, and the
+            // derivation can miss (symlinked or very long paths): look the
+            // session up by name in every project folder now and then
+            misses += 1;
+            if let Some((home, sid)) = relocate.as_ref().filter(|_| misses % 8 == 0) {
+                if let Some(found) = crate::util::find_claude_transcript(home, sid) {
+                    path = found;
+                }
+            }
+            continue;
+        };
         let len = meta.len();
         if len < offset {
             // truncated/rewritten — start over from the top
@@ -128,7 +166,11 @@ fn tail_loop(app: AppHandle, agent: String, path: std::path::PathBuf, stop: Arc<
         }
         let lines = split_lines(&mut carry);
         if !lines.is_empty() {
-            let _ = app.emit("transcript-lines", TranscriptLines { agent: agent.clone(), lines });
+            let _ = app.emit("transcript-lines", TranscriptLines { agent: agent.clone(), lines, backfill });
+        }
+        // a backfill window can span several reads; it ends once caught up
+        if backfill && offset >= len {
+            backfill = false;
         }
     }
 }
@@ -281,7 +323,15 @@ pub fn transcript_watch(
     cwd: String,
     session_id: String,
     from_start: bool,
+    backfill: Option<bool>,
 ) -> Result<(), String> {
+    let start = if from_start {
+        Start::Beginning
+    } else if backfill.unwrap_or(false) {
+        Start::Backfill
+    } else {
+        Start::End
+    };
     if session_id.is_empty() || session_id.contains(['/', '\\']) || session_id.contains("..") {
         return Err("invalid session id".to_string());
     }
@@ -299,7 +349,8 @@ pub fn transcript_watch(
     match kind.as_str() {
         "claude" => {
             let path = claude_transcript_path(&home, &cwd, &session_id);
-            std::thread::spawn(move || tail_loop(app, agent, path, stop, from_start));
+            let relocate = Some((home, session_id));
+            std::thread::spawn(move || tail_loop(app, agent, path, stop, start, relocate));
             Ok(())
         }
         "codex" => {
@@ -310,7 +361,7 @@ pub fn transcript_watch(
                         return;
                     }
                     if let Some(path) = find_codex_rollout(&home, &session_id) {
-                        tail_loop(app, agent, path, stop, from_start);
+                        tail_loop(app, agent, path, stop, start, None);
                         return;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -320,6 +371,24 @@ pub fn transcript_watch(
         }
         other => Err(format!("unsupported transcript kind: {other}")),
     }
+}
+
+/// Whether a Claude Code conversation is still on disk. Claude deletes
+/// transcripts after its retention period (30 days by default), and resuming a
+/// deleted one fails ("No conversation found") and then runs as a new
+/// conversation under an id YAAM never learns, so the caller starts a fresh,
+/// tracked one instead.
+#[tauri::command]
+pub async fn claude_transcript_exists(cwd: String, session_id: String) -> Result<bool, String> {
+    if session_id.is_empty() || session_id.contains(['/', '\\']) || session_id.contains("..") {
+        return Err("invalid session id".to_string());
+    }
+    let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
+    crate::util::blocking(move || {
+        let path = claude_transcript_path(&home, &cwd, &session_id);
+        Ok(path.is_file() || crate::util::find_claude_transcript(&home, &session_id).is_some())
+    })
+    .await
 }
 
 /// Stop a session's transcript watcher (archive/delete).

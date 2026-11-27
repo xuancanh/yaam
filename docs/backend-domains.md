@@ -402,8 +402,11 @@ Routes:
   Web Push subscription + preferences (`remote_push.rs`);
 - `GET /api/presence?t&d&v` — "companion on screen" heartbeat; `remote_push`
   sends nothing while a phone reported itself visible in the last 25s;
-- `GET /sw.js`, `/manifest.webmanifest`, `/icon.png` — public: the service
-  worker (`remote-sw.js`), install manifest, and icon.
+- `GET /sw.js`, `/manifest.webmanifest`, `/icon.png`, `/icon-192.png`,
+  `/icon-maskable.png`, `/apple-touch-icon.png` — public: the service worker
+  (`remote-sw.js`: push alerts, plus a network-first app-shell cache so the
+  installed app opens offline; `/api/*` is never cached), the install
+  manifest, and its icons (`remote-assets/`).
 
 Push: `remote_push(req)` encrypts one payload per subscribed device whose
 preferences want its kind (`needs` | `done`) and POSTs it to that device's

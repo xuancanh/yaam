@@ -86,7 +86,7 @@ const MAX_UPLOADS_KEPT: usize = 40;
 fn valid_command(cmd: &RemoteCommand) -> bool {
     const KINDS: &[&str] = &[
         "master_send", "chat_send", "chat_new", "chat_reply", "chat_rate", "task_chat", "task_start",
-        "session_input", "session_key", "session_focus", "session_blur", "session_watch", "session_unwatch",
+        "session_input", "session_key", "session_scroll", "session_focus", "session_blur", "session_watch", "session_unwatch",
         "prompt_answer", "prompt_approve", "prompt_deny", "session_stop",
         "session_resume", "approve_master", "approve_chat", "workspace_switch", "rpc_fs_list",
         "rpc_fs_read", "rpc_fs_b64", "rpc_git_status", "rpc_git_diff",
@@ -638,12 +638,28 @@ async fn manifest() -> Response {
     // no start_url: the browser installs the page's own URL, connect token
     // included, so the home-screen app opens already linked
     let body = serde_json::json!({
+        "id": "/",
         "name": "YAAM Remote",
         "short_name": "YAAM",
+        "description": "Watch, answer and steer your coding agents from your phone.",
+        "scope": "/",
         "display": "standalone",
+        "display_override": ["standalone", "minimal-ui"],
+        "orientation": "any",
         "background_color": "#08090c",
         "theme_color": "#08090c",
-        "icons": [{ "src": "/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }],
+        "categories": ["developer", "productivity", "utilities"],
+        "icons": [
+            { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+            { "src": "/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+            { "src": "/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+        ],
+        // the page re-applies its remembered connect token on these, like a
+        // tapped alert does on a cold start
+        "shortcuts": [
+            { "name": "Inbox", "short_name": "Inbox", "url": "/?open=inbox", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+            { "name": "Agents", "short_name": "Agents", "url": "/?open=agents", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+        ],
     });
     Response::builder()
         .header(header::CONTENT_TYPE, "application/manifest+json")
@@ -652,7 +668,19 @@ async fn manifest() -> Response {
 }
 
 async fn icon() -> Response {
-    Response::builder().header(header::CONTENT_TYPE, "image/png").body(axum::body::Body::from(ICON)).unwrap()
+    png(ICON)
+}
+
+const ICON_192: &[u8] = include_bytes!("remote-assets/icon-192.png");
+const ICON_MASKABLE: &[u8] = include_bytes!("remote-assets/icon-maskable.png");
+const APPLE_TOUCH_ICON: &[u8] = include_bytes!("remote-assets/apple-touch-icon.png");
+
+fn png(bytes: &'static [u8]) -> Response {
+    Response::builder()
+        .header(header::CONTENT_TYPE, "image/png")
+        .header(header::CACHE_CONTROL, "public, max-age=86400")
+        .body(axum::body::Body::from(bytes))
+        .unwrap()
 }
 
 async fn push_key(State(s): Shared, Query(q): Query<AuthQuery>) -> (StatusCode, Json<serde_json::Value>) {
@@ -756,6 +784,9 @@ fn router(shared: Arc<RemoteShared>) -> Router {
         .route("/sw.js", get(service_worker))
         .route("/manifest.webmanifest", get(manifest))
         .route("/icon.png", get(icon))
+        .route("/icon-192.png", get(|| async { png(ICON_192) }))
+        .route("/icon-maskable.png", get(|| async { png(ICON_MASKABLE) }))
+        .route("/apple-touch-icon.png", get(|| async { png(APPLE_TOUCH_ICON) }))
         .fallback(get(app_page))
         .layer(middleware::from_fn(security_headers))
         .with_state(shared)

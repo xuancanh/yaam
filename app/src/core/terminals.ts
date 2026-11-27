@@ -315,6 +315,54 @@ export function isAltScreen(id: string): boolean {
   return entries.get(id)?.term.buffer.active.type === 'alternate'
 }
 
+/** Whether scrolling this session means telling the APP to scroll: a full-
+ *  screen TUI (alternate buffer: no scrollback of its own) or an app that
+ *  turned on mouse reporting. A plain shell scrolls its own scrollback. */
+export function appScrolls(id: string): 'mouse' | 'keys' | null {
+  const term = entries.get(id)?.term
+  if (!term) return null
+  if (term.modes.mouseTrackingMode !== 'none') return 'mouse'
+  return term.buffer.active.type === 'alternate' ? 'keys' : null
+}
+
+/** Bytes that scroll the app by `lines` (negative = up), encoded exactly as
+ *  xterm's own wheel handling would: mouse-wheel reports when the app enabled
+ *  mouse tracking (SGR or legacy encoding), else arrow keys in the alternate
+ *  buffer (honoring application-cursor mode). Null when the session scrolls
+ *  its own scrollback instead. A phone drag can't go through xterm's wheel
+ *  path (no DOM event on this machine), so it is encoded here. */
+export function appScrollInput(id: string, lines: number): string | null {
+  const term = entries.get(id)?.term
+  if (!term || !appScrolls(id)) return null
+  // the mouse encoding has no public API; SGR (1006) is what modern TUIs use
+  const encoding = (term as unknown as { _core?: { coreMouseService?: { activeEncoding?: string } } })
+    ._core?.coreMouseService?.activeEncoding ?? 'SGR'
+  return encodeAppScroll({
+    mouse: term.modes.mouseTrackingMode !== 'none',
+    appCursor: term.modes.applicationCursorKeysMode,
+    encoding, cols: term.cols, rows: term.rows,
+  }, lines)
+}
+
+/** Pure encoder behind appScrollInput. */
+export function encodeAppScroll(
+  m: { mouse: boolean; appCursor: boolean; encoding: string; cols: number; rows: number },
+  lines: number,
+): string {
+  const n = Math.min(30, Math.abs(Math.round(lines)))
+  if (!n) return ''
+  if (m.mouse) {
+    const btn = lines < 0 ? 64 : 65
+    const col = Math.max(1, Math.ceil(m.cols / 2))
+    const row = Math.max(1, Math.ceil(m.rows / 2))
+    const one = m.encoding === 'DEFAULT'
+      ? `\x1b[M${String.fromCharCode(32 + btn, 32 + Math.min(col, 223), 32 + Math.min(row, 223))}`
+      : `\x1b[<${btn};${col};${row}M`
+    return one.repeat(n)
+  }
+  return `\x1b${m.appCursor ? 'O' : '['}${lines < 0 ? 'A' : 'B'}`.repeat(n)
+}
+
 /** A remote device takes terminal focus: size BOTH the desktop xterm and the
  *  PTY to the remote's dimensions so every device renders the same layout.
  *  The desktop steals focus back simply by fitting again (pane interaction,

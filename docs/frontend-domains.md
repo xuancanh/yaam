@@ -653,7 +653,9 @@ approval — without granting the remote any capability the desktop UI lacks.
   device set from `settings.remoteDevices` (so Settings revokes propagate),
   publishes a debounced snapshot on every store change, drains the command
   queue (master/chat send, task chat/start, session input/stop/resume, a
-  `session_key` that writes a mapped byte sequence straight to the PTY, prompt
+  `session_key` that writes a mapped byte sequence straight to the PTY,
+  `session_scroll` (a phone drag over a full-screen TUI, encoded by
+  `appScrollInput` in `core/terminals.ts` as wheel reports or arrow keys), prompt
   answer/approve/deny, and approvals) through the normal conductor actions, and
   turns pairing requests into `confirmAction` dialogs — approval mints the device
   token and persists it in settings.

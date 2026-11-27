@@ -226,9 +226,11 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
     resume: id => {
       // resuming a minted-id CLI keeps writing the same transcript: tail only
       // what the resumed process appends
+      // (with recent history read back, so the flow timeline is not empty
+      // until the resumed agent does something new)
       const watchResumedTranscript = (sid: string, a: Agent, adapter: ReturnType<typeof adapterFor>) => {
         if (adapter?.store.kind === 'claude-projects' && a.cliSessionId) {
-          void port.watchTranscript(sid, 'claude', a.cwd || '', a.cliSessionId, false)
+          void port.watchTranscript(sid, 'claude', a.cwd || '', a.cliSessionId, false, true)
         }
       }
       const agent = stateRef.current.agents.find(a => a.id === id)
@@ -308,6 +310,26 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           resumeNote = 'reattaching detached session — relaunches it if it had ended'
         }
         const adapter = adapterFor(type, agent.cmd)
+        // Claude deletes conversations after its retention period (30 days by
+        // default). Resuming a deleted one prints "No conversation found" and
+        // then runs as a NEW conversation under an id we never learn, so its
+        // flow timeline and the next resume both pointed at a missing file.
+        // Start a fresh conversation under a newly minted, tracked id instead.
+        const resolveResume = async (): Promise<string> => {
+          const sid = agent.cliSessionId
+          if (!sid || cmd === agent.cmd || !agent.cmd || adapter?.sessionId !== 'mint' || !adapter.mintFlag
+            || adapter.store.kind !== 'claude-projects') return cmd
+          if (await port.claudeTranscriptExists(agent.cwd || '', sid)) return cmd
+          const fresh = crypto.randomUUID()
+          dispatch(s => ({
+            ...s,
+            agents: s.agents.map(a => a.id === id
+              ? { ...a, cliSessionId: fresh, log: a.log.concat([{ t: 'sys' as const, x: `conversation ${sid} is no longer on disk (Claude deletes old transcripts) · started a new one · ${fresh}` }]) }
+              : a),
+          }))
+          void port.watchTranscript(id, 'claude', agent.cwd || '', fresh, true)
+          return agent.cmd.replace(/^(\s*\S+)/, `$1 ${adapter.mintFlag(fresh)}`)
+        }
         // the respawn reuses this xterm. NEVER wipe the scrollback
         // automatically — re-normalize the modes (alt screen, mouse tracking,
         // …) and let the respawned CLI repaint its own content. If the old
@@ -360,8 +382,9 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
             .then(() => { setTimeout(() => port.repaintTerminal(id), 400) })
             .catch(failResume)
           void (async () => {
+            const resumeCmd = legacyAttach ? cmd : await resolveResume()
             const hostBase = legacyAttach ? ''
-              : `${envPrefix(type?.env)}${adapter && !terminalShell ? await withSensingFlags(port, id, cmd, adapter) : cmd}`.trim()
+              : `${envPrefix(type?.env)}${adapter && !terminalShell ? await withSensingFlags(port, id, resumeCmd, adapter) : resumeCmd}`.trim()
             // a sandboxed relaunch rebuilds its wrapper first (fail closed); ''
             // reuses the host's on-disk spec, which kept the wrap from launch
             if (agent.sandbox && hostBase) {
@@ -390,7 +413,8 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
           // a resumed CLI is a new process: re-wire hooks/MCP/event server, or
           // it runs blind (and /clear id changes go unseen) from here on
           if (adapter && !terminalShell) {
-            withSensingFlags(port, id, cmd, adapter)
+            resolveResume()
+              .then(c => withSensingFlags(port, id, c, adapter))
               .then(c => spawnWith(`${envPrefix(type?.env)}${c}`.trim()))
               .catch(failResume)
           } else spawnWith(`${envPrefix(type?.env)}${cmd}`.trim()).catch(failResume)
@@ -503,7 +527,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
       term.writeln(`\x1b[90madopted external ${kind} session ${sessionId}${dir ? ` @ ${dir}` : ''} — ▶ resumes the conversation here\x1b[0m`)
       dispatch(s => ({ ...s, agents: s.agents.concat([agent]) }))
       // live sensing while it runs elsewhere: tail only what it writes from now on
-      if (kind === 'claude' || kind === 'codex') void port.watchTranscript(id, kind, dir, sessionId, false)
+      if (kind === 'claude' || kind === 'codex') void port.watchTranscript(id, kind, dir, sessionId, false, true)
       logEvent('route', id, `Adopted external ${kind} session${folder ? ` in ${folder}` : ''}`)
       flash(`Adopted ${kind} session${folder ? ` · ${folder}` : ''}`)
     },

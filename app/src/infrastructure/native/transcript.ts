@@ -10,15 +10,24 @@ export interface TranscriptLinesEvent {
   agent: string
   /** complete new JSONL lines, oldest first */
   lines: string[]
+  /** history read back when the watch started, not new activity */
+  backfill?: boolean
 }
 
 /** Start (or replace) the transcript watcher for a session. `fromStart` streams
  *  the whole file (fresh session); otherwise an existing file is tailed from
  *  its end (resume). Best-effort: failures are swallowed — transcripts are a
  *  supplementary signal. */
-export async function transcriptWatch(agent: string, kind: string, cwd: string, sessionId: string, fromStart: boolean): Promise<void> {
+export async function transcriptWatch(agent: string, kind: string, cwd: string, sessionId: string, fromStart: boolean, backfill = false): Promise<void> {
   if (!isTauri) return
-  await invoke('transcript_watch', { agent, kind, cwd, sessionId, fromStart }).catch(() => {})
+  await invoke('transcript_watch', { agent, kind, cwd, sessionId, fromStart, backfill }).catch(() => {})
+}
+
+/** Whether a Claude Code conversation is still on disk (Claude deletes old
+ *  transcripts); true when unknown, so callers fall back to a normal resume. */
+export async function claudeTranscriptExists(cwd: string, sessionId: string): Promise<boolean> {
+  if (!isTauri) return true
+  return await invoke<boolean>('claude_transcript_exists', { cwd, sessionId }).catch(() => true)
 }
 
 /** Stop a session's transcript watcher. */

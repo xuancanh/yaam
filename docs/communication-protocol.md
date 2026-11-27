@@ -115,6 +115,8 @@ interface RemoteCommand {
 
 Allowlisted kinds include `master_send`, `chat_send`, `chat_new`, `chat_reply`,
 `chat_rate`, `task_chat`, `task_start`, `session_input`, `session_key`,
+`session_scroll` (a phone drag over a full-screen TUI: a signed line count the
+desktop encodes as mouse-wheel reports or arrow keys, as its own xterm would),
 `session_focus`, `session_blur`, `prompt_answer`, `prompt_approve`,
 `prompt_deny`, `session_stop`, `session_resume`, `approve_master`,
 `approve_chat`, `workspace_switch`, and `rpc_fs_list`, `rpc_fs_read`,

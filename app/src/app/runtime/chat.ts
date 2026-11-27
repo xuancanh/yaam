@@ -97,6 +97,7 @@ export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: S
           appendTail: session.appendTail, clearNeeds: session.clearNeeds,
           bumpSettle: session.bumpSettle, armResponseWatch: session.armResponseWatch,
           bufferOutput: session.bufferOutput,
+          onSessionRevived: session.rewatchTranscript,
           onTerminalSubmit: (id, text, writeln) => {
             session.recordTerminalSubmit(id, text)
             if (stateRef.current.agents.find(a => a.id === id)?.acp && text.trim()) {

@@ -20,7 +20,7 @@ import {
   remotePush, remotePushCount, remoteRespond, remoteSetDevices, remoteStart, remoteStop, remoteWaitCommands, writeSession,
 } from '../../core/native'
 import type { RemoteCommand } from '../../core/native'
-import { fitTerminal, remoteResize, serializeScreen, terminalSize } from '../../core/terminals'
+import { appScrollInput, appScrolls, fitTerminal, remoteResize, serializeScreen, terminalSize } from '../../core/terminals'
 import { confirmAction } from '../../components/Confirm'
 import { b64ToBytes, extractFileText } from '../../shared/filetext'
 import { buildRemoteSnapshot } from './snapshot'
@@ -63,10 +63,12 @@ function mintToken(): string {
 }
 
 /** One session's terminal, serialized with colors/layout for the mobile xterm. */
-type TermSnap = { data: string; cols: number; rows?: number }
+type TermSnap = { data: string; cols: number; rows?: number; appScroll?: 'mouse' | 'keys' }
 function termSize(id: string): Omit<TermSnap, 'data'> {
   const sz = terminalSize(id)
-  return sz ? { cols: sz.cols, rows: sz.rows } : { cols: 80 }
+  const mode = appScrolls(id)
+  const app = mode ? { appScroll: mode } : {}
+  return sz ? { cols: sz.cols, rows: sz.rows, ...app } : { cols: 80, ...app }
 }
 function termFor(id: string): TermSnap {
   return { data: serializeScreen(id), ...termSize(id) }
@@ -317,6 +319,12 @@ export function RemoteCompanion() {
         case 'session_input': return c.text.includes('\n') ? a.sendPrompt(c.id, c.text, 'Sent a prompt from the phone') : a.sendInput(c.id, c.text)
         case 'session_key': {
           const seq = REMOTE_KEY_BYTES[c.text]
+          if (seq) void writeSession(c.id, seq).catch(() => {})
+          return
+        }
+        // a phone drag over a full-screen TUI: the app does the scrolling
+        case 'session_scroll': {
+          const seq = appScrollInput(c.id, Number(c.text))
           if (seq) void writeSession(c.id, seq).catch(() => {})
           return
         }

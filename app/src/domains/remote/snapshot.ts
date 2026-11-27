@@ -70,6 +70,9 @@ export interface RemoteSnapshot {
     /** source terminal height; a phone mirroring the desktop layout (instead
      *  of resizing the PTY to itself) needs both dimensions */
     rows?: number
+    /** a full-screen TUI or mouse-reporting app: a phone drag must ask the app
+     *  to scroll (session_scroll) rather than scroll local scrollback */
+    appScroll?: 'mouse' | 'keys'
     /** structured timeline (prompts, tool calls, replies) from the CLI
      *  transcript: only for sessions a phone is viewing, absent otherwise */
     flow?: RemoteFlowStep[]
@@ -166,7 +169,7 @@ function lastMatching<T>(src: readonly T[], n: number, keep: (x: T) => boolean):
 
 export function buildRemoteSnapshot(
   s: AppState,
-  readTerm: (id: string) => { data: string; cols: number; rows?: number } = () => ({ data: '', cols: 80 }),
+  readTerm: (id: string) => { data: string; cols: number; rows?: number; appScroll?: 'mouse' | 'keys' } = () => ({ data: '', cols: 80 }),
   readFlow: (id: string) => readonly FlowStep[] | null = () => null,
 ): RemoteSnapshot {
   // scope to the ACTIVE workspace — tasks already are (workspaceData holds the
@@ -227,7 +230,10 @@ export function buildRemoteSnapshot(
         kind: a.kind ?? 'real',
         repo: a.repo,
         cwd: a.worktree?.workdir ?? a.cwd ?? '',
-        ...(() => { const t = readTerm(a.id); return t.rows ? { term: t.data, cols: t.cols, rows: t.rows } : { term: t.data, cols: t.cols } })(),
+        ...(() => {
+          const t = readTerm(a.id)
+          return { term: t.data, cols: t.cols, ...(t.rows ? { rows: t.rows } : {}), ...(t.appScroll ? { appScroll: t.appScroll } : {}) }
+        })(),
         ...(() => {
           const f = readFlow(a.id)
           if (!f) return {}

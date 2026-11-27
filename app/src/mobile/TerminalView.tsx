@@ -43,9 +43,14 @@ function savedMirror(): boolean {
  *  the desktop pane shrinks with it). In MIRROR mode the phone adopts the
  *  desktop's size and pans sideways, so watching never disturbs the desktop
  *  layout or the TUI running in it. */
-export const TerminalView = memo(function TerminalView({ sessionId, data, cols, rows }: {
+export const TerminalView = memo(function TerminalView({ sessionId, data, cols, rows, appScroll }: {
   sessionId: string; data: string; cols: number; rows?: number
+  /** from the desktop: a full-screen TUI / mouse-reporting app, which has no
+   *  scrollback here; a drag asks the app itself to scroll */
+  appScroll?: 'mouse' | 'keys'
 }) {
+  const appScrollRef = useRef(appScroll)
+  appScrollRef.current = appScroll
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const lastRef = useRef<string>('')
@@ -195,6 +200,26 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
     let raf = 0
     let frameT = 0
     let pendingFrac: number | null = null
+    // App scrolling. A full-screen TUI lives in the alternate buffer, which
+    // has no scrollback: scrolling xterm locally did nothing (the bug), and
+    // on the desktop it is the APP that scrolls, fed wheel reports or arrow
+    // keys by xterm. The drag is sent to the desktop as whole lines, which
+    // encodes them exactly as its own xterm would.
+    const appMode = (): 'mouse' | 'keys' | null => {
+      if (appScrollRef.current) return appScrollRef.current
+      // our own copy of the stream is a fallback hint (an older desktop)
+      if (term.modes.mouseTrackingMode !== 'none') return 'mouse'
+      return term.buffer.active.type === 'alternate' ? 'keys' : null
+    }
+    let appAcc = 0
+    let appTimer: ReturnType<typeof setTimeout> | null = null
+    const sendAppScroll = () => {
+      appTimer = null
+      const n = Math.trunc(appAcc)
+      if (!n) return
+      appAcc -= n
+      void sendCommand({ kind: 'session_scroll', id: sessionId, text: String(n) }).catch(() => {})
+    }
     const setOffset = (frac: number) => { fracY = frac; paint() }
     // a whole-row scroll repaints on xterm's next frame: keep the old offset
     // until then, or the content jumps back a row for one frame
@@ -272,6 +297,15 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
         return
       }
       const dLines = (lastY - e.clientY) / cellH()
+      const mode = appMode()
+      if (mode) {
+        // a wheel report scrolls most TUIs ~3 lines; an arrow key, one
+        appAcc += dLines / (mode === 'mouse' ? 3 : 1)
+        lastY = e.clientY
+        lastT = e.timeStamp
+        if (!appTimer) appTimer = setTimeout(sendAppScroll, 60)
+        return
+      }
       const dt = e.timeStamp - lastT
       if (dt > 0) vel = 0.7 * vel + 0.3 * (dLines / dt)
       carry += dLines
@@ -283,6 +317,13 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
       if (!tracking) return
       tracking = false
       if (axis === 'x') return
+      if (appMode()) {
+        if (appTimer) clearTimeout(appTimer)
+        appAcc = Math.round(appAcc)
+        sendAppScroll()
+        appAcc = 0
+        return
+      }
       // a pause before lifting means "hold", not "fling"
       if (e.timeStamp - lastT > 80) vel = 0
       if (raf) cancelAnimationFrame(raf)
@@ -312,6 +353,7 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
       host.removeEventListener('pointercancel', onUp)
       host.removeEventListener('touchmove', onTouchMove)
       if (raf) cancelAnimationFrame(raf)
+      if (appTimer) clearTimeout(appTimer)
       rendered.dispose()
       resetScrollRef.current = () => {}
       ro.disconnect()
@@ -393,7 +435,7 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
         onClick={() => setMirror(!mirror)}
         title={mirror ? 'Mirroring the desktop layout (drag sideways to pan). Tap to fit this screen instead.' : 'Fitted to this phone (the desktop pane resizes too). Tap to mirror the desktop layout instead.'}
       >
-        {mirror ? '⇔ Mirror' : '▣ Fit'}
+        {mirror ? 'Mirror' : 'Fit'}
       </button>
     </div>
   )

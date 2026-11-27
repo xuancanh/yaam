@@ -44,6 +44,7 @@ export function remoteCommandAllowed(s: AppState, command: RemoteCommand): boole
       return true
     case 'session_input':
     case 'session_key':
+    case 'session_scroll':
     case 'session_focus':
     case 'session_watch':
     case 'session_stop':

@@ -32,7 +32,10 @@ export interface SessionProcessPort {
   /** write/refresh the global Kiro hook bridge pointing at the listener */
   installKiroHooks: (url: string) => Promise<void>
   /** start (or replace) a session's CLI transcript watcher (best-effort) */
-  watchTranscript: (agentId: string, kind: string, cwd: string, sessionId: string, fromStart: boolean) => Promise<void>
+  /** `backfill`: also read recent history (resume/reattach), so the flow
+   *  timeline is not empty until the agent does something new */
+  watchTranscript: (agentId: string, kind: string, cwd: string, sessionId: string, fromStart: boolean, backfill?: boolean) => Promise<void>
+  claudeTranscriptExists: (cwd: string, sessionId: string) => Promise<boolean>
   /** stop a session's transcript watcher */
   unwatchTranscript: (agentId: string) => Promise<void>
   /** an OS-assigned loopback port for a CLI's event server (null = unavailable) */
@@ -89,7 +92,8 @@ export const realSessionProcessPort: SessionProcessPort = {
   detectCliSession: (kind, cwd, sinceMs, exclude) => native.detectCliSession(kind, cwd, sinceMs, exclude),
   hooksInfo: () => native.hooksInfo(),
   installKiroHooks: url => native.kiroHooksInstall(url),
-  watchTranscript: (agentId, kind, cwd, sessionId, fromStart) => native.transcriptWatch(agentId, kind, cwd, sessionId, fromStart),
+  watchTranscript: (agentId, kind, cwd, sessionId, fromStart, backfill) => native.transcriptWatch(agentId, kind, cwd, sessionId, fromStart, backfill),
+  claudeTranscriptExists: (cwd, sessionId) => native.claudeTranscriptExists(cwd, sessionId),
   unwatchTranscript: agentId => native.transcriptUnwatch(agentId),
   freePort: () => native.freePort(),
   watchOpencode: (agentId, port) => native.opencodeWatch(agentId, port),

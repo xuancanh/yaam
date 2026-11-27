@@ -26,7 +26,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     removeSession: vi.fn(async () => {}),
     writeSession: vi.fn(async () => {}),
     sendLine: vi.fn(),
-    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), installKiroHooks: vi.fn(async () => {}), watchTranscript: vi.fn(async () => {}), unwatchTranscript: vi.fn(async () => {}), freePort: vi.fn(async () => null), watchOpencode: vi.fn(async () => {}), unwatchOpencode: vi.fn(async () => {}), acpStart: vi.fn(async () => {}), acpCancel: vi.fn(async () => {}), acpStop: vi.fn(async () => {}),
+    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), installKiroHooks: vi.fn(async () => {}), watchTranscript: vi.fn(async () => {}), claudeTranscriptExists: vi.fn(async () => true), unwatchTranscript: vi.fn(async () => {}), freePort: vi.fn(async () => null), watchOpencode: vi.fn(async () => {}), unwatchOpencode: vi.fn(async () => {}), acpStart: vi.fn(async () => {}), acpCancel: vi.fn(async () => {}), acpStop: vi.fn(async () => {}),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     sandboxWrapper: vi.fn(async () => "sandbox-exec -f '/fake.sb'"),
     detachedSpawn: vi.fn(async () => 'attach-cmd'),
@@ -138,9 +138,25 @@ describe('createSessionActions', () => {
     const spawned = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
     expect(spawned).toMatch(/^claude --resume sid-1 --settings /)
     expect(spawned).toContain('agent=a1')
-    expect(port.watchTranscript).toHaveBeenCalledWith('a1', 'claude', '/repo', 'sid-1', false)
+    expect(port.watchTranscript).toHaveBeenCalledWith('a1', 'claude', '/repo', 'sid-1', false, true)
     // a file probe could grab a sibling session born in the same folder
     expect(c.probeCliSession).not.toHaveBeenCalled()
+  })
+
+  it('claude resume of a conversation Claude has deleted starts a fresh, tracked one', async () => {
+    const type = { id: 'claude', name: 'Claude Code', model: 'claude', probe: 'claude', resumeCmd: 'claude --resume {id}' } as unknown as AgentType
+    seed([agent({ status: 'idle', cmd: 'claude', cliSessionId: 'gone-1', typeId: 'claude' })], { agentTypes: [type] })
+    const port = fakePort({ hooksInfo: vi.fn(async () => ({ port: 4321, token: 'tok' })), claudeTranscriptExists: vi.fn(async () => false) })
+    const c = ctx(port)
+    createSessionActions(c).resume('a1')
+    await flush()
+    const fresh = get('a1')?.cliSessionId
+    expect(fresh).toBeTruthy()
+    expect(fresh).not.toBe('gone-1')
+    const spawned = (port.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+    expect(spawned).toMatch(new RegExp(`^claude --session-id ${fresh}`))
+    expect(spawned).not.toContain('--resume')
+    expect(port.watchTranscript).toHaveBeenCalledWith('a1', 'claude', '/repo', fresh, true)
   })
 
   it('resume ensures the detached host and spawns the returned attach command', async () => {
@@ -317,7 +333,7 @@ describe('createSessionActions', () => {
     actions.adoptExternalSession('claude', 'ext-uuid-1', '/repo/x')
     const adopted = useAppStore.getState().agents.find(a => a.cliSessionId === 'ext-uuid-1')
     expect(adopted).toMatchObject({ status: 'idle', cmd: 'claude', typeId: 'claude', cwd: '/repo/x', name: 'x · adopted' })
-    expect(port.watchTranscript).toHaveBeenCalledWith(adopted!.id, 'claude', '/repo/x', 'ext-uuid-1', false)
+    expect(port.watchTranscript).toHaveBeenCalledWith(adopted!.id, 'claude', '/repo/x', 'ext-uuid-1', false, true)
     // adopting the same id twice is a no-op
     actions.adoptExternalSession('claude', 'ext-uuid-1', '/repo/x')
     expect(useAppStore.getState().agents.filter(a => a.cliSessionId === 'ext-uuid-1')).toHaveLength(1)

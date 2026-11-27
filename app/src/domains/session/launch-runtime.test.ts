@@ -24,7 +24,7 @@ function fakePort(over: Partial<SessionProcessPort> = {}): SessionProcessPort {
     removeSession: vi.fn(async () => {}),
     writeSession: vi.fn(async () => {}),
     sendLine: vi.fn(),
-    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), installKiroHooks: vi.fn(async () => {}), watchTranscript: vi.fn(async () => {}), unwatchTranscript: vi.fn(async () => {}), freePort: vi.fn(async () => null), watchOpencode: vi.fn(async () => {}), unwatchOpencode: vi.fn(async () => {}), acpStart: vi.fn(async () => {}), acpCancel: vi.fn(async () => {}), acpStop: vi.fn(async () => {}),
+    detectCliSession: vi.fn(async () => null), hooksInfo: vi.fn(async () => null), installKiroHooks: vi.fn(async () => {}), watchTranscript: vi.fn(async () => {}), claudeTranscriptExists: vi.fn(async () => true), unwatchTranscript: vi.fn(async () => {}), freePort: vi.fn(async () => null), watchOpencode: vi.fn(async () => {}), unwatchOpencode: vi.fn(async () => {}), acpStart: vi.fn(async () => {}), acpCancel: vi.fn(async () => {}), acpStop: vi.fn(async () => {}),
     createWorktree: vi.fn(async () => { throw new Error('no worktrees in tests') }),
     sandboxWrapper: vi.fn(async () => "sandbox-exec -f '/fake.sb'"),
     detachedSpawn: vi.fn(async () => 'attach-cmd'),
@@ -127,7 +127,7 @@ describe('createLaunchRuntime.launchSession', () => {
     timers[0]()
     await flush()
     await flush()
-    expect(port.watchTranscript).toHaveBeenCalledWith(id, 'codex', '', 'cx-id-1', true)
+    expect(port.watchTranscript).toHaveBeenCalledWith(id, 'codex', '', 'cx-id-1', true, false)
   })
 
   it('pins the OpenCode server to an allocated port and watches its event bus', async () => {
