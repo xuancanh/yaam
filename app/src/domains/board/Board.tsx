@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { DragEvent } from 'react'
-import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { useActions, useConductorSelector, shallowEqual, shallowEqualIgnoringOutput } from '../../store'
 import { brainOn } from '../../llm/client'
 import { ACCENT } from '../../core/data'
 import type { Agent, BoardCol, BoardTask } from '../../core/types'
@@ -9,6 +9,7 @@ import { SpecVerifyDialog, TaskSpecFields, emptyTaskSpec, useTaskSpecAssist } fr
 import type { TaskSpecPatch, VerifyOutcome } from './TaskSpecForm'
 import { ReviewPanel } from './ReviewPanel'
 import { GitWorkbench } from '../session/GitPanel'
+import { sessionFs } from '../session/remote-native'
 import { TaskReviewFooter, WatcherChat } from './WatcherChat'
 import { confirmAction } from '../../components/Confirm'
 import { HistoryList } from '../../components/HistoryList'
@@ -87,7 +88,12 @@ function NewTaskDialog({ onClose }: { onClose: () => void }) {
 // ---------- task drawer: spec + watcher chat ----------
 
 function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | null; onClose: () => void }) {
-  const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes, agents: x.agents }), shallowEqual)
+  const s = useConductorSelector(x => ({ templates: x.templates, agentTypes: x.agentTypes, agents: x.agents }), shallowEqualIgnoringOutput)
+  // review the task's changes where its session ran (an ssh machine's repo is
+  // not on this Mac)
+  const machine = agent?.machine
+  const agentKey = agent?.id ?? ''
+  const fs = useMemo(() => sessionFs(machine, agentKey), [machine, agentKey])
   const { updateTask, focusTab, startTask, restartTask, archiveTask } = useActions()
   const [view, setView] = useState<'chat' | 'review' | 'history'>('chat')
   // the task's worktree, if any of its sessions ran isolated
@@ -195,6 +201,7 @@ function TaskDrawer({ task, agent, onClose }: { task: BoardTask; agent: Agent | 
           <GitWorkbench
             cwd={worktree?.workdir ?? agent?.cwd ?? task.cwd}
             worktree={worktree}
+            fs={fs}
             footer={<TaskReviewFooter task={task} onClose={onClose} />}
           />
         ) : (
@@ -580,6 +587,8 @@ export function Board() {
       })()}
       {openTask && (
         <TaskDrawer
+          // a different task must not inherit the previous task's spec drafts
+          key={openTask.id}
           task={openTask}
           agent={openTask.agentId ? byId.get(openTask.agentId) || null : null}
           onClose={() => setOpenTaskId(null)}

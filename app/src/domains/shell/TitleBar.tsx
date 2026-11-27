@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { useActions, useConductorSelector, shallowEqual, shallowEqualIgnoringOutput } from '../../store'
 import { APP_VERSION } from '../../core/addons'
 import { isSatelliteWindow } from '../../core/window-role'
 import { NOTIF_COLORS, WORKSPACE_COLORS, DEFAULT_WORKSPACE_COLOR, hexToRgba, uiTint } from '../../core/data'
@@ -17,7 +17,7 @@ const BADGE_UNSEEN = { background: 'var(--accent-soft)', color: 'var(--accent)' 
  *  into their own OS window. In a spun-out (satellite) window this collapses to a
  *  pinned label — a satellite shows exactly one workspace and cannot switch. */
 function WorkspaceSwitcher() {
-  const s = useConductorSelector(x => ({ workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, agents: x.agents, detachedWorkspaces: x.detachedWorkspaces, archivedCount: x.archivedWorkspaces?.length ?? 0 }), shallowEqual)
+  const s = useConductorSelector(x => ({ workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, agents: x.agents, detachedWorkspaces: x.detachedWorkspaces, archivedCount: x.archivedWorkspaces?.length ?? 0 }), shallowEqualIgnoringOutput)
   const { switchWorkspace, createWorkspace, renameWorkspace, archiveWorkspace, setWorkspaceColor, setView } = useActions()
   const [open, setOpen] = useState(false)
   const active = s.workspaces.find(w => w.id === s.activeWorkspace)
@@ -229,9 +229,12 @@ function NotifPopover() {
 
 /** Render the draggable desktop title bar and global controls. */
 export function TitleBar() {
-  const s = useConductorSelector(x => ({ agents: x.agents, workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, notifications: x.notifications, notifOpen: x.notifOpen }), shallowEqual)
+  const s = useConductorSelector(x => ({
+    needsCount: x.agents.reduce((n, a) => n + (a.status === 'needs' && (a.workspaceId ?? x.activeWorkspace) === x.activeWorkspace ? 1 : 0), 0),
+    workspaces: x.workspaces, activeWorkspace: x.activeWorkspace, notifications: x.notifications, notifOpen: x.notifOpen,
+  }), shallowEqual)
   const { openPalette, gotoNeeds, toggleNotif, setView, openWorkspaceInWindow } = useActions()
-  const needsCount = s.agents.filter(a => a.status === 'needs' && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace).length
+  const needsCount = s.needsCount
   const unread = s.notifications.filter(n => !n.read).length
   const isMac = navigator.platform.toUpperCase().includes('MAC')
   const logoColor = s.workspaces.find(w => w.id === s.activeWorkspace)?.color

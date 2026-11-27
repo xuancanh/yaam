@@ -9,7 +9,8 @@ import { requestMissionStage } from './mission-bus'
 /** Render the resizable Master conversation, composer, and collapsed rail. */
 export function Sidebar() {
   const s = useConductorSelector(x => ({
-    agents: x.agents, masterBusy: x.masterBusy, settings: x.settings, view: x.view,
+    runningCount: x.agents.reduce((n, a) => n + (a.status === 'running' ? 1 : 0), 0),
+    masterBusy: x.masterBusy, settings: x.settings, view: x.view,
   }), shallowEqual)
   const { updateSettings, setView, focusTab } = useActions()
   const on = s.settings.masterEnabled && hasCreds(s.settings)
@@ -35,7 +36,7 @@ export function Sidebar() {
     window.addEventListener('pointerup', up)
   }
 
-  const runningCount = s.agents.filter(a => a.status === 'running').length
+  const runningCount = s.runningCount
 
   if (s.settings.sidebarHidden) {
     return (

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { memo, useEffect, useMemo, useState } from 'react'
+import { useActions, useConductorSelector } from '../../store'
 import { worktreeDiff } from '../../core/native'
 import { multiRepoDiff } from '../../shared/git-repos'
 import type { BoardTask } from '../../core/types'
@@ -12,12 +12,21 @@ import { IC, Icon } from '../../components/ui'
 // to done; Request changes bounces it to progress with the reviewer's comment
 // as the watcher's next instruction.
 
-/** One unified-diff, colored by line kind. */
-function DiffText({ diff }: { diff: string }) {
+// A lockfile or generated-code diff can run to tens of thousands of lines; one
+// div per line for all of it froze the panel. Render a bounded head, with the
+// rest one click away.
+const DIFF_LINES_SHOWN = 4000
+
+/** One unified-diff, colored by line kind. Memoized: typing a review comment
+ *  re-renders the panel, not the diff. */
+const DiffText = memo(function DiffText({ diff }: { diff: string }) {
+  const [all, setAll] = useState(false)
+  const lines = useMemo(() => diff.split('\n'), [diff])
   if (!diff.trim()) return <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--dim)' }}>no changes</div>
+  const shown = all ? lines : lines.slice(0, DIFF_LINES_SHOWN)
   return (
     <pre className="mono" style={{ margin: 0, padding: '8px 0', fontSize: 11.5, lineHeight: 1.55, overflowX: 'auto' }}>
-      {diff.split('\n').map((line, i) => {
+      {shown.map((line, i) => {
         const color = line.startsWith('+++') || line.startsWith('---') ? 'var(--text)'
           : line.startsWith('+') ? 'var(--green)'
           : line.startsWith('-') ? 'var(--red-soft)'
@@ -34,9 +43,14 @@ function DiffText({ diff }: { diff: string }) {
           </div>
         )
       })}
+      {shown.length < lines.length && (
+        <button className="btn ghost" style={{ margin: '8px 14px' }} onClick={() => setAll(true)}>
+          Show the remaining {lines.length - shown.length} lines
+        </button>
+      )}
     </pre>
   )
-}
+})
 
 interface RepoDiffView {
   name: string
@@ -45,7 +59,11 @@ interface RepoDiffView {
 }
 
 export function ReviewPanel({ task, onClose }: { task: BoardTask; onClose: () => void }) {
-  const s = useConductorSelector(x => ({ agents: x.agents }), shallowEqual)
+  // just the worktree root, not the whole agents array (which changes on
+  // every output flush)
+  const worktreeRoot = useConductorSelector(x => (task.agentIds ?? [])
+    .map(aid => x.agents.find(a => a.id === aid)?.worktree?.root)
+    .find(Boolean))
   const { approveTaskReview, rejectTaskReview } = useActions()
   const [diffs, setDiffs] = useState<RepoDiffView[] | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
@@ -53,16 +71,13 @@ export function ReviewPanel({ task, onClose }: { task: BoardTask; onClose: () =>
   const [busy, setBusy] = useState(false)
   const [mergeErr, setMergeErr] = useState<string | null>(null)
 
-  const worktree = (task.agentIds ?? [])
-    .map(aid => s.agents.find(a => a.id === aid)?.worktree)
-    .find(Boolean)
 
   useEffect(() => {
     let live = true
     const load = async () => {
       try {
-        if (worktree) {
-          const res = await worktreeDiff(worktree.root)
+        if (worktreeRoot) {
+          const res = await worktreeDiff(worktreeRoot)
           if (live) setDiffs(res)
         } else if (task.cwd) {
           // the task folder may itself be a folder of repos — diff each one
@@ -94,7 +109,7 @@ export function ReviewPanel({ task, onClose }: { task: BoardTask; onClose: () =>
     onClose()
   }
 
-  const changedFiles = (diffs ?? []).reduce((n, d) => n + (d.diff.match(/^diff --git /gm)?.length ?? 0), 0)
+  const changedFiles = useMemo(() => (diffs ?? []).reduce((n, d) => n + (d.diff.match(/^diff --git /gm)?.length ?? 0), 0), [diffs])
 
   return (
     <div
@@ -115,7 +130,7 @@ export function ReviewPanel({ task, onClose }: { task: BoardTask; onClose: () =>
               Review · {task.title}
             </div>
             <div className="mono" style={{ fontSize: 10.5, color: 'var(--dim)' }}>
-              {worktree ? `worktree ${worktree.root}` : task.cwd ? `working tree ${task.cwd}` : 'no folder'}
+              {worktreeRoot ? `worktree ${worktreeRoot}` : task.cwd ? `working tree ${task.cwd}` : 'no folder'}
               {diffs ? ` · ${changedFiles} file${changedFiles === 1 ? '' : 's'} changed` : ''}
             </div>
           </div>
@@ -168,9 +183,9 @@ export function ReviewPanel({ task, onClose }: { task: BoardTask; onClose: () =>
             style={{ padding: '9px 18px', flexShrink: 0, opacity: busy ? 0.6 : 1 }}
             onClick={() => { void approve() }}
             disabled={busy}
-            title={worktree ? 'Commit + merge each repo back into its original checkout, then move to done' : 'Move to done (changes were made in place)'}
+            title={worktreeRoot ? 'Commit + merge each repo back into its original checkout, then move to done' : 'Move to done (changes were made in place)'}
           >
-            {busy ? 'Merging…' : worktree ? 'Approve & merge' : 'Approve'}
+            {busy ? 'Merging…' : worktreeRoot ? 'Approve & merge' : 'Approve'}
           </button>
         </div>
       </div>

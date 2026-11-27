@@ -1,6 +1,6 @@
 // Persisted-state schema: version stamp and the selectors that project the
 // live AppState into its on-disk partitions (main blob + per-session files).
-import type { AppState, MainPartition, SessionRecord } from '../../core/types'
+import type { AppState, MainPartition, SessionRecord, WorkspaceData } from '../../core/types'
 import { SESSION_RUNTIME_KEYS } from '../../core/types'
 
 /** Bumped when the persisted shape changes in a way hydration must know about.
@@ -14,6 +14,32 @@ export function selectSession(a: AppState['agents'][number]) {
   const durable = { ...a } as Partial<Record<keyof typeof a, unknown>>
   for (const k of SESSION_RUNTIME_KEYS) delete durable[k]
   return { schemaVersion: SCHEMA_VERSION, agent: { ...(durable as SessionRecord), log: a.log.slice(-200) } }
+}
+
+// Same caps as the active workspace's flat fields. Background workspace slices
+// were persisted untrimmed: two of them held 223 and 370 messages and made up
+// 1.1 MB of a 1.8 MB file rewritten on every change.
+const MESSAGES_KEPT = 60
+const EVENTS_KEPT = 60
+const NOTIFICATIONS_KEPT = 30
+const PENDING_NOTES_KEPT = 16
+
+function trimSlice(d: WorkspaceData): WorkspaceData {
+  if (d.messages.length <= MESSAGES_KEPT && d.events.length <= EVENTS_KEPT
+    && d.notifications.length <= NOTIFICATIONS_KEPT && (d.pendingMasterNotes ?? []).length <= PENDING_NOTES_KEPT) return d
+  return {
+    ...d,
+    messages: d.messages.slice(-MESSAGES_KEPT),
+    events: d.events.slice(0, EVENTS_KEPT),
+    notifications: d.notifications.slice(0, NOTIFICATIONS_KEPT),
+    pendingMasterNotes: (d.pendingMasterNotes ?? []).slice(-PENDING_NOTES_KEPT),
+  }
+}
+
+function trimWorkspaceData(data: AppState['workspaceData']): AppState['workspaceData'] {
+  const out: AppState['workspaceData'] = {}
+  for (const [id, d] of Object.entries(data ?? {})) out[id] = d ? trimSlice(d) : d
+  return out
 }
 
 /** The low-churn main partition: everything durable except `agents`. */
@@ -32,7 +58,7 @@ export function selectMainState(s: AppState): MainPartition {
     chatAgentTypes: s.chatAgentTypes,
     workspaces: s.workspaces,
     activeWorkspace: s.activeWorkspace,
-    workspaceData: s.workspaceData,
+    workspaceData: trimWorkspaceData(s.workspaceData),
     archivedWorkspaces: s.archivedWorkspaces ?? [],
     groups: s.groups,
     activeGroup: s.activeGroup,
@@ -43,8 +69,8 @@ export function selectMainState(s: AppState): MainPartition {
     durableAgents: s.durableAgents ?? [],
     assistantMemory: s.assistantMemory ?? {},
     harnessLog: (s.harnessLog ?? []).slice(0, 200),
-    messages: s.messages.slice(-60),
-    events: s.events.slice(0, 60),
-    notifications: s.notifications.slice(0, 30),
+    messages: s.messages.slice(-MESSAGES_KEPT),
+    events: s.events.slice(0, EVENTS_KEPT),
+    notifications: s.notifications.slice(0, NOTIFICATIONS_KEPT),
   }
 }

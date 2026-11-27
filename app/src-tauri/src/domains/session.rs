@@ -49,7 +49,11 @@ pub(crate) fn tap_push(id: &str, generation: u64, bytes: &[u8]) {
     if excess > 0 {
         tap.ring.drain(..excess);
     }
-    let _ = tap.tx.send(bytes.to_vec());
+    // no phone is streaming this session: skip the copy (the ring above is
+    // what a later subscriber replays)
+    if tap.tx.receiver_count() > 0 {
+        let _ = tap.tx.send(bytes.to_vec());
+    }
 }
 
 /// Ring backlog + live receiver for one session's raw terminal output.
@@ -202,15 +206,44 @@ fn spawn_input_writer(mut writer: Box<dyn Write + Send>) -> mpsc::SyncSender<Vec
 const SHUTDOWN_GRACE_MS: u64 = 2000;
 
 /// Bounded depth of the per-session output queue between the PTY reader and the
-/// emitter thread. A slow/blocked webview backpressures the reader (which in turn
-/// throttles the child via the PTY) instead of letting output buffer without limit.
+/// emitter thread. It bounds memory only when the emitter itself falls behind:
+/// `emit` never blocks (it queues a script eval on the event loop), so the real
+/// throttle is the batching window below.
 const OUTPUT_CHANNEL_CAP: usize = 256;
+
+/// While output is streaming, the emitter collects for this long before sending
+/// one event. Each event is a base64 + JSON + script eval on the main thread,
+/// broadcast to every window: one per PTY read flooded the event loop during a
+/// build or `cat`. An idle session's first chunk (a keystroke echo) is still
+/// sent at once; batching only starts when the previous event was recent.
+const OUTPUT_BATCH_WINDOW: std::time::Duration = std::time::Duration::from_millis(12);
 
 /// Upper bound on how many bytes the emitter merges into a single IPC event when
 /// output is backed up. Chunks that are already queued get coalesced so a burst
 /// crosses the bridge as a few large events rather than thousands of tiny ones;
 /// when the webview keeps up this is a no-op (one chunk in → one event out).
 const OUTPUT_COALESCE_MAX_BYTES: usize = 64 * 1024;
+
+/// Like `coalesce_output`, but keeps collecting until `deadline` (or
+/// `max_bytes`, or the sender closing). Returns the merged buffer and whether
+/// the sender is gone.
+fn coalesce_until(
+    first: Vec<u8>,
+    rest: &mpsc::Receiver<Vec<u8>>,
+    max_bytes: usize,
+    deadline: std::time::Instant,
+) -> (Vec<u8>, bool) {
+    let mut merged = first;
+    while merged.len() < max_bytes {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        match rest.recv_timeout(left) {
+            Ok(chunk) => merged.extend_from_slice(&chunk),
+            Err(mpsc::RecvTimeoutError::Timeout) => break,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return (merged, true),
+        }
+    }
+    (merged, false)
+}
 
 /// Merge `first` with any chunks already waiting on `rest`, up to `max_bytes`.
 /// Returns the merged buffer and the number of source chunks it consumed. It keeps
@@ -422,8 +455,15 @@ impl SessionManager {
         std::thread::spawn(move || {
             // recv blocks until the next chunk; then merge whatever else is already
             // queued into the same event. Exits when the reader drops its sender.
+            let mut last_emit: Option<std::time::Instant> = None;
             while let Ok(first) = rx.recv() {
-                let (merged, _coalesced) = coalesce_output(first, &rx, OUTPUT_COALESCE_MAX_BYTES);
+                let streaming = last_emit.is_some_and(|t| t.elapsed() < OUTPUT_BATCH_WINDOW * 4);
+                let merged = if streaming {
+                    coalesce_until(first, &rx, OUTPUT_COALESCE_MAX_BYTES, std::time::Instant::now() + OUTPUT_BATCH_WINDOW).0
+                } else {
+                    coalesce_output(first, &rx, OUTPUT_COALESCE_MAX_BYTES).0
+                };
+                last_emit = Some(std::time::Instant::now());
                 // tee raw bytes to remote subscribers (mobile companion terminals)
                 tap_push(&id_out, generation, &merged);
                 let data = base64::engine::general_purpose::STANDARD.encode(&merged);
@@ -984,6 +1024,24 @@ mod tests {
             select_session_id("claude", &mut candidates, &excluded).as_deref(),
             Some("second")
         );
+    }
+
+    #[test]
+    /// While streaming, chunks that arrive within the window join one event,
+    /// and a closed sender still hands back what was collected.
+    fn coalesce_until_collects_chunks_arriving_within_the_window() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(8);
+        let sender = std::thread::spawn(move || {
+            for c in [b"b", b"c"] {
+                std::thread::sleep(std::time::Duration::from_millis(3));
+                tx.send(c.to_vec()).unwrap();
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
+        let (merged, closed) = super::coalesce_until(b"a".to_vec(), &rx, 64 * 1024, deadline);
+        sender.join().unwrap();
+        assert_eq!(merged, b"abc");
+        assert!(closed);
     }
 
     #[test]

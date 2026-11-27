@@ -14,6 +14,7 @@ import type { IntegrationRuntime } from '../../domains/settings/integrations'
 import { createChatLog } from '../../domains/chat/log'
 import { createChatSearchIndexer } from '../../domains/chat/search-indexer'
 import { runHydration } from '../../infrastructure/persistence/hydrate-effect'
+import { sendLineToSession } from '../../domains/session/command'
 import { createPersistenceRuntime } from '../../infrastructure/persistence/runtime'
 import type { ConductorKernel } from '../conductor-runtime'
 import type { RuntimeRefs } from './refs'
@@ -95,6 +96,14 @@ export function createChatBoot(k: ConductorKernel, refs: RuntimeRefs, session: S
           stateRef, persistence, startIntegrations: isMain ? () => startIntegrationsRef.current() : () => {},
           appendTail: session.appendTail, clearNeeds: session.clearNeeds,
           bumpSettle: session.bumpSettle, armResponseWatch: session.armResponseWatch,
+          bufferOutput: session.bufferOutput,
+          onTerminalSubmit: (id, text, writeln) => {
+            session.recordTerminalSubmit(id, text)
+            if (stateRef.current.agents.find(a => a.id === id)?.acp && text.trim()) {
+              writeln(`\x1b[36m› ${text}\x1b[0m`)
+              sendLineToSession(id, text)
+            }
+          },
           resolveSecrets: isMain,
         })
       }

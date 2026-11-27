@@ -515,10 +515,23 @@ export function ChatPane({ agent, active }: { agent: Agent; active: boolean }) {
   useEffect(() => { setMenuSel(0) }, [slashQuery])
   useEffect(() => { setFileSel(0) }, [atQuery])
 
+  // Stick to the bottom only while the reader is there. Streaming grows the
+  // live bubble without changing log.length, so the tail's length is a dep
+  // too; and a new message no longer yanks someone reading further up.
+  const stuckRef = useRef(true)
+  const tailLen = log.length ? log[log.length - 1].text.length : 0
   useEffect(() => {
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [log.length, busy])
+    if (!el) return
+    const onScroll = () => { stuckRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48 }
+    stuckRef.current = true // a newly opened chat starts at its latest message
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [agent.id])
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el && stuckRef.current) el.scrollTop = el.scrollHeight
+  }, [log.length, tailLen, busy, agent.id])
 
   useEffect(() => {
     if (active) inputRef.current?.focus()

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { useActions, useConductorSelector, shallowEqualIgnoringOutput } from '../../store'
 import { steppedUiScale } from '../../app/appearance'
 import type { View } from '../../core/types'
 import { Icon } from '../../components/ui'
@@ -45,9 +45,16 @@ interface Command {
   run: () => void
 }
 
-/** Filter keyboard actions and dispatch the selected command or session focus. */
+/** Filter keyboard actions and dispatch the selected command or session focus.
+ *  Mounted only while open: the command list is not rebuilt for a closed
+ *  palette on every store change. */
 export function CommandPalette() {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery, settings: x.settings, addons: x.addons }), shallowEqual)
+  const open = useConductorSelector(x => x.paletteOpen)
+  return open ? <PaletteBody /> : null
+}
+
+function PaletteBody() {
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, paletteOpen: x.paletteOpen, paletteQuery: x.paletteQuery, settings: x.settings, addons: x.addons }), shallowEqualIgnoringOutput)
   const a = useActions()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -166,6 +173,10 @@ export function CommandPalette() {
   // mousemove on the row under the stationary cursor; same-coords events are
   // scroll artifacts, not the user pointing, and must not steal the selection
   const pointer = useRef<{ x: number; y: number } | null>(null)
+  // scroll the keyboard selection into view only when it moves: a callback ref
+  // ran on every render and snapped a wheel-scrolled list back
+  const selectedRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => { selectedRef.current?.scrollIntoView({ block: 'nearest' }) }, [selected])
 
   useEffect(() => {
     if (s.paletteOpen) inputRef.current?.focus()
@@ -237,7 +248,7 @@ export function CommandPalette() {
                 pointer.current = { x: e.clientX, y: e.clientY }
                 setSel(i)
               }}
-              ref={el => { if (i === selected) el?.scrollIntoView({ block: 'nearest' }) }}
+              ref={i === selected ? selectedRef : undefined}
               style={{
                 width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12,
                 padding: '11px 12px', background: i === selected ? 'var(--bg2)' : 'transparent',

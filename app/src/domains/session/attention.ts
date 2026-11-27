@@ -104,7 +104,7 @@ export function createSessionAttention(ctx: SessionAttentionCtx): SessionAttenti
         if (wid === s.activeWorkspace) return { ...withStatus, messages: s.messages.concat([msg]) }
         const d = s.workspaceData[wid]
         if (!d) return withStatus
-        return { ...withStatus, workspaceData: { ...s.workspaceData, [wid]: { ...d, messages: d.messages.concat([msg]) } } }
+        return { ...withStatus, workspaceData: { ...s.workspaceData, [wid]: { ...d, messages: d.messages.concat([msg]).slice(-200) } } }
       })
       logEvent('escalate', id, `${agent.name} is asking for input: ${question.slice(0, 64)}`)
       notify('escalate', `${agent.name} needs your input`, question.slice(0, 80), id)

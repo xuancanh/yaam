@@ -16,6 +16,7 @@ import { Icon, MasterMark } from '../../components/ui'
 import { Pane } from '../session/Pane'
 import { requestQuickShellToggle } from '../session/QuickShell'
 import { onMissionStage } from './mission-bus'
+import { pageHidden } from '../../shared/visibility'
 
 // faint blueprint grid painted under the stage and rail — reads as a deck,
 // costs nothing (two repeating gradients, no elements)
@@ -256,7 +257,7 @@ export function MissionControl() {
   // snapshot refresh: tiles re-read their terminal buffers on a slow heartbeat
   const [, setTick] = useState(0)
   useEffect(() => {
-    const iv = window.setInterval(() => setTick(t => t + 1), 1500)
+    const iv = window.setInterval(() => { if (!pageHidden()) setTick(t => t + 1) }, 1500)
     return () => window.clearInterval(iv)
   }, [])
 

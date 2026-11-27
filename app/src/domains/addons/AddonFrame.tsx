@@ -10,6 +10,7 @@ import { withViewCsp } from './view-csp'
 import { isTauri, previewClear, previewStash } from '../../core/native'
 import { addonSnapshot } from '../../core/addons'
 import type { Addon, AddonViewContext } from '../../core/entities'
+import { pageHidden } from '../../shared/visibility'
 
 export function AddonFrame({ addon, context, style }: { addon: Addon; context: AddonViewContext; style?: CSSProperties }) {
   const { addonRpc } = useActions()
@@ -71,7 +72,7 @@ export function AddonFrame({ addon, context, style }: { addon: Addon; context: A
       }
     }
     window.addEventListener('message', onMessage)
-    const timer = window.setInterval(push, 3000)
+    const timer = window.setInterval(() => { if (!pageHidden()) push() }, 3000)
     return () => {
       window.removeEventListener('message', onMessage)
       window.clearInterval(timer)

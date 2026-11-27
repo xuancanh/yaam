@@ -78,12 +78,23 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs, isMa
     masterEvent: (n, a) => masterEventRef.current(n, a),
   })
   const runMonitor = monitor.run
+  // What the user typed into a terminal, held until the next monitor/watcher
+  // note for that target. Each Enter used to run its own full LLM turn just to
+  // "record intent", then the settle that followed ran a second one.
+  const pendingSubmits = new Map<string, string[]>()
+  const withSubmits = (key: string, note: string) => {
+    const typed = pendingSubmits.get(key)
+    if (!typed?.length) return note
+    pendingSubmits.delete(key)
+    return `${typed.join('\n\n')}\n\n---\n\n${note}`
+  }
+  const runMonitorWithSubmits = (id: string, note: string) => runMonitor(id, withSubmits(`s:${id}`, note))
   monitorEventRef.current = (id, note) => {
     // a detached workspace's sessions are owned by the satellite window — main
     // must not spend monitor turns on them (its writes are clobbered by ws:sync)
     const agent = stateRef.current.agents.find(a => a.id === id)
     if (agent && isDetachedAgent(stateRef.current, agent)) return
-    runMonitor(id, note)
+    runMonitorWithSubmits(id, note)
   }
 
   const taskForSession = (sessionId: string): LocatedTask | undefined => {
@@ -111,12 +122,12 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs, isMa
     // watcher would act on a slice the next ws:sync merge overwrites
     const located = findTaskInState(stateRef.current, taskId)
     if (located && (stateRef.current.detachedWorkspaces ?? []).includes(located.workspaceId)) return
-    void runWatcher(taskId, note)
+    void runWatcher(taskId, withSubmits(`t:${taskId}`, note))
   }
 
   const state: StatePort = { get: () => stateRef.current, update: dispatch, subscribe: () => () => {} }
   const settle = createSessionSettle({
-    state, clock: browserClock, notify, setNeedsInput, runMonitor, taskForSession,
+    state, clock: browserClock, notify, setNeedsInput, runMonitor: runMonitorWithSubmits, taskForSession,
     masterEventRef, monitorEventRef, runWatcherRef,
   })
   const { armResponseWatch, bumpSettle, bufferOutput, clearFlagged, disposeSettle } = settle
@@ -156,9 +167,11 @@ export function createSessionRuntime(k: ConductorKernel, refs: RuntimeRefs, isMa
       sessionId: id, taskId: task?.task.id, workspaceId: task?.workspaceId,
     }))
     armResponseWatch(id)
-    const note = terminalSubmissionNote(agent.name, tracked)
-    if (task) void runWatcher(task.task.id, note)
-    else runMonitor(id, note)
+    // carried into the next settle/checkpoint note for this target instead of
+    // a turn of its own (the response watch above guarantees one follows)
+    const key = task ? `t:${task.task.id}` : `s:${id}`
+    const typed = (pendingSubmits.get(key) ?? []).concat([terminalSubmissionNote(agent.name, tracked)])
+    pendingSubmits.set(key, typed.slice(-3))
   }
 
   const exitCtx = {

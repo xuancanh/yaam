@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { chatSearch } from '../../core/native'
@@ -144,15 +144,20 @@ export function ChatView() {
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [tagsOpen, setTagsOpen] = useState(false)
   const [budgetOpen, setBudgetOpen] = useState(false)
-  const workbenchRef = useRef<HTMLDivElement>(null)
   const [workbenchWidth, setWorkbenchWidth] = useState(0)
-  useEffect(() => {
-    const el = workbenchRef.current
+  // a callback ref: the workbench exists only while a chat is open, so a
+  // mount-time effect never found it when the view opened on the agent home,
+  // and kept observing a detached node after switching chats
+  const observerRef = useRef<ResizeObserver | null>(null)
+  const workbenchRef = useCallback((el: HTMLDivElement | null) => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
     if (!el || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(entries => setWorkbenchWidth(entries[0]?.contentRect.width ?? 0))
     observer.observe(el)
-    return () => observer.disconnect()
+    observerRef.current = observer
   }, [])
+  useEffect(() => () => observerRef.current?.disconnect(), [])
   const compactWorkbench = workbenchWidth > 0 && workbenchWidth < 600
 
   // chats are workspace-specific (each carries the workspace it was created in)

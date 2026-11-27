@@ -2,7 +2,7 @@ import { contributedCommands } from '../addons/contributions'
 import { terminalSelection } from '../../core/terminals'
 import { useCallback, useState } from 'react'
 import type { MouseEvent } from 'react'
-import { useActions, useConductorSelector, shallowEqual } from '../../store'
+import { useActions, useConductorSelector, shallowEqual, shallowEqualIgnoringOutput } from '../../store'
 import { ACCENT, hexToRgba, indicatorColor, RESPONDING_COLOR, TAB_COLORS, uiTint } from '../../core/data'
 import type { Agent, BoardTask, TabGroup } from '../../core/types'
 import { IC, Icon } from '../../components/ui'
@@ -244,7 +244,7 @@ function LayoutMenu({ group }: { group: TabGroup | undefined }) {
 
 /** empty grid section: click to pick which session lives here */
 function EmptySlot({ index }: { index: number }) {
-  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup }), shallowEqualIgnoringOutput)
   const { assignPane, openNewSession, setActivePane } = useActions()
   const [picking, setPicking] = useState(false)
   // assignable: loose sessions, plus sessions sitting alone in a single-pane
@@ -329,7 +329,7 @@ function EmptySlot({ index }: { index: number }) {
 /** Compose the mode toggle, group/loose tabs, the active group's split grid,
  *  and the dock — or, in Runs mode, the triage rail + session pane. */
 export function Workspace() {
-  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen, newSessionCwd: x.newSessionCwd, workMode: x.settings.workMode ?? 'tabs', brainConfigured: brainOn(x.settings) }), shallowEqual)
+  const s = useConductorSelector(x => ({ agents: x.agents, tasks: x.tasks, activeWorkspace: x.activeWorkspace, groups: x.groups, activeGroup: x.activeGroup, minimizedIds: x.minimizedIds, newSessionOpen: x.newSessionOpen, newSessionCwd: x.newSessionCwd, workMode: x.settings.workMode ?? 'tabs', brainConfigured: brainOn(x.settings) }), shallowEqualIgnoringOutput)
   const { focusTab, activateGroup, closeGroup, openNewSession, closeNewSession, restoreSession, setRowSplit, setColSplit, updateSettings } = useActions()
   const runsMode = s.workMode === 'runs'
   const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null)
@@ -376,6 +376,17 @@ export function Workspace() {
       rows.push(cells.slice(at, at + n))
       at += n
     }
+  }
+  // Row wrappers are keyed by the row a pane occupies in the full layout, so a
+  // pane maximized from a lower row keeps its parent (and its state: commit
+  // draft, editor undo, addon iframe) instead of remounting under row 0.
+  const rowKeys: number[] = rows.map((_, ri) => ri)
+  if (ag && cells.length === 1 && ag.slots.length > 1 && ag.maximizedPane !== null) {
+    let at = 0
+    groupRows(ag).forEach((n, ri) => {
+      if (ag.maximizedPane! >= at && ag.maximizedPane! < at + n) rowKeys[0] = ri
+      at += n
+    })
   }
 
   const wsAgents = s.agents.filter(a => !a.archived && a.kind !== 'chat' && (a.workspaceId ?? s.activeWorkspace) === s.activeWorkspace)
@@ -560,7 +571,7 @@ export function Workspace() {
           </div>
         ) : (
           rows.map((row, ri) => (
-            <div key={ri} style={{ display: 'contents' }}>
+            <div key={rowKeys[ri]} style={{ display: 'contents' }}>
               {/* the drag divider only exists for 2-row layouts (one ratio);
                   3-row layouts get equal thirds with a static seam */}
               {ri > 0 && rows.length === 2 && <Divider dir="row" onRatio={setRowSplit} />}

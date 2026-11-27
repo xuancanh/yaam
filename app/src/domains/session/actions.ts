@@ -499,7 +499,7 @@ export function createSessionActions(ctx: SessionActionsCtx): SessionActions {
         log: [{ t: 'sys', x: `adopted external ${kind} session · ${sessionId}` }],
         ...defaultDetail(), usageVersion: 1,
       }
-      const term = port.attachTerminal(id, line => appendTail(id, line), () => clearNeeds(id), () => bumpSettle(id), text => recordTerminalSubmit(id, text))
+      const term = port.attachTerminal(id, line => { appendTail(id, line); ctx.bufferOutput?.(id, line) }, () => clearNeeds(id), () => bumpSettle(id), text => recordTerminalSubmit(id, text))
       term.writeln(`\x1b[90madopted external ${kind} session ${sessionId}${dir ? ` @ ${dir}` : ''} — ▶ resumes the conversation here\x1b[0m`)
       dispatch(s => ({ ...s, agents: s.agents.concat([agent]) }))
       // live sensing while it runs elsewhere: tail only what it writes from now on

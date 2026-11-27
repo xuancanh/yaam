@@ -4,11 +4,12 @@ import { AgentAvatar, IC, Icon, Switch } from '../../components/ui'
 
 /** Route the active slide-over panel to its specialized content component. */
 export function SlideOver() {
-  const s = useConductorSelector(x => ({ panel: x.panel, agents: x.agents }), shallowEqual)
+  // only the panel's own agent: the whole array changes on every output flush
+  const s = useConductorSelector(x => ({ panel: x.panel, agent: x.panel ? x.agents.find(a => a.id === x.panel!.agentId) : undefined }), shallowEqual)
   const { closePanel, setPanelTab, toggleMem, toggleTool, cyclePerm } = useActions()
 
   if (!s.panel) return null
-  const agent = s.agents.find(a => a.id === s.panel!.agentId)
+  const agent = s.agent
   if (!agent) return null
   const tab = s.panel.tab
 

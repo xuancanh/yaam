@@ -1,6 +1,6 @@
 import { addComment, clearComments, commentsFor, onComments, removeComment, reviewPrompt, unifiedLineNumbers } from './review-comments'
 import type { ReviewComment } from './review-comments'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useActions, useConductorSelector } from '../../store'
 import { worktreeDiff } from '../../core/native'
@@ -241,16 +241,25 @@ function CommentBox({ initial, onSave, onCancel }: { initial?: string; onSave: (
 /** colored diff body: unified, or side-by-side (old left, new right).
  *  `path` selects the syntax highlighter for the code content. With a
  *  `commentKey`, unified lines take review comments (click the gutter). */
-function DiffView({ diff, split, path, commentKey }: { diff: string; split?: boolean; path?: string; commentKey?: string }) {
+// Memoized, with highlighting cached per diff: every parent render (a pane
+// beside a busy session re-renders often) re-highlighted every line of up to
+// 60 diffs.
+const DiffView = memo(function DiffView({ diff, split, path, commentKey }: { diff: string; split?: boolean; path?: string; commentKey?: string }) {
   const lang = useMemo(() => (path ? langForFile(path) : 'text') as HighlightLang, [path])
   const nums = useMemo(() => unifiedLineNumbers(diff), [diff])
+  const lines = useMemo(() => diff.split('\n'), [diff])
+  const highlighted = useMemo(() => lines.map(line => {
+    if (!line || line.startsWith('@@') || line.startsWith('+++') || line.startsWith('---')) return null
+    const marked = line.startsWith('+') || line.startsWith('-') || line.startsWith(' ')
+    return hlHtml(marked ? line.slice(1) : line, lang)
+  }), [lines, lang])
+  const rows = useMemo(() => (split ? splitDiffRows(diff) : []), [diff, split])
   const all = useReviewComments(commentKey)
   const mine = path ? all.filter(c => c.path === path) : []
   const [draftRow, setDraftRow] = useState<number | null>(null)
   const canComment = Boolean(commentKey && path)
   if (!diff.trim()) return <div style={{ padding: 16, fontSize: 12, color: 'var(--dim)' }}>no diff — select a file on the left</div>
   if (split) {
-    const rows = splitDiffRows(diff)
     return (
       <div className="mono" style={{ padding: '8px 0', fontSize: 12, lineHeight: 1.6 }}>
         {rows.map((row, i) => row.left.kind === 'hunk' || row.left.kind === 'meta' ? (
@@ -269,7 +278,7 @@ function DiffView({ diff, split, path, commentKey }: { diff: string; split?: boo
   }
   return (
     <pre className="mono" style={{ margin: 0, padding: '8px 0', fontSize: 12, lineHeight: 1.6 }}>
-      {diff.split('\n').map((line, i) => {
+      {lines.map((line, i) => {
         const isMeta = line.startsWith('+++') || line.startsWith('---')
         const isAdd = line.startsWith('+') && !isMeta
         const isDel = line.startsWith('-') && !isMeta
@@ -297,7 +306,7 @@ function DiffView({ diff, split, path, commentKey }: { diff: string; split?: boo
                 >+</button>
               )}
               <span style={{ color: markColor, userSelect: 'none' }}>{mark}</span>
-              <span dangerouslySetInnerHTML={hlHtml(code, lang)} />
+              <span dangerouslySetInnerHTML={highlighted[i] ?? hlHtml(code, lang)} />
             </div>
             {here.map(c => (
               <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', margin: '3px 14px 5px 28px', padding: '6px 9px', borderRadius: 7, border: '1px solid var(--line2)', background: 'var(--panel2)', fontFamily: 'var(--font-sans)', fontSize: 12.5, whiteSpace: 'pre-wrap' }}>
@@ -319,7 +328,7 @@ function DiffView({ diff, split, path, commentKey }: { diff: string; split?: boo
       })}
     </pre>
   )
-}
+})
 
 interface DiffSection {
   key: string

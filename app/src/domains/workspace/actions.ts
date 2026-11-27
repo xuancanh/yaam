@@ -309,7 +309,7 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
  *  the satellite's copy; sessions in other workspaces are untouched. */
 function mergeWorkspaceSlice(s: AppState, id: string, data: WorkspaceData | undefined, agents: Agent[] | undefined, keepDetached: boolean): AppState {
   const workspaceData = data ? { ...s.workspaceData, [id]: data } : s.workspaceData
-  const nextAgents = agents ? [...s.agents.filter(a => a.workspaceId !== id), ...agents] : s.agents
+  const nextAgents = agents ? mergeAgents(s.agents, id, agents) : s.agents
   const detached = s.detachedWorkspaces ?? []
   return {
     ...s,
@@ -317,4 +317,25 @@ function mergeWorkspaceSlice(s: AppState, id: string, data: WorkspaceData | unde
     agents: nextAgents,
     detachedWorkspaces: keepDetached ? detached : detached.filter(w => w !== id),
   }
+}
+
+/** Replace a workspace's sessions with the satellite's copy, in place. An
+ *  incoming session equal to the one held keeps the held object: the sync
+ *  repeats every few seconds, and a fresh identity per session rewrote every
+ *  session file and re-rendered everything subscribed to agents. Order is
+ *  kept (they used to move to the end on each sync); new ones are appended. */
+function mergeAgents(current: Agent[], workspaceId: string, incoming: Agent[]): Agent[] {
+  const byId = new Map(incoming.map(a => [a.id, a]))
+  const out: Agent[] = []
+  let changed = false
+  for (const a of current) {
+    if (a.workspaceId !== workspaceId) { out.push(a); continue }
+    const next = byId.get(a.id)
+    if (!next) { changed = true; continue } // gone in the satellite
+    byId.delete(a.id)
+    if (JSON.stringify(next) === JSON.stringify(a)) out.push(a)
+    else { out.push(next); changed = true }
+  }
+  for (const a of byId.values()) { out.push(a); changed = true }
+  return changed ? out : current
 }

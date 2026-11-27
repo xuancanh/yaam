@@ -65,6 +65,7 @@ export function createPersistenceRuntime(
   // crash lost everything since the last moment of global quiet.
   const MAX_WAIT_MS = 4000
   let mainArmedAt = 0
+  let lastMainJson: string | undefined
   let sessionArmedAt = 0
   // Consecutive session-write failures. A persistently failing disk (full,
   // read-only, …) must not spin an 800ms re-arm forever: back off exponentially
@@ -120,8 +121,15 @@ export function createPersistenceRuntime(
     } else mainArmedAt = Date.now()
     mainTimer = window.setTimeout(() => {
       mainTimer = undefined
-      const main = redactSecrets(selectMainState(store.getState()), keychainReady)
-      native.saveStateFile(JSON.stringify(main)).then(() => onSaveOk('main')).catch(e => onSaveError('main', 'main', e))
+      const json = JSON.stringify(redactSecrets(selectMainState(store.getState()), keychainReady))
+      // a satellite's ws:sync replaces its slice with equal content every few
+      // seconds; an identical blob needs no IPC, fsync and .bak rotation
+      if (json === lastMainJson) return
+      lastMainJson = json
+      native.saveStateFile(json).then(() => onSaveOk('main')).catch(e => {
+        if (lastMainJson === json) lastMainJson = undefined
+        onSaveError('main', 'main', e)
+      })
     }, 800)
   }
 

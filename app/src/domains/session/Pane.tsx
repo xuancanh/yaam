@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useActions, useConductorSelector } from '../../store'
 import { ACCENT } from '../../core/data'
@@ -137,7 +137,9 @@ function DockStrip({ label, dock, onDock, onPopup, onClose, full, onToggleFull, 
 /** Render one terminal pane with session controls and optional file explorer.
  *  `standalone` hosts the pane outside the tab-group grid (the Runs rail):
  *  grid-only controls (minimize / maximize / pane focus) disappear. */
-export function Pane({ agent, index, active, showRing, maximized, standalone }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean; standalone?: boolean }) {
+// Memoized: Workspace re-renders on layout and status changes, and every pane's
+// docked panels (diffs, file tree) re-rendered with it.
+export const Pane = memo(function Pane({ agent, index, active, showRing, maximized, standalone }: { agent: Agent; index: number; active: boolean; showRing: boolean; maximized: boolean; standalone?: boolean }) {
   const { setActivePane, openPanel, resume, stopSession, toggleMaximize, minimizePane, renameSession, refreshTerminal, archiveSession } = useActions()
   // the board task this session is working (drives the review footer in Changes)
   const task = useConductorSelector(x => x.tasks.find(t =>
@@ -570,7 +572,7 @@ export function Pane({ agent, index, active, showRing, maximized, standalone }: 
       {gitPopup && agent.cwd && <GitPopup agent={agent} onClose={() => setGitPopup(false)} />}
     </div>
   )
-}
+})
 
 /** One row of the addon-panel picker. */
 // pane header toolbar: one size for every icon button, a hairline between groups

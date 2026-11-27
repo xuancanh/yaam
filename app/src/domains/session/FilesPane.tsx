@@ -28,6 +28,7 @@ import { LINK_BRIDGE, markdownDoc, readDocTheme } from '../../shared/markdown-do
 import { requestAttach } from '../chat/attach-bus'
 import { onOpenFileRequest } from './open-file-bus'
 import { Divider } from './Divider'
+import { pageHidden } from '../../shared/visibility'
 
 // UI state survives tab switches / pane moves (components remount freely)
 interface FilesState {
@@ -1021,7 +1022,14 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
     }
     void load()
     if (kind === 'image' || kind === 'pdf' || kind === 'video' || kind === 'audio') return
-    if (isTauri) return onFsChange(() => void load())
+    // Only batches that touched this file's name: the stream is shared by
+    // every watched root, and each viewer in every pane re-read its file and
+    // ran a git diff on any change anywhere. Paths are canonicalized (their
+    // prefix may differ from ours), so match on the file name.
+    if (isTauri) return onFsChange(e => {
+      if (e.paths.length && !e.paths.some(p => p === path || p.endsWith('/' + name))) return
+      void load()
+    })
     const iv = window.setInterval(() => void load(), 4000)
     return () => window.clearInterval(iv)
   }, [load, kind, path, isMdFile, isCsvFile])
@@ -1699,7 +1707,10 @@ export function FilesPane({ agent }: { agent: Agent }) {
       })
       return () => { off(); void unwatchDir(root) }
     }
-    const iv = window.setInterval(() => { setRefresh(r => ({ tick: r.tick + 1, dirs: null })); refreshGit() }, 6000)
+    const iv = window.setInterval(() => {
+      if (pageHidden()) return // an ssh round-trip per tick for a window nobody sees
+      setRefresh(r => ({ tick: r.tick + 1, dirs: null })); refreshGit()
+    }, 6000)
     return () => window.clearInterval(iv)
   }, [refreshGit, root, fs])
 

@@ -25,7 +25,9 @@ export function emptyScoped(greeting: string): WorkspaceData {
 export function scopedFromState(s: AppState): WorkspaceData {
   return {
     groups: s.groups, activeGroup: s.activeGroup, minimizedIds: s.minimizedIds,
-    messages: s.messages, crons: s.crons, tasks: s.tasks,
+    // a stashed workspace only shows its recent history: don't carry an
+    // unbounded Master transcript in memory for every background workspace
+    messages: s.messages.length > 200 ? s.messages.slice(-200) : s.messages, crons: s.crons, tasks: s.tasks,
     events: s.events, notifications: s.notifications, pendingMasterNotes: [],
   }
 }

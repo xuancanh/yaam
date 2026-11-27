@@ -30,4 +30,4 @@ export function ConductorProvider({ children }: { children: ReactNode }) {
   return <ActionsCtx.Provider value={runtime.actions}>{children}</ActionsCtx.Provider>
 }
 
-export { useConductor, useConductorSelector, useActions, shallowEqual } from './store/hooks'
+export { useConductor, useConductorSelector, useActions, shallowEqual, shallowEqualIgnoringOutput, sameAgentsIgnoringOutput } from './store/hooks'

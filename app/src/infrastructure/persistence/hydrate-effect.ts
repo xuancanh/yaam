@@ -22,6 +22,11 @@ export interface HydrationCtx {
   clearNeeds: (id: string) => void
   bumpSettle: (id: string) => void
   armResponseWatch: (id: string) => void
+  /** Output evidence for monitor checkpoints (same as a fresh launch). */
+  bufferOutput?: (id: string, line: string) => void
+  /** A line the user submitted in a restored terminal: records it and, for
+   *  ACP sessions (no PTY echo), forwards it as the next prompt turn. */
+  onTerminalSubmit?: (id: string, text: string, writeln: (line: string) => void) => void
   /** Satellites render a workspace slice only; the main window owns secrets. */
   resolveSecrets?: boolean
 }
@@ -41,7 +46,7 @@ export function useHydration(ctx: HydrationCtx): void {
  *  React); the caller guards against running it twice. */
 export function runHydration(ctx: HydrationCtx): void {
   {
-    const { stateRef, persistence, startIntegrations, appendTail, clearNeeds, bumpSettle, armResponseWatch } = ctx
+    const { stateRef, persistence, startIntegrations, appendTail, clearNeeds, bumpSettle, armResponseWatch, bufferOutput, onTerminalSubmit } = ctx
     // Apply one merged snapshot: dispatch the pure hydration result, then rebuild terminals.
     const hydrateFrom = (p: Partial<PersistedState>) => {
       const { next, restoredAgents } = buildHydration(p, stateRef.current)
@@ -54,7 +59,15 @@ export function runHydration(ctx: HydrationCtx): void {
         const alive = new Set(liveIds)
         const hosts = new Map(detachedHosts.filter(h => h.running).map(h => [h.id, h]))
         for (const a of restoredAgents) {
-          const { term } = getTerminal(a.id, line => appendTail(a.id, line), () => clearNeeds(a.id), () => bumpSettle(a.id), () => armResponseWatch(a.id))
+          // chats have no terminal, and archiving disposed the xterm on
+          // purpose (unarchive rebuilds it): don't hold dozens of idle ones
+          if (a.kind === 'chat' || a.archived) continue
+          // the same callbacks as a fresh launch: resume reuses this xterm, so
+          // anything missing here stayed missing for the session's whole life
+          const { term } = getTerminal(a.id,
+            line => { appendTail(a.id, line); bufferOutput?.(a.id, line) },
+            () => clearNeeds(a.id), () => bumpSettle(a.id),
+            text => { if (onTerminalSubmit) onTerminalSubmit(a.id, text, l => term.writeln(l)); else armResponseWatch(a.id) })
           if (alive.has(a.id)) {
             // live PTY: never inject text (it corrupts TUI screens) —
             // nudge the app to repaint itself once the pane has mounted

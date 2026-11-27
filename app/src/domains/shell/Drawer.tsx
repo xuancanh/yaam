@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useActions, useConductorSelector, shallowEqual } from '../../store'
 import { LOG_COLORS } from '../../core/data'
 import type { Agent } from '../../core/types'
 import { AgentAvatar, EditableName, IC, Icon } from '../../components/ui'
 import { GitWorkbench } from '../session/GitPanel'
+import { sessionFs } from '../session/remote-native'
 import { confirmAction } from '../../components/Confirm'
 
 /** Review actions under the shared git workbench: a feedback chatbox that
@@ -170,11 +171,16 @@ function AgentBody({ agent }: { agent: Agent }) {
 
 /** Render the store-selected agent drawer and close it on backdrop interaction. */
 export function Drawer() {
-  const s = useConductorSelector(x => ({ agents: x.agents, drawer: x.drawer }), shallowEqual)
+  // only the drawer's own agent: the whole array changes on every output flush
+  const s = useConductorSelector(x => ({ drawer: x.drawer, agent: x.drawer ? x.agents.find(a => a.id === x.drawer!.agentId) : undefined }), shallowEqual)
   const { closeDrawer, renameSession } = useActions()
+  // an ssh-machine session's repo lives on that machine, not this Mac
+  const machine = s.agent?.machine
+  const agentId = s.agent?.id ?? ''
+  const fs = useMemo(() => sessionFs(machine, agentId), [machine, agentId])
 
   if (!s.drawer) return null
-  const agent = s.agents.find(a => a.id === s.drawer!.agentId)
+  const agent = s.agent
   if (!agent) return null
   const isDiff = s.drawer.kind === 'diff'
 
@@ -200,7 +206,7 @@ export function Drawer() {
           </button>
         </div>
         {isDiff
-          ? <GitWorkbench agentId={agent.kind !== 'chat' && (agent.status === 'running' || agent.status === 'needs') ? agent.id : undefined} cwd={agent.cwd} worktree={agent.worktree} footer={<ReviewFooter agent={agent} />} />
+          ? <GitWorkbench agentId={agent.kind !== 'chat' && (agent.status === 'running' || agent.status === 'needs') ? agent.id : undefined} cwd={agent.cwd} worktree={agent.worktree} fs={fs} footer={<ReviewFooter agent={agent} />} />
           : <AgentBody agent={agent} />}
       </div>
     </>

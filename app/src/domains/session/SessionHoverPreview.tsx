@@ -5,13 +5,18 @@ import { indicatorColor } from '../../core/data'
 import { readScreen } from '../../core/terminals'
 import { brainOn } from '../../llm/client'
 import { useConductorSelector } from '../../store'
+import { useAppStore } from '../../core/store'
 import { sessionWorkStatus } from './session-work-status'
 
 type PreviewPlacement = 'vertical' | 'right'
 
 function previewLines(agent: Agent): string[] {
   const rendered = readScreen(agent.id, 12)
-  return dedent(rendered.length ? rendered : agent.log.slice(-12).map(line => line.x).filter(Boolean))
+  if (rendered.length) return dedent(rendered)
+  // the prop can lag the store (parents skip re-rendering on output churn), so
+  // the log fallback reads the live agent
+  const live = useAppStore.getState().agents.find(a => a.id === agent.id) ?? agent
+  return dedent(live.log.slice(-12).map(line => line.x).filter(Boolean))
 }
 
 /** TUIs pad every row with the same left margin; in a 420px card that margin

@@ -28,9 +28,14 @@ export function ContextMenu({ x, y, width = 224, label, header, onClose, childre
     return () => window.removeEventListener('resize', place)
   }, [width, x, y])
 
+  // Callers often pass an inline onClose; keyed on it, this effect re-ran (and
+  // yanked focus back to the first item) on every parent render, which is ten
+  // times a second beside a printing session. Read it through a ref, run once.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') onCloseRef.current()
     }
     window.addEventListener('keydown', closeOnEscape)
     const frame = window.requestAnimationFrame(() => {
@@ -40,7 +45,7 @@ export function ContextMenu({ x, y, width = 224, label, header, onClose, childre
       window.cancelAnimationFrame(frame)
       window.removeEventListener('keydown', closeOnEscape)
     }
-  }, [onClose])
+  }, [])
 
   const moveFocus = (event: ReactKeyboardEvent) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return

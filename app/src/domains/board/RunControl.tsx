@@ -16,6 +16,7 @@ import { brainOn } from '../../llm/client'
 import { groupRuns, groupRunsByFolder, runCwdOf, runNeedsUserAction, runStatusLabel } from './run-state'
 import type { RunFilter, RunRef } from './run-state'
 import { WatcherChat } from './WatcherChat'
+import { pageHidden } from '../../shared/visibility'
 
 // Runs: the Work view's triage mode (toggle at the top left of the tab bar).
 // Every run (task sessions + loose sessions) in one urgency-grouped rail with
@@ -274,7 +275,7 @@ export function RunControl() {
       void discoverSessions(Date.now() - 6 * 3600_000).then(d => { if (alive) setDiscovered(d) })
     }
     refresh()
-    const timer = window.setInterval(refresh, 45_000)
+    const timer = window.setInterval(() => { if (!pageHidden()) refresh() }, 45_000)
     return () => { alive = false; window.clearInterval(timer) }
   }, [])
   const adoptable = useMemo(() => {

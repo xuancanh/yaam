@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { execCommand, worktreeDiff } from '../../core/native'
 import type { Machine } from '../../core/types'
 import { shq, sshPrefix } from './remote-machine'
+import { pageHidden } from '../../shared/visibility'
 
 export interface DiffStats {
   add: number
@@ -114,6 +115,7 @@ export function useDiffStats(sources: StatsSource[], intervalMs = 15_000): Recor
     let timer: number | undefined
     setStats(cur => pruneDiffStats(cur, new Set(ref.current.map(s => s.id))))
     const sweep = async () => {
+      if (pageHidden()) { timer = window.setTimeout(() => { void sweep() }, intervalMs); return }
       for (const src of ref.current) {
         if (!live) return
         const st = await fetchDiffStats(src)
