@@ -910,6 +910,27 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
   const rendered = isMd && mdView === 'rendered'
   const rel = git && path.startsWith(git.root + '/') ? path.slice(git.root.length + 1) : null
 
+  const gitRef = useRef(git)
+  gitRef.current = git
+  const loadMarks = useCallback(async () => {
+    const g = gitRef.current
+    const relPath = g && path.startsWith(g.root + '/') ? path.slice(g.root.length + 1) : null
+    if (kind === 'text' && g && relPath) {
+      if (g.byPath.get(path) === '??') {
+        // untracked: every line is new
+        setMarks({ added: new Set([-1]), modified: new Set(), deletedAfter: new Set() })
+      } else {
+        try {
+          setMarks(parseDiffLines(await fs.gitFileDiff(g.root, relPath)))
+        } catch {
+          setMarks(null)
+        }
+      }
+    } else {
+      setMarks(null)
+    }
+  }, [path, kind, fs])
+
   // Read the selected file and its diff, ignoring stale async completions.
   const load = useCallback(async () => {
     // never clobber an open editor buffer — but the FIRST load must always go
@@ -956,21 +977,18 @@ function FileViewer({ path, gutter, onToggleGutter, onClose, git, onAttachFile, 
       setErr(e instanceof Error ? e.message : String(e))
       return
     }
-    if (kind === 'text' && git && rel) {
-      if (git.byPath.get(path) === '??') {
-        // untracked: every line is new
-        setMarks({ added: new Set([-1]), modified: new Set(), deletedAfter: new Set() })
-      } else {
-        try {
-          setMarks(parseDiffLines(await fs.gitFileDiff(git.root, rel)))
-        } catch {
-          setMarks(null)
-        }
-      }
-    } else {
-      setMarks(null)
-    }
-  }, [path, git, rel, kind, name, fs])
+    await loadMarks()
+  }, [path, kind, name, fs, loadMarks])
+
+  // A git refresh only changes the gutter marks. It must not re-run the load
+  // effect: that cleared the content, remounting the editor (lost cursor, undo
+  // and focus, which it stole from the terminal) and reset the HTML preview's
+  // no-network lock, on every agent file write.
+  const gitKey = git ? `${git.root}\u0000${git.byPath.get(path) ?? ''}` : ''
+  useEffect(() => {
+    if (contentRef.current === null) return // the initial load computes marks itself
+    void loadMarks()
+  }, [gitKey, loadMarks])
 
   // load on open, then keep it fresh — the agent edits files while you watch.
   // Desktop app: a native fs watch drives reloads (event-driven, no timer). We

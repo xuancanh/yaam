@@ -436,7 +436,11 @@ async fn stream_term(
         return Err(StatusCode::NOT_FOUND);
     };
     let first = tokio_stream::once(Ok(Event::default().data(B64.encode(backlog))));
+    // A receiver that fell behind (Lagged) has lost bytes, possibly mid escape
+    // sequence: end the stream instead of skipping them, and the phone
+    // reconnects onto a fresh ring backlog (a clean redraw, not a garbled one).
     let live = BroadcastStream::new(rx)
+        .take_while(|r| r.is_ok())
         .filter_map(|r| r.ok())
         .map(|bytes| Ok(Event::default().data(B64.encode(bytes))));
     Ok(Sse::new(first.chain(live)).keep_alive(KeepAlive::default()))

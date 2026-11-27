@@ -404,4 +404,32 @@ describe('createSessionSettle detached workspaces', () => {
     expect(h.state.get().agents[0].responding).toBe(true)
     resetStructuredSignals()
   })
+
+  it('a full 200-line log with no new output does not raise a false "finished"', () => {
+    const log = Array.from({ length: 200 }, (_, i) => ({ t: 'out', x: `line ${i}` })) as Agent['log']
+    const h = harness([agent({ log })])
+    h.rt.armResponseWatch('a1')
+    h.clock.advance(4000) // the armed watch bumps a settle with no output at all
+    h.clock.advance(3000)
+    expect(h.deps.notify).not.toHaveBeenCalled()
+  })
+
+  it('the TUI scan wakes the task watcher, not the generic monitor, for a task session', () => {
+    tui.alt.add('a1')
+    tui.screens.set('a1', ['Do you want to proceed?', '❯ 1. Yes', '  2. No'])
+    const h = harness([agent()])
+    const watcher = vi.fn()
+    const monitor = vi.fn()
+    h.deps.runWatcherRef.current = watcher
+    h.deps.monitorEventRef.current = monitor
+    h.deps.taskForSession = () => ({ task: { id: 't1' } } as never)
+    const rt = createSessionSettle(h.deps)
+    rt.start()
+    h.clock.advance(4000)
+    expect(watcher).toHaveBeenCalledWith('t1', expect.stringContaining('waiting at this prompt'))
+    expect(monitor).not.toHaveBeenCalled()
+    rt.dispose()
+    tui.alt.delete('a1')
+    tui.screens.delete('a1')
+  })
 })

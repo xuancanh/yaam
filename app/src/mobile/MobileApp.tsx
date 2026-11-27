@@ -2,7 +2,7 @@
 // cards with tinted avatars and pulsing status pills, inbox-style approvals,
 // free-flowing assistant chat, and a pill composer with file attachments
 // pulled from the working folder via the rpc bridge.
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Markdown } from '../components/Markdown'
 import { TerminalView } from './TerminalView'
 import { FilesBrowser, GitReview } from './FilesGit'
@@ -430,13 +430,38 @@ function Messages({ msgs, echoes, botWho, botAvatar }: {
   )
 }
 
+const watcherRows = new WeakMap<object, { role: string; text: string }>()
+function asAssistant<T extends { role: string; text: string }>(m: T): T {
+  if (m.role !== 'watcher') return m
+  let row = watcherRows.get(m)
+  if (!row) { row = { ...m, role: 'assistant' }; watcherRows.set(m, row) }
+  return row as T
+}
+
+// Shared empty list for a detail whose entity is gone: a fresh `[]` per render
+// re-ran the echo effect every render and looped the phone at 100% CPU.
+const NO_MSGS: { role: string; text: string }[] = []
+
 /** Track optimistic sends per target until the snapshot reflects them. */
 function useEchoes(msgs: { role: string; text: string }[]) {
-  const [echoes, setEchoes] = useState<string[]>([])
+  // each echo remembers how many user messages existed when it was sent, so an
+  // attachment-only send (echoed as "(attached …)", never verbatim in the
+  // transcript) settles once any newer user message lands
+  const [pending, setPending] = useState<{ text: string; base: number }[]>([])
+  const users = msgs.reduce((n, m) => n + (m.role === 'user' ? 1 : 0), 0)
+  const usersRef = useRef(users)
+  usersRef.current = users
   useEffect(() => {
-    setEchoes(cur => cur.filter(text => !msgs.some(m => m.role === 'user' && m.text.startsWith(text.slice(0, 80)))))
-  }, [msgs])
-  return { echoes, addEcho: (text: string) => setEchoes(cur => cur.concat([text])) }
+    setPending(cur => {
+      if (!cur.length) return cur
+      const left = cur.filter(e => e.text.startsWith('(attached')
+        ? users <= e.base
+        : !msgs.some(m => m.role === 'user' && m.text.startsWith(e.text.slice(0, 80))))
+      return left.length === cur.length ? cur : left
+    })
+  }, [msgs, users])
+  const echoes = useMemo(() => pending.map(e => e.text), [pending])
+  return { echoes, addEcho: (text: string) => setPending(cur => cur.concat([{ text, base: usersRef.current }])) }
 }
 
 /** Slide-in files sheet for browsing + attaching from a working folder. */
@@ -462,7 +487,11 @@ function FilesSheet({ root, onClose, onAttach }: { root: string; onClose: () => 
 
 function TaskDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   const t = snap.tasks.find(x => x.id === id)
-  const { echoes, addEcho } = useEchoes(t?.chat ?? [])
+  const { echoes, addEcho } = useEchoes(t?.chat ?? NO_MSGS)
+  // per-message cache over the reconciled (identity-stable) chat entries, so
+  // MsgRow's memo holds for every unchanged message across pushes
+  const chat = t?.chat
+  const msgs = useMemo(() => (chat ?? []).map(asAssistant), [chat])
   if (!t) return <div className="empty">This task is gone.</div>
   return (
     <>
@@ -483,7 +512,7 @@ function TaskDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
           </div>
         )}
         <div className="section">WATCHER</div>
-        <Messages msgs={t.chat.map(m => ({ ...m, role: m.role === 'watcher' ? 'assistant' : m.role }))} echoes={echoes} botWho="watcher" />
+        <Messages msgs={msgs} echoes={echoes} botWho="watcher" />
       </div>
       <Composer placeholder="Message the watcher…" draftKey={`task:${t.id}`} onSend={text => { if (!text) return; addEcho(text); void sendCommand({ kind: 'task_chat', id: t.id, text }) }} />
     </>
@@ -492,7 +521,7 @@ function TaskDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
 
 function ChatDetail({ snap, id }: { snap: RemoteSnapshot; id: string }) {
   const c = snap.chats.find(x => x.id === id)
-  const { echoes, addEcho } = useEchoes(c?.msgs ?? [])
+  const { echoes, addEcho } = useEchoes(c?.msgs ?? NO_MSGS)
   const [atts, setAtts] = useState<Attachment[]>([])
   const [filesOpen, setFilesOpen] = useState(false)
   const folder = c?.cwd ?? ''

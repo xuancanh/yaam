@@ -6,7 +6,7 @@
 // React adapter binding it to the real store + browser clock.
 import { useEffect, useMemo } from 'react'
 import type { MutableRefObject } from 'react'
-import type { AppState, EscOption, NotifKind } from '../../core/types'
+import type { AppState, EscOption, LogLine, NotifKind } from '../../core/types'
 import type { LocatedTask } from '../board/task-state'
 import { isAltScreen, readScreen } from '../../core/terminals'
 import { hasCreds } from '../../master'
@@ -65,7 +65,15 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   // (vs. a fresh arm from user input / launch), so we can refresh the card on
   // each new burst without re-pinging the user at every quiet point.
   const armed = new Map<string, { snapshot: string; at: number; continuation?: boolean }>()
-  const settle = new Map<string, { since: number; timer: Disposable }>()
+  // `since` marks the last log entry that existed when the burst began. It is an
+  // entry reference, not an index: the log is trimmed to 200 lines, so an index
+  // drifts once a session is full and slice(index) returned a single line.
+  const settle = new Map<string, { since: LogLine | undefined; timer: Disposable }>()
+  const linesSince = (log: readonly LogLine[], mark: LogLine | undefined) => {
+    if (!mark) return log
+    const i = log.lastIndexOf(mark)
+    return i < 0 ? log : log.slice(i) // trimmed past the mark: everything left is new
+  }
   const lastFlagged = new Map<string, string>()
   // Plain terminals accumulate decoded lines here. Long-running output is
   // forwarded in bounded checkpoints; settle always sends one final snapshot.
@@ -176,7 +184,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   }
 
   // Inspect a stable rendered screen for prompts, completion, monitors, and watchers.
-  const onSettle = (id: string, since: number) => {
+  const onSettle = (id: string, since: LogLine | undefined) => {
     settle.delete(id)
     outputTimers.get(id)?.dispose()
     outputTimers.delete(id)
@@ -202,7 +210,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
 
     // TUIs redraw constantly, so judge the rendered screen (stable) instead
     // of the raw output stream; plain sessions use the new stream tail.
-    const streamLines = agent.log.slice(since).map(l => l.x).filter(Boolean)
+    const streamLines = linesSince(agent.log, since).map(l => l.x).filter(Boolean)
     const content = alt ? readScreen(id) : streamLines.slice(-14)
     if (!content.length) { flushOutput(id, true); return }
     // Never flag input, and never relay half-answers, while the TUI busy marker
@@ -255,7 +263,10 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     }
 
     if (arm) {
-      const key = stableScreenKey(content)
+      // compare like with like: the armed snapshot is the log's last 14 lines,
+      // so a plain session is judged on that same window (the new-lines view
+      // is shorter and always looked "changed", raising false finishes)
+      const key = stableScreenKey(alt ? content : agent.log.slice(-14).map(l => l.x))
       const expired = clock.now() - arm.at > 15 * 60 * 1000
       const unchanged = key === arm.snapshot
       if ((busy || unchanged) && !expired) {
@@ -315,7 +326,7 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     if (agent?.status === 'running') {
       setResponding(id, true)
     }
-    const since = prev?.since ?? Math.max(0, (agent?.log.length ?? 1) - 1)
+    const since = prev ? prev.since : agent?.log[agent.log.length - 1]
     const timer = clock.setTimeout(() => onSettle(id, since), 3000)
     settle.set(id, { since, timer })
     scheduleOutputCheckpoint(id)
@@ -368,9 +379,19 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
         markScannerNeedsFlag(a.id)
         const { options, cursorNum } = extractOptions(screen)
         setNeedsInput(a.id, question, options, cursorNum)
-        void monitorEventRef.current(a.id,
-          `A dialog was detected on the session's screen (already flagged as needing input):\n${untrustedBlock(screen.slice(-14).join('\n'), a.name)}\n\n` +
-          'This needs the user — report_to_master with what it is asking, including the options if it is a menu.')
+        // A task's watcher is its session's monitor. This scan often wins the
+        // race against the settle check, which then sees the prompt as already
+        // flagged and skips its own watcher wake, so route it here too.
+        const taskFor = taskForSession(a.id)
+        if (taskFor) {
+          runWatcherRef.current(taskFor.task.id,
+            `The task's session "${a.name}" is waiting at this prompt:\n${untrustedBlock(screen.slice(-14).join('\n'), a.name)}\n\n` +
+            'Unblock it from the task spec when safe; otherwise ask the user one focused question and update the card note.')
+        } else {
+          void monitorEventRef.current(a.id,
+            `A dialog was detected on the session's screen (already flagged as needing input):\n${untrustedBlock(screen.slice(-14).join('\n'), a.name)}\n\n` +
+            'This needs the user — report_to_master with what it is asking, including the options if it is a menu.')
+        }
       } else if (a.status === 'needs' && isScannerNeedsFlag(a.id)) {
         // dialog gone — but only retract a flag this scanner raised itself
         lastFlagged.delete(a.id)
