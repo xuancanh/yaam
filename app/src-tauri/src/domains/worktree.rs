@@ -345,8 +345,13 @@ fn merge_impl(root: &str, message: &str) -> Result<Vec<MergeResult>, String> {
             if ahead == "0" {
                 return Ok(("skipped".into(), "no changes".into()));
             }
-            // the source checkout must still be on the branch we forked from
-            let current = git(&source, &["symbolic-ref", "--short", "HEAD"]).unwrap_or_default();
+            // the source checkout must still be on the branch we forked from.
+            // Forked from a detached HEAD, base_ref is a commit sha: then the
+            // source must still be detached at that commit (symbolic-ref
+            // fails there, so this check used to reject every such merge).
+            let current = git(&source, &["symbolic-ref", "--short", "HEAD"])
+                .or_else(|_| git(&source, &["rev-parse", "HEAD"]))
+                .unwrap_or_default();
             if current != repo.base_ref {
                 return Err(format!(
                     "source is on '{current}', expected '{}' — switch branches and retry",

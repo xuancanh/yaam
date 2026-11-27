@@ -155,7 +155,9 @@ pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
     let mut reader = pair.master.try_clone_reader().expect("pty reader");
     let writer = Arc::new(Mutex::new(pair.master.take_writer().expect("pty writer")));
     let master = Arc::new(Mutex::new(pair.master));
-    let ring: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    // a deque: trimming the front of a full 200 KB Vec moved all of it on
+    // every PTY read
+    let ring: Arc<Mutex<std::collections::VecDeque<u8>>> = Arc::new(Mutex::new(std::collections::VecDeque::new()));
     let client: Arc<Mutex<Option<UnixStream>>> = Arc::new(Mutex::new(None));
     let mut killer = child.clone_killer();
     let mut frame_killer = child.clone_killer();
@@ -166,15 +168,20 @@ pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
         let mut buf = [0u8; 8192];
         while let Ok(n) = reader.read(&mut buf) {
             if n == 0 { break }
+            // append and forward under the ring lock, so an attach (which
+            // replays the ring and installs itself under the same lock) sees
+            // every byte exactly once: before, output between its snapshot and
+            // its install was lost, or duplicated
             let mut r = ring2.lock().unwrap();
-            r.extend_from_slice(&buf[..n]);
+            r.extend(&buf[..n]);
             let excess = r.len().saturating_sub(200_000);
             if excess > 0 { r.drain(..excess); }
-            drop(r);
             let mut c = client2.lock().unwrap();
             if let Some(s) = c.as_mut() {
                 if s.write_all(&buf[..n]).is_err() { *c = None; } // client left — keep running
             }
+            drop(c);
+            drop(r);
         }
     });
 
@@ -183,9 +190,12 @@ pub fn run_host(spec: &DetachedSpec, sock: &PathBuf) -> i32 {
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let mut out = match stream.try_clone() { Ok(s) => s, Err(_) => continue };
-            let backlog = ring3.lock().unwrap().clone();
-            if out.write_all(&backlog).is_err() { continue }
-            *client3.lock().unwrap() = Some(out);
+            {
+                let ring = ring3.lock().unwrap();
+                let (a, b) = ring.as_slices();
+                if out.write_all(a).and_then(|_| out.write_all(b)).is_err() { continue }
+                *client3.lock().unwrap() = Some(out);
+            }
             let mut inp = stream;
             loop {
                 match read_frame(&mut inp) {

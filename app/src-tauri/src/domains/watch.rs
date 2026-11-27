@@ -15,6 +15,7 @@ use tauri::{AppHandle, Emitter, Manager};
 /// save often produces several events (write, chmod, rename-in); batching them
 /// keeps the UI from refreshing many times for one logical change.
 const DEBOUNCE_MS: u64 = 250;
+const MAX_BATCH_WAIT_MS: u64 = 1000;
 const MAX_WATCHERS: usize = 64;
 const MAX_QUEUED_EVENTS: usize = 1024;
 const MAX_BATCH_PATHS: usize = 10_000;
@@ -90,9 +91,18 @@ impl WatchManager {
         std::thread::spawn(move || {
             while let Ok(first) = rx.recv() {
                 let mut batch: Vec<PathBuf> = first.paths;
-                while let Ok(ev) = rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS)) {
+                // max-wait: a continuous write stream (cargo's target/, a dev
+                // server log) never goes quiet for DEBOUNCE_MS, and the tree
+                // and git panel then stayed stale for minutes
+                let deadline = std::time::Instant::now() + Duration::from_millis(MAX_BATCH_WAIT_MS);
+                while let Ok(ev) = rx.recv_timeout(
+                    Duration::from_millis(DEBOUNCE_MS).min(deadline.saturating_duration_since(std::time::Instant::now())),
+                ) {
                     let remaining = MAX_BATCH_PATHS.saturating_sub(batch.len());
                     batch.extend(ev.paths.into_iter().take(remaining));
+                    if std::time::Instant::now() >= deadline {
+                        break;
+                    }
                 }
                 batch.truncate(MAX_BATCH_PATHS);
                 let paths = dedup_visible_paths(batch);

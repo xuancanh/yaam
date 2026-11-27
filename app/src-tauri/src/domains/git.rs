@@ -83,6 +83,8 @@ fn diff_text(out: &BoundedOutput) -> String {
     text
 }
 
+const STATUS_OUTPUT_CAP: usize = 8 * 1024 * 1024;
+
 /// Complete working-tree diff against HEAD for a session directory.
 pub fn diff(cwd: &str) -> Result<String, String> {
     let out = git_bounded(cwd, &["diff", "--no-color", "HEAD"])?;
@@ -100,11 +102,27 @@ pub fn status(cwd: &str) -> Result<GitStatusResult, String> {
     }
     let root = String::from_utf8_lossy(&root_out.stdout).trim().to_string();
     let branch = run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
-    let out = git_bounded(cwd, &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
+    // Status gets its own, much larger cap: at the 40 KB diff cap a repo with
+    // ~800 changed or untracked files lost the head of the list (the parser
+    // then started mid-record, and "Stage all" missed files).
+    let out = crate::util::run_bounded(
+        Command::new("git")
+            .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+            .current_dir(expand_tilde(cwd)),
+        GIT_TIMEOUT,
+        STATUS_OUTPUT_CAP,
+    )?;
     if out.code != Some(0) {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
-    Ok(parse_porcelain_status(root, branch, &out.stdout))
+    // still truncated (an enormous tree): the kept tail starts mid-record, so
+    // skip to the first record boundary rather than parse garbage
+    let body: &[u8] = if out.truncated {
+        out.stdout.iter().position(|&b| b == 0).map(|i| &out.stdout[i + 1..]).unwrap_or(&[])
+    } else {
+        &out.stdout
+    };
+    Ok(parse_porcelain_status(root, branch, body))
 }
 
 /// Zero-context diff of one file vs HEAD — the frontend parses hunk headers
@@ -148,11 +166,17 @@ pub async fn git_file_diff(cwd: String, path: String) -> Result<String, String> 
 #[tauri::command]
 pub async fn git_file_diff_side(cwd: String, path: String, staged: bool) -> Result<String, String> {
     blocking(move || {
-        if staged {
-            run_git(&cwd, &["diff", "--no-color", "--cached", "--", &path])
+        // through diff_text so a capped diff says so (run_git dropped the
+        // truncation flag and the staging view showed a silent tail)
+        let out = if staged {
+            git_bounded(&cwd, &["diff", "--no-color", "--cached", "--", &path])?
         } else {
-            run_git(&cwd, &["diff", "--no-color", "--", &path])
+            git_bounded(&cwd, &["diff", "--no-color", "--", &path])?
+        };
+        if out.code != Some(0) {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
         }
+        Ok(diff_text(&out).trim().to_string())
     })
     .await
 }

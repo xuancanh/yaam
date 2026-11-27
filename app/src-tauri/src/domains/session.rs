@@ -570,14 +570,13 @@ fn files_in_window(
         return;
     };
     for entry in entries.flatten() {
+        // the dirent's type, not path.is_dir(): no extra stat per entry
+        let Ok(kind) = entry.file_type() else { continue };
         let path = entry.path();
-        if path.is_dir() {
+        if kind.is_dir() {
             if recurse {
                 files_in_window(&path, since_ms, until_ms, true, matches, out);
             }
-            continue;
-        }
-        if !matches(&path) {
             continue;
         }
         let Ok(meta) = entry.metadata() else {
@@ -589,12 +588,29 @@ fn files_in_window(
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64);
-        if let Some(created) = created {
-            if created >= since_ms && created <= until_ms {
-                out.push((created, path));
-            }
+        // the time window before the matcher: some matchers read the file
+        // (omp parses each session header)
+        let Some(created) = created.filter(|c| *c >= since_ms && *c <= until_ms) else {
+            continue;
+        };
+        if matches(&path) {
+            out.push((created, path));
         }
     }
+}
+
+/// UTC calendar date of a ms timestamp (Howard Hinnant's civil_from_days).
+fn civil_date(ms: u64) -> (i64, u32, u32) {
+    let z = (ms / 86_400_000) as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    (y, m, d)
 }
 
 /// Turn a session file path into the CLI's resume id for the given kind.
@@ -688,22 +704,47 @@ fn detect_cli_session_impl(
             }
             return select_session_id(kind, &mut candidates, exclude);
         }
-        "codex" => (
-            std::path::PathBuf::from(&home).join(".codex/sessions"),
-            true,
-            Box::new(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl")),
-        ),
-        "opencode" => (
-            std::path::PathBuf::from(&home).join(".local/share/opencode/storage"),
-            true,
-            Box::new(|p| {
+        // ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl: only the day folders
+        // around the launch can hold it (the whole history was walked, three
+        // times per launch). A day either side covers the local-date offset.
+        "codex" => {
+            let root = std::path::PathBuf::from(&home).join(".codex/sessions");
+            let mut candidates = Vec::new();
+            let day = 86_400_000u64;
+            let mut seen = std::collections::HashSet::new();
+            for t in [since.saturating_sub(day), since, until, until.saturating_add(day)] {
+                let (y, m, d) = civil_date(t);
+                let dir = root.join(format!("{y:04}")).join(format!("{m:02}")).join(format!("{d:02}"));
+                if seen.insert(dir.clone()) {
+                    files_in_window(&dir, since, until, false, &|p: &std::path::Path| {
+                        p.extension().and_then(|e| e.to_str()) == Some("jsonl")
+                    }, &mut candidates);
+                }
+            }
+            return select_session_id(kind, &mut candidates, exclude);
+        }
+        // ses_*.json files sit in several storage folders (it varies by
+        // version), but message/ and part/ hold 1e5+ per-message files that
+        // can never match: walk everything except those
+        "opencode" => {
+            let root = std::path::PathBuf::from(&home).join(".local/share/opencode/storage");
+            let matcher = |p: &std::path::Path| {
                 p.extension().and_then(|e| e.to_str()) == Some("json")
-                    && p.file_stem()
-                        .and_then(|s| s.to_str())
-                        .map(|s| s.starts_with("ses_"))
-                        .unwrap_or(false)
-            }),
-        ),
+                    && p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.starts_with("ses_"))
+            };
+            let mut candidates = Vec::new();
+            files_in_window(&root, since, until, false, &matcher, &mut candidates);
+            if let Ok(dirs) = std::fs::read_dir(&root) {
+                for d in dirs.flatten() {
+                    let name = d.file_name();
+                    if name == "message" || name == "part" || !d.file_type().is_ok_and(|t| t.is_dir()) {
+                        continue;
+                    }
+                    files_in_window(&d.path(), since, until, true, &matcher, &mut candidates);
+                }
+            }
+            return select_session_id(kind, &mut candidates, exclude);
+        }
         _ => return None,
     };
 
@@ -1093,4 +1134,12 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn civil_date_matches_known_days() {
+        assert_eq!(super::civil_date(0), (1970, 1, 1));
+        assert_eq!(super::civil_date(1_709_164_800_000), (2024, 2, 29));
+        assert_eq!(super::civil_date(1_795_305_600_000), (2026, 11, 22));
+    }
 }
+

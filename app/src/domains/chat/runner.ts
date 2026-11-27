@@ -724,6 +724,8 @@ export async function compactConversation(ctx: ChatCtx, agentId: string, force =
     )
     const summary = res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
     if (!summary) return 'compaction produced nothing'
+    // deleted while the summary was being written: don't re-create its history
+    if (!ctx.stateRef.current.agents.some(a => a.id === agentId)) return 'chat was deleted'
 
     // reseed the private API history: summary in, old rounds out
     const history = ctx.histories.get(agentId) ?? []

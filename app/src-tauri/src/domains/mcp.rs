@@ -6,32 +6,46 @@ use crate::util::expand_tilde;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{sync_channel, Receiver};
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+/// Requests waiting on a reply, keyed by their JSON-RPC id (as JSON text).
+type Waiters = Arc<Mutex<HashMap<String, SyncSender<String>>>>;
+
+/// One server process. Requests no longer hold a per-server lock while they
+/// wait: the reader thread routes each reply to the request with that id, so
+/// calls run concurrently and a `notifications/cancelled` can reach the server
+/// while the request it cancels is still pending (it used to queue behind it,
+/// blocking an async worker, which made cancellation useless).
 struct Proc {
-    child: Child,
-    stdin: ChildStdin,
-    /// complete stdout lines from the reader thread
-    rx: Receiver<String>,
+    child: Mutex<Child>,
+    stdin: Mutex<ChildStdin>,
+    waiters: Waiters,
 }
 
 impl Drop for Proc {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Ok(mut child) = self.child.lock() {
+            // the whole group: an `npx`/`uvx` launcher's node or python
+            // grandchild otherwise outlives the server (the child is not
+            // reaped yet, so its pid and group id can't have been reused)
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
-/// Live stdio MCP server processes by server id. Each process is behind its
-/// own mutex so one slow request doesn't block other servers.
+/// Live stdio MCP server processes by server id.
 #[derive(Clone, Default)]
-pub struct McpManager(Arc<Mutex<HashMap<String, Arc<Mutex<Proc>>>>>);
+pub struct McpManager(Arc<Mutex<HashMap<String, Arc<Proc>>>>);
 
 const MAX_PAYLOAD_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
-const MAX_QUEUED_LINES: usize = 256;
 
 /// Read one newline-delimited record without ever retaining more than `max`
 /// bytes. Oversized records are fully drained so the child cannot deadlock its
@@ -63,7 +77,7 @@ fn read_bounded_line(reader: &mut impl BufRead, max: usize) -> std::io::Result<O
     }
 }
 
-fn get_proc(mgr: &McpManager, id: &str) -> Result<Arc<Mutex<Proc>>, String> {
+fn get_proc(mgr: &McpManager, id: &str) -> Result<Arc<Proc>, String> {
     mgr.0
         .lock()
         .unwrap()
@@ -89,6 +103,11 @@ fn start_impl(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        c.process_group(0);
+    }
     if let Some(dir) = cwd.filter(|d| !d.trim().is_empty()) {
         c.current_dir(expand_tilde(&dir));
     }
@@ -108,16 +127,30 @@ fn start_impl(
     let stdout = child.stdout.take().ok_or("no stdout pipe")?;
     let stderr = child.stderr.take();
 
-    let (tx, rx) = sync_channel::<String>(MAX_QUEUED_LINES);
+    let waiters: Waiters = Arc::new(Mutex::new(HashMap::new()));
+    let route = waiters.clone();
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         while let Ok(Some((line, oversized))) = read_bounded_line(&mut reader, MAX_LINE_BYTES) {
             if oversized {
                 log::warn!("MCP server emitted an oversized stdout record; discarded");
-            } else if tx.send(line).is_err() {
-                break
+                continue;
+            }
+            // server notifications and reverse requests carry no id we are
+            // waiting on and are skipped (v1: roots/list etc. not serviced)
+            let Some(key) = serde_json::from_str::<serde_json::Value>(&line)
+                .ok()
+                .filter(|v| v.get("method").is_none())
+                .and_then(|v| v.get("id").map(|id| id.to_string()))
+            else {
+                continue;
+            };
+            if let Some(tx) = route.lock().unwrap().remove(&key) {
+                let _ = tx.try_send(line);
             }
         }
+        // EOF: dropping the remaining senders wakes their requests at once
+        route.lock().unwrap().clear();
     });
     if let Some(err) = stderr {
         let label = id.clone();
@@ -134,7 +167,7 @@ fn start_impl(
     mgr.0
         .lock()
         .unwrap()
-        .insert(id, Arc::new(Mutex::new(Proc { child, stdin, rx })));
+        .insert(id, Arc::new(Proc { child: Mutex::new(child), stdin: Mutex::new(stdin), waiters }));
     Ok(())
 }
 
@@ -149,40 +182,42 @@ fn request_impl(mgr: &McpManager, id: &str, payload: String, timeout_ms: u64) ->
         .ok()
         .and_then(|v| v.get("id").cloned())
         .ok_or("payload has no JSON-RPC id")?;
-    let proc = get_proc(mgr, id)?;
-    let mut p = proc.lock().map_err(|_| "server mutex poisoned")?;
-    p.stdin
-        .write_all(payload.as_bytes())
-        .and_then(|_| p.stdin.write_all(b"\n"))
-        .and_then(|_| p.stdin.flush())
-        .map_err(|e| format!("server stdin closed: {e}"))?;
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms.clamp(1_000, 120_000));
-    loop {
-        let remaining = deadline
-            .checked_duration_since(Instant::now())
-            .ok_or("timed out waiting for the MCP server response")?;
-        let line = p.rx.recv_timeout(remaining).map_err(|_| {
-            "MCP server did not answer (timeout or process exited)".to_string()
-        })?;
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-            if v.get("id") == Some(&want_id) {
-                return Ok(line);
-            }
+    let key = want_id.to_string();
+    let (tx, rx) = sync_channel::<String>(1);
+    let waiters = {
+        let proc = get_proc(mgr, id)?;
+        // register before writing, so a fast reply can't arrive unrouted
+        proc.waiters.lock().unwrap().insert(key.clone(), tx);
+        let written = write_line(&proc, &payload);
+        if let Err(e) = written {
+            proc.waiters.lock().unwrap().remove(&key);
+            return Err(e);
         }
-    }
+        // only the waiter map is kept: holding the process here would keep
+        // a stopped server alive until this request timed out
+        proc.waiters.clone()
+    };
+    let res = rx
+        .recv_timeout(Duration::from_millis(timeout_ms.clamp(1_000, 120_000)))
+        .map_err(|_| "MCP server did not answer (timeout or process exited)".to_string());
+    waiters.lock().unwrap().remove(&key);
+    res
+}
+
+fn write_line(proc: &Proc, payload: &str) -> Result<(), String> {
+    let mut stdin = proc.stdin.lock().map_err(|_| "server stdin poisoned")?;
+    stdin
+        .write_all(payload.as_bytes())
+        .and_then(|_| stdin.write_all(b"\n"))
+        .and_then(|_| stdin.flush())
+        .map_err(|e| format!("server stdin closed: {e}"))
 }
 
 fn notify_impl(mgr: &McpManager, id: &str, payload: String) -> Result<(), String> {
     if payload.len() > MAX_PAYLOAD_BYTES {
         return Err(format!("MCP notification exceeds {MAX_PAYLOAD_BYTES} bytes"));
     }
-    let proc = get_proc(mgr, id)?;
-    let mut p = proc.lock().map_err(|_| "server mutex poisoned")?;
-    p.stdin
-        .write_all(payload.as_bytes())
-        .and_then(|_| p.stdin.write_all(b"\n"))
-        .and_then(|_| p.stdin.flush())
-        .map_err(|e| format!("server stdin closed: {e}"))
+    write_line(&*get_proc(mgr, id)?, &payload)
 }
 
 fn stop_impl(mgr: &McpManager, id: &str) {
@@ -199,7 +234,8 @@ pub async fn mcp_stdio_start(
     env: HashMap<String, String>,
     cwd: Option<String>,
 ) -> Result<(), String> {
-    start_impl(&state, id, command, args, env, cwd)
+    let manager = state.inner().clone();
+    crate::util::blocking(move || start_impl(&manager, id, command, args, env, cwd)).await
 }
 
 #[tauri::command]
@@ -222,13 +258,16 @@ pub async fn mcp_stdio_notify(
     id: String,
     payload: String,
 ) -> Result<(), String> {
-    notify_impl(&state, &id, payload)
+    // a pipe write can block (a server not reading stdin): never on an
+    // async worker
+    let manager = state.inner().clone();
+    crate::util::blocking(move || notify_impl(&manager, &id, payload)).await
 }
 
 #[tauri::command]
 pub async fn mcp_stdio_stop(state: tauri::State<'_, McpManager>, id: String) -> Result<(), String> {
-    stop_impl(&state, &id);
-    Ok(())
+    let manager = state.inner().clone();
+    crate::util::blocking(move || { stop_impl(&manager, &id); Ok(()) }).await
 }
 
 #[cfg(test)]
@@ -278,4 +317,30 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("exceeds"));
     }
+
+    #[test]
+    fn concurrent_requests_each_get_their_own_reply() {
+        let mgr = McpManager::default();
+        // answers in reverse order: two reads, then reply to id 2 before id 1
+        start_impl(
+            &mgr,
+            "t2".into(),
+            "/bin/sh".into(),
+            vec![
+                "-c".into(),
+                r#"read a; read b; echo '{"jsonrpc":"2.0","id":2,"result":"two"}'; echo '{"jsonrpc":"2.0","id":1,"result":"one"}'"#.into(),
+            ],
+            HashMap::new(),
+            None,
+        )
+        .unwrap();
+        let m1 = mgr.clone();
+        let first = std::thread::spawn(move || request_impl(&m1, "t2", r#"{"jsonrpc":"2.0","id":1,"method":"a"}"#.into(), 5_000));
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let second = request_impl(&mgr, "t2", r#"{"jsonrpc":"2.0","id":2,"method":"b"}"#.into(), 5_000).unwrap();
+        assert!(second.contains("two"));
+        assert!(first.join().unwrap().unwrap().contains("one"));
+        stop_impl(&mgr, "t2");
+    }
 }
+

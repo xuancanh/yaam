@@ -81,6 +81,8 @@ fn tail_loop(app: AppHandle, agent: String, path: std::path::PathBuf, stop: Arc<
         std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
     };
     let mut carry: Vec<u8> = Vec::new();
+    // inside a pathological line that was dropped: discard through its end
+    let mut skipping = false;
     loop {
         if stop.load(Ordering::Relaxed) {
             return;
@@ -92,6 +94,7 @@ fn tail_loop(app: AppHandle, agent: String, path: std::path::PathBuf, stop: Arc<
             // truncated/rewritten — start over from the top
             offset = 0;
             carry.clear();
+            skipping = false;
         }
         if len == offset {
             continue;
@@ -107,25 +110,44 @@ fn tail_loop(app: AppHandle, agent: String, path: std::path::PathBuf, stop: Arc<
             continue;
         }
         offset += n as u64;
-        carry.extend_from_slice(&buf[..n]);
-        // a carry with no newline that keeps growing is one pathological line
+        let mut chunk = &buf[..n];
+        if skipping {
+            match chunk.iter().position(|&b| b == b'\n') {
+                Some(i) => { chunk = &chunk[i + 1..]; skipping = false; }
+                None => continue,
+            }
+        }
+        carry.extend_from_slice(chunk);
+        // a carry with no newline that keeps growing is one pathological line:
+        // drop it, and its remainder when that arrives (it used to be emitted
+        // as a bogus line of its own)
         if carry.len() > MAX_LINE_BYTES && !carry.contains(&b'\n') {
             carry.clear();
+            skipping = true;
             continue;
         }
-        let mut lines: Vec<String> = Vec::new();
-        while let Some(pos) = carry.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = carry.drain(..=pos).collect();
-            let line = &line[..line.len() - 1];
-            if line.is_empty() || line.len() > MAX_LINE_BYTES {
-                continue;
-            }
-            lines.push(String::from_utf8_lossy(line).into_owned());
-        }
+        let lines = split_lines(&mut carry);
         if !lines.is_empty() {
             let _ = app.emit("transcript-lines", TranscriptLines { agent: agent.clone(), lines });
         }
     }
+}
+
+/// Take every complete line out of `carry`, leaving the unfinished tail. One
+/// scan and one drain: draining per line moved the whole (up to 1 MB) buffer
+/// once per line, quadratic during catch-up on a large rollout.
+fn split_lines(carry: &mut Vec<u8>) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    while let Some(rel) = carry[start..].iter().position(|&b| b == b'\n') {
+        let line = &carry[start..start + rel];
+        if !line.is_empty() && line.len() <= MAX_LINE_BYTES {
+            lines.push(String::from_utf8_lossy(line).into_owned());
+        }
+        start += rel + 1;
+    }
+    carry.drain(..start);
+    lines
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -370,4 +392,12 @@ mod tests {
             std::path::PathBuf::from("/Users/u/.claude/projects/-Users-u/abc.jsonl")
         );
     }
+
+    #[test]
+    fn split_lines_keeps_the_unfinished_tail() {
+        let mut carry = b"a\n\nbb\ncc".to_vec();
+        assert_eq!(super::split_lines(&mut carry), vec!["a".to_string(), "bb".to_string()]);
+        assert_eq!(carry, b"cc");
+    }
 }
+

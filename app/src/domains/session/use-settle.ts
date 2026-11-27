@@ -69,6 +69,9 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
   // entry reference, not an index: the log is trimmed to 200 lines, so an index
   // drifts once a session is full and slice(index) returned a single line.
   const settle = new Map<string, { since: LogLine | undefined; timer: Disposable }>()
+  // the no-output fallback bump armResponseWatch schedules (tracked so a
+  // disposed session or runtime leaves no timer behind)
+  const armTimers = new Map<string, Disposable>()
   const linesSince = (log: readonly LogLine[], mark: LogLine | undefined) => {
     if (!mark) return log
     const i = log.lastIndexOf(mark)
@@ -122,7 +125,8 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     // a fresh prompt restarts the checkpoint backoff from the base interval
     checkpointDelay.delete(id)
     // ensure a settle check runs even if the session produces no output at all
-    clock.setTimeout(() => bumpSettle(id), 4000)
+    armTimers.get(id)?.dispose()
+    armTimers.set(id, clock.setTimeout(() => { armTimers.delete(id); bumpSettle(id) }, 4000))
   }
 
   const bufferOutput = (id: string, line: string) => {
@@ -337,6 +341,8 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
     dropStructuredSignals(id)
     settle.get(id)?.timer.dispose()
     settle.delete(id)
+    armTimers.get(id)?.dispose()
+    armTimers.delete(id)
     armed.delete(id)
     lastFlagged.delete(id)
     clearNeedsFlagSource(id)
@@ -413,6 +419,8 @@ export function createSessionSettle(deps: SettleDeps): SettleRuntime {
       scan?.dispose(); scan = undefined
       for (const { timer } of settle.values()) timer.dispose()
       for (const timer of outputTimers.values()) timer.dispose()
+      for (const timer of armTimers.values()) timer.dispose()
+      armTimers.clear()
       settle.clear(); armed.clear(); lastFlagged.clear(); outputBuffers.clear(); outputTimers.clear(); lastOutputKey.clear(); lastFinalKey.clear(); checkpointDelay.clear(); lastCheckpointKey.clear(); streaming.clear()
       resetNeedsFlagSources()
       resetStructuredSignals()

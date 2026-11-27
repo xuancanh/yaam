@@ -87,6 +87,25 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
 
   // The plain switch: stash the current workspace, hydrate the target, and
   // replay any Master events that queued while it was in the background.
+  // Replay Master events that queued while `id` was in the background.
+  const replayPending = (id: string, pending: string[]) => {
+    if (!pending.length) return
+    later(600, () => {
+      if (stateRef.current.activeWorkspace !== id) return
+      void ctx.runMaster(`[events queued while this workspace was in the background]\n${pending.join('\n\n')}\n\nSummarize these for the user (grouped, brief).`)
+    })
+  }
+  // A teardown of the active workspace falls back to another one inside its
+  // dispatch; that switch consumed the fallback's queued notes without
+  // replaying them. Snapshot them first, replay for whichever became active.
+  const withFallbackReplay = (teardown: () => void) => {
+    const before = stateRef.current.activeWorkspace
+    const queued = Object.fromEntries(Object.entries(stateRef.current.workspaceData ?? {}).map(([k, d]) => [k, d?.pendingMasterNotes ?? []]))
+    teardown()
+    const after = stateRef.current.activeWorkspace
+    if (after !== before) replayPending(after, queued[after] ?? [])
+  }
+
   const doSwitch = (id: string) => {
     // A Master turn works on the active workspace's flat slice: left running,
     // its later iterations described the new workspace and its answer landed
@@ -94,12 +113,7 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
     if (id !== stateRef.current.activeWorkspace) ctx.abortMaster()
     const pending = stateRef.current.workspaceData[id]?.pendingMasterNotes ?? []
     dispatch(s => switchWorkspaceIn(s, id, MASTER_GREETING))
-    if (pending.length) {
-      later(600, () => {
-        if (stateRef.current.activeWorkspace !== id) return
-        void ctx.runMaster(`[events queued while this workspace was in the background]\n${pending.join('\n\n')}\n\nSummarize these for the user (grouped, brief).`)
-      })
-    }
+    replayPending(id, pending)
   }
 
   return {
@@ -171,14 +185,16 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
       if (s0.activeWorkspace === id && !s0.workspaces.some(w => w.id !== id && !detached0.includes(w.id))) {
         flash('Keep at least one workspace in this window'); return
       }
-      dispatch(s => {
-        const detached = s.detachedWorkspaces ?? []
-        let next = s
-        if (s.activeWorkspace === id) {
-          const fallback = s.workspaces.find(w => w.id !== id && !detached.includes(w.id))!
-          next = switchWorkspaceIn(s, fallback.id, MASTER_GREETING)
-        }
-        return { ...next, detachedWorkspaces: [...(next.detachedWorkspaces ?? []), id] }
+      withFallbackReplay(() => {
+        dispatch(s => {
+          const detached = s.detachedWorkspaces ?? []
+          let next = s
+          if (s.activeWorkspace === id) {
+            const fallback = s.workspaces.find(w => w.id !== id && !detached.includes(w.id))!
+            next = switchWorkspaceIn(s, fallback.id, MASTER_GREETING)
+          }
+          return { ...next, detachedWorkspaces: [...(next.detachedWorkspaces ?? []), id] }
+        })
       })
       // This window stops tracking the workspace's sessions: drop their xterm
       // entries so session-data broadcasts no longer decode (or drive settle
@@ -207,21 +223,23 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
       // background one must not cancel the turn in the one the user is in
       if (s0.activeWorkspace === id) ctx.abortMaster()
       killWorkspaceSessions(s0.agents.filter(a => a.workspaceId === id))
-      dispatch(s => {
-        let next = s
-        if (s.activeWorkspace === id) {
-          const fallback = s.workspaces.find(w => w.id !== id)!
-          next = switchWorkspaceIn(s, fallback.id, MASTER_GREETING)
-        }
-        const workspaceData = { ...next.workspaceData }
-        delete workspaceData[id]
-        return {
-          ...next,
-          workspaces: next.workspaces.filter(w => w.id !== id),
-          workspaceData,
-          agents: next.agents.filter(a => a.workspaceId !== id),
-          detachedWorkspaces: (next.detachedWorkspaces ?? []).filter(w => w !== id),
-        }
+      withFallbackReplay(() => {
+        dispatch(s => {
+          let next = s
+          if (s.activeWorkspace === id) {
+            const fallback = s.workspaces.find(w => w.id !== id)!
+            next = switchWorkspaceIn(s, fallback.id, MASTER_GREETING)
+          }
+          const workspaceData = { ...next.workspaceData }
+          delete workspaceData[id]
+          return {
+            ...next,
+            workspaces: next.workspaces.filter(w => w.id !== id),
+            workspaceData,
+            agents: next.agents.filter(a => a.workspaceId !== id),
+            detachedWorkspaces: (next.detachedWorkspaces ?? []).filter(w => w !== id),
+          }
+        })
       })
       flash('Workspace deleted')
     },
@@ -237,31 +255,33 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
       if ((s0.detachedWorkspaces ?? []).includes(id)) void closeWorkspaceWindow(id)
       if (s0.activeWorkspace === id) ctx.abortMaster()
       killWorkspaceSessions(s0.agents.filter(a => a.workspaceId === id))
-      dispatch(s => {
-        const ws = s.workspaces.find(w => w.id === id)
-        if (!ws) return s
-        // the active workspace's slice is flat on state; an inactive one is
-        // already stashed in workspaceData
-        const data = s.activeWorkspace === id ? scopedFromState(s) : (s.workspaceData[id] ?? scopedFromState(s))
-        // stored sessions are paused snapshots — their processes are now dead
-        const agents = s.agents.filter(a => a.workspaceId === id).map(a => ({ ...a, status: 'idle' as const, responding: false }))
-        let next = s
-        if (s.activeWorkspace === id) {
-          const fallback = s.workspaces.find(w => w.id !== id && !(s.detachedWorkspaces ?? []).includes(w.id))
-            ?? s.workspaces.find(w => w.id !== id)!
-          next = switchWorkspaceIn(s, fallback.id, MASTER_GREETING)
-        }
-        const workspaceData = { ...next.workspaceData }
-        delete workspaceData[id]
-        const entry: ArchivedWorkspace = { workspace: ws, data, agents, archivedAt: Date.now() }
-        return {
-          ...next,
-          workspaces: next.workspaces.filter(w => w.id !== id),
-          workspaceData,
-          agents: next.agents.filter(a => a.workspaceId !== id),
-          detachedWorkspaces: (next.detachedWorkspaces ?? []).filter(w => w !== id),
-          archivedWorkspaces: [entry, ...(next.archivedWorkspaces ?? [])],
-        }
+      withFallbackReplay(() => {
+        dispatch(s => {
+          const ws = s.workspaces.find(w => w.id === id)
+          if (!ws) return s
+          // the active workspace's slice is flat on state; an inactive one is
+          // already stashed in workspaceData
+          const data = s.activeWorkspace === id ? scopedFromState(s) : (s.workspaceData[id] ?? scopedFromState(s))
+          // stored sessions are paused snapshots — their processes are now dead
+          const agents = s.agents.filter(a => a.workspaceId === id).map(a => ({ ...a, status: 'idle' as const, responding: false }))
+          let next = s
+          if (s.activeWorkspace === id) {
+            const fallback = s.workspaces.find(w => w.id !== id && !(s.detachedWorkspaces ?? []).includes(w.id))
+              ?? s.workspaces.find(w => w.id !== id)!
+            next = switchWorkspaceIn(s, fallback.id, MASTER_GREETING)
+          }
+          const workspaceData = { ...next.workspaceData }
+          delete workspaceData[id]
+          const entry: ArchivedWorkspace = { workspace: ws, data, agents, archivedAt: Date.now() }
+          return {
+            ...next,
+            workspaces: next.workspaces.filter(w => w.id !== id),
+            workspaceData,
+            agents: next.agents.filter(a => a.workspaceId !== id),
+            detachedWorkspaces: (next.detachedWorkspaces ?? []).filter(w => w !== id),
+            archivedWorkspaces: [entry, ...(next.archivedWorkspaces ?? [])],
+          }
+        })
       })
       flash('Workspace archived')
     },
@@ -314,7 +334,12 @@ export function createWorkspaceActions(ctx: WorkspaceActionsCtx): WorkspaceActio
  *  a plain sync keeps it detached. The workspace's own sessions are replaced with
  *  the satellite's copy; sessions in other workspaces are untouched. */
 function mergeWorkspaceSlice(s: AppState, id: string, data: WorkspaceData | undefined, agents: Agent[] | undefined, keepDetached: boolean): AppState {
-  const workspaceData = data ? { ...s.workspaceData, [id]: data } : s.workspaceData
+  // Master notes for a spun-out workspace queue here in main (the satellite
+  // runs no Master); the satellite's slice always carries none, so keep ours
+  // or every sync wiped them
+  const queued = s.workspaceData[id]?.pendingMasterNotes ?? []
+  const slice = data && queued.length ? { ...data, pendingMasterNotes: queued } : data
+  const workspaceData = slice ? { ...s.workspaceData, [id]: slice } : s.workspaceData
   const nextAgents = agents ? mergeAgents(s.agents, id, agents) : s.agents
   const detached = s.detachedWorkspaces ?? []
   return {

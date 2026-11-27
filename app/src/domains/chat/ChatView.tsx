@@ -23,10 +23,19 @@ const FIELD = {
 } as const
 
 /** last non-tool message of a chat, for the sidebar snippet */
+// cached per transcript: the list re-derives this for every chat on each
+// render (each keystroke of a composer), and the old version filtered the
+// whole log and collapsed whitespace in the full last message to keep 80 chars
+const snippets = new WeakMap<readonly unknown[], { text: string; at: number }>()
 function lastSnippet(a: Agent): { text: string; at: number } {
-  const msgs = (a.chatLog ?? []).filter(m => m.role === 'user' || m.role === 'assistant')
-  const m = msgs[msgs.length - 1]
-  return { text: m?.text.replace(/\s+/g, ' ').slice(0, 80) ?? '', at: m?.at ?? 0 }
+  const log = a.chatLog ?? []
+  const hit = snippets.get(log)
+  if (hit) return hit
+  let m: (typeof log)[number] | undefined
+  for (let i = log.length - 1; i >= 0; i--) if (log[i].role === 'user' || log[i].role === 'assistant') { m = log[i]; break }
+  const out = { text: m ? m.text.slice(0, 400).replace(/\s+/g, ' ').slice(0, 80) : '', at: m?.at ?? 0 }
+  snippets.set(log, out)
+  return out
 }
 
 function timeLabel(at: number): string {

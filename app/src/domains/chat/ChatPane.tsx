@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useActions, useConductorSelector } from '../../store'
@@ -181,7 +181,21 @@ function ApprovalBubble({ m, busy, onDecide }: { m: ChatMsg; busy: boolean; onDe
   )
 }
 
-function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork, onQuickReply, onRate, atts }: { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'always-tool' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void; onQuickReply?: (msgId: string, reply: string) => void; onRate?: (msgId: string, rating: 'up' | 'down', note?: string) => void; atts?: ChatAttachmentRecord[] }) {
+type BubbleProps = { m: ChatMsg; live?: boolean; canRetry?: boolean; onRetry?: () => void; busy?: boolean; onApprove?: (msgId: string, decision: 'once' | 'always' | 'always-tool' | 'deny') => void; onArtifact?: (a: ChatArtifact) => void; collapseTool?: boolean; onEdit?: () => void; onFork?: () => void; onQuickReply?: (msgId: string, reply: string) => void; onRate?: (msgId: string, rating: 'up' | 'down', note?: string) => void; atts?: ChatAttachmentRecord[] }
+
+// Memoized on the message and its display flags. The pane re-renders every
+// streamed frame and on every composer keystroke (the draft lives in the
+// store), and each of those re-rendered every bubble of the transcript. The
+// callbacks only close over the chat id and the turn, whose changes show up
+// in the compared props.
+const sameBubble = (a: BubbleProps, b: BubbleProps) =>
+  a.m === b.m && a.live === b.live && a.canRetry === b.canRetry && a.busy === b.busy
+  && a.collapseTool === b.collapseTool && a.atts === b.atts
+  && !a.onEdit === !b.onEdit && !a.onFork === !b.onFork && !a.onRate === !b.onRate
+
+const Bubble = memo(function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, collapseTool, onEdit, onFork, onQuickReply, onRate, atts }: BubbleProps) {
+  // two regex passes over the whole text: once per message, not per render
+  const artifact = useMemo(() => (live ? null : extractArtifact(m.text)), [live, m.text])
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
@@ -241,7 +255,6 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
       </div>
     )
   }
-  const artifact = live ? null : extractArtifact(m.text)
   return (
     <div
       onMouseEnter={() => setHover(true)}
@@ -337,7 +350,7 @@ function Bubble({ m, live, canRetry, onRetry, busy, onApprove, onArtifact, colla
       )}
     </div>
   )
-}
+}, sameBubble)
 
 /** Live sandboxed preview of an assistant-produced document (HTML/SVG). */
 function ArtifactPanel({ artifact, onClose }: { artifact: ChatArtifact; onClose: () => void }) {
