@@ -112,7 +112,21 @@ export function runHydration(ctx: HydrationCtx): void {
         if (Object.keys(merged).some(k => k !== 'agents') || merged.agents?.length) hydrateFrom(merged)
       } catch (e) {
         console.error('[yaam] hydration failed — starting fresh:', e)
-        dispatch(s => ({ ...s, toast: 'Saved state was unreadable — starting fresh', bootStatus: 'failed' }))
+        // Keep the unreadable files before saves are enabled: otherwise the
+        // first two saves of the fresh state rotate both the real file and its
+        // .bak away. If they cannot be kept, saving stays off for this run.
+        try {
+          const kept = await native.preserveStateFiles()
+          dispatch(s => ({
+            ...s,
+            toast: kept ? `Saved state was unreadable, starting fresh. The old file was kept as ${kept}` : 'Saved state was unreadable, starting fresh',
+            bootStatus: 'failed',
+          }))
+        } catch (pe) {
+          console.error('[yaam] could not keep the unreadable state file; saving is off for this run:', pe)
+          dispatch(s => ({ ...s, toast: 'Saved state was unreadable and could not be backed up. Changes will not be saved until restart.', bootStatus: 'failed' }))
+          return
+        }
       }
       // Fill credential fields the file no longer holds from the OS keychain.
       // markReady() seeds those mirrors and migrates any legacy plaintext.

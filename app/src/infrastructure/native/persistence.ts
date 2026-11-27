@@ -15,14 +15,18 @@ const saveChains = new Map<string, { chain: Promise<void>; queued: string | null
 function savePartitionSerialized(partition: string, invokeName: string, args: (json: string) => Record<string, unknown>, json: string): Promise<void> {
   const entry = saveChains.get(partition) ?? { chain: Promise.resolve(), queued: null }
   entry.queued = json
-  entry.chain = entry.chain.then(async () => {
+  const link = entry.chain.then(async () => {
     if (entry.queued === null) return // superseded by an earlier link
     const payload = entry.queued
     entry.queued = null
     await invoke(invokeName, args(payload))
   })
+  // the stored chain must swallow failures: a rejected link would otherwise
+  // skip every later write for this partition (including the close flush)
+  // without ever calling the backend again. The caller still sees the error.
+  entry.chain = link.catch(() => {})
   saveChains.set(partition, entry)
-  return entry.chain
+  return link
 }
 
 /** Persist the main app-state partition, with localStorage fallback.
@@ -43,6 +47,14 @@ export async function loadStateFile(): Promise<string | null> {
 export async function loadStateBackup(): Promise<string | null> {
   if (!isTauri) return null
   return await invoke<string | null>('load_state_backup')
+}
+
+/** Copy the unreadable main state file (and its backup) aside before a fresh
+ *  start may save over them. Resolves to the kept file name, or null when there
+ *  was nothing on disk. */
+export async function preserveStateFiles(): Promise<string | null> {
+  if (!isTauri) return null
+  return await invoke<string | null>('preserve_state')
 }
 
 /** Persist a named high-churn partition (e.g. `sessions`), with localStorage
@@ -75,9 +87,10 @@ export function removeSession(id: string): Promise<void> {
   const partition = `session:${id}`
   const entry = saveChains.get(partition) ?? { chain: Promise.resolve(), queued: null }
   entry.queued = null // a pending save for a removed session must never run
-  entry.chain = entry.chain.then(() => invoke<void>('remove_session', { id }))
+  const link = entry.chain.then(() => invoke<void>('remove_session', { id }))
+  entry.chain = link.catch(() => {})
   saveChains.set(partition, entry)
-  return entry.chain
+  return link
 }
 
 /** Load every persisted session file (each element is one session's JSON). */

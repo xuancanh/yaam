@@ -46,11 +46,26 @@ export function createPersistenceRuntime(
   // prompts for unchanged items after an app update).
   const mirroredSecrets = new Map<string, string>()
   const savedAgents = new Map<string, Agent>()
+  // Ids present at the last sweep. Structural change (add/remove) is judged
+  // against this, not savedAgents: a failed write drops its entry from
+  // savedAgents to stay dirty, and must not make every later dispatch look
+  // structural (that bypassed the backoff and rewrote on each output flush).
+  const savedIds = new Set<string>()
+  // Last JSON confirmed written per session. Runtime-only edits (responding,
+  // attention, a re-created identity after ws:sync) change the object but not
+  // the durable content; those skip the IPC + fsync entirely.
+  const savedJson = new Map<string, string>()
   let ready = false
   let saveFailed = false
   let mainTimer: number | undefined
   let sessionTimer: number | undefined
   let secretTimer: number | undefined
+  // Max-wait for the trailing debounces: output flushes change agents every
+  // 100ms, so a pure trailing timer never fired during a long agent run and a
+  // crash lost everything since the last moment of global quiet.
+  const MAX_WAIT_MS = 4000
+  let mainArmedAt = 0
+  let sessionArmedAt = 0
   // Consecutive session-write failures. A persistently failing disk (full,
   // read-only, …) must not spin an 800ms re-arm forever: back off exponentially
   // and give up after MAX_SAVE_ATTEMPTS. On give-up the failed identity stays
@@ -99,8 +114,12 @@ export function createPersistenceRuntime(
   // latest state at fire time and redacts keychain-safe secrets to plaintext.
   const armMain = () => {
     if (!ready || !ownsWrites) return
-    if (mainTimer) window.clearTimeout(mainTimer)
+    if (mainTimer) {
+      if (Date.now() - mainArmedAt >= MAX_WAIT_MS) return // let the pending save land
+      window.clearTimeout(mainTimer)
+    } else mainArmedAt = Date.now()
     mainTimer = window.setTimeout(() => {
+      mainTimer = undefined
       const main = redactSecrets(selectMainState(store.getState()), keychainReady)
       native.saveStateFile(JSON.stringify(main)).then(() => onSaveOk('main')).catch(e => onSaveError('main', 'main', e))
     }, 800)
@@ -132,7 +151,11 @@ export function createPersistenceRuntime(
     for (const a of store.getState().agents) {
       next.set(a.id, a)
       if (savedAgents.get(a.id) !== a) {
-        native.saveSession(a.id, JSON.stringify(selectSession(a))).then(() => { onSaveOk('session'); sessionAttempt = 0 }).catch(e => {
+        const json = JSON.stringify(selectSession(a))
+        if (savedJson.get(a.id) === json) continue
+        savedJson.set(a.id, json)
+        native.saveSession(a.id, json).then(() => { onSaveOk('session'); sessionAttempt = 0 }).catch(e => {
+          if (savedJson.get(a.id) === json) savedJson.delete(a.id)
           onSaveError('session', 'session', e)
           // This identity was optimistically recorded below. Remove it only if
           // it is still current, so the unchanged session remains dirty and a
@@ -145,6 +168,7 @@ export function createPersistenceRuntime(
     for (const id of savedAgents.keys()) {
       if (!next.has(id)) {
         const removed = savedAgents.get(id)!
+        savedJson.delete(id)
         native.removeSession(id).then(() => { onSaveOk('session'); sessionAttempt = 0 }).catch(e => {
           onSaveError('session removal', 'session', e)
           // Keep a tombstone-like old identity so the next sweep retries the
@@ -156,10 +180,15 @@ export function createPersistenceRuntime(
     }
     savedAgents.clear()
     for (const [id, a] of next) savedAgents.set(id, a)
+    savedIds.clear()
+    for (const id of next.keys()) savedIds.add(id)
   }
   const armSession = (delay = 800) => {
     if (!ready || !ownsWrites) return
-    if (sessionTimer) window.clearTimeout(sessionTimer)
+    if (sessionTimer) {
+      if (Date.now() - sessionArmedAt >= MAX_WAIT_MS) return // let the pending sweep land
+      window.clearTimeout(sessionTimer)
+    } else sessionArmedAt = Date.now()
     sessionTimer = window.setTimeout(writeSessions, delay)
   }
   // A session was added or removed (vs the last save) — a structural change, as
@@ -167,8 +196,8 @@ export function createPersistenceRuntime(
   // persisted immediately so a just-created chat survives a quick restart instead
   // of waiting out the content debounce (and racing the unload flush).
   const sessionSetChanged = (agents: readonly Agent[]) => {
-    if (agents.length !== savedAgents.size) return true
-    for (const a of agents) if (!savedAgents.has(a.id)) return true
+    if (agents.length !== savedIds.size) return true
+    for (const a of agents) if (!savedIds.has(a.id)) return true
     return false
   }
 
@@ -223,6 +252,9 @@ export function createPersistenceRuntime(
   // write settles, so teardown can await durability before closing the window.
   const flush = async (): Promise<void> => {
     if (!ownsWrites) return // satellites never write — main owns the files
+    // before hydration has applied the restored snapshot, the store holds seed
+    // state: a quit during boot must not write that over the real files
+    if (!ready) return
     const st = store.getState()
     const writes: Array<Promise<unknown>> = [
       native.saveStateFile(JSON.stringify(redactSecrets(selectMainState(st), keychainReady)))
@@ -230,7 +262,9 @@ export function createPersistenceRuntime(
     ]
     for (const a of st.agents) {
       if (savedAgents.get(a.id) !== a) {
-        writes.push(native.saveSession(a.id, JSON.stringify(selectSession(a)))
+        const json = JSON.stringify(selectSession(a))
+        if (savedJson.get(a.id) === json) continue
+        writes.push(native.saveSession(a.id, json)
           .then(() => onSaveOk('session')).catch(e => onSaveError('session', 'session', e)))
       }
     }
@@ -244,6 +278,10 @@ export function createPersistenceRuntime(
     keychainReady,
     markReady() {
       ready = true
+      // The hydrated sessions are exactly what is on disk: seed the saved set
+      // so the first output flush after boot doesn't look structural and
+      // rewrite every session file at once.
+      for (const a of store.getState().agents) { savedAgents.set(a.id, a); savedIds.add(a.id) }
       // Hydration has already resolved these accounts from Keychain, so their
       // in-memory values are known mirrors and must not be written back. Any
       // legacy plaintext credential is migrated once after boot.

@@ -91,11 +91,10 @@ describe('createPersistenceRuntime', () => {
     const store = fakeStore(baseState({ agents: [a1, a2] as AppState['agents'] }))
     const rt = createPersistenceRuntime(store, { onToast: () => {} })
     rt.start(); rt.markReady()
-    // first pass persists both
+    // the hydrated sessions are already on disk: an unchanged pass writes nothing
     store.set(baseState({ agents: [a1, a2] as AppState['agents'] }))
     vi.advanceTimersByTime(800)
-    expect(native.saveSession).toHaveBeenCalledTimes(2)
-    vi.clearAllMocks()
+    expect(native.saveSession).not.toHaveBeenCalled()
     // a1 changes (new ref), a2 unchanged, and a3 added — only a1 + a3 written
     const a1b = { ...a1, log: [{ t: 'out', x: 'hi' }] } as unknown as AppState['agents'][number]
     const a3 = { id: 'a3', kind: 'real', cmd: 'z', log: [] } as unknown as AppState['agents'][number]
@@ -127,9 +126,8 @@ describe('createPersistenceRuntime', () => {
     const store = fakeStore(baseState({ agents: [a1] as AppState['agents'] }))
     const rt = createPersistenceRuntime(store, { onToast: () => {} })
     rt.start(); rt.markReady()
-    store.set({ ...store.getState(), agents: [a1] as AppState['agents'] }) // structural (a1 new vs empty saved) → immediate
-    expect(native.saveSession).toHaveBeenCalledTimes(1)
-    vi.clearAllMocks()
+    store.set({ ...store.getState(), agents: [a1] as AppState['agents'] }) // hydrated identity: nothing to write
+    expect(native.saveSession).not.toHaveBeenCalled()
     // same id, new ref (streaming content) → debounced, not immediate
     const a1b = { ...a1, log: [{ t: 'out', x: 'hi' }] } as unknown as AppState['agents'][number]
     store.set({ ...store.getState(), agents: [a1b] as AppState['agents'] })
@@ -390,6 +388,46 @@ describe('createPersistenceRuntime', () => {
     store.set({ ...store.getState(), tasks: [{ id: 't2' }] as unknown as AppState['tasks'] })
     await vi.advanceTimersByTimeAsync(800)
     expect(onSaveStatus).toHaveBeenLastCalledWith(null)
+    rt.dispose()
+  })
+
+  it('flush() before markReady() never writes seed state over the real files', async () => {
+    const store = fakeStore(baseState({ agents: [{ id: 'a1', kind: 'real', log: [] }] as unknown as AppState['agents'] }))
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start()
+    await rt.flush()
+    expect(native.saveStateFile).not.toHaveBeenCalled()
+    expect(native.saveSession).not.toHaveBeenCalled()
+    rt.dispose()
+  })
+
+  it('a continuous output stream still saves sessions within the max-wait', () => {
+    const a1 = { id: 'a1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
+    const store = fakeStore(baseState({ agents: [a1] as AppState['agents'] }))
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+    // a new identity every 100ms for 6s: a trailing-only debounce never fires
+    for (let i = 0; i < 60; i++) {
+      store.set({ ...store.getState(), agents: [{ ...a1, log: [{ t: 'out', x: String(i) }] }] as unknown as AppState['agents'] })
+      vi.advanceTimersByTime(100)
+    }
+    expect(vi.mocked(native.saveSession).mock.calls.length).toBeGreaterThanOrEqual(1)
+    rt.dispose()
+  })
+
+  it('skips the write when only runtime fields changed the identity', () => {
+    const a1 = { id: 'a1', kind: 'real', cmd: 'x', log: [] } as unknown as AppState['agents'][number]
+    const store = fakeStore(baseState({ agents: [a1] as AppState['agents'] }))
+    const rt = createPersistenceRuntime(store, { onToast: () => {} })
+    rt.start(); rt.markReady()
+    const a1b = { ...a1, log: [{ t: 'out', x: 'hi' }] } as unknown as AppState['agents'][number]
+    store.set({ ...store.getState(), agents: [a1b] as AppState['agents'] })
+    vi.advanceTimersByTime(800)
+    expect(native.saveSession).toHaveBeenCalledTimes(1)
+    // same durable content, fresh object (e.g. ws:sync re-created it)
+    store.set({ ...store.getState(), agents: [{ ...a1b }] as AppState['agents'] })
+    vi.advanceTimersByTime(800)
+    expect(native.saveSession).toHaveBeenCalledTimes(1)
     rt.dispose()
   })
 })

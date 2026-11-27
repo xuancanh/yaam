@@ -61,3 +61,20 @@ describe('native persistence session chains', () => {
     ])
   })
 })
+
+describe('native persistence failure recovery', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('keeps writing after one failed save on the same partition', async () => {
+    let n = 0
+    vi.mocked(invoke).mockImplementation((cmd) => {
+      if (cmd === 'save_session' && n++ === 0) return Promise.reject(new Error('disk full')) as Promise<never>
+      return Promise.resolve() as Promise<never>
+    })
+    await expect(saveSession('rel15-a', '{"v":1}')).rejects.toThrow('disk full')
+    await saveSession('rel15-a', '{"v":2}')
+    await removeSession('rel15-a')
+    const calls = vi.mocked(invoke).mock.calls.map(c => c[0])
+    expect(calls).toEqual(['save_session', 'save_session', 'remove_session'])
+  })
+})

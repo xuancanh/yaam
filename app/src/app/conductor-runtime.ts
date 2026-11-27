@@ -212,9 +212,16 @@ export function createAppRuntime(role: WindowRole = { kind: 'main' }): AppRuntim
           agents: stateRef.current.agents.filter(a => a.workspaceId === wsId),
         })
         let pinned = false
+        // trailing debounce with a max-wait: a busy satellite changes state
+        // every 100ms while its sessions print, so a pure trailing timer would
+        // never hand main its slice until output went quiet
+        let syncArmedAt = 0
         const armSync = () => {
-          syncTimer?.dispose()
-          syncTimer = browserClock.setTimeout(() => { void emitWsSync(slice()) }, 1500)
+          if (syncTimer) {
+            if (Date.now() - syncArmedAt >= 5000) return
+            syncTimer.dispose()
+          } else syncArmedAt = Date.now()
+          syncTimer = browserClock.setTimeout(() => { syncTimer = undefined; void emitWsSync(slice()) }, 1500)
         }
         windowDisposers.push(useAppStore.subscribe(() => {
           const st = stateRef.current

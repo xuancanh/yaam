@@ -87,6 +87,7 @@ pub fn run() {
             domains::state::save_state,
             domains::state::load_state,
             domains::state::load_state_backup,
+            domains::state::preserve_state,
             domains::state::save_partition,
             domains::state::load_partition,
             domains::state::save_session,

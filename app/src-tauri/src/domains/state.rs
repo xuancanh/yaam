@@ -19,11 +19,37 @@ fn safe_stem(name: &str) -> Result<String, String> {
     Ok(format!("{name}.json"))
 }
 
+/// How hard a write flushes. On macOS `File::sync_all` is `F_FULLFSYNC`, which
+/// drains the drive's whole write cache and can take tens of milliseconds. The
+/// low-churn main partition pays that; per-session files (rewritten every
+/// ~second while agents print) use plain `fsync`, which still survives an app
+/// or OS crash and keeps rename ordering.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Flush {
+    Full,
+    Fast,
+}
+
+fn flush_file(f: &std::fs::File, mode: Flush) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if mode == Flush::Fast {
+        use std::os::unix::io::AsRawFd;
+        // SAFETY: fsync on a descriptor we own for the duration of the call
+        return if unsafe { libc::fsync(f.as_raw_fd()) } == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) };
+    }
+    let _ = mode;
+    f.sync_all()
+}
+
 /// Atomic write to an absolute path: unique temp file + fsync + rename, rotating
 /// the previous copy to `<path>.bak`. Temp-file + rename means a crash mid-write
 /// can never truncate the only good copy, and a unique temp name keeps
 /// concurrent writers from sharing one scratch path.
 fn atomic_write(path: &std::path::Path, json: &str) -> Result<(), String> {
+    atomic_write_with(path, json, Flush::Full)
+}
+
+fn atomic_write_with(path: &std::path::Path, json: &str, mode: Flush) -> Result<(), String> {
     use std::io::Write;
     use std::sync::{Mutex, OnceLock};
     static WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -56,7 +82,7 @@ fn atomic_write(path: &std::path::Path, json: &str) -> Result<(), String> {
             let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
         }
         f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
-        f.sync_all().map_err(|e| e.to_string())?;
+        flush_file(&f, mode).map_err(|e| e.to_string())?;
     }
     let bak = parent.join(format!("{name}.bak"));
     if path.exists() {
@@ -73,7 +99,7 @@ fn atomic_write(path: &std::path::Path, json: &str) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     std::fs::File::open(parent)
-        .and_then(|dir| dir.sync_all())
+        .and_then(|dir| flush_file(&dir, mode))
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -129,6 +155,34 @@ pub fn load_main(app: &AppHandle) -> Result<Option<String>, String> {
     read_with_backup(&data_dir(app)?.join("conductor-state.json"), true)
 }
 
+/// Copy the main partition and its backup aside as
+/// `conductor-state.unreadable-<ms>.json[.bak]` before a fresh start may save
+/// over them. Called when hydration hard-fails: without it, the first two saves
+/// of the fresh state would rotate both the real file and its `.bak` away.
+pub fn preserve_main(app: &AppHandle) -> Result<Option<String>, String> {
+    preserve_in(&data_dir(app)?)
+}
+
+fn preserve_in(dir: &std::path::Path) -> Result<Option<String>, String> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let mut kept = None;
+    for (src, dst) in [
+        ("conductor-state.json", format!("conductor-state.unreadable-{stamp}.json")),
+        ("conductor-state.json.bak", format!("conductor-state.unreadable-{stamp}.json.bak")),
+    ] {
+        let from = dir.join(src);
+        if !from.exists() {
+            continue;
+        }
+        std::fs::copy(&from, dir.join(&dst)).map_err(|e| e.to_string())?;
+        kept.get_or_insert(dst);
+    }
+    Ok(kept)
+}
+
 /// Return the main partition's previous snapshot (the `.bak`).
 pub fn load_main_backup(app: &AppHandle) -> Result<Option<String>, String> {
     read_with_backup(&data_dir(app)?.join("conductor-state.json.bak"), false)
@@ -148,7 +202,7 @@ fn load_partition_impl(app: &AppHandle, name: &str) -> Result<Option<String>, St
 /// Persist one session (agent) to its own file, `sessions/<id>.json`.
 fn save_session_impl(app: &AppHandle, id: &str, json: &str) -> Result<(), String> {
     if json.len() > MAX_SESSION_BYTES { return Err("session state exceeds 16 MB".to_string()); }
-    atomic_write(&sessions_dir(app)?.join(safe_stem(id)?), json)
+    atomic_write_with(&sessions_dir(app)?.join(safe_stem(id)?), json, Flush::Fast)
 }
 
 /// Delete one session's file (and its backup).
@@ -183,6 +237,11 @@ fn load_session_files(dir: &std::path::Path) -> Result<Vec<String>, String> {
             continue;
         }
         if let Ok(Some(s)) = read_with_backup(&path, false) {
+            // a torn or corrupt primary must not shadow a good backup: leave
+            // the stem unseen so the .bak pass below recovers it instead
+            if serde_json::from_str::<serde::de::IgnoredAny>(&s).is_err() {
+                continue;
+            }
             seen_stems.insert(name.trim_end_matches(".json").to_string());
             out.push(s);
         }
@@ -212,49 +271,61 @@ fn load_sessions_impl(app: &AppHandle) -> Result<Vec<String>, String> {
     load_session_files(&sessions_dir(app)?)
 }
 
-#[tauri::command]
-pub fn save_state(app: AppHandle, json: String) -> Result<(), String> {
-    save_main(&app, &json)
+// Storage commands run on the blocking pool: a sync Tauri command runs on the
+// main thread, and each write fsyncs (twice, with the directory) under a
+// global lock, which stalled the UI once a second while agents printed.
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn load_state(app: AppHandle) -> Result<Option<String>, String> {
-    load_main(&app)
+pub async fn save_state(app: AppHandle, json: String) -> Result<(), String> {
+    blocking(move || save_main(&app, &json)).await
 }
 
 #[tauri::command]
-pub fn load_state_backup(app: AppHandle) -> Result<Option<String>, String> {
-    load_main_backup(&app)
+pub async fn load_state(app: AppHandle) -> Result<Option<String>, String> {
+    blocking(move || load_main(&app)).await
 }
 
 #[tauri::command]
-pub fn save_partition(app: AppHandle, name: String, json: String) -> Result<(), String> {
-    save_partition_impl(&app, &name, &json)
+pub async fn load_state_backup(app: AppHandle) -> Result<Option<String>, String> {
+    blocking(move || load_main_backup(&app)).await
 }
 
 #[tauri::command]
-pub fn load_partition(app: AppHandle, name: String) -> Result<Option<String>, String> {
-    load_partition_impl(&app, &name)
+pub async fn preserve_state(app: AppHandle) -> Result<Option<String>, String> {
+    blocking(move || preserve_main(&app)).await
 }
 
 #[tauri::command]
-pub fn save_session(app: AppHandle, id: String, json: String) -> Result<(), String> {
-    save_session_impl(&app, &id, &json)
+pub async fn save_partition(app: AppHandle, name: String, json: String) -> Result<(), String> {
+    blocking(move || save_partition_impl(&app, &name, &json)).await
 }
 
 #[tauri::command]
-pub fn remove_session(app: AppHandle, id: String) -> Result<(), String> {
-    remove_session_impl(&app, &id)
+pub async fn load_partition(app: AppHandle, name: String) -> Result<Option<String>, String> {
+    blocking(move || load_partition_impl(&app, &name)).await
 }
 
 #[tauri::command]
-pub fn load_sessions(app: AppHandle) -> Result<Vec<String>, String> {
-    load_sessions_impl(&app)
+pub async fn save_session(app: AppHandle, id: String, json: String) -> Result<(), String> {
+    blocking(move || save_session_impl(&app, &id, &json)).await
+}
+
+#[tauri::command]
+pub async fn remove_session(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || remove_session_impl(&app, &id)).await
+}
+
+#[tauri::command]
+pub async fn load_sessions(app: AppHandle) -> Result<Vec<String>, String> {
+    blocking(move || load_sessions_impl(&app)).await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{atomic_write, load_session_files, read_with_backup, safe_stem, MAX_STATE_BYTES};
+    use super::{atomic_write, atomic_write_with, load_session_files, preserve_in, read_with_backup, safe_stem, Flush, MAX_STATE_BYTES};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -358,16 +429,18 @@ mod tests {
     #[test]
     fn load_session_files_prefers_primaries_and_recovers_orphaned_backups() {
         let dir = TestDir::new("sessions");
-        std::fs::write(dir.path().join("primary.json"), "primary-current").unwrap();
-        std::fs::write(dir.path().join("primary.json.bak"), "primary-old").unwrap();
-        std::fs::write(dir.path().join("recovered.json.bak"), "recovered").unwrap();
+        std::fs::write(dir.path().join("primary.json"), r#""primary-current""#).unwrap();
+        std::fs::write(dir.path().join("primary.json.bak"), r#""primary-old""#).unwrap();
+        std::fs::write(dir.path().join("recovered.json.bak"), r#""recovered""#).unwrap();
+        std::fs::write(dir.path().join("torn.json"), r#"{"agent":{"id":"#).unwrap();
+        std::fs::write(dir.path().join("torn.json.bak"), r#""torn-old""#).unwrap();
         std::fs::write(dir.path().join("ignored.json.1.tmp"), "temporary").unwrap();
         std::fs::write(dir.path().join("notes.txt"), "not-json").unwrap();
 
         let mut loaded = load_session_files(dir.path()).unwrap();
         loaded.sort();
 
-        assert_eq!(loaded, vec!["primary-current", "recovered"]);
+        assert_eq!(loaded, vec![r#""primary-current""#, r#""recovered""#, r#""torn-old""#]);
     }
 
     #[test]
@@ -375,5 +448,28 @@ mod tests {
         let dir = TestDir::new("missing-sessions");
         let missing = dir.path().join("does-not-exist");
         assert!(load_session_files(&missing).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fast_flush_writes_and_rotates_like_full() {
+        let dir = TestDir::new("fast-flush");
+        let path = dir.path().join("s.json");
+        atomic_write_with(&path, "1", Flush::Fast).unwrap();
+        atomic_write_with(&path, "2", Flush::Fast).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "2");
+        assert_eq!(std::fs::read_to_string(dir.path().join("s.json.bak")).unwrap(), "1");
+    }
+
+    #[test]
+    fn preserve_copies_the_main_file_and_backup_aside() {
+        let dir = TestDir::new("preserve");
+        assert_eq!(preserve_in(dir.path()).unwrap(), None);
+        std::fs::write(dir.path().join("conductor-state.json"), "main").unwrap();
+        std::fs::write(dir.path().join("conductor-state.json.bak"), "bak").unwrap();
+        let kept = preserve_in(dir.path()).unwrap().unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join(&kept)).unwrap(), "main");
+        assert_eq!(std::fs::read_to_string(dir.path().join(format!("{kept}.bak"))).unwrap(), "bak");
+        // originals untouched
+        assert_eq!(std::fs::read_to_string(dir.path().join("conductor-state.json")).unwrap(), "main");
     }
 }
