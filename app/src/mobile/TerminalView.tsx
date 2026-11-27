@@ -61,8 +61,6 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
   // a finger is down or a fling is running: live output must not yank the
   // view to the bottom under it
   const gestureRef = useRef(false)
-  // new bytes arrived: a full-screen app has redrawn (its scroll landed)
-  const appRedrawRef = useRef<() => void>(() => {})
   const claimRef = useRef<() => void>(() => {})
   const refitRef = useRef<() => void>(() => {})
   const [mirror, setMirrorState] = useState(savedMirror)
@@ -203,8 +201,8 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
     //   constant; it used to die at ~325ms), time-based so 60 and 120Hz feel
     //   the same, and settles onto a row boundary.
     // - Full-screen TUIs (no scrollback of their own) get the same gesture:
-    //   rows go to the app as session_scroll, sent as soon as one whole step
-    //   is ready, with immediate sub-row visual feedback and momentum.
+    //   rows go to the app as session_scroll, one request in flight at a
+    //   time with movement merged meanwhile, plus momentum after a flick.
     const host = hostRef.current!
     const DECEL = 0.998 // velocity kept per ms
     const MAX_V = 7 // px per ms
@@ -243,63 +241,34 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
       if (term.modes.mouseTrackingMode !== 'none') return 'mouse'
       return term.buffer.active.type === 'alternate' ? 'keys' : null
     }
+    // At most ONE scroll request in flight. Movement made meanwhile is merged
+    // into the next request when it returns, so updates pace themselves to
+    // the network: firing every 35ms regardless queued requests behind the
+    // browser's per-host connection limit over a slow link, and the app only
+    // caught up after the finger had lifted. There is no fake preview offset:
+    // the screen moves when the app redraws (a preview "acknowledged" by every
+    // spinner redraw jagged the whole screen up and down).
     let appAcc = 0 // app steps not yet sent
-    let appVisual = 0 // finger travel (rows) the app has not redrawn yet
-    let appInFlight = 0 // rows sent to the app whose redraw has not arrived
-    const stepRows = () => (appMode() === 'mouse' ? 3 : 1)
-    let appTimer: ReturnType<typeof setTimeout> | null = null
-    let appSettle: ReturnType<typeof setTimeout> | null = null
-    let lastAppSend = 0
-    let appFlingRows = 0
+    let appBusy = false
     const sendAppScroll = () => {
-      appTimer = null
+      if (appBusy) return
       const n = Math.trunc(appAcc)
       if (!n) return
       appAcc -= n
-      appInFlight += Math.abs(n) * stepRows()
-      lastAppSend = performance.now()
-      void sendCommand({ kind: 'session_scroll', id: sessionId, text: String(n) }).catch(() => {})
+      appBusy = true
+      sendCommand({ kind: 'session_scroll', id: sessionId, text: String(n) })
+        .catch(() => {})
+        .finally(() => {
+          appBusy = false
+          if (Math.abs(appAcc) >= 1) sendAppScroll()
+        })
     }
     const pushApp = (dRows: number) => {
       // a wheel report scrolls most TUIs ~3 lines; an arrow key, one
-      const step = stepRows()
-      appAcc += dRows / step
-      // immediate feedback: the screen follows the finger (up to about one
-      // step ahead) until the app's redraw of that step arrives
-      const lim = step + 0.5
-      appVisual = Math.max(-lim, Math.min(lim, appVisual + dRows))
-      setOffset(appVisual)
-      if (appSettle) { clearTimeout(appSettle); appSettle = null }
-      if (Math.abs(appAcc) >= 1) {
-        // the first step goes out at once; then at most one request per 35ms
-        const wait = 35 - (performance.now() - lastAppSend)
-        if (wait <= 0) { if (appTimer) clearTimeout(appTimer); sendAppScroll() }
-        else if (!appTimer) appTimer = setTimeout(sendAppScroll, wait)
-      }
+      appAcc += dRows / (appMode() === 'mouse' ? 3 : 1)
+      if (Math.abs(appAcc) >= 1) sendAppScroll()
     }
-    /** new bytes from the app: a sent step has (likely) been redrawn, so
-     *  that much of the preview offset is now real content. Only rows that
-     *  were actually sent are taken back; resetting the whole preview made
-     *  the screen jump back under the finger on every redraw. */
-    const appRedrawn = () => {
-      if (!appVisual || !appInFlight) return
-      const ack = Math.min(Math.abs(appVisual), appInFlight)
-      appInFlight -= ack
-      appVisual -= Math.sign(appVisual) * ack
-      setOffset(appVisual)
-    }
-    /** gesture over: whatever the app did not redraw (its top or bottom was
-     *  reached, or the step was smaller than a row) eases back to rest */
-    const appRelax = () => {
-      if (appSettle) clearTimeout(appSettle)
-      appSettle = setTimeout(() => {
-        appSettle = null
-        if (tracking) return
-        appVisual = 0
-        appInFlight = 0
-        setOffset(0)
-      }, 400)
-    }
+    let appFlingRows = 0
     const setOffset = (frac: number) => { fracY = frac; paint() }
     // a whole-row scroll repaints on xterm's next frame: keep the old offset
     // until then, or the content jumps back a row for one frame
@@ -356,7 +325,7 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
       if (tracking) return
       // every app step is a network round trip: end the tail sooner than a
       // local fling (below ~1 row per 100ms it reads as stopped anyway)
-      if (Math.abs(vel) * m.cell < 0.15 || appFlingRows > 120) { vel = 0; appRelax(); gestureRef.current = false; return }
+      if (Math.abs(vel) * m.cell < 0.15 || appFlingRows > 60) { vel = 0; gestureRef.current = false; return }
       const d = vel * dt
       appFlingRows += Math.abs(d)
       pushApp(d)
@@ -366,7 +335,6 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
     const onDown = (e: PointerEvent) => {
       if (e.pointerType === 'mouse') return // desktop keeps native wheel/select
       if (raf) { cancelAnimationFrame(raf); raf = 0 } // grab a live fling
-      if (appSettle) { clearTimeout(appSettle); appSettle = null }
       measure() // once per gesture: cell size and pan bounds
       tracking = true
       gestureRef.current = true
@@ -414,7 +382,7 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
       frameT = 0
       if (appMode()) {
         appFlingRows = 0
-        if (stopped()) { vel = 0; appRelax(); gestureRef.current = false; return }
+        if (stopped()) { vel = 0; gestureRef.current = false; return }
         raf = requestAnimationFrame(appFling)
         return
       }
@@ -431,7 +399,7 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
       pendingFrac = null
       setOffset(0)
     }
-    appRedrawRef.current = appRedrawn
+
     host.addEventListener('pointerdown', onDown)
     host.addEventListener('pointermove', onMove)
     host.addEventListener('pointerup', onUp)
@@ -444,10 +412,7 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
       host.removeEventListener('pointercancel', onUp)
       host.removeEventListener('touchmove', onTouchMove)
       if (raf) cancelAnimationFrame(raf)
-      if (appTimer) clearTimeout(appTimer)
-      if (appSettle) clearTimeout(appSettle)
       rendered.dispose()
-      appRedrawRef.current = () => {}
       resetScrollRef.current = () => {}
       ro.disconnect()
       if (focusTimer) clearTimeout(focusTimer)
@@ -478,7 +443,6 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
         if (fresh) { fresh = false; lastRef.current = ''; term.write('\x1bc') }
         term.write(b64Bytes(String(e.data)), () => {
           if (wasAtBottom && !gestureRef.current) { term.scrollToBottom(); resetScrollRef.current() }
-          appRedrawRef.current()
         })
       }
       es.onerror = () => { es?.close(); setLive(false) } // fall back to snapshots
@@ -518,7 +482,6 @@ export const TerminalView = memo(function TerminalView({ sessionId, data, cols, 
     term.write('\x1bc\x1b[?2026h' + data + '\x1b[?2026l', () => {
       // keep the reading position when the user has scrolled back
       if (!gestureRef.current) term.scrollToLine(Math.max(0, term.buffer.active.baseY - fromBottom))
-      appRedrawRef.current()
     })
   }, [data, live])
 
