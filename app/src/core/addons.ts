@@ -649,12 +649,23 @@ export function addonPromptAppends(s: AppState): string {
 }
 
 /** Compile and execute a trusted addon handler against the permission-wrapped API. */
-async function runHandler(source: string, arg: unknown, api: AddonApi): Promise<unknown> {
+async function runHandler(addonId: string, source: string, arg: unknown, api: AddonApi): Promise<unknown> {
   // UNTRUSTED code — never `new Function` in the privileged main webview (that
-  // grants ambient fetch/Tauri/app-origin authority). Run it in the opaque-origin
-  // sandboxed iframe, where the api is only reachable via validated RPC.
-  const { addonSandbox } = await import('../domains/addons/sandbox')
-  return await addonSandbox().run(source, arg, api)
+  // grants ambient fetch/Tauri/app-origin authority). Run it in the addon's own
+  // opaque-origin sandboxed iframe, where the api is only reachable via
+  // validated RPC.
+  const { runInAddonSandbox } = await import('../domains/addons/sandbox')
+  return await runInAddonSandbox(addonId, source, arg, api)
+}
+
+// A tool result is replayed in the model's history on every later iteration of
+// the turn, so it is clipped well below the sandbox's transport cap.
+const MAX_TOOL_TEXT = 16_000
+function toolText(out: unknown): string {
+  const text = typeof out === 'string' ? out : JSON.stringify(out ?? 'ok')
+  return text.length > MAX_TOOL_TEXT
+    ? `${text.slice(0, MAX_TOOL_TEXT)}\n… [addon result truncated: ${text.length} chars]`
+    : text
 }
 
 /** Execute an addon-contributed Master tool (name arrives namespaced). */
@@ -665,8 +676,7 @@ export async function execAddonTool(s: AppState, name: string, input: Record<str
     const tool = a.tools?.find(t => t.name === plain)
     if (!tool) continue
     try {
-      const out = await runHandler(tool.handler, input, apiFor(a.id))
-      return typeof out === 'string' ? out : JSON.stringify(out ?? 'ok')
+      return toolText(await runHandler(a.id, tool.handler, input, apiFor(a.id)))
     } catch (e) {
       return `addon tool error: ${e instanceof Error ? e.message : String(e)}`
     }
@@ -681,8 +691,7 @@ export async function execOwnAddonTool(addon: Addon, tool: string, input: Record
   const t = addon.tools?.find(x => x.name === tool)
   if (!t) return `addon "${addon.name}" has no tool ${tool}`
   try {
-    const out = await runHandler(t.handler, input, api)
-    return typeof out === 'string' ? out : JSON.stringify(out ?? 'ok')
+    return toolText(await runHandler(addon.id, t.handler, input, api))
   } catch (e) {
     return `addon tool error: ${e instanceof Error ? e.message : String(e)}`
   }
@@ -709,7 +718,7 @@ export async function execAddonHook(
     const previous = addonHookTails.get(a.id) ?? Promise.resolve()
     const job = previous.catch(() => {}).then(async () => {
       try {
-        await runHandler(src, event, api)
+        await runHandler(a.id, src, event, api)
       } catch (e) {
         // logEvent is itself permission-guarded (ui) — a hook failure in an
         // addon without that scope must not escape as an unhandled rejection

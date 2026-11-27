@@ -326,8 +326,16 @@ fn save_info(path: &std::path::Path, info: &HookInfo) {
 /// lets them keep reporting after a restart or an update.
 fn bind_listener(saved: &std::path::Path) -> Result<(std::net::TcpListener, HookInfo), String> {
     if let Some(prev) = load_saved_info(saved) {
-        if let Ok(l) = std::net::TcpListener::bind(("127.0.0.1", prev.port)) {
-            return Ok((l, prev));
+        // retry briefly: on an app restart (or update relaunch) the previous
+        // instance can still be releasing the port, and a child process forked
+        // at the wrong moment can hold an inherited copy for an instant
+        for attempt in 0..6 {
+            if let Ok(l) = std::net::TcpListener::bind(("127.0.0.1", prev.port)) {
+                return Ok((l, prev));
+            }
+            if attempt < 5 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
         }
     }
     // Mint from below the OS ephemeral range (49152+ on macOS, 32768+ on most

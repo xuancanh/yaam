@@ -123,8 +123,14 @@ fn platform_get(account: &str) -> Result<Option<String>, String> {
 }
 
 /// Store (or replace) a secret. An empty value deletes the entry.
+// Keychain calls run on the blocking pool: the interactive fallback waits on a
+// macOS access prompt, and on the main thread that froze the UI per prompt.
 #[tauri::command]
-pub fn secret_set(account: String, value: String) -> Result<(), String> {
+pub async fn secret_set(account: String, value: String) -> Result<(), String> {
+    crate::util::blocking(move || secret_set_impl(account, value)).await
+}
+
+fn secret_set_impl(account: String, value: String) -> Result<(), String> {
     if value.len() > MAX_SECRET_BYTES {
         return Err("secret value exceeds 1 MB".to_string());
     }
@@ -144,7 +150,11 @@ pub fn secret_set(account: String, value: String) -> Result<(), String> {
 
 /// Retrieve a secret; a missing entry returns None rather than erroring.
 #[tauri::command]
-pub fn secret_get(account: String) -> Result<Option<String>, String> {
+pub async fn secret_get(account: String) -> Result<Option<String>, String> {
+    crate::util::blocking(move || secret_get_impl(account)).await
+}
+
+fn secret_get_impl(account: String) -> Result<Option<String>, String> {
     entry(&account)?; // validate even when a cached value exists
     if let Some(value) = cache_get(&account) {
         return Ok(Some(value));
@@ -158,7 +168,11 @@ pub fn secret_get(account: String) -> Result<Option<String>, String> {
 
 /// Delete a secret (no-op when absent).
 #[tauri::command]
-pub fn secret_delete(account: String) -> Result<(), String> {
+pub async fn secret_delete(account: String) -> Result<(), String> {
+    crate::util::blocking(move || secret_delete_impl(account)).await
+}
+
+fn secret_delete_impl(account: String) -> Result<(), String> {
     delete_entry(&account)?;
     let _ = delete_entry(&format!("{ACL_BACKUP_PREFIX}{account}"));
     cache_set(&account, None);

@@ -121,6 +121,11 @@ pub struct RemoteShared {
     visible_at: std::sync::atomic::AtomicU64,
     /// push subscriptions + VAPID key, loaded from disk on first use
     push: Mutex<Option<super::remote_push::PushFile>>,
+    /// bumped whenever credentials change (stop, token rotation, device list).
+    /// Auth is checked when a stream opens; every open SSE stream also
+    /// re-checks on this signal and ends once its device is no longer valid,
+    /// so a revoked phone or a stopped server cuts live streams too.
+    auth_tx: tokio::sync::watch::Sender<u64>,
 }
 
 impl Default for RemoteShared {
@@ -139,6 +144,7 @@ impl Default for RemoteShared {
             last_seen: std::sync::atomic::AtomicU64::new(0),
             visible_at: std::sync::atomic::AtomicU64::new(0),
             push: Mutex::new(None),
+            auth_tx: tokio::sync::watch::channel(0).0,
         }
     }
 }
@@ -236,7 +242,7 @@ fn candidate_ips() -> Vec<(&'static str, String)> {
 
 const APP: &str = include_str!("remote-app.html");
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct AuthQuery {
     #[serde(default)]
     t: String,
@@ -270,6 +276,30 @@ fn token_eq(a: &str, b: &str) -> bool {
 fn check_base(shared: &RemoteShared, q: &AuthQuery) -> bool {
     let token = shared.token.lock().unwrap();
     !token.is_empty() && token_eq(&q.t, &token)
+}
+
+/// Whether the device credentials in `q` are still valid (no side effects).
+fn device_valid(shared: &RemoteShared, q: &AuthQuery) -> bool {
+    check_base(shared, q)
+        && !q.d.is_empty()
+        && shared.devices.lock().unwrap().values().any(|dev| token_eq(&dev.token, &q.d))
+}
+
+/// Resolves once the credentials in `q` stop being valid.
+fn revoked(shared: Arc<RemoteShared>, t: String, d: String) -> impl std::future::Future<Output = ()> + Send {
+    let mut rx = shared.auth_tx.subscribe();
+    async move {
+        let q = AuthQuery { t, d, ..AuthQuery::default() };
+        loop {
+            if rx.changed().await.is_err() || !device_valid(&shared, &q) {
+                return;
+            }
+        }
+    }
+}
+
+fn bump_auth(shared: &RemoteShared) {
+    shared.auth_tx.send_modify(|v| *v = v.wrapping_add(1));
 }
 
 /// URL token + paired-device token (everything else).
@@ -415,10 +445,12 @@ async fn stream_state(
         return Err(StatusCode::FORBIDDEN);
     }
     let shared = s.clone();
-    let stream = WatchStream::new(s.snap_tx.subscribe()).map(move |_| {
-        let snap = shared.snapshot.lock().unwrap().clone();
-        Ok(Event::default().data(if snap.is_empty() { "{}".to_string() } else { snap }))
-    });
+    let stream = WatchStream::new(s.snap_tx.subscribe())
+        .map(move |_| {
+            let snap = shared.snapshot.lock().unwrap().clone();
+            Ok(Event::default().data(if snap.is_empty() { "{}".to_string() } else { snap }))
+        });
+    let stream = futures_util::StreamExt::take_until(stream, revoked(s.clone(), q.t.clone(), q.d.clone()));
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
@@ -443,7 +475,8 @@ async fn stream_term(
         .take_while(|r| r.is_ok())
         .filter_map(|r| r.ok())
         .map(|bytes| Ok(Event::default().data(B64.encode(bytes))));
-    Ok(Sse::new(first.chain(live)).keep_alive(KeepAlive::default()))
+    let stream = futures_util::StreamExt::take_until(first.chain(live), revoked(s.clone(), q.t.clone(), q.d.clone()));
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
 fn uploads_dir() -> std::path::PathBuf {
@@ -719,7 +752,10 @@ pub fn remote_start(state: tauri::State<'_, RemoteManager>, port: Option<u16>, t
         let mut t = state.shared.token.lock().unwrap();
         match wanted {
             Some(w) => {
-                *t = w;
+                if *t != w {
+                    *t = w;
+                    bump_auth(&state.shared);
+                }
                 t.clone()
             }
             None if stop_slot.is_some() && !t.is_empty() => t.clone(), // already running
@@ -788,6 +824,10 @@ pub fn remote_stop(state: tauri::State<'_, RemoteManager>) {
     state.shared.snapshot.lock().unwrap().clear();
     state.shared.commands.lock().unwrap().clear();
     state.shared.pending.lock().unwrap().clear();
+    // open SSE streams never end on their own, so axum's graceful shutdown
+    // would wait on them forever (leaking the server thread) and the phone
+    // would keep receiving data: cut them now that the token is gone
+    bump_auth(&state.shared);
     // paired devices stay in memory; the durable copy lives in frontend settings
 }
 
@@ -887,6 +927,7 @@ pub fn remote_set_devices(state: tauri::State<'_, RemoteManager>, devices: Vec<P
             map.insert(d.id.clone(), d);
         }
     }
+    bump_auth(&state.shared); // a revoked phone's open streams end now
     // an unpaired device must stop getting alerts
     with_push(&state.shared, |f| {
         let before = f.subs.len();
@@ -1381,4 +1422,50 @@ mod tests {
         router(s.clone()).oneshot(get("/api/presence?t=base&d=devtok&v=0")).await.unwrap();
         assert_eq!(s.visible_at.load(ord), 0);
     }
+
+    #[tokio::test]
+    async fn revoking_a_device_ends_its_open_stream() {
+        let s = shared_with("base");
+        s.devices.lock().unwrap().insert(
+            "dev1".into(),
+            PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
+        );
+        let req = Request::builder().uri("/api/stream?t=base&d=devtok").body(axum::body::Body::empty()).unwrap();
+        let resp = router(s.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let mut body = resp.into_body().into_data_stream();
+        // revoke: the device list no longer holds it, and the auth signal fires
+        s.devices.lock().unwrap().clear();
+        bump_auth(&s);
+        let ended = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while let Some(chunk) = futures_util::StreamExt::next(&mut body).await {
+                if chunk.is_err() { break; }
+            }
+        })
+        .await;
+        assert!(ended.is_ok(), "stream stayed open after the device was revoked");
+    }
+
+    #[tokio::test]
+    async fn an_unrelated_auth_bump_keeps_a_valid_stream_open() {
+        let s = shared_with("base");
+        s.devices.lock().unwrap().insert(
+            "dev1".into(),
+            PairedDevice { id: "dev1".into(), name: "phone".into(), token: "devtok".into(), at: 1 },
+        );
+        let req = Request::builder().uri("/api/stream?t=base&d=devtok").body(axum::body::Body::empty()).unwrap();
+        let mut body = router(s.clone()).oneshot(req).await.unwrap().into_body().into_data_stream();
+        bump_auth(&s); // e.g. another device was revoked
+        let r = tokio::time::timeout(std::time::Duration::from_millis(300), async {
+            loop {
+                match futures_util::StreamExt::next(&mut body).await {
+                    None => return false,
+                    Some(_) => continue,
+                }
+            }
+        })
+        .await;
+        assert!(r.is_err(), "a still-valid stream ended");
+    }
 }
+

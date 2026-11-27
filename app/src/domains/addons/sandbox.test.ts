@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { createAddonSandbox, sandboxDocument, type SandboxFrame } from './sandbox'
+import { createAddonSandbox, disposeAddonSandbox, runInAddonSandbox, sandboxDocument, type SandboxFrame } from './sandbox'
 import { ADDON_RPC_METHODS, enforcePermissions } from '../../core/addons'
 import type { AddonApi } from '../../core/addons'
 import type { AddonPermission } from '../../core/types'
@@ -151,3 +151,26 @@ describe('addon sandbox — termination', () => {
     await assertion
   })
 })
+
+describe('addon sandbox — per-addon isolation', () => {
+  it('gives each addon its own sandbox, so one addon cannot share another addon\'s realm', async () => {
+    const made: string[] = []
+    const make = (tag: string) => () => { made.push(tag); return createAddonSandbox(fakeFrame) }
+    const a = fakeApi(['ui'])
+    const b = fakeApi(['ui'])
+    await runInAddonSandbox('addon-a', 'await api.flash("a")', null, a.api, make('a'))
+    await runInAddonSandbox('addon-b', 'await api.flash("b")', null, b.api, make('b'))
+    await runInAddonSandbox('addon-a', 'await api.flash("a2")', null, a.api, make('a-again'))
+    expect(made).toEqual(['a', 'b']) // a reused its own frame, b got a separate one
+    expect(a.flash).not.toHaveBeenCalledWith('b')
+    expect(b.flash).toHaveBeenCalledWith('b')
+    disposeAddonSandbox('addon-a'); disposeAddonSandbox('addon-b')
+  })
+
+  it('caps a handler\'s own return value', async () => {
+    const sb = createAddonSandbox(fakeFrame)
+    await expect(sb.run('return "x".repeat(300000)', null, fakeApi([]).api)).rejects.toThrow(/exceeds/)
+    sb.dispose()
+  })
+})
+

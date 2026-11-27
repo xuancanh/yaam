@@ -4,7 +4,7 @@ import type { AppState } from './types'
 
 const sandboxRun = vi.fn()
 vi.mock('../domains/addons/sandbox', () => ({
-  addonSandbox: () => ({ run: sandboxRun }),
+  runInAddonSandbox: (_id: string, source: string, arg: unknown, api: unknown) => sandboxRun(source, arg, api),
 }))
 
 import { execAddonHook } from './addons'

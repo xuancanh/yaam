@@ -5,6 +5,7 @@
 //! (replace-by-msg_id) and `remove` calls so a single new message no longer
 //! rebuilds the whole index.
 use std::sync::Mutex;
+use tauri::Manager;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::{Field, Schema, TantivyDocument, Value, STORED, STRING, TEXT};
@@ -26,33 +27,41 @@ const MAX_UPSERT_DOCS: usize = 1_000;
 const MAX_REINDEX_TEXT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_UPSERT_TEXT_BYTES: usize = 16 * 1024 * 1024;
 
-fn validate_docs(docs: &[ChatDoc], max_docs: usize, max_text_bytes: usize) -> Result<(), String> {
+/// Validate identifiers and return how many leading docs fit the byte budget.
+/// Text is measured as indexed (after `bound_body`), so one multi-MB pasted log
+/// no longer rejects the whole batch. A batch past the budget indexes what
+/// fits instead of failing: the frontend retries a failed sync forever, and a
+/// rejection there meant search stayed stale until restart.
+fn validate_docs(docs: &[ChatDoc], max_docs: usize, max_text_bytes: usize) -> Result<usize, String> {
     if docs.len() > max_docs { return Err(format!("too many chat documents (max {max_docs})")); }
     let mut text_bytes = 0usize;
-    for doc in docs {
+    for (i, doc) in docs.iter().enumerate() {
         if doc.chat_id.is_empty() || doc.chat_id.len() > 256
             || doc.msg_id.is_empty() || doc.msg_id.len() > 256
             || doc.role.len() > 32
         {
             return Err("chat document identifier is empty or oversized".to_string());
         }
-        text_bytes = text_bytes.saturating_add(doc.text.len());
+        text_bytes = text_bytes.saturating_add(doc.text.len().min(MAX_BODY_BYTES));
         if text_bytes > max_text_bytes {
-            return Err(format!("chat document text exceeds {max_text_bytes} aggregate bytes"));
+            log::warn!("chat search: indexing {i} of {} documents (text budget {max_text_bytes} bytes)", docs.len());
+            return Ok(i);
         }
     }
-    Ok(())
+    Ok(docs.len())
 }
+
+const MAX_BODY_BYTES: usize = 20_000;
 
 /// Bound one message's contribution to the in-RAM index (unicode-safe cut).
 fn bound_body(text: String) -> String {
-    if text.len() <= 20_000 {
+    if text.len() <= MAX_BODY_BYTES {
         return text;
     }
     let cut = text
         .char_indices()
         .map(|(i, _)| i)
-        .take_while(|&i| i <= 20_000)
+        .take_while(|&i| i <= MAX_BODY_BYTES)
         .last()
         .unwrap_or(0);
     text[..cut].to_string()
@@ -79,8 +88,9 @@ pub struct ChatHit {
 }
 
 /// Rebuild the in-RAM index from the full set of chat messages.
-pub fn reindex(state: &ChatSearchState, docs: Vec<ChatDoc>) -> Result<usize, String> {
-    validate_docs(&docs, MAX_REINDEX_DOCS, MAX_REINDEX_TEXT_BYTES)?;
+pub fn reindex(state: &ChatSearchState, mut docs: Vec<ChatDoc>) -> Result<usize, String> {
+    let fit = validate_docs(&docs, MAX_REINDEX_DOCS, MAX_REINDEX_TEXT_BYTES)?;
+    docs.truncate(fit);
     let mut schema_builder = Schema::builder();
     let chat_id = schema_builder.add_text_field("chat_id", STORED);
     // msg_id is STRING (indexed as one raw term) so upsert/remove can delete by it
@@ -119,8 +129,9 @@ pub fn reindex(state: &ChatSearchState, docs: Vec<ChatDoc>) -> Result<usize, Str
 
 /// Incrementally add/replace messages by msg_id. Falls back to a full reindex
 /// when no index exists yet (first call). Returns the number of docs written.
-pub fn upsert(state: &ChatSearchState, docs: Vec<ChatDoc>) -> Result<usize, String> {
-    validate_docs(&docs, MAX_UPSERT_DOCS, MAX_UPSERT_TEXT_BYTES)?;
+pub fn upsert(state: &ChatSearchState, mut docs: Vec<ChatDoc>) -> Result<usize, String> {
+    let fit = validate_docs(&docs, MAX_UPSERT_DOCS, MAX_UPSERT_TEXT_BYTES)?;
+    docs.truncate(fit);
     {
         let mut guard = state.0.lock().map_err(|e| e.to_string())?;
         if let Some(engine) = guard.as_mut() {
@@ -207,37 +218,26 @@ pub fn search(
     Ok(hits)
 }
 
+// Index work runs on the blocking pool (tantivy commits, multi-MB reindex
+// payloads): a sync command would run on, and freeze, the main thread.
 #[tauri::command]
-pub fn chat_search_reindex(
-    state: tauri::State<'_, ChatSearchState>,
-    docs: Vec<ChatDoc>,
-) -> Result<usize, String> {
-    reindex(&state, docs)
+pub async fn chat_search_reindex(app: tauri::AppHandle, docs: Vec<ChatDoc>) -> Result<usize, String> {
+    crate::util::blocking(move || reindex(&app.state::<ChatSearchState>(), docs)).await
 }
 
 #[tauri::command]
-pub fn chat_search_upsert(
-    state: tauri::State<'_, ChatSearchState>,
-    docs: Vec<ChatDoc>,
-) -> Result<usize, String> {
-    upsert(&state, docs)
+pub async fn chat_search_upsert(app: tauri::AppHandle, docs: Vec<ChatDoc>) -> Result<usize, String> {
+    crate::util::blocking(move || upsert(&app.state::<ChatSearchState>(), docs)).await
 }
 
 #[tauri::command]
-pub fn chat_search_remove(
-    state: tauri::State<'_, ChatSearchState>,
-    msg_ids: Vec<String>,
-) -> Result<usize, String> {
-    remove(&state, msg_ids)
+pub async fn chat_search_remove(app: tauri::AppHandle, msg_ids: Vec<String>) -> Result<usize, String> {
+    crate::util::blocking(move || remove(&app.state::<ChatSearchState>(), msg_ids)).await
 }
 
 #[tauri::command]
-pub fn chat_search(
-    state: tauri::State<'_, ChatSearchState>,
-    query: String,
-    limit: Option<usize>,
-) -> Result<Vec<ChatHit>, String> {
-    search(&state, query, limit)
+pub async fn chat_search(app: tauri::AppHandle, query: String, limit: Option<usize>) -> Result<Vec<ChatHit>, String> {
+    crate::util::blocking(move || search(&app.state::<ChatSearchState>(), query, limit)).await
 }
 
 #[cfg(test)]

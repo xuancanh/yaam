@@ -29,6 +29,7 @@ export interface ChatSearchOps {
 
 const SYNC_DEBOUNCE_MS = 1500
 const SYNC_RETRY_MS = 5000
+const UPSERT_CHUNK = 500
 
 const defaultOps: ChatSearchOps = {
   reindex: docs => native.chatSearchReindex(docs),
@@ -83,10 +84,11 @@ export function createChatSearchIndexer(
       } else {
         const changed = docs.filter(d => indexed!.get(d.msgId) !== d.text)
         const removed = [...indexed.keys()].filter(id => !next.has(id))
-        await Promise.all([
-          changed.length ? ops.upsert(changed) : Promise.resolve(),
-          removed.length ? ops.remove(removed) : Promise.resolve(),
-        ])
+        // The backend takes at most 1000 docs per upsert, and renaming a long
+        // chat changes every one of its docs (the name is in each text). An
+        // oversize batch failed, and was retried identically every 5s forever.
+        for (let i = 0; i < changed.length; i += UPSERT_CHUNK) await ops.upsert(changed.slice(i, i + UPSERT_CHUNK))
+        for (let i = 0; i < removed.length; i += UPSERT_CHUNK) await ops.remove(removed.slice(i, i + UPSERT_CHUNK))
       }
       if (active) indexed = next
     } catch {

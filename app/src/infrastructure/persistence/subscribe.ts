@@ -47,6 +47,9 @@ export function secretsChanged(a: AppState, b: AppState): boolean {
  *  transcript changed, or its indexed name/tags changed). Terminal output and
  *  unrelated chat fields must NOT trigger a search reindex. */
 export function chatTranscriptsChanged(a: AppState, b: AppState): boolean {
+  // runs on every dispatch (toasts, composer keystrokes): skip the scan when
+  // the agents array itself is untouched
+  if (a.agents === b.agents) return false
   const prev = new Map<string, { log: unknown; name: string; tags: unknown }>()
   let prevCount = 0
   for (const x of a.agents) {

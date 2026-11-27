@@ -242,9 +242,9 @@ fn discover_impl(home: &str, since_ms: f64) -> Vec<DiscoveredSession> {
 /// newest first — the frontend filters out ids YAAM already owns and offers
 /// the rest for adoption.
 #[tauri::command]
-pub fn discover_sessions(since_ms: f64) -> Result<Vec<DiscoveredSession>, String> {
+pub async fn discover_sessions(since_ms: f64) -> Result<Vec<DiscoveredSession>, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
-    Ok(discover_impl(&home, since_ms))
+    crate::util::blocking(move || Ok(discover_impl(&home, since_ms))).await
 }
 
 /// Start (or replace) the transcript watcher for one YAAM session. Claude's

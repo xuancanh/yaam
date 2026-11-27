@@ -13,6 +13,7 @@ import { appCompat, dispatchAddonRpc, execOwnAddonTool, exportAddonPackage, load
 import type { AddonApi } from '../../core/addons'
 import type { AddonInstallPreview } from './slice'
 import { generateAddonPackage } from './addon-gen'
+import { disposeAddonSandbox } from './sandbox'
 
 export interface AddonsActionsCtx {
   dispatch: (f: (s: AppState) => AppState) => void
@@ -68,10 +69,14 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
   return {
     openAddon: id => dispatch(s => ({ ...s, view: 'addon', activeAddon: id })),
 
-    toggleAddon: id => dispatch(s => ({
-      ...s,
-      addons: s.addons.map(a => (a.id === id ? { ...a, enabled: !a.enabled } : a)),
-    })),
+    toggleAddon: id => {
+      // a disabled addon's realm (and anything its code left running) goes away
+      if (stateRef.current.addons.find(a => a.id === id)?.enabled) disposeAddonSandbox(id)
+      dispatch(s => ({
+        ...s,
+        addons: s.addons.map(a => (a.id === id ? { ...a, enabled: !a.enabled } : a)),
+      }))
+    },
 
     toggleAddonGrant: (id, perm) => dispatch(s => ({
       ...s,
@@ -183,6 +188,7 @@ export function createAddonsActions(ctx: AddonsActionsCtx): AddonsActions {
     },
     removeAddon: id => {
       ctx.disposeAddon(id) // cancel any in-flight agent turn + drop its registries + editor history
+      disposeAddonSandbox(id)
       dispatch(s => {
         const addonStorage = { ...s.addonStorage }
         delete addonStorage[id]

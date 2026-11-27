@@ -25,16 +25,26 @@ export interface AddonAgentRuntime {
 export function createAddonAgentRuntime(ports: AddonAgentPorts): AddonAgentRuntime {
   const histories = new Map<string, ApiMessage[]>()
   const busy = new Set<string>()
+  // Notes that arrive mid-turn (two sessions exiting seconds apart, an
+  // agent.every wake) used to be dropped. They queue, bounded, and run as one
+  // follow-up turn when the current one ends.
+  const MAX_QUEUED = 8
+  const queued = new Map<string, string[]>()
   const aborts = new AbortRegistry()
-  return {
-    run: async (addonId, note) => {
+  const run = async (addonId: string, note: string): Promise<string> => {
       const st = ports.stateRef.current.settings
       const addon = ports.stateRef.current.addons.find(a => a.id === addonId)
       if (!addon?.agent) return 'this addon declares no agent'
       if (!addon.enabled) return 'addon is disabled'
       if (!addon.granted.includes('agent')) return 'permission "agent" not granted to this addon'
       if (!(st.masterEnabled && hasCreds(st))) return 'no brain configured — enable LLM Master in Settings'
-      if (busy.has(addonId)) return 'agent is busy with a previous note — try again shortly'
+      if (busy.has(addonId)) {
+        const q = queued.get(addonId) ?? []
+        q.push(note)
+        if (q.length > MAX_QUEUED) q.splice(0, q.length - MAX_QUEUED)
+        queued.set(addonId, q)
+        return 'queued: the agent will handle this after its current turn'
+      }
       busy.add(addonId)
       const runSignal = aborts.signal(addonId)
       try {
@@ -54,12 +64,20 @@ export function createAddonAgentRuntime(ports: AddonAgentPorts): AddonAgentRunti
       } finally {
         const released = aborts.clear(addonId, runSignal)
         if (released || !aborts.has(addonId)) busy.delete(addonId)
+        const next = runSignal.aborted ? undefined : queued.get(addonId)
+        queued.delete(addonId)
+        if (next?.length && !busy.has(addonId)) {
+          void run(addonId, next.length === 1 ? next[0] : `${next.length} events arrived while you were busy:\n\n${next.join('\n\n---\n\n')}`)
+        }
       }
-    },
+  }
+  return {
+    run,
     dispose: (addonId) => {
       aborts.abort(addonId) // cancel any in-flight addon-agent turn
       histories.delete(addonId)
       busy.delete(addonId)
+      queued.delete(addonId)
     },
   }
 }

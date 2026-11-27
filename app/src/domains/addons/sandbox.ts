@@ -140,8 +140,10 @@ export function createAddonSandbox(makeFrame: () => SandboxFrame = createIframeF
       const call = calls.get(msg.callId)
       if (!call) return
       calls.delete(msg.callId)
-      if (msg.ok) call.resolve(msg.value)
-      else call.reject(new Error(msg.error))
+      if (!msg.ok) { call.reject(new Error(msg.error)); return }
+      // the handler's own return value is capped like api results: it lands
+      // in Master's tool history and is re-sent on every later iteration
+      try { call.resolve(capSize(msg.value, 'addon handler result')) } catch (e) { call.reject(e as Error) }
     }
   }
 
@@ -181,16 +183,46 @@ export function createAddonSandbox(makeFrame: () => SandboxFrame = createIframeF
   return { run, dispose }
 }
 
-// Process-wide sandbox shared by all addon handler executions (one hidden frame).
-let shared: AddonSandbox | undefined
-export function addonSandbox(): AddonSandbox {
-  return (shared ??= createAddonSandbox())
+// One sandbox (its own frame and JS realm) per addon. A single shared frame let
+// one addon leave a message listener behind, read another addon's exec message
+// (its callId and state snapshot) and replay that callId to act with the other
+// addon's grants. It also meant one addon's timeout reset killed every other
+// addon's in-flight handler. Idle frames are torn down to free their realm.
+const IDLE_DISPOSE_MS = 60_000
+const sandboxes = new Map<string, { sb: AddonSandbox; active: number; idle?: number }>()
+
+/** Run one handler in the given addon's own sandbox. */
+export async function runInAddonSandbox(addonId: string, source: string, arg: unknown, api: AddonApi, make: () => AddonSandbox = createAddonSandbox): Promise<unknown> {
+  let entry = sandboxes.get(addonId)
+  if (!entry) { entry = { sb: make(), active: 0 }; sandboxes.set(addonId, entry) }
+  const e = entry
+  if (e.idle !== undefined) { window.clearTimeout(e.idle); e.idle = undefined }
+  e.active++
+  try {
+    return await e.sb.run(source, arg, api)
+  } finally {
+    e.active--
+    if (e.active === 0 && sandboxes.get(addonId) === e) {
+      e.idle = window.setTimeout(() => {
+        if (e.active === 0 && sandboxes.get(addonId) === e) { sandboxes.delete(addonId); e.sb.dispose() }
+      }, IDLE_DISPOSE_MS)
+    }
+  }
 }
 
-function capSize(value: unknown): unknown {
+/** Tear down an addon's sandbox now (uninstall/disable). */
+export function disposeAddonSandbox(addonId: string): void {
+  const e = sandboxes.get(addonId)
+  if (!e) return
+  sandboxes.delete(addonId)
+  if (e.idle !== undefined) window.clearTimeout(e.idle)
+  e.sb.dispose()
+}
+
+function capSize(value: unknown, what = 'addon api result'): unknown {
   const json = (() => { try { return JSON.stringify(value) } catch { return undefined } })()
   if (json !== undefined && json.length > MAX_RESULT_BYTES) {
-    throw new Error(`addon api result exceeds ${MAX_RESULT_BYTES} bytes`)
+    throw new Error(`${what} exceeds ${MAX_RESULT_BYTES} bytes`)
   }
   return value
 }

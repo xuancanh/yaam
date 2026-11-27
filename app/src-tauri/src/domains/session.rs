@@ -86,23 +86,37 @@ fn resolve_login_executable(executable: &str) -> Result<String, String> {
             .then_some(requested.clone())
             .ok_or_else(|| format!("terminal shell does not exist: {requested}"));
     }
-    let out = Command::new("/bin/sh")
-        .args(["-lc", "command -v \"$1\""])
-        .arg("yaam-shell-resolver")
-        .arg(&requested)
-        .output()
-        .map_err(|e| format!("failed to resolve terminal shell `{requested}`: {e}"))?;
+    // Resolution runs a login shell (path_helper, the user's profile), once per
+    // launch on the main thread: cache it, and bound it so a hanging profile
+    // can't freeze the app. A cached path that vanished is re-resolved.
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(hit) = cache.lock().unwrap().get(&requested).cloned() {
+        if std::path::Path::new(&hit).is_file() {
+            return Ok(hit);
+        }
+    }
+    let out = crate::util::run_bounded(
+        Command::new("/bin/sh")
+            .args(["-lc", "command -v \"$1\""])
+            .arg("yaam-shell-resolver")
+            .arg(&requested),
+        std::time::Duration::from_secs(10),
+        16 * 1024,
+    )
+    .map_err(|e| format!("failed to resolve terminal shell `{requested}`: {e}"))?;
     let resolved = String::from_utf8_lossy(&out.stdout)
         .lines()
         .map(str::trim)
         .rfind(|line| !line.is_empty())
         .unwrap_or_default()
         .to_string();
-    if !out.status.success() || resolved.is_empty() || !std::path::Path::new(&resolved).is_file() {
+    if out.code != Some(0) || resolved.is_empty() || !std::path::Path::new(&resolved).is_file() {
         return Err(format!(
             "terminal shell not found in login PATH: {requested}"
         ));
     }
+    cache.lock().unwrap().insert(requested, resolved.clone());
     Ok(resolved)
 }
 
@@ -147,11 +161,11 @@ fn session_launch_spec(
 
 struct SessionHandle {
     master: Box<dyn MasterPty + Send>,
-    /// Per-session writer behind its own lock, shared out of the map: `write`
-    /// clones the Arc and releases the global sessions lock before writing, so
-    /// a child that stops draining its stdin wedges only its own session
-    /// instead of every kill/spawn/resize queued behind the map lock.
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Input queue drained by the session's own writer thread. `write_session`
+    /// is a sync command (it runs on the main thread, which keeps keystrokes
+    /// in order), so it only enqueues: a child that stops draining stdin used
+    /// to block the PTY write, and with it the whole UI and every kill.
+    input: mpsc::SyncSender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     /// child pid, for graceful (SIGTERM→SIGKILL) shutdown of the process tree
     pid: Option<i32>,
@@ -162,6 +176,25 @@ struct SessionHandle {
     /// distinguishes a resumed session reusing the same id from the one whose
     /// exit thread is still in flight
     generation: u64,
+}
+
+/// Pending input chunks per session before `write` reports the child as not
+/// reading (each chunk is at most the 1 MB command cap).
+const INPUT_QUEUE_CAP: usize = 64;
+
+/// Start the thread that owns a PTY writer and drains its input queue in
+/// order. It exits when the session handle (the sender) is dropped, or on a
+/// write error (the child is gone).
+fn spawn_input_writer(mut writer: Box<dyn Write + Send>) -> mpsc::SyncSender<Vec<u8>> {
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(INPUT_QUEUE_CAP);
+    std::thread::spawn(move || {
+        while let Ok(buf) = rx.recv() {
+            if writer.write_all(&buf).and_then(|_| writer.flush()).is_err() {
+                break;
+            }
+        }
+    });
+    tx
 }
 
 /// Grace period between the polite SIGTERM and the forced SIGKILL. CLIs use it to
@@ -231,7 +264,11 @@ fn shutdown_process(
             {
                 unsafe { libc::kill(-pid, libc::SIGKILL); }
             }
-            let _ = killer.kill(); // drop the pty child handle / reap
+            // No killer.kill() here: portable-pty's kill is a bare
+            // kill(pid, SIGHUP), which after the grace period could hit an
+            // unrelated process that reused the pid. The guarded SIGKILL above
+            // already ended ours; dropping the handle is enough.
+            drop(killer);
         });
         return;
     }
@@ -314,10 +351,21 @@ impl SessionManager {
             .map_err(|e| format!("failed to spawn `{launch_label}`: {e}"))?;
         drop(pair.slave);
 
-        let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-        let writer = Arc::new(Mutex::new(
-            pair.master.take_writer().map_err(|e| e.to_string())?,
-        ));
+        // the child is already running: a failure past this point must reap
+        // it, or it is leaked (no handle, no reaper)
+        let pipes = pair
+            .master
+            .try_clone_reader()
+            .and_then(|r| pair.master.take_writer().map(|w| (r, w)));
+        let (mut reader, writer) = match pipes {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(e.to_string());
+            }
+        };
+        let input = spawn_input_writer(writer);
         let killer = child.clone_killer();
         let pid = child.process_id().map(|p| p as i32);
         let exited = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -339,7 +387,7 @@ impl SessionManager {
                 id.clone(),
                 SessionHandle {
                     master: pair.master,
-                    writer,
+                    input,
                     killer,
                     pid,
                     exited: exited.clone(),
@@ -424,21 +472,18 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Write text to a session's PTY writer and flush it immediately.
-    /// The global sessions lock is only held to look up the writer; the
-    /// (potentially blocking, when the child stops draining stdin) write runs
-    /// under the session's own writer lock afterwards, so a stuck session can
-    /// never wedge kill/spawn/resize for the others.
+    /// Queue text for a session's PTY. Never blocks: the session's writer
+    /// thread does the (possibly stalling) write, so a child that stops
+    /// draining stdin wedges only its own input, never the caller.
     pub fn write(&self, id: &str, data: &str) -> Result<(), String> {
-        let writer = {
+        let input = {
             let sessions = self.sessions.lock().unwrap();
-            sessions.get(id).ok_or("no such session")?.writer.clone()
+            sessions.get(id).ok_or("no such session")?.input.clone()
         };
-        let mut writer = writer.lock().unwrap();
-        writer
-            .write_all(data.as_bytes())
-            .and_then(|_| writer.flush())
-            .map_err(|e| e.to_string())
+        input.try_send(data.as_bytes().to_vec()).map_err(|e| match e {
+            mpsc::TrySendError::Full(_) => "the session is not reading its input".to_string(),
+            mpsc::TrySendError::Disconnected(_) => "the session's input is closed".to_string(),
+        })
     }
 
     /// Resize a session's PTY so terminal applications receive SIGWINCH.
@@ -687,13 +732,14 @@ pub fn live_sessions(state: State<'_, SessionManager>) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn detect_cli_session(
+pub async fn detect_cli_session(
     kind: String,
     cwd: Option<String>,
     since_ms: f64,
     exclude: Vec<String>,
-) -> Option<String> {
-    detect_cli_session_impl(&kind, cwd, since_ms, &exclude)
+) -> Result<Option<String>, String> {
+    // walks CLI history directories: keep it off the main thread
+    crate::util::blocking(move || Ok(detect_cli_session_impl(&kind, cwd, since_ms, &exclude))).await
 }
 
 #[cfg(test)]
@@ -701,7 +747,7 @@ mod tests {
     use super::{
         coalesce_output, derive_session_id, resolve_login_executable, select_session_id,
         session_launch_spec, tap_remove, tap_start, tap_subscribe, valid_session_id,
-        SessionHandle, SessionManager,
+        SessionHandle, SessionManager, INPUT_QUEUE_CAP,
     };
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
@@ -717,7 +763,7 @@ mod tests {
     ) -> (SessionHandle, Box<dyn portable_pty::Child + Send + Sync>) {
         use portable_pty::{native_pty_system, CommandBuilder, PtySize};
         use std::io::Read;
-        use std::sync::{Arc, Mutex};
+        use super::spawn_input_writer;
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 24,
@@ -747,13 +793,13 @@ mod tests {
                 }
             }
         });
-        let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
+        let input = spawn_input_writer(pair.master.take_writer().unwrap());
         let killer = child.clone_killer();
         let pid = child.process_id().map(|p| p as i32);
         (
             SessionHandle {
                 master: pair.master,
-                writer,
+                input,
                 killer,
                 pid,
                 exited: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -780,10 +826,9 @@ mod tests {
         let _ = child.wait();
     }
 
-    /// Regression test for the global-lock wedge: a session whose child stops
-    /// draining stdin blocks its `write` forever. Other sessions' write /
-    /// resize / kill must not queue behind it (they used to, because the
-    /// global sessions lock was held across the blocking PTY write).
+    /// A session whose child stops draining stdin must never block `write`
+    /// (it runs on the main thread): the queue fills and `write` reports it.
+    /// Other sessions' write / resize / kill stay prompt throughout.
     #[cfg(unix)]
     #[test]
     fn wedged_write_does_not_block_other_sessions() {
@@ -791,49 +836,26 @@ mod tests {
         let mgr = Arc::new(SessionManager::default());
         let (handle_a, mut child_a) = spawn_test_session(true);
         let (handle_b, mut child_b) = spawn_test_session(false);
-        mgr.sessions
-            .lock()
-            .unwrap()
-            .insert("wedged".to_string(), handle_a);
-        mgr.sessions
-            .lock()
-            .unwrap()
-            .insert("healthy".to_string(), handle_b);
+        mgr.sessions.lock().unwrap().insert("wedged".to_string(), handle_a);
+        mgr.sessions.lock().unwrap().insert("healthy".to_string(), handle_b);
 
-        // The wedged session's child (`sleep`) never reads stdin, so a loop of
-        // 1 MB writes eventually fills the PTY input queue and blocks inside
-        // write_all. (macOS buffers several MB before applying backpressure,
-        // so a single fixed-size write can't be trusted to wedge — stall
-        // detection can.)
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        let written = Arc::new(AtomicUsize::new(0));
+        // The wedged child (`sleep`) never reads stdin. Keep writing 1 MB
+        // chunks: each call must return immediately, and once the PTY buffer
+        // and the queue are full it must say so instead of blocking.
         let chunk = "x".repeat(1024 * 1024);
-        let wedged_writer = {
-            let mgr = mgr.clone();
-            let written = written.clone();
-            std::thread::spawn(move || {
-                for _ in 0..32 {
-                    mgr.write("wedged", &chunk)?;
-                    written.fetch_add(1, Ordering::Relaxed);
-                }
-                Ok::<(), String>(())
-            })
-        };
-        // Wait until the writer stops making progress: the queue is full and
-        // it is blocked mid-write.
-        let mut blocked = false;
-        for _ in 0..50 {
-            let before = written.load(Ordering::Relaxed);
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            if !wedged_writer.is_finished() && written.load(Ordering::Relaxed) == before {
-                blocked = true;
+        let started = std::time::Instant::now();
+        let mut refused = false;
+        for _ in 0..(INPUT_QUEUE_CAP * 4) {
+            if mgr.write("wedged", &chunk).is_err() {
+                refused = true;
                 break;
             }
+            // give the writer thread a moment to fill the PTY's own buffer
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
-        assert!(blocked, "the wedged write never filled the PTY input queue");
+        assert!(refused, "a never-read session accepted unbounded input");
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "write blocked");
 
-        // Under the old code each of these would queue behind the wedged
-        // write's global lock. They must all complete promptly.
         let (done_tx, done_rx) = mpsc::channel();
         {
             let mgr = mgr.clone();
@@ -848,10 +870,7 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(5))
             .expect("healthy-session operations queued behind a wedged write");
 
-        // Unwedge: killing the child closes the slave side, which wakes the
-        // blocked write with EIO. The writer thread is expected to fail.
         mgr.kill("wedged");
-        let _ = wedged_writer.join().unwrap();
         let _ = child_a.wait();
         let _ = child_b.wait();
     }

@@ -274,12 +274,16 @@ fn linux_wrapper(roots: &[String], deny_network: bool) -> Result<String, String>
 /// `<wrapper> /bin/sh -c '<original command>'`. Fails closed: unsupported OS,
 /// missing tooling, or a bad cwd return an error instead of running unwrapped.
 #[tauri::command]
-pub fn sandbox_wrapper(
+pub async fn sandbox_wrapper(
     _id: String,
     cwd: String,
     extra_paths: Vec<String>,
     deny_network: bool,
 ) -> Result<String, String> {
+    crate::util::blocking(move || sandbox_wrapper_impl(cwd, extra_paths, deny_network)).await
+}
+
+fn sandbox_wrapper_impl(cwd: String, extra_paths: Vec<String>, deny_network: bool) -> Result<String, String> {
     let roots = writable_roots(&cwd, &extra_paths)?;
     if cfg!(target_os = "macos") {
         macos_wrapper(&roots, deny_network)
@@ -424,7 +428,7 @@ mod tests {
     /// End-to-end: the command returns an inline profile, so rebuilding a
     /// wrapper never writes through a sandbox-controlled filesystem path.
     fn builds_macos_wrapper() {
-        let w = sandbox_wrapper("test–profile/1".into(), "/tmp".into(), vec![], true).unwrap();
+        let w = sandbox_wrapper_impl("/tmp".into(), vec![], true).unwrap();
         assert!(w.starts_with("sandbox-exec -p '"));
         assert!(w.contains("(deny network*)"));
     }

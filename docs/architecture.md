@@ -578,8 +578,8 @@ permission-scoped addon agent. Package parsing normalizes JSON or the folder
 manifest format and validates the declared surface.
 
 Views run in opaque-origin `sandbox="allow-scripts"` iframes with a restrictive
-CSP and postMessage RPC. Tool and hook JavaScript runs in a separate hidden
-opaque-origin iframe, not in the privileged main webview. Host RPC validates the
+CSP and postMessage RPC. Tool and hook JavaScript runs in a hidden
+opaque-origin iframe per addon, not in the privileged main webview. Host RPC validates the
 method whitelist, applies the permission-wrapped `AddonApi`, caps returned data,
 and terminates timed-out handlers.
 

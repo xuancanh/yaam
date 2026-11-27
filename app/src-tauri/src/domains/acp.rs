@@ -17,7 +17,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Default)]
 pub struct AcpManager {
@@ -264,7 +264,22 @@ pub fn acp_start(
             }
             std::thread::sleep(std::time::Duration::from_millis(300));
         };
-        let _ = app.emit("session-exit", serde_json::json!({ "id": agent, "code": code }));
+        // Only the current process for this id reports an exit: a restarted
+        // chat replaces (and kills) the old child, whose reaper must not mark
+        // the new live session as exited. The current handle is forgotten.
+        let current = {
+            let mgr = app.state::<AcpManager>();
+            let mut sessions = match mgr.sessions.lock() { Ok(g) => g, Err(_) => return };
+            match sessions.get(&agent) {
+                Some(h) if Arc::ptr_eq(&h.child, &child) => { sessions.remove(&agent); true }
+                Some(_) => false,
+                // already removed by acp_stop: that stop is the exit
+                None => true,
+            }
+        };
+        if current {
+            let _ = app.emit("session-exit", serde_json::json!({ "id": agent, "code": code }));
+        }
     });
     Ok(())
 }

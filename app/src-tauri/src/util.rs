@@ -84,26 +84,13 @@ pub(crate) const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// instead of marshalling unbounded bytes across the bridge.
 pub(crate) const GIT_OUTPUT_CAP: usize = 40_000;
 
-/// Drain a pipe completely while retaining only its bounded tail. Continuing
-/// to drain is essential: stopping at the cap would block the child on a full
-/// OS pipe and turn truncation into a deadlock.
-pub(crate) fn read_capped_tail<R: Read>(reader: &mut R, cap: usize) -> (Vec<u8>, bool) {
-    let mut kept = Vec::with_capacity(cap);
-    let mut chunk = [0u8; 8192];
-    let mut truncated = false;
-    loop {
-        let n = match reader.read(&mut chunk) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        kept.extend_from_slice(&chunk[..n]);
-        if kept.len() > cap {
-            let excess = kept.len() - cap;
-            kept.drain(..excess);
-            truncated = true;
-        }
-    }
-    (kept, truncated)
+/// Run blocking work on the blocking pool from an async command. A sync Tauri
+/// command runs on the main thread, so disk scans, process spawns, keychain
+/// prompts and index commits there freeze the whole window.
+pub(crate) async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
 }
 
 /// Result of a bounded subprocess run.
@@ -117,16 +104,68 @@ pub(crate) struct BoundedOutput {
     pub truncated: bool,
 }
 
-/// Run `command` to completion under a wall-clock `timeout`. Stdout and stderr
-/// are drained on their own threads (a child that writes more than the pipe
-/// buffer would otherwise block forever before exiting) while retaining only a
-/// capped tail of each. On timeout the whole process group is SIGKILLed and an
-/// Err returned, so a wedged child can never hang its caller.
-pub(crate) fn run_bounded(
+/// A pipe drained on its own thread into a capped tail buffer. Shared, so a
+/// caller can take what has arrived without waiting for EOF: a backgrounded
+/// grandchild (`npm run dev &`) inherits the pipe and keeps it open long after
+/// the command itself exited, and joining the reader used to hang forever.
+#[derive(Default)]
+struct TailBuf {
+    data: Vec<u8>,
+    truncated: bool,
+}
+
+fn spawn_tail_reader<R: Read + Send + 'static>(
+    pipe: Option<R>,
+    cap: usize,
+    done: std::sync::mpsc::Sender<()>,
+) -> std::sync::Arc<std::sync::Mutex<TailBuf>> {
+    let buf = std::sync::Arc::new(std::sync::Mutex::new(TailBuf::default()));
+    let shared = buf.clone();
+    std::thread::spawn(move || {
+        if let Some(mut pipe) = pipe {
+            let mut chunk = [0u8; 8192];
+            loop {
+                let n = match pipe.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => n,
+                };
+                let mut b = shared.lock().unwrap();
+                b.data.extend_from_slice(&chunk[..n]);
+                if b.data.len() > cap {
+                    let excess = b.data.len() - cap;
+                    b.data.drain(..excess);
+                    b.truncated = true;
+                }
+            }
+        }
+        let _ = done.send(());
+    });
+    buf
+}
+
+/// How long to keep reading after the command exits, for output still in
+/// flight. Past this, pipes held open by a background process are abandoned
+/// (their reader threads finish whenever that process exits).
+const PIPE_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Everything a bounded run observed.
+pub(crate) struct Captured {
+    /// `None` when the run timed out and was killed
+    pub status: Option<std::process::ExitStatus>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub truncated: bool,
+}
+
+/// Run `command` (stdin closed, own process group) under a wall-clock
+/// `timeout`, capturing a capped tail of stdout and stderr. On timeout the
+/// whole process group is SIGKILLed and `status` is `None`. Never blocks past
+/// `timeout + PIPE_GRACE`, even when a background job holds the pipes.
+pub(crate) fn run_capture(
     command: &mut Command,
     timeout: std::time::Duration,
     cap: usize,
-) -> Result<BoundedOutput, String> {
+) -> Result<Captured, String> {
     command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -139,24 +178,13 @@ pub(crate) fn run_bounded(
     }
     let mut child = command.spawn().map_err(|e| format!("failed to run: {e}"))?;
     let pid = child.id() as i32;
-    let mut stdout_pipe = child.stdout.take();
-    let mut stderr_pipe = child.stderr.take();
-    let out_thread = std::thread::spawn(move || {
-        stdout_pipe
-            .as_mut()
-            .map(|p| read_capped_tail(p, cap))
-            .unwrap_or_default()
-    });
-    let err_thread = std::thread::spawn(move || {
-        stderr_pipe
-            .as_mut()
-            .map(|p| read_capped_tail(p, cap))
-            .unwrap_or_default()
-    });
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let out = spawn_tail_reader(child.stdout.take(), cap, done_tx.clone());
+    let err = spawn_tail_reader(child.stderr.take(), cap, done_tx);
     let started = std::time::Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            break status;
+            break Some(status);
         }
         if started.elapsed() >= timeout {
             // safe against pid reuse: the child is still unreaped (try_wait
@@ -167,20 +195,38 @@ pub(crate) fn run_bounded(
             }
             let _ = child.kill();
             let _ = child.wait();
-            let _ = out_thread.join();
-            let _ = err_thread.join();
-            return Err(format!("command timed out after {}s", timeout.as_secs()));
+            break None;
         }
         std::thread::sleep(std::time::Duration::from_millis(25));
     };
-    let (stdout, stdout_truncated) = out_thread.join().unwrap_or_default();
-    let (stderr, stderr_truncated) = err_thread.join().unwrap_or_default();
-    Ok(BoundedOutput {
-        code: status.code(),
-        stdout,
-        stderr,
-        truncated: stdout_truncated || stderr_truncated,
-    })
+    let deadline = std::time::Instant::now() + PIPE_GRACE;
+    for _ in 0..2 {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if done_rx.recv_timeout(left).is_err() {
+            break;
+        }
+    }
+    let take = |b: &std::sync::Arc<std::sync::Mutex<TailBuf>>| {
+        let mut g = b.lock().unwrap();
+        (std::mem::take(&mut g.data), g.truncated)
+    };
+    let (stdout, t1) = take(&out);
+    let (stderr, t2) = take(&err);
+    Ok(Captured { status, stdout, stderr, truncated: t1 || t2 })
+}
+
+/// Run `command` to completion under a wall-clock `timeout`, keeping a capped
+/// tail of each pipe. A timeout is an Err (the process group is killed).
+pub(crate) fn run_bounded(
+    command: &mut Command,
+    timeout: std::time::Duration,
+    cap: usize,
+) -> Result<BoundedOutput, String> {
+    let c = run_capture(command, timeout, cap)?;
+    let Some(status) = c.status else {
+        return Err(format!("command timed out after {}s", timeout.as_secs()));
+    };
+    Ok(BoundedOutput { code: status.code(), stdout: c.stdout, stderr: c.stderr, truncated: c.truncated })
 }
 
 // ── pid-reuse guards ────────────────────────────────────────────────────────
@@ -335,4 +381,20 @@ mod tests {
         assert!(status.code().is_none(), "SIGKILL leaves no exit code: {status}");
         assert!(!super::process_alive(pid));
     }
+
+    #[test]
+    fn run_bounded_returns_when_a_background_job_keeps_the_pipe_open() {
+        let started = std::time::Instant::now();
+        let out = super::run_bounded(
+            // the background sleep inherits stdout and outlives the command
+            std::process::Command::new("/bin/sh").args(["-c", "sleep 8 & printf started"]),
+            std::time::Duration::from_secs(20),
+            1024,
+        )
+        .unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "hung on the inherited pipe");
+        assert_eq!(out.code, Some(0));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "started");
+    }
 }
+

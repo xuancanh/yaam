@@ -58,16 +58,22 @@ State snapshots are sent only when the addon is enabled and holds `state:read`.
 
 ### Tool handlers and hooks
 
-Handler/hook source is evaluated inside a separate hidden iframe with the same
-opaque-origin/no-network design. It receives only:
+Handler/hook source is evaluated inside a hidden iframe with the same
+opaque-origin/no-network design, one frame (and JS realm) per addon. Addons
+never share a realm: in a shared frame, one addon's leftover message listener
+could read another's exec message and replay its call id to act with that
+addon's grants. An addon's frame is torn down when it is disabled, removed, or
+idle for a minute. It receives only:
 
 - an input/event value;
 - an immutable bounded state snapshot when permitted;
 - async API stubs that post messages to the host.
 
 The host revalidates the method, invokes a permission-wrapped `AddonApi`, caps
-JSON-serializable API results at 256 KiB, and terminates/reset the frame after a
-10-second timeout. JavaScript is never evaluated in the main webview.
+JSON-serializable API results and the handler's own return value at 256 KiB
+(tool results reaching Master are further clipped to 16k characters), and
+resets the addon's frame after a 10-second timeout, which affects only that
+addon. JavaScript is never evaluated in the main webview.
 
 ### Permissions
 

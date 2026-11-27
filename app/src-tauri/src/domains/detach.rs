@@ -338,7 +338,12 @@ pub fn detach_entry() -> bool {
 /// relaunched fresh. An empty `command` reuses the stored spec (legacy agents
 /// that only persisted the attach wrapper).
 #[tauri::command]
-pub fn detached_spawn(id: String, command: String, cwd: Option<String>, command_shell: Option<String>, rows: Option<u16>, cols: Option<u16>) -> Result<String, String> {
+pub async fn detached_spawn(id: String, command: String, cwd: Option<String>, command_shell: Option<String>, rows: Option<u16>, cols: Option<u16>) -> Result<String, String> {
+    // forks the host and waits for its socket: off the main thread
+    crate::util::blocking(move || detached_spawn_impl(id, command, cwd, command_shell, rows, cols)).await
+}
+
+fn detached_spawn_impl(id: String, command: String, cwd: Option<String>, command_shell: Option<String>, rows: Option<u16>, cols: Option<u16>) -> Result<String, String> {
     if !valid_id(&id) { return Err("invalid detached session id".to_string()); }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let sock = sock_path(&id);
@@ -374,12 +379,19 @@ pub fn detached_spawn(id: String, command: String, cwd: Option<String>, command_
             });
         }
     }
-    cmd.spawn().map_err(|e| format!("could not start session host: {e}"))?;
-    // wait for the socket so the attach client doesn't race the host
+    let mut host = cmd.spawn().map_err(|e| format!("could not start session host: {e}"))?;
+    // wait for the socket so the attach client doesn't race the host; a host
+    // that already exited (e.g. it could not bind) will never create it
     for _ in 0..50 {
         if UnixStream::connect(&sock).is_ok() { break }
+        if let Ok(Some(status)) = host.try_wait() {
+            return Err(format!("session host exited before it was ready ({status})"));
+        }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+    // the host lives in its own session; reap it whenever it exits so it never
+    // lingers as a zombie of the app
+    std::thread::spawn(move || { let _ = host.wait(); });
     Ok(attach)
 }
 
